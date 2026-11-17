@@ -75,6 +75,30 @@ async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string
   return (await isPackageReadableInSpace(spaceId, packageId)) ? agent : null;
 }
 
+/**
+ * The placement rule of {@link requireAgent} over several spaces: the agent of
+ * this org with the grants whose space reads it. `agent_not_found` when none
+ * does, the same opaque refusal as one space.
+ */
+export async function loadAgentPlacedAcross<G extends { spaceId: string }>(
+  packageId: string,
+  orgId: string,
+  grants: readonly G[],
+) {
+  const agent = await getPackage(packageId, orgId);
+  const placed = agent
+    ? (
+        await Promise.all(
+          grants.map(async (grant) =>
+            (await isPackageReadableInSpace(grant.spaceId, packageId)) ? grant : (null as G | null),
+          ),
+        )
+      ).filter((grant) => grant !== null)
+    : [];
+  if (!agent || placed.length === 0) throw agentNotFound(packageId);
+  return { agent, grants: placed };
+}
+
 /** The shadow of a run the caller may read: `GET /api/runs/:id`'s rule — the
  *  runs permission, then ownership — or `null`. */
 async function loadReadableShadow(c: Context<AppEnv>, packageId: string) {

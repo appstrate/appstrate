@@ -3079,6 +3079,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/agents/{scope}/{name}/persistence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an agent's persistence across the organization's spaces
+         * @description Read-only: the agent's pinned slots and memories in every space of the organization where the caller holds `persistence:read` and the space reads the agent (homed, placed or shipped with the deployment), each row naming its `spaceId`. The query and the actor partition are those of `GET /api/agents/{scope}/{name}/persistence`, judged per space: where the caller holds `persistence:delete` they see every actor's rows (or the `actor_type` they name), elsewhere their own actor scope plus the shared rows. Pinned slots come newest update first and memories oldest first, across spaces. `404` when no such space reads the agent. An inline run's shadow agent is not served here. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgAgentPersistence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/chat": {
         parameters: {
             query?: never;
@@ -3375,6 +3395,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notifications across the organization's spaces
+         * @description The current recipient's notifications in every space of the organization where they hold a role, in one keyset-paginated page, newest first. The rule of `GET /api/notifications` holds in each space: the caller's own notifications, no role grant asked. Each item carries its `spaceId`: read one with `GET /api/notifications/{id}` and mark it read with `PUT /api/notifications/{id}/read`, both in that space; `PUT /api/notifications/read-all` reads one space's feed. Takes the query of `GET /api/notifications`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get unread notification count across the organization's spaces
+         * @description The number of unread notifications of the current recipient in every space of the organization where they hold a role — the spaces `GET /api/orgs/{orgId}/notifications` lists. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["getOrgUnreadNotificationCount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/packages/integrations": {
         parameters: {
             query?: never;
@@ -3444,7 +3504,7 @@ export interface paths {
         };
         /**
          * List schedules across the organization's spaces
-         * @description Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         * @description Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. `packageId` narrows it to one agent's schedules; any other query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
          */
         get: operations["listOrgSchedules"];
         put?: never;
@@ -4824,7 +4884,7 @@ export interface paths {
         };
         /**
          * List all schedules
-         * @description List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.
+         * @description List the schedules of the space, every agent's or one agent's (`packageId`). Any other query parameter is rejected with `400`.
          */
         get: operations["listSchedules"];
         put?: never;
@@ -6745,6 +6805,8 @@ export interface components {
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
+            /** @description The spaces the caller reaches where the package is ACTIVE (spc_ prefix), as its row of `GET /api/orgs/{orgId}/packages/{skills|integrations}` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted. */
+            space_ids: string[];
             agents: {
                 id: string;
                 display_name: string;
@@ -18989,6 +19051,7 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
+                     *           "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
                      *           "type": "package_shared",
                      *           "runId": null,
                      *           "payload": {
@@ -19012,6 +19075,8 @@ export interface operations {
                              * @description Notification id
                              */
                             id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
                             /** @constant */
                             type: "run_failed";
                             /** @description Originating run id, when the notification references one */
@@ -19038,6 +19103,8 @@ export interface operations {
                              * @description Notification id
                              */
                             id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
                             /** @constant */
                             type: "package_shared";
                             /** @description Originating run id, when the notification references one */
@@ -19062,6 +19129,8 @@ export interface operations {
                              * @description Notification id
                              */
                             id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
                             /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
@@ -19196,6 +19265,7 @@ export interface operations {
                     /**
                      * @example {
                      *       "id": "550e8400-e29b-41d4-a716-446655440000",
+                     *       "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
                      *       "type": "agent_message",
                      *       "runId": "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
                      *       "payload": {
@@ -19214,6 +19284,8 @@ export interface operations {
                          * @description Notification id
                          */
                         id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
                         /** @constant */
                         type: "run_failed";
                         /** @description Originating run id, when the notification references one */
@@ -19240,6 +19312,8 @@ export interface operations {
                          * @description Notification id
                          */
                         id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
                         /** @constant */
                         type: "package_shared";
                         /** @description Originating run id, when the notification references one */
@@ -19264,6 +19338,8 @@ export interface operations {
                          * @description Notification id
                          */
                         id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
                         /** @constant */
                         type: "agent_message";
                         /** @description Originating run id, when the notification references one */
@@ -20427,6 +20503,78 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    listOrgAgentPersistence: {
+        parameters: {
+            query?: {
+                /** @description Limit the response to one kind. Omitted → both. */
+                kind?: "pinned" | "memory";
+                /** @description Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope. */
+                actor_type?: "user" | "end_user" | "shared";
+                /** @description Required when `actor_type` is `user` or `end_user`. */
+                actor_id?: string;
+                /** @description Narrow `memories` and `pinned` to rows touched during a specific run. */
+                runId?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "agent_persistence";
+                        pinned?: {
+                            id: number;
+                            key: string;
+                            content: unknown;
+                            runId: string | null;
+                            /** @enum {string} */
+                            actor_type: "user" | "end_user" | "shared";
+                            actor_id: string | null;
+                            /** Format: date-time */
+                            createdAt: string | null;
+                            /** Format: date-time */
+                            updatedAt: string | null;
+                            /** @description The space this row belongs to. */
+                            spaceId: string;
+                        }[];
+                        memories?: {
+                            id: number;
+                            content: string;
+                            runId: string | null;
+                            /** @enum {string} */
+                            actor_type: "user" | "end_user" | "shared";
+                            actor_id: string | null;
+                            /** Format: date-time */
+                            createdAt: string | null;
+                            pinned?: boolean;
+                            /** @description The space this row belongs to. */
+                            spaceId: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     streamChat: {
         parameters: {
             query?: never;
@@ -21277,6 +21425,187 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listOrgNotifications: {
+        parameters: {
+            query?: {
+                /** @description When true, only unread notifications are returned */
+                unread?: boolean;
+                limit?: number;
+                /** @description Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header. */
+                startingAfter?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notification list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "list",
+                     *       "data": [
+                     *         {
+                     *           "id": "550e8400-e29b-41d4-a716-446655440000",
+                     *           "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
+                     *           "type": "package_shared",
+                     *           "runId": null,
+                     *           "payload": {
+                     *             "packageId": "@acme/email-sorter",
+                     *             "package_type": "agent",
+                     *             "shared_by_name": "Ada Lovelace"
+                     *           },
+                     *           "read_at": null,
+                     *           "createdAt": "2026-01-15T10:31:12Z"
+                     *         }
+                     *       ],
+                     *       "hasMore": false
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: ({
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "run_failed";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The run's agent; null once the agent is deleted. */
+                                packageId: string | null;
+                                /** @description The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted). */
+                                agent_name: string | null;
+                                /** @enum {string} */
+                                status: "failed" | "timeout";
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "package_shared";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @enum {string} */
+                                package_type: "agent" | "skill" | "integration";
+                                shared_by_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "agent_message";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The agent of the run that sent it; null when the run no longer references its agent. */
+                                packageId: string | null;
+                                /** @description The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted). */
+                                agent_name: string | null;
+                                /** @description Headline the agent wrote (`notify` tool). */
+                                title: string;
+                                /** @description Body the agent wrote (`notify` tool). */
+                                message: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        })[];
+                        /** @description True when another page follows — page via the Link header cursor */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getOrgUnreadNotificationCount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unread count */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "count": 5
+                     *     }
+                     */
+                    "application/json": {
+                        /** @description Number of unread notifications */
+                        count: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listOrgIntegrationPackages: {
         parameters: {
             query?: never;
@@ -21441,7 +21770,10 @@ export interface operations {
     };
     listOrgSchedules: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent. */
+                packageId?: string;
+            };
             header?: never;
             path: {
                 /** @description Organization ID. */
@@ -26312,7 +26644,10 @@ export interface operations {
     };
     listSchedules: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent. */
+                packageId?: string;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];

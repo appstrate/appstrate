@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
@@ -11,11 +11,41 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   listNotifications,
+  type FeedReach,
 } from "../services/state/notifications.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListLimit } from "@appstrate/core/list-query";
+
+/**
+ * The feed's ceiling: the feed is the recipient's own, so no role grant is asked
+ * (a share notice reaches a member who reads no run); a delegated credential is
+ * capped by the run read (RBAC spec §7.1).
+ */
+export const NOTIFICATION_FEED_CEILING = RUNS_READ_PERMISSIONS;
+
+/** The feed over `reach`: `GET /api/notifications` and `GET /api/orgs/{orgId}/notifications`. */
+export async function respondNotificationList(c: Context<AppEnv>, reach: FeedReach) {
+  const unread = c.req.query("unread") === "true";
+  // Keyset-paginated on `startingAfter`, so only the helper's `limit` applies.
+  const limit = parseListLimit(c, { defaultLimit: 20 });
+  const startingAfter = c.req.query("startingAfter");
+  const result = await listNotifications(reach, getActor(c), { unread, limit, startingAfter });
+  setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
+  return c.json(result);
+}
+
+/** The unread count over `reach`: the bell's badge, of one space or of every reached one. */
+export async function respondUnreadNotificationCount(c: Context<AppEnv>, reach: FeedReach) {
+  return c.json({ count: await getUnreadNotificationCount(reach, getActor(c)) });
+}
+
+/** The space route's reach: the request's space. */
+function spaceReach(c: Context<AppEnv>): FeedReach {
+  const { orgId, spaceId } = getSpaceScope(c);
+  return { orgId, spaceIds: [spaceId] };
+}
 
 /**
  * The recipient's notification feed — the dashboard bell: what needs their
@@ -25,32 +55,17 @@ import { parseListLimit } from "@appstrate/core/list-query";
  */
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
-  // The feed is the recipient's own, so no role grant is asked (a share
-  // notice reaches a member who reads no run); a delegated credential is
-  // capped by the run read (RBAC spec §7.1).
-  const feedCeiling = requireAnyCeiling(RUNS_READ_PERMISSIONS);
+  const feedCeiling = requireAnyCeiling(NOTIFICATION_FEED_CEILING);
 
   // GET /api/notifications — recipient-scoped feed, newest first.
   // Keyset-paginated: `?startingAfter=<id>` follows the `Link: rel="next"`
   // cursor (Stripe-style). `?unread=true` filters to unread only.
-  router.get("/notifications", feedCeiling, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const unread = c.req.query("unread") === "true";
-    // Keyset-paginated on `startingAfter`, so only the helper's `limit` applies.
-    const limit = parseListLimit(c, { defaultLimit: 20 });
-    const startingAfter = c.req.query("startingAfter");
-    const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
-    const lastId = result.data.at(-1)?.id;
-    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId });
-    return c.json(result);
-  });
+  router.get("/notifications", feedCeiling, (c) => respondNotificationList(c, spaceReach(c)));
 
   // GET /api/notifications/unread-count
-  router.get("/notifications/unread-count", feedCeiling, async (c) => {
-    const count = await getUnreadNotificationCount(getSpaceScope(c), getActor(c));
-    return c.json({ count });
-  });
+  router.get("/notifications/unread-count", feedCeiling, (c) =>
+    respondUnreadNotificationCount(c, spaceReach(c)),
+  );
 
   // GET /api/notifications/:id — a pure read; the notification's page marks it
   // read through the PUT below.

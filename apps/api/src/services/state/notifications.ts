@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -39,6 +39,8 @@ function recipientFilter(actor: Actor): SQL {
 /** Shape returned to the notifications list endpoint. */
 interface NotificationDto {
   id: string;
+  /** The space it was written in: where its page and its run open. */
+  spaceId: string;
   type: NotificationType;
   runId: string | null;
   payload: NotificationPayloads[NotificationType] | null;
@@ -198,6 +200,7 @@ export async function createPackageShareNotification(params: {
 
 const notificationColumns = {
   id: notifications.id,
+  spaceId: notifications.spaceId,
   type: notifications.type,
   runId: notifications.runId,
   payload: notifications.payload,
@@ -210,6 +213,7 @@ function toNotificationDto(
 ): NotificationDto {
   return {
     id: r.id,
+    spaceId: r.spaceId,
     type: r.type,
     runId: r.runId,
     payload: r.payload ?? null,
@@ -284,22 +288,37 @@ export async function markAllNotificationsRead(scope: SpaceScope, actor: Actor):
   return updated.length;
 }
 
-export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor): Promise<number> {
-  const [row] = await db
-    .select({ count: count() })
-    .from(notifications)
-    .where(
-      scopedWhere(notifications, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [recipientFilter(actor), isNull(notifications.readAt)],
-      }),
-    );
+/**
+ * The spaces of one organization a feed read covers: the space route's own, or
+ * every space the caller reaches (`GET /api/orgs/{orgId}/notifications`). The
+ * caller's own rows are the rule in each, so no space asks a role grant.
+ */
+export interface FeedReach {
+  orgId: string;
+  spaceIds: readonly string[];
+}
+
+/** The caller's notifications in the spaces of `reach`; `undefined` when it covers none. */
+function feedWhere(reach: FeedReach, actor: Actor, extra: SQL[] = []): SQL | undefined {
+  if (reach.spaceIds.length === 0) return undefined;
+  return and(
+    eq(notifications.orgId, reach.orgId),
+    inArray(notifications.spaceId, [...reach.spaceIds]),
+    recipientFilter(actor),
+    ...extra,
+  );
+}
+
+export async function getUnreadNotificationCount(reach: FeedReach, actor: Actor): Promise<number> {
+  const where = feedWhere(reach, actor, [isNull(notifications.readAt)]);
+  if (!where) return 0;
+  const [row] = await db.select({ count: count() }).from(notifications).where(where);
   return row?.count ?? 0;
 }
 
 /**
- * Recipient-scoped notification feed, newest first, keyset-paginated.
+ * Recipient-scoped notification feed over the spaces of `reach`, newest first,
+ * keyset-paginated.
  *
  * Ordering is `(created_at DESC, id DESC)` — chronological, with `id` as the
  * unique tiebreak. The cursor (`startingAfter`) is a plain notification id;
@@ -311,33 +330,35 @@ export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor
  * cursor resolves to NULL → empty page (the caller restarts from the head).
  */
 export async function listNotifications(
-  scope: SpaceScope,
+  reach: FeedReach,
   actor: Actor,
   options: { unread?: boolean; limit: number; startingAfter?: string },
 ): Promise<ListEnvelope<NotificationDto>> {
   const { unread = false, limit, startingAfter } = options;
   const fetchLimit = limit + 1; // one extra row to detect hasMore
 
-  const extra: SQL[] = [recipientFilter(actor)];
+  // Not an id at all: a cursor no row has, so the empty page a stale one gets.
+  if (startingAfter && !isUuid(startingAfter)) return listResponse([], { hasMore: false });
+
+  const extra: SQL[] = [];
   if (unread) extra.push(isNull(notifications.readAt));
   if (startingAfter) {
-    // Resolve the cursor's (created_at, id) coordinate with a scalar subquery
-    // scoped to the SAME tenant + recipient as the outer query. Scoping is
-    // deliberate: an unscoped lookup would (a) be a weak existence oracle for
-    // notification UUIDs and (b) let a stale/foreign cursor borrow another
-    // tenant's timestamp as the bound. Scoped, an unknown/foreign/stale cursor
-    // resolves to NULL → the row-value comparison is NULL → empty page (the
-    // caller restarts from the head), which is the correct stale-cursor result.
+    // The cursor's (created_at, id) coordinate, looked up within the SAME
+    // reach and recipient as the page: an unscoped lookup would be a weak
+    // existence oracle for notification ids and let a foreign cursor borrow
+    // another tenant's timestamp. Unknown, foreign or stale, it resolves to
+    // NULL → the comparison is NULL → empty page.
+    const cursor = db
+      .select({ createdAt: notifications.createdAt })
+      .from(notifications)
+      .where(feedWhere(reach, actor, [eq(notifications.id, startingAfter)]));
     extra.push(
-      sql`(${notifications.createdAt}, ${notifications.id}) < ((SELECT created_at FROM notifications WHERE id = ${startingAfter} AND org_id = ${scope.orgId} AND space_id = ${scope.spaceId} AND recipient_type = ${actor.type} AND recipient_id = ${actor.id}), ${startingAfter})`,
+      sql`(${notifications.createdAt}, ${notifications.id}) < ((${cursor}), ${startingAfter})`,
     );
   }
 
-  const where = scopedWhere(notifications, {
-    orgId: scope.orgId,
-    spaceId: scope.spaceId,
-    extra,
-  })!;
+  const where = feedWhere(reach, actor, extra);
+  if (!where) return listResponse([], { hasMore: false });
 
   const rows = await db
     .select(notificationColumns)

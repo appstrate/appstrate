@@ -1,0 +1,208 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * `GET /api/orgs/{orgId}/notifications` and its unread count — the caller's own
+ * notifications in every space they hold a role in, the rule of the space feed
+ * applied in each.
+ *
+ * | space                                    | notification of     | listed |
+ * | ---------------------------------------- | ------------------- | ------ |
+ * | open default space (default role)        | the member          | yes    |
+ * | closed space joined as `viewer` (Un)     | the member          | yes    |
+ * | closed space joined as `viewer` (Un)     | the owner           | no     |
+ * | `closed` space, not joined (Fermé)       | the member          | no     |
+ * | another organization's space             | the member          | no     |
+ *
+ * One notification is read, and marked read, in its own space through the space
+ * routes; the reach every org list shares is in `cross-space-reads.test.ts`.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedApiKey, seedEndUser, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
+import { walkLinkPages } from "../../helpers/pagination.ts";
+import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
+import { db } from "@appstrate/db/client";
+import { notifications } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+
+const app = getTestApp();
+
+interface ListedNotification {
+  id: string;
+  spaceId: string;
+  type: string;
+  read_at: string | null;
+}
+
+describe("GET /api/orgs/{orgId}/notifications", () => {
+  let owner: TestContext;
+  let member: TestContext;
+  let un: string;
+  let ferme: string;
+  /** Notification ids by space and recipient. */
+  let n: Record<string, string>;
+
+  async function share(spaceId: string, userId: string, orgId = owner.orgId): Promise<string> {
+    const packageId = `@orgnotif/pkg-${crypto.randomUUID().slice(0, 8)}`;
+    await createPackageShareNotification({
+      orgId,
+      spaceId,
+      recipientUserId: userId,
+      packageId,
+      packageType: "skill",
+      sharedByName: "Ada",
+    });
+    const rows = await db
+      .select({ id: notifications.id, payload: notifications.payload })
+      .from(notifications)
+      .where(and(eq(notifications.spaceId, spaceId), eq(notifications.recipientId, userId)));
+    return rows.find((row) => row.payload?.packageId === packageId)!.id;
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "orgnotif" });
+    member = await memberContext(owner, "member");
+    un = (await seedSpace({ orgId: owner.orgId, name: "Un", visibility: "closed" })).id;
+    ferme = (await seedSpace({ orgId: owner.orgId, name: "Fermé", visibility: "closed" })).id;
+    await seedSpaceMember({ spaceId: un, userId: member.user.id, presetRole: "viewer" });
+    n = {
+      defaultMember: await share(owner.defaultSpaceId, member.user.id),
+      unMember: await share(un, member.user.id),
+      unOwner: await share(un, owner.user.id),
+      fermeMember: await share(ferme, member.user.id),
+    };
+    const foreign = await createTestContext({ orgSlug: "orgnotif-foreign" });
+    await addOrgMember(foreign.orgId, member.user.id, "member");
+    n.foreign = await share(foreign.defaultSpaceId, member.user.id, foreign.orgId);
+  });
+
+  const session = (ctx: TestContext) => ({ Cookie: ctx.cookie });
+  const listPath = (query = "") => `/api/orgs/${owner.orgId}/notifications${query}`;
+
+  async function list(ctx: TestContext, query = ""): Promise<ListedNotification[]> {
+    const res = await app.request(listPath(query), { headers: session(ctx) });
+    expect(res.status, await res.clone().text()).toBe(200);
+    return ((await res.json()) as { data: ListedNotification[] }).data;
+  }
+
+  async function orgUnreadCount(ctx: TestContext): Promise<number> {
+    const res = await app.request(`/api/orgs/${owner.orgId}/notifications/unread-count`, {
+      headers: session(ctx),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    return ((await res.json()) as { count: number }).count;
+  }
+
+  const inSpace = (ctx: TestContext, spaceId: string) => ({
+    Cookie: ctx.cookie,
+    "X-Org-Id": owner.orgId,
+    "X-Space-Id": spaceId,
+  });
+
+  it("lists the caller's own notifications of every space they hold a role in, each naming its space", async () => {
+    const rows = await list(member);
+    expect(new Map(rows.map((row) => [row.id, row.spaceId]))).toEqual(
+      new Map([
+        [n.defaultMember!, owner.defaultSpaceId],
+        [n.unMember!, un],
+      ]),
+    );
+  });
+
+  it("counts the unread notifications of the same spaces", async () => {
+    expect(await orgUnreadCount(member)).toBe(2);
+  });
+
+  it("pages across spaces with the space feed's cursor", async () => {
+    const pages = await walkLinkPages<{ data: ListedNotification[] }>(
+      app,
+      listPath("?limit=1"),
+      session(member),
+    );
+    expect(pages.flatMap((page) => page.data.map((row) => row.id)).sort()).toEqual(
+      [n.defaultMember!, n.unMember!].sort(),
+    );
+  });
+
+  it("filters to unread, and a notification marked read in its own space leaves the count", async () => {
+    const res = await app.request(`/api/notifications/${n.unMember}/read`, {
+      method: "PUT",
+      headers: inSpace(member, un),
+    });
+    expect(res.status).toBe(204);
+    expect(await orgUnreadCount(member)).toBe(1);
+    expect((await list(member, "?unread=true")).map((row) => row.id)).toEqual([n.defaultMember!]);
+  });
+
+  it("reads one notification in its own space only", async () => {
+    const own = await app.request(`/api/notifications/${n.unMember}`, {
+      headers: inSpace(member, un),
+    });
+    expect(own.status).toBe(200);
+    expect(((await own.json()) as ListedNotification).spaceId).toBe(un);
+    const elsewhere = await app.request(`/api/notifications/${n.unMember}`, {
+      headers: inSpace(member, owner.defaultSpaceId),
+    });
+    expect(elsewhere.status).toBe(404);
+  });
+
+  it("« Tout marquer comme lu » in one space reads that space's feed only", async () => {
+    const res = await app.request("/api/notifications/read-all", {
+      method: "PUT",
+      headers: inSpace(member, un),
+    });
+    expect(((await res.json()) as { updated_count: number }).updated_count).toBe(1);
+    expect(await orgUnreadCount(member)).toBe(1);
+  });
+
+  it("gives the owner their own notifications only, never a member's", async () => {
+    const rows = await list(owner);
+    expect(rows.map((row) => row.id)).toEqual([n.unOwner!]);
+  });
+
+  describe("an API key", () => {
+    const keyFor = async (scopes: string[]) => {
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: un,
+        createdBy: owner.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${key.rawKey}` };
+    };
+
+    it("pinned to a space reaches that space only", async () => {
+      await share(owner.defaultSpaceId, owner.user.id);
+      const res = await app.request(listPath(), { headers: await keyFor(["runs:read"]) });
+      expect(res.status).toBe(200);
+      const rows = ((await res.json()) as { data: ListedNotification[] }).data;
+      expect(rows.map((row) => row.id)).toEqual([n.unOwner!]);
+    });
+
+    it("is refused when its scopes hold no run read, the feed's ceiling", async () => {
+      const res = await app.request(listPath(), { headers: await keyFor(["mcp:read"]) });
+      expect(res.status).toBe(403);
+    });
+
+    it("is refused acting as an end-user", async () => {
+      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
+      const headers = { ...(await keyFor(["runs:read"])), "Appstrate-User": endUser.id };
+      expect((await app.request(listPath(), { headers })).status).toBe(403);
+    });
+  });
+
+  it("refuses an organization the caller is not a member of", async () => {
+    const outsider = await createTestContext({ orgSlug: "orgnotif-outsider" });
+    const res = await app.request(listPath(), { headers: session(outsider) });
+    expect(res.status).toBe(403);
+  });
+});

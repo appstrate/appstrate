@@ -1579,6 +1579,191 @@
         }
       }
     },
+    "/api/orgs/{orgId}/agents/{scope}/{name}/persistence": {
+      "get": {
+        "operationId": "listOrgAgentPersistence",
+        "tags": ["Agents"],
+        "summary": "List an agent's persistence across the organization's spaces",
+        "description": "Read-only: the agent's pinned slots and memories in every space of the organization where the caller holds `persistence:read` and the space reads the agent (homed, placed or shipped with the deployment), each row naming its `spaceId`. The query and the actor partition are those of `GET /api/agents/{scope}/{name}/persistence`, judged per space: where the caller holds `persistence:delete` they see every actor's rows (or the `actor_type` they name), elsewhere their own actor scope plus the shared rows. Pinned slots come newest update first and memories oldest first, across spaces. `404` when no such space reads the agent. An inline run's shadow agent is not served here. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pinned", "memory"]
+            },
+            "description": "Limit the response to one kind. Omitted → both."
+          },
+          {
+            "name": "actor_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["user", "end_user", "shared"]
+            },
+            "description": "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope."
+          },
+          {
+            "name": "actor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required when `actor_type` is `user` or `end_user`."
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Narrow `memories` and `pinned` to rows touched during a specific run."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["agent_persistence"]
+                    },
+                    "pinned": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "key",
+                          "content",
+                          "runId",
+                          "actor_type",
+                          "actor_id",
+                          "createdAt",
+                          "updatedAt",
+                          "spaceId"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "content": {},
+                          "runId": {
+                            "type": ["string", "null"]
+                          },
+                          "actor_type": {
+                            "type": "string",
+                            "enum": ["user", "end_user", "shared"]
+                          },
+                          "actor_id": {
+                            "type": ["string", "null"]
+                          },
+                          "createdAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "spaceId": {
+                            "type": "string",
+                            "description": "The space this row belongs to."
+                          }
+                        }
+                      }
+                    },
+                    "memories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "content",
+                          "runId",
+                          "actor_type",
+                          "actor_id",
+                          "createdAt",
+                          "spaceId"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": ["string", "null"]
+                          },
+                          "actor_type": {
+                            "type": "string",
+                            "enum": ["user", "end_user", "shared"]
+                          },
+                          "actor_id": {
+                            "type": ["string", "null"]
+                          },
+                          "createdAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "spaceId": {
+                            "type": "string",
+                            "description": "The space this row belongs to."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/agents/{scope}/{name}/persistence/memories/{id}": {
       "delete": {
         "operationId": "deleteAgentPersistenceMemory",
@@ -5511,13 +5696,22 @@
         "operationId": "listSchedules",
         "tags": ["Schedules"],
         "summary": "List all schedules",
-        "description": "List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.",
+        "description": "List the schedules of the space, every agent's or one agent's (`packageId`). Any other query parameter is rejected with `400`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
           }
         ],
         "responses": {
@@ -5572,10 +5766,19 @@
         "operationId": "listOrgSchedules",
         "tags": ["Schedules"],
         "summary": "List schedules across the organization's spaces",
-        "description": "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "description": "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. `packageId` narrows it to one agent's schedules; any other query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
           }
         ],
         "responses": {
@@ -19136,12 +19339,24 @@
                         "oneOf": [
                           {
                             "type": "object",
-                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
                                 "format": "uuid",
                                 "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                               },
                               "type": {
                                 "type": "string",
@@ -19184,12 +19399,24 @@
                           },
                           {
                             "type": "object",
-                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
                                 "format": "uuid",
                                 "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                               },
                               "type": {
                                 "type": "string",
@@ -19230,12 +19457,24 @@
                           },
                           {
                             "type": "object",
-                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
                                 "format": "uuid",
                                 "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                               },
                               "type": {
                                 "type": "string",
@@ -19294,6 +19533,7 @@
                   "data": [
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
                       "type": "package_shared",
                       "runId": null,
                       "payload": {
@@ -19312,6 +19552,349 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/notifications": {
+      "get": {
+        "operationId": "listOrgNotifications",
+        "tags": ["Notifications"],
+        "summary": "List notifications across the organization's spaces",
+        "description": "The current recipient's notifications in every space of the organization where they hold a role, in one keyset-paginated page, newest first. The rule of `GET /api/notifications` holds in each space: the caller's own notifications, no role grant asked. Each item carries its `spaceId`: read one with `GET /api/notifications/{id}` and mark it read with `PUT /api/notifications/{id}/read`, both in that space; `PUT /api/notifications/read-all` reads one space's feed. Takes the query of `GET /api/notifications`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "When true, only unread notifications are returned"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "startingAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel=\"next\"` header."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Link": {
+                "$ref": "#/components/headers/Link"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "run_failed"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "agent_name", "status"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": ["string", "null"],
+                                    "description": "The run's agent; null once the agent is deleted."
+                                  },
+                                  "agent_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted)."
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["failed", "timeout"]
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "package_shared"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "package_type", "shared_by_name"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string"
+                                  },
+                                  "package_type": {
+                                    "type": "string",
+                                    "enum": ["agent", "skill", "integration"]
+                                  },
+                                  "shared_by_name": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "agent_message"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "agent_name", "title", "message"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent of the run that sent it; null when the run no longer references its agent."
+                                  },
+                                  "agent_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "description": "Headline the agent wrote (`notify` tool)."
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "description": "Body the agent wrote (`notify` tool)."
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "True when another page follows — page via the Link header cursor"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
+                      "type": "package_shared",
+                      "runId": null,
+                      "payload": {
+                        "packageId": "@acme/email-sorter",
+                        "package_type": "agent",
+                        "shared_by_name": "Ada Lovelace"
+                      },
+                      "read_at": null,
+                      "createdAt": "2026-01-15T10:31:12Z"
+                    }
+                  ],
+                  "hasMore": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/notifications/unread-count": {
+      "get": {
+        "operationId": "getOrgUnreadNotificationCount",
+        "tags": ["Notifications"],
+        "summary": "Get unread notification count across the organization's spaces",
+        "description": "The number of unread notifications of the current recipient in every space of the organization where they hold a role — the spaces `GET /api/orgs/{orgId}/notifications` lists. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unread count",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "description": "Number of unread notifications"
+                    }
+                  },
+                  "required": ["count"]
+                },
+                "example": {
+                  "count": 5
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19421,12 +20004,24 @@
                   "oneOf": [
                     {
                       "type": "object",
-                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
                           "format": "uuid",
                           "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                         },
                         "type": {
                           "type": "string",
@@ -19469,12 +20064,24 @@
                     },
                     {
                       "type": "object",
-                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
                           "format": "uuid",
                           "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                         },
                         "type": {
                           "type": "string",
@@ -19515,12 +20122,24 @@
                     },
                     {
                       "type": "object",
-                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
                           "format": "uuid",
                           "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                         },
                         "type": {
                           "type": "string",
@@ -19569,6 +20188,7 @@
                 },
                 "example": {
                   "id": "550e8400-e29b-41d4-a716-446655440000",
+                  "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
                   "type": "agent_message",
                   "runId": "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
                   "payload": {
@@ -36228,6 +36848,7 @@
           "home_writable",
           "home_deletable",
           "home_shareable",
+          "space_ids",
           "agents",
           "definition"
         ],
@@ -36304,6 +36925,14 @@
           "home_shareable": {
             "type": "boolean",
             "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+          },
+          "space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The spaces the caller reaches where the package is ACTIVE (spc_ prefix), as its row of `GET /api/orgs/{orgId}/packages/{skills|integrations}` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted."
           },
           "agents": {
             "type": "array",

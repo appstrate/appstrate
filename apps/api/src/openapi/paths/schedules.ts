@@ -17,6 +17,18 @@ const scheduleConnectionNotChosen = {
   content: connectionConflictContent,
 };
 
+/** The `packageId` filter of both schedule lists. */
+const schedulePackageFilter = {
+  name: "packageId",
+  in: "query",
+  schema: {
+    type: "string",
+    pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+  },
+  description:
+    "Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent.",
+};
+
 /** A schedule write's success body: the schedule, plus what its fires would start without. */
 const scheduleWriteSchema = {
   allOf: [
@@ -69,10 +81,11 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "List all schedules",
       description:
-        "List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.",
+        "List the schedules of the space, every agent's or one agent's (`packageId`). Any other query parameter is rejected with `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        schedulePackageFilter,
       ],
       responses: {
         ...scheduleListResponses,
@@ -86,9 +99,9 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "List schedules across the organization's spaces",
       description:
-        "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. " +
+        "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. `packageId` narrows it to one agent's schedules; any other query parameter is rejected with `400`. " +
         ORG_READ_REACH,
-      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, schedulePackageFilter],
       responses: {
         ...scheduleListResponses,
         "400": { $ref: "#/components/responses/ValidationError" },

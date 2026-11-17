@@ -24,6 +24,7 @@ import {
   activatePackage,
   activatePackageWithin,
   assertHasPublishedVersion,
+  listActiveSpaceIdsOf,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
@@ -793,11 +794,21 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
-  const spec = await resolveFileExplorerVersion(
-    c,
-    { id: item.id, source: item.source },
-    opts.version?.trim() || undefined,
-  );
+  const read = packagePermission(rcfg.cfg.type, "read");
+  const [spec, spaceIds] = await Promise.all([
+    resolveFileExplorerVersion(
+      c,
+      { id: item.id, source: item.source },
+      opts.version?.trim() || undefined,
+    ),
+    // The spaces the org index of this type would list it in for this caller.
+    listActiveSpaceIdsOf(
+      orgId,
+      item.id,
+      rcfg.cfg.type,
+      accessible.filter((space) => space.permissions.has(read)).map((space) => space.id),
+    ),
+  ]);
   // The answer comes back in the version-SPEC vocabulary, where the stored tree
   // has two spellings — an omitted selector and the literal `draft` — and
   // `resolvePackageFileValidator` treats them as one. So must this: `draft` is
@@ -821,6 +832,8 @@ async function buildPackageDetailDto(
     ...published,
     definition,
     ...homeWireForCaller({ type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
+    // Every space the caller reaches where the package is active, as its index row's `space_ids`.
+    space_ids: spaceIds,
     version_count: versionCount,
     // Authoring metadata, never projected: it compares the DRAFT against the
     // latest version, and that answer does not change with the definition the

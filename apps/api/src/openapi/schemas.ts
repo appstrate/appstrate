@@ -2028,6 +2028,7 @@ export const schemas = {
       "home_writable",
       "home_deletable",
       "home_shareable",
+      "space_ids",
       "agents",
       "definition",
     ],
@@ -2069,6 +2070,12 @@ export const schemas = {
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       ...PACKAGE_HOME_PROPERTIES,
+      space_ids: {
+        type: "array",
+        items: { type: "string", pattern: SPACE_ID_RE.source },
+        description:
+          "The spaces the caller reaches where the package is ACTIVE (spc_ prefix), as its row of `GET /api/orgs/{orgId}/packages/{skills|integrations}` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted.",
+      },
       agents: {
         type: "array",
         items: {

@@ -4,6 +4,116 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 import { ORG_READ_REACH } from "../parameters.ts";
 
+/** The query of both persistence reads: one space's, and the one spanning spaces. */
+const PERSISTENCE_QUERY = [
+  {
+    name: "kind",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["pinned", "memory"] },
+    description: "Limit the response to one kind. Omitted → both.",
+  },
+  {
+    name: "actor_type",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["user", "end_user", "shared"] },
+    description:
+      "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
+  },
+  {
+    name: "actor_id",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Required when `actor_type` is `user` or `end_user`.",
+  },
+  {
+    name: "runId",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Narrow `memories` and `pinned` to rows touched during a specific run.",
+  },
+];
+
+/** The rows of a persistence snapshot; `namesSpace` adds the row's `spaceId` (the read spanning spaces). */
+function persistenceSnapshotResponse(namesSpace: boolean) {
+  const space = namesSpace
+    ? { spaceId: { type: "string", description: "The space this row belongs to." } }
+    : {};
+  const required = namesSpace ? ["spaceId"] : [];
+  return {
+    description:
+      "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object"],
+          properties: {
+            object: { type: "string", enum: ["agent_persistence"] },
+            pinned: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "key",
+                  "content",
+                  "runId",
+                  "actor_type",
+                  "actor_id",
+                  "createdAt",
+                  "updatedAt",
+                  ...required,
+                ],
+                properties: {
+                  id: { type: "integer" },
+                  key: { type: "string" },
+                  content: {},
+                  runId: { type: ["string", "null"] },
+                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                  actor_id: { type: ["string", "null"] },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  updatedAt: { type: ["string", "null"], format: "date-time" },
+                  ...space,
+                },
+              },
+            },
+            memories: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "content",
+                  "runId",
+                  "actor_type",
+                  "actor_id",
+                  "createdAt",
+                  ...required,
+                ],
+                properties: {
+                  id: { type: "integer" },
+                  content: { type: "string" },
+                  runId: { type: ["string", "null"] },
+                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                  actor_id: { type: ["string", "null"] },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  pinned: { type: "boolean" },
+                  ...space,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 /** The responses of both agent indexes: one space's, and the one spanning spaces. */
 const agentListResponses = {
   "200": {
@@ -312,95 +422,10 @@ export const agentsPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "kind",
-          in: "query",
-          required: false,
-          schema: { type: "string", enum: ["pinned", "memory"] },
-          description: "Limit the response to one kind. Omitted → both.",
-        },
-        {
-          name: "actor_type",
-          in: "query",
-          required: false,
-          schema: { type: "string", enum: ["user", "end_user", "shared"] },
-          description:
-            "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
-        },
-        {
-          name: "actor_id",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Required when `actor_type` is `user` or `end_user`.",
-        },
-        {
-          name: "runId",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Narrow `memories` and `pinned` to rows touched during a specific run.",
-        },
+        ...PERSISTENCE_QUERY,
       ],
       responses: {
-        "200": {
-          description:
-            "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object"],
-                properties: {
-                  object: { type: "string", enum: ["agent_persistence"] },
-                  pinned: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: [
-                        "id",
-                        "key",
-                        "content",
-                        "runId",
-                        "actor_type",
-                        "actor_id",
-                        "createdAt",
-                        "updatedAt",
-                      ],
-                      properties: {
-                        id: { type: "integer" },
-                        key: { type: "string" },
-                        content: {},
-                        runId: { type: ["string", "null"] },
-                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actor_id: { type: ["string", "null"] },
-                        createdAt: { type: ["string", "null"], format: "date-time" },
-                        updatedAt: { type: ["string", "null"], format: "date-time" },
-                      },
-                    },
-                  },
-                  memories: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["id", "content", "runId", "actor_type", "actor_id", "createdAt"],
-                      properties: {
-                        id: { type: "integer" },
-                        content: { type: "string" },
-                        runId: { type: ["string", "null"] },
-                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actor_id: { type: ["string", "null"] },
-                        createdAt: { type: ["string", "null"], format: "date-time" },
-                        pinned: { type: "boolean" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        "200": persistenceSnapshotResponse(false),
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -459,6 +484,28 @@ export const agentsPaths = {
             },
           },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/agents/{scope}/{name}/persistence": {
+    get: {
+      operationId: "listOrgAgentPersistence",
+      tags: ["Agents"],
+      summary: "List an agent's persistence across the organization's spaces",
+      description:
+        "Read-only: the agent's pinned slots and memories in every space of the organization where the caller holds `persistence:read` and the space reads the agent (homed, placed or shipped with the deployment), each row naming its `spaceId`. The query and the actor partition are those of `GET /api/agents/{scope}/{name}/persistence`, judged per space: where the caller holds `persistence:delete` they see every actor's rows (or the `actor_type` they name), elsewhere their own actor scope plus the shared rows. Pinned slots come newest update first and memories oldest first, across spaces. `404` when no such space reads the agent. An inline run's shadow agent is not served here. " +
+        ORG_READ_REACH,
+      parameters: [
+        { $ref: "#/components/parameters/OrgIdPath" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        ...PERSISTENCE_QUERY,
+      ],
+      responses: {
+        "200": persistenceSnapshotResponse(true),
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

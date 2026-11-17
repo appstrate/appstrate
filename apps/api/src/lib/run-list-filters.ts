@@ -85,19 +85,24 @@ const runListQuerySchema = () =>
       start_date: z.string().optional(),
       end_date: z.string().optional(),
       chat_session_id: z.string().optional(),
-      // An empty value reads as absent, as on the closed sets.
-      packageId: z.preprocess(
-        (value) => (value === "" ? undefined : value),
-        z
-          .string()
-          .regex(scopedNameRegex, { error: "packageId must be a package id (@scope/name)" })
-          .optional(),
-      ),
+      packageId: packageIdFilter,
       // Checked by `parseListLimit` (anything but 1..100 is a 400).
       limit: z.string().optional(),
       startingAfter: z.string().optional(),
     })
     .strict();
+
+/**
+ * The `packageId` filter of a list (runs, schedules): one package id. An empty
+ * value reads as absent, as on the closed sets.
+ */
+export const packageIdFilter = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z
+    .string()
+    .regex(scopedNameRegex, { error: "packageId must be a package id (@scope/name)" })
+    .optional(),
+);
 
 /** `start_date` / `end_date`: an ISO date, a 400 otherwise. */
 function parseDate(raw: string | undefined, name: string): Date | undefined {

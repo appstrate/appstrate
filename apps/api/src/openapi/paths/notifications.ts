@@ -2,6 +2,7 @@
 
 import { packageTypeValues, runAlertStatusValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 /**
  * One notification kind. `type` is a `const`, which discriminates the `oneOf`
@@ -10,9 +11,14 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 function notificationOf(kind: string, payload: Record<string, unknown>) {
   return {
     type: "object",
-    required: ["id", "type", "runId", "payload", "read_at", "createdAt"],
+    required: ["id", "spaceId", "type", "runId", "payload", "read_at", "createdAt"],
     properties: {
       id: { type: "string", format: "uuid", description: "Notification id" },
+      spaceId: {
+        type: "string",
+        description:
+          "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's.",
+      },
       type: { type: "string", const: kind },
       runId: {
         type: ["string", "null"],
@@ -84,6 +90,97 @@ const notificationObject = {
   ],
 };
 
+/** The query of `GET /api/notifications` and `GET /api/orgs/{orgId}/notifications`. */
+const notificationListQueryParameters = [
+  {
+    name: "unread",
+    in: "query",
+    required: false,
+    schema: { type: "boolean" },
+    description: "When true, only unread notifications are returned",
+  },
+  {
+    name: "limit",
+    in: "query",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+  },
+  {
+    name: "startingAfter",
+    in: "query",
+    required: false,
+    schema: { type: "string", format: "uuid" },
+    description:
+      'Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header.',
+  },
+];
+
+/** One page of the feed, the answer of both list routes. */
+const notificationListPageResponses = {
+  "200": {
+    description: "Notification list",
+    headers: {
+      ...STD_RESPONSE_HEADERS,
+      Link: { $ref: "#/components/headers/Link" },
+    },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: { type: "array", items: notificationObject },
+            hasMore: {
+              type: "boolean",
+              description: "True when another page follows — page via the Link header cursor",
+            },
+          },
+        },
+        example: {
+          object: "list",
+          data: [
+            {
+              id: "550e8400-e29b-41d4-a716-446655440000",
+              spaceId: "spc_8f14e45fceea167a5a36dedd4bea2543",
+              type: "package_shared",
+              runId: null,
+              payload: {
+                packageId: "@acme/email-sorter",
+                package_type: "agent",
+                shared_by_name: "Ada Lovelace",
+              },
+              read_at: null,
+              createdAt: "2026-01-15T10:31:12Z",
+            },
+          ],
+          hasMore: false,
+        },
+      },
+    },
+  },
+};
+
+/** The unread count, the answer of both count routes. */
+const unreadCountResponse = {
+  "200": {
+    description: "Unread count",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          properties: {
+            count: { type: "integer", description: "Number of unread notifications" },
+          },
+          required: ["count"],
+        },
+        example: { count: 5 },
+      },
+    },
+  },
+};
+
 export const notificationsPaths = {
   "/api/notifications": {
     get: {
@@ -95,71 +192,47 @@ export const notificationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "unread",
-          in: "query",
-          required: false,
-          schema: { type: "boolean" },
-          description: "When true, only unread notifications are returned",
-        },
-        {
-          name: "limit",
-          in: "query",
-          required: false,
-          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
-        },
-        {
-          name: "startingAfter",
-          in: "query",
-          required: false,
-          schema: { type: "string", format: "uuid" },
-          description:
-            'Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header.',
-        },
+        ...notificationListQueryParameters,
       ],
       responses: {
-        "200": {
-          description: "Notification list",
-          headers: {
-            ...STD_RESPONSE_HEADERS,
-            Link: { $ref: "#/components/headers/Link" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: notificationObject },
-                  hasMore: {
-                    type: "boolean",
-                    description: "True when another page follows — page via the Link header cursor",
-                  },
-                },
-              },
-              example: {
-                object: "list",
-                data: [
-                  {
-                    id: "550e8400-e29b-41d4-a716-446655440000",
-                    type: "package_shared",
-                    runId: null,
-                    payload: {
-                      packageId: "@acme/email-sorter",
-                      package_type: "agent",
-                      shared_by_name: "Ada Lovelace",
-                    },
-                    read_at: null,
-                    createdAt: "2026-01-15T10:31:12Z",
-                  },
-                ],
-                hasMore: false,
-              },
-            },
-          },
-        },
+        ...notificationListPageResponses,
         "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/notifications": {
+    get: {
+      operationId: "listOrgNotifications",
+      tags: ["Notifications"],
+      summary: "List notifications across the organization's spaces",
+      description:
+        "The current recipient's notifications in every space of the organization where they hold a role, in one keyset-paginated page, newest first. The rule of `GET /api/notifications` holds in each space: the caller's own notifications, no role grant asked. Each item carries its `spaceId`: read one with `GET /api/notifications/{id}` and mark it read with `PUT /api/notifications/{id}/read`, both in that space; `PUT /api/notifications/read-all` reads one space's feed. Takes the query of `GET /api/notifications`. " +
+        ORG_READ_REACH,
+      parameters: [
+        { $ref: "#/components/parameters/OrgIdPath" },
+        ...notificationListQueryParameters,
+      ],
+      responses: {
+        ...notificationListPageResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/notifications/unread-count": {
+    get: {
+      operationId: "getOrgUnreadNotificationCount",
+      tags: ["Notifications"],
+      summary: "Get unread notification count across the organization's spaces",
+      description:
+        "The number of unread notifications of the current recipient in every space of the organization where they hold a role — the spaces `GET /api/orgs/{orgId}/notifications` lists. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...unreadCountResponse,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -177,22 +250,7 @@ export const notificationsPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
-        "200": {
-          description: "Unread count",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  count: { type: "integer", description: "Number of unread notifications" },
-                },
-                required: ["count"],
-              },
-              example: { count: 5 },
-            },
-          },
-        },
+        ...unreadCountResponse,
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -227,6 +285,7 @@ export const notificationsPaths = {
               schema: notificationObject,
               example: {
                 id: "550e8400-e29b-41d4-a716-446655440000",
+                spaceId: "spc_8f14e45fceea167a5a36dedd4bea2543",
                 type: "agent_message",
                 runId: "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
                 payload: {
@@ -315,10 +374,4 @@ export const notificationsPaths = {
       },
     },
   },
-  // NOTE: GET /api/runs is documented in paths/runs.ts — the handler lives
-  // under the notifications router for historical reasons (shared unread-
-  // count query helpers), but the path belongs with the rest of the Runs
-  // surface. Keep the OpenAPI definition there to avoid a duplicate-key
-  // collision during spec assembly (object spread = last-wins, which would
-  // silently shadow new query params added to paths/runs.ts).
 };
