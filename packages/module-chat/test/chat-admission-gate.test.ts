@@ -61,21 +61,6 @@ const MODELS_PAYLOAD = {
   ],
 };
 
-/**
- * A minimal `/api/me/context` payload. The caller-context read is dispatched
- * as soon as the space id is known — concurrently with the model list and
- * ahead of the gate — so the fake must answer it. It is a READ; what a rejected
- * turn must never do is written below (no MCP hop, no message, no usage row).
- */
-const CONTEXT_PAYLOAD = {
-  user: { name: "U", email: "u@test.com" },
-  org: { role: "member", name: "chatgate", slug: "chatgate" },
-  connections: [],
-  agents: [],
-  skills: [],
-  recent_runs: [],
-};
-
 /** Fake Hono context exposing exactly the reads `handleChatStream` makes. */
 function fakeContext(opts: {
   orgId: string;
@@ -111,8 +96,7 @@ interface DepsOverrides {
 }
 
 /**
- * Deps whose `dispatch` serves the two preamble reads (`/api/models`,
- * `/api/me/context`); everything else is scripted.
+ * Deps whose `dispatch` serves the preamble read (`/api/models`); everything else is scripted.
  */
 function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
   return {
@@ -120,7 +104,6 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
       const path = new URL(req.url).pathname;
       o.dispatchPaths?.push(path);
       if (path === "/api/models") return Response.json(MODELS_PAYLOAD);
-      if (path === "/api/me/context") return Response.json(CONTEXT_PAYLOAD);
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
     rateLimit: () => async (_c, next) => next(),
@@ -320,7 +303,7 @@ describe("chat admission gate (handleChatStream)", () => {
     // never started.
     expect(dispatchPaths).toContain("/api/models");
     expect(dispatchPaths.some((p) => p.startsWith("/api/mcp"))).toBe(false);
-    expect(dispatchPaths.filter((p) => p !== "/api/models" && p !== "/api/me/context")).toEqual([]);
+    expect(dispatchPaths.filter((p) => p !== "/api/models")).toEqual([]);
     // No user message, no metered usage. (The session ROW shell is created
     // before the preamble on purpose — see the ai-sdk case above.)
     const messages = await db

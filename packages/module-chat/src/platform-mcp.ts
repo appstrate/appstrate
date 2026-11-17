@@ -16,8 +16,8 @@
  * (`/api/mcp/o/:org/s/:space`, the endpoint's one client-side pin), tagged
  * `?context=injected`.
  *
- * The chat injects the get_me payload (`/api/me/context`) straight into its own
- * system prompt, so the server's get_me tool would only re-fetch what the model
+ * The chat injects the caller's identity, role and space into its own system
+ * prompt, so the server's get_me tool would only re-fetch what the model
  * already has. The tag tells the server to drop that redundant tool (and its
  * "call get_me first" instruction).
  */

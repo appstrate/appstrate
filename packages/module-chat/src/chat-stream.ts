@@ -5,7 +5,7 @@
  * satellite (routes/chat.ts) with two changes:
  *
  *   1. Identity: the satellite carried two audience-bound OAuth tokens; the
- *      module forwards the caller's own headers on loopback calls (self.ts).
+ *      module's loopback calls carry a short-lived bearer it mints (loopback-auth.ts).
  *   2. Persistence: server-authoritative. This route writes the user turn
  *      before inference and the assistant turn when the stream finalizes
  *      (see persistence.ts). Generation runs through a resumable producer
@@ -30,7 +30,7 @@ import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
-import { selfOrigin, forwardedHeaders } from "./self.ts";
+import { selfOrigin } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
@@ -298,10 +298,9 @@ export async function handleChatStream(
       : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
-  const headers = forwardedHeaders(c);
   // Single platform-call seam: re-enter the platform app in-process (or loopback
-  // fetch when not wired) for every PLATFORM read the turn makes (/api/models,
-  // /api/spaces, and the MCP hops; `/api/me/context` dispatches directly).
+  // fetch when not wired) for every PLATFORM read the turn makes (/api/models
+  // and the MCP hops).
   // Auth + RBAC run each hop.
   //
   // Inference is the exception and does NOT ride this seam: the proxy binding
@@ -365,15 +364,14 @@ export async function handleChatStream(
   // now; phase A's join awaits them, so their 503 refuses the turn before any
   // file is materialized.
   const enforcedSkills = deps.loadEnforcedSkills(orgId, spaceId);
-  // Then the caller-context block. It depends on the space id and the caller's
-  // headers and the session row (the turn's grants and its skills) — never on the
+  // Then the caller-context block. It depends on the space id and the session row
+  // (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
   // resolves, overlapping the model list, the attachment materialization, the
-  // credential resolution and the gate rather than waiting behind them. It is a
-  // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
-  // nothing, which is acceptable — what a rejected turn must not do is persist
-  // a user message, open an MCP session or record usage, none of which happen
-  // before the gate.
+  // credential resolution and the gate rather than waiting behind them. A turn the gate
+  // rejects has read its skills for nothing, which is acceptable — what a rejected turn
+  // must not do is persist a user message, open an MCP session for the engine or record
+  // usage, none of which happen before the gate.
   //
   // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
   // connection from `platformMcp.url`, and the MCP server's instructions reach
@@ -393,11 +391,8 @@ export async function handleChatStream(
   > = turn
     .then(({ skills, permissions, capabilities }) =>
       buildCallerContextBlock(c, {
-        origin,
-        headers,
         spaceId,
         user,
-        deps,
         // UI language forwarded by the client; validated/defaulted in the builder.
         locale: c.req.header("X-Chat-Locale"),
         capabilities,

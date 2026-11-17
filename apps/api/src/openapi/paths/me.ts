@@ -790,7 +790,7 @@ export const mePaths = {
       description:
         "Returns the caller's identity, their role in the pinned org, and the integrations " +
         "they could attach when building an agent in the current space (their own, or " +
-        "shared into it). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
+        "shared into it). One payload powering the MCP `get_me` tool and " +
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
         "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
         "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +

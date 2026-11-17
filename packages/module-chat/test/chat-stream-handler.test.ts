@@ -9,8 +9,6 @@
  * deterministically:
  *
  *   - `/api/models`       → one openai-completions model (llm-proxy-routed)
- *   - `/api/me/context`   → a small caller-context payload
- *   - `/api/spaces` → the default space id
  *
  * The engine itself is injected. Production always gets `runPiChat`, which would
  * open a real Pi session against a real provider; here a scripted engine returns
@@ -92,8 +90,8 @@ async function waitForAssistantPersist(sessionId: string, timeoutMs = 8_000): Pr
   }
 }
 
-// A distinctive marker in the scripted caller context so we can prove
-// `/api/me/context` was fetched and rendered into the system prompt.
+// A distinctive marker in the request context's organization name, so we can prove the
+// caller-context block was rendered into the system prompt.
 const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
 const SPACE_ID = "spc_chat_handler_test";
@@ -124,22 +122,9 @@ function modelsResponse(apiShape = "openai-completions"): Response {
   });
 }
 
-/** A minimal but non-empty `/api/me/context` payload. */
-function contextResponse(recentRuns: unknown[] = []): Response {
-  return Response.json({
-    user: { name: "Chat Tester", email: "chat-tester@test.com" },
-    org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
-    connections: [],
-    agents: [],
-    skills: [],
-    recent_runs: recentRuns,
-  });
-}
-
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
 function scriptedDispatch(
   apiShape?: string,
-  context: () => Response = () => contextResponse(),
   listedSkill?: SkillEntry,
 ): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
@@ -148,10 +133,6 @@ function scriptedDispatch(
       return answerSkillsMcp(await req.json(), { entry: listedSkill, text: "", onRead: () => {} });
     }
     if (path === "/api/models") return modelsResponse(apiShape);
-    if (path === "/api/me/context") return context();
-    if (path === "/api/spaces") {
-      return Response.json({ data: [{ id: SPACE_ID, isDefault: true }] });
-    }
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
 }
@@ -307,7 +288,7 @@ describe("handleChatStream", () => {
       c.set("space", { id: ctx.defaultSpaceId });
       c.set("principalKind", principalKind);
       c.set("orgRole", "owner");
-      c.set("orgName", ctx.org.name);
+      c.set("orgName", CONTEXT_ORG_MARKER);
       c.set("orgSlug", ctx.org.slug);
       c.set("permissions", permissions);
       return handleChatStream(c, deps, engine);
@@ -326,8 +307,6 @@ describe("handleChatStream", () => {
       resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
       /** Stand in for the platform's usage writer. */
       recordChatUsage?: ChatPlatformDeps["recordChatUsage"];
-      /** Scripted `/api/me/context` body, to vary the payload between turns. */
-      context?: () => Response;
       /** The one skill the scripted platform MCP server lists. */
       listedSkill?: SkillEntry;
       /** Replace the whole scripted dispatch (to observe request timing). */
@@ -366,8 +345,7 @@ describe("handleChatStream", () => {
           : initCtx,
       ),
       dispatch:
-        overrides?.dispatch ??
-        scriptedDispatch(overrides?.apiShape, overrides?.context, overrides?.listedSkill),
+        overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.listedSkill),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
       ...(overrides?.recordChatUsage ? { recordChatUsage: overrides.recordChatUsage } : {}),
       ...(overrides?.resolveChatAttachment
@@ -701,13 +679,7 @@ describe("handleChatStream", () => {
           onRead: (readUri) => read.push(readUri),
         });
       }
-      if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
-      return Response.json({
-        user: { name: "Chat Tester", email: "chat-tester@test.com" },
-        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
-        connections: [],
-        agents: [],
-      });
+      return scriptedDispatch()(req);
     };
 
     const { engine, calls } = scriptedEngine();
@@ -863,7 +835,7 @@ describe("handleChatStream", () => {
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       if (url.pathname.startsWith("/api/mcp/")) skillReads.push(url.pathname);
-      return scriptedDispatch(undefined, undefined, catalogued)(req);
+      return scriptedDispatch(undefined, catalogued)(req);
     };
 
     const { engine, calls } = scriptedEngine();
@@ -984,32 +956,6 @@ describe("handleChatStream", () => {
         expect(system).toContain("it wins. Only each SKILL.md is shown: read a file");
         expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
         // Readable through `resources/read` all the same: the bearer names it, bound to the space.
-        expect(await tokenInjectedSkills(calls[0]!)).toEqual({
-          spaceId: ctx.defaultSpaceId,
-          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
-        });
-
-        await waitForAssistantPersist(sessionId);
-      }
-    });
-
-    it("keeps them, and their claim, when the caller-context read fails or 400s", async () => {
-      for (const status of [500, 400]) {
-        const sessionId = mintSessionId();
-        const { engine, calls } = scriptedEngine();
-        const res = await postChat(sessionId, undefined, engine, {
-          permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
-          context: () => new Response(null, { status }),
-          loadEnforcedChatSkills: async () => [HOUSE],
-        });
-        expect(res.status).toBe(200);
-        await collectUiChunks(res);
-
-        const system = calls[0]!.system;
-        expect(system).not.toContain(CONTEXT_ORG_MARKER);
-        expect(system).toContain(
-          '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">',
-        );
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
           spaceId: ctx.defaultSpaceId,
           skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
@@ -1200,63 +1146,13 @@ describe("handleChatStream", () => {
   });
 
   /**
-   * The preamble overlap.
-   *
-   * The caller-context read (`/api/me/context`) depends on the space id and the
-   * caller's headers only — never on the chosen model or the admission gate —
-   * so the handler starts it the moment the space id is known, under the model
-   * list. Pinned here: the context request is dispatched BEFORE the model list
-   * has answered. With the reads back in series (context after models → pick →
-   * resolve → gate) it can only start after `models:end`, and this fails.
-   */
-  it("dispatches the caller-context read before the model list has answered", async () => {
-    const events: string[] = [];
-    const base = scriptedDispatch();
-    const dispatch = async (req: Request): Promise<Response> => {
-      const path = new URL(req.url).pathname;
-      if (path === "/api/models") {
-        events.push("models:start");
-        // Long enough that a serial context read is unambiguously later.
-        await new Promise((r) => setTimeout(r, 50));
-        events.push("models:end");
-      } else if (path === "/api/me/context") {
-        events.push("context:start");
-      }
-      return base(req);
-    };
-
-    const sessionId = mintSessionId();
-    const { engine, calls } = scriptedEngine();
-    const res = await postChat(sessionId, undefined, engine, {
-      dispatch,
-      // Scripted so the ordering is observable in isolation — the platform's
-      // own resolution needs the boot-time system-model registry, which is
-      // beside the point here.
-      resolveChatModel: async () => ({ subscription: false }),
-    });
-    expect(res.status).toBe(200);
-    await res.text();
-
-    const contextStart = events.indexOf("context:start");
-    const modelsEnd = events.indexOf("models:end");
-    expect(contextStart).toBeGreaterThanOrEqual(0);
-    expect(modelsEnd).toBeGreaterThanOrEqual(0);
-    expect(contextStart).toBeLessThan(modelsEnd);
-    // The overlapped block still reached the prompt — it was joined, not lost.
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
-
-    await waitForAssistantPersist(sessionId);
-  }, 20_000);
-
-  /**
    * The prompt-cache guard.
    *
    * pi-ai emits the system prompt as ONE text block carrying ONE `cache_control`
    * breakpoint, and caching is prefix-based — so any per-turn difference in that
    * block invalidates it AND the conversation-history breakpoint downstream of
    * it. The prompt must therefore be byte-identical between turns for a given
-   * caller, whatever the platform reports about their runs in the meantime.
+   * caller.
    *
    * This asserts the property at the seam the handler owns, so it fails whatever
    * route a regression takes back in: a re-rendered `recent_runs`, a finer clock,
@@ -1264,34 +1160,14 @@ describe("handleChatStream", () => {
    */
   it("hands the engine a byte-identical system prompt across turns", async () => {
     const first = scriptedEngine();
-    await postChat(mintSessionId(), undefined, first.engine, {
-      context: () => contextResponse([]),
-    });
-
-    // Same caller, same org — but the platform now reports runs that did not
-    // exist a moment ago, each with its own timestamp and error text.
+    await postChat(mintSessionId(), undefined, first.engine);
     const second = scriptedEngine();
-    await postChat(mintSessionId(), undefined, second.engine, {
-      context: () =>
-        contextResponse([
-          {
-            packageId: "@acme/report",
-            status: "failed",
-            runNumber: 41,
-            started_at: new Date().toISOString(),
-            error: "provider timed out",
-          },
-          { packageId: "@acme/triage", status: "success", runNumber: 42 },
-        ]),
-    });
+    await postChat(mintSessionId(), undefined, second.engine);
 
     expect(first.calls).toHaveLength(1);
     expect(second.calls).toHaveLength(1);
     expect(second.calls[0]!.system).toBe(first.calls[0]!.system);
-    // And the volatile payload really was delivered — otherwise the assertion
-    // above would pass for the wrong reason (a dispatch that never ran).
-    expect(second.calls[0]!.system).not.toContain("provider timed out");
-    expect(second.calls[0]!.system).not.toContain("@acme/report");
+    expect(first.calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
   }, 20_000);
 
   describe("the composer's package-authoring switch", () => {

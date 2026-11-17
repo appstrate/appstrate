@@ -409,7 +409,7 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
 }
 
 // ---------------------------------------------------------------------------
-// Active-package hints — caller-context for the chat / get_me payload
+// Active-package hints — caller-context for the get_me payload
 // ---------------------------------------------------------------------------
 
 /**
@@ -484,10 +484,10 @@ interface HintOptions {
 
 /**
  * List the packages of one `type` an actor in this space could use, as a
- * bounded hint for the get_me / chat-prompt caller context. "Could use" is
+ * bounded hint for the get_me caller context. "Could use" is
  * {@link activePackagesFilter}, the run gate's own predicate: a system package,
  * or a placement row that says `enabled`. The list is capped (`limit`) so a
- * large catalog doesn't bloat the system prompt — the long tail stays reachable
+ * large catalog doesn't bloat the payload — the long tail stays reachable
  * via `search_operations`.
  *
  * Bounded IN SQL. This runs twice per chat turn (agents, then skills) on the

@@ -1209,9 +1209,9 @@ export async function getRecentRuns(
 
 /**
  * The given actor's most recent runs in a space (own runs only, newest
- * first) — feeds the chat module's caller-context block. Unlike `getRecentRuns`
+ * first) — feeds the `get_me` caller context. Unlike `getRecentRuns`
  * this spans all packages and all statuses (so failures surface), and returns a
- * minimal wire shape tuned for the system prompt. Actor isolation
+ * minimal wire shape tuned for a model's context. Actor isolation
  * is mandatory: a user never sees another actor's runs.
  */
 export async function listRecentForActor(

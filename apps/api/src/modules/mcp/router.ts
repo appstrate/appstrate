@@ -572,8 +572,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
 
     const reqUrl = new URL(c.req.url);
     const origin = getPublicAppOrigin();
-    // A consumer that injects the get_me payload (`/api/me/context`) into its
-    // own system prompt tags the session `?context=injected` so the redundant
+    // A consumer that injects the caller's identity into its own system prompt
+    // tags the session `?context=injected` so the redundant
     // get_me tool — and its "call get_me first" instruction — are dropped. Only
     // the in-process chat sets it; external MCP clients omit it and keep get_me.
     const contextInjected = reqUrl.searchParams.get("context") === "injected";

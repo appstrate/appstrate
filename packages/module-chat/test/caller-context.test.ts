@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chat fetches GET /api/me/context (the `get_me` payload) and injects a
- * "## Your context" block into the system prompt so the agent knows who it is
- * acting for, their role, and which integrations are already connected.
- * `formatCallerContext` renders that block from the raw payload and returns ""
- * when there is nothing useful to inject (so the caller skips it).
+ * The chat injects a "## Your context" block into the system prompt so the agent knows who it
+ * is acting for, their role, the space the conversation acts in and the skills it follows.
+ * `formatCallerContext` renders that block from the caller's identity;
+ * `buildCallerContextBlock` reads the skills over a platform connection.
  */
 
 import { createHash } from "node:crypto";
@@ -17,7 +16,6 @@ import {
 } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
-import type { ChatPlatformDeps } from "../src/platform-services.ts";
 import type { EnforcedChatSkill } from "@appstrate/core/chat-contract";
 import {
   SKILL_DEFINITION_META_KEY,
@@ -26,8 +24,25 @@ import {
 } from "@appstrate/core/skill-uri";
 
 /** The rendered texts; the injected-skills claim has its own cases. */
-const contextText = (...args: Parameters<typeof formatCallerContext>) =>
-  formatCallerContext(...args).text;
+const contextText = (...args: Parameters<typeof identityContext>) => identityContext(...args).text;
+
+/** `formatCallerContext` over an identity given loosely: what is not named is not known. */
+function identityContext(
+  raw: { user?: { name?: string; email?: string }; org?: Record<string, string> },
+  opts: Parameters<typeof formatCallerContext>[1],
+) {
+  return formatCallerContext(
+    {
+      user: { name: raw.user?.name ?? null, email: raw.user?.email ?? null },
+      org: {
+        role: raw.org?.role ?? null,
+        name: raw.org?.name ?? null,
+        slug: raw.org?.slug ?? null,
+      },
+    },
+    opts,
+  );
+}
 const blockText = async (...args: Parameters<typeof buildCallerContextBlock>) =>
   (await buildCallerContextBlock(...args)).text;
 
@@ -40,29 +55,6 @@ function fakeContext(vars: Record<string, unknown>): any {
 /** The one `Role in this space:` line, so an assertion cannot match elsewhere in the block. */
 function roleLine(block: string): string | undefined {
   return block.split("\n").find((line) => line.startsWith("Role in this space:"));
-}
-
-/** Deps whose dispatch returns a scripted Response and records the request. */
-function fakeDeps(respond: (req: Request) => Response): {
-  deps: ChatPlatformDeps;
-  lastRequest: () => Request | null;
-} {
-  let last: Request | null = null;
-  return {
-    deps: {
-      dispatch: async (req) => {
-        last = req;
-        return respond(req);
-      },
-      rateLimit: () => async (_c, next) => next(),
-      publicOrigin: "http://localhost:3000",
-      resolveChatModel: async () => ({ subscription: false }),
-      recordChatUsage: async () => {},
-      checkUsageAllowed: async () => null,
-      loadEnforcedSkills: async () => [],
-    },
-    lastRequest: () => last,
-  };
 }
 
 /** The turn's capabilities, from the permission set a role actually grants. */
@@ -110,130 +102,6 @@ const listedSkill = (packageId: string, description: string, version: string | n
 };
 
 describe("formatCallerContext", () => {
-  it("renders identity, role, and connected integrations with their default tools", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada Lovelace", email: "ada@acme.com" },
-        org: { role: "member" },
-        connections: [
-          {
-            integration_package_id: "@appstrate/gmail",
-            name: "Gmail",
-            source: "own",
-            default_tools: ["api_call"],
-          },
-          { integration_package_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("## Your context");
-    expect(out).toContain("Ada Lovelace (ada@acme.com)");
-    expect(out).toContain('whose role is "member"');
-    expect(out).toContain("`@appstrate/gmail`");
-    // Declared default is rendered inline so the model knows what it inherits.
-    expect(out).toContain("(own; default: api_call)");
-    // No declared default → an explicit "select tools yourself" signal.
-    expect(out).toContain("(shared; no default — you must select tools explicitly)");
-    // Connected integrations are rendered as DATA ONLY. The verbatim-id rule,
-    // like the preference order and the tool-catalog rule, lives outside this
-    // block — in the persona (`buildSystemPrompt`) and in the platform MCP server instructions.
-    expect(out).not.toContain("Use the `@scope/name` id verbatim");
-  });
-
-  it("renders the wildcard and empty default-tools markers", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [
-          {
-            integration_package_id: "@acme/all",
-            name: "AllTools",
-            source: "own",
-            default_tools: "*",
-          },
-          // An explicit empty default also reads as "no default" (must select).
-          {
-            integration_package_id: "@acme/none",
-            name: "NoneTools",
-            source: "own",
-            default_tools: [],
-          },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("(own; default: all tools)");
-    expect(out).toContain("no default — you must select tools explicitly");
-  });
-
-  it("lists up to 12 default tools by name and renders a longer default as its count", () => {
-    const names = (count: number) => Array.from({ length: count }, (_, i) => `tool_${i + 1}`);
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [
-          {
-            integration_package_id: "@acme/twelve",
-            name: "Twelve",
-            source: "own",
-            default_tools: names(12),
-          },
-          {
-            integration_package_id: "@acme/thirteen",
-            name: "Thirteen",
-            source: "shared",
-            default_tools: names(13),
-          },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain(`(own; default: ${names(12).join(", ")})`);
-    // Past the cap the names are one detail read away, in the field that holds the default.
-    expect(out).toContain(
-      "(shared; default: 13 tools (names: `default_tools` of `getIntegration`))",
-    );
-    expect(out).not.toContain("tool_13");
-  });
-
-  it("tells a draft-only agent apart by whether THIS caller may run its draft", () => {
-    // `published: false` alone does not say "run it with version=draft": the
-    // run route reserves the draft to whoever may WRITE the agent, so telling
-    // the model otherwise buys a 403 loop. The two rows below differ ONLY in
-    // `home_writable`, so the contrast is that flag and nothing else.
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        agents: [
-          {
-            packageId: "@acme/mine",
-            display_name: "Mine",
-            takes_input: false,
-            published: false,
-            home_writable: true,
-          },
-          {
-            packageId: "@acme/theirs",
-            display_name: "Theirs",
-            takes_input: false,
-            published: false,
-            home_writable: false,
-          },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("`@acme/mine` — Mine (takes input: no; draft only, yours to run");
-    expect(out).toContain("`@acme/theirs` — Theirs (takes input: no; draft only, not runnable");
-    // The one the caller cannot write must not be advertised as runnable.
-    const theirs = out.split("\n").find((line) => line.includes("@acme/theirs"))!;
-    expect(theirs).not.toContain("version=draft");
-  });
-
   it("renders the space role and the turn's permissions as joinable data", () => {
     // Same `resource:action` vocabulary as an operation's `required_permissions`
     // and the 403 hint, so the model joins the two itself. Sorted, so the block
@@ -275,88 +143,6 @@ describe("formatCallerContext", () => {
     expect(roleless).not.toContain("Role in this space:");
     expect(roleless).toContain("Permissions this turn: mcp:read");
     expect(roleless).not.toContain("Current space:");
-  });
-
-  it("blames the role preview, not the human, for a draft it cannot run", () => {
-    // Under `X-View-As` the persona narrows the permission set and
-    // `home_writable` follows it, so the SAME human reads this line about their
-    // own draft. Telling them they do not author it is a lie the preview causes.
-    const raw = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      agents: [
-        {
-          packageId: "@acme/mine",
-          display_name: "Mine",
-          takes_input: false,
-          published: false,
-          home_writable: false,
-        },
-      ],
-    };
-    const preview = contextText(raw, {
-      ...BASE_OPTS,
-      capabilities: caps(NO_AUTHORING),
-      rolePreview: true,
-    });
-    expect(preview).toContain("draft only, not runnable under this role preview");
-    expect(preview).not.toContain("you do not author it");
-    // Outside a preview the permission set IS the caller's, so the fact holds.
-    const real = contextText(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) });
-    expect(real).toContain("draft only, not runnable — nothing published and you do not author it");
-    expect(real).not.toContain("role preview");
-  });
-
-  it("gives ONE cause-neutral reason for a writable draft the turn cannot run", () => {
-    // `home_writable` is the HUMAN's answer: `/api/me/context` is dispatched
-    // with the caller's raw headers, so it sees neither the preview nor the
-    // authoring toggle. The turn holding no `agents:write` is therefore all this
-    // line can know — naming the preview as the cause was a guess, and wrong
-    // whenever the toggle was what dropped it.
-    const raw = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      agents: [
-        {
-          packageId: "@acme/mine",
-          display_name: "Mine",
-          takes_input: false,
-          published: false,
-          home_writable: true,
-        },
-      ],
-    };
-    const hint = "; draft, not runnable in this turn — this turn does not hold agent authoring";
-    expect(
-      contextText(raw, {
-        ...BASE_OPTS,
-        capabilities: caps(NO_AUTHORING),
-        rolePreview: true,
-      }),
-    ).toContain(hint);
-    expect(contextText(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) })).toContain(hint);
-    // Control: with authoring held, the same draft is advertised as runnable.
-    expect(contextText(raw, BASE_OPTS)).toContain("draft only, yours to run");
-  });
-
-  it("advertises no draft as runnable when the turn may not author agents", () => {
-    // The turn's token then lacks `agents:write`, and a draft launch 403s.
-    const draft = {
-      packageId: "@acme/mine",
-      display_name: "Mine",
-      takes_input: false,
-      published: false,
-      home_writable: true,
-    };
-    const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
-    expect(contextText(raw, BASE_OPTS)).toContain("yours to run");
-    const off = contextText(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) });
-    expect(off).toContain(
-      "draft, not runnable in this turn — this turn does not hold agent authoring",
-    );
-    // Distinct from the "draft only, not runnable" rule, which means never runnable.
-    expect(off).not.toContain("draft only, not runnable");
-    expect(off).not.toContain("version=draft");
   });
 
   it("lists skills whatever the turn's authoring grant — the chat loads them itself", () => {
@@ -745,41 +531,6 @@ describe("formatCallerContext", () => {
     });
   });
 
-  it("says nothing about the draft for a PUBLISHED agent", () => {
-    // The negative control: the suffix is about the draft, not about authorship
-    // — an author of a published agent gets the plain line.
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        agents: [
-          {
-            packageId: "@acme/shipped",
-            display_name: "Shipped",
-            takes_input: true,
-            published: true,
-            home_writable: true,
-          },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("`@acme/shipped` — Shipped (takes input: yes)");
-    expect(out).not.toContain("draft only");
-  });
-
-  it("states explicitly when the user has no connected integrations", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada", email: "ada@acme.com" },
-        org: { role: "owner" },
-        connections: [],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("no connected integrations yet");
-  });
-
   it("falls back to email, then a generic label, when the name is missing", () => {
     expect(
       contextText({ user: { email: "ada@acme.com" }, org: { role: "guest" } }, BASE_OPTS),
@@ -791,80 +542,6 @@ describe("formatCallerContext", () => {
     const out = contextText({ user: { name: "Ada" }, connections: [] }, BASE_OPTS);
     expect(out).toContain("assisting Ada.");
     expect(out).not.toContain("role in this organization");
-  });
-
-  it("renders the runnable-agent block with invokable id and input flag", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada", email: "ada@acme.com" },
-        org: { role: "member" },
-        connections: [],
-        agents: [
-          {
-            packageId: "@appstrate/triage",
-            display_name: "Inbox Triage",
-            description: "Sorts incoming email.",
-            takes_input: false,
-          },
-          {
-            packageId: "@acme/report",
-            display_name: "Report",
-            description: "Builds a report.",
-            takes_input: true,
-          },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("## Existing agents you can run");
-    expect(out).toContain("`@appstrate/triage`");
-    expect(out).toContain("Inbox Triage: Sorts incoming email.");
-    expect(out).toContain("(takes input: no)");
-    expect(out).toContain("`@acme/report`");
-    expect(out).toContain("(takes input: yes)");
-    // Data only — the "prefer an existing agent" rule lives in `buildSystemPrompt`.
-    expect(out).not.toContain("Prefer running an existing agent");
-    expect(out).not.toContain("(list truncated)");
-  });
-
-  it("marks the agent list as truncated without restating how to page it", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [],
-        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
-        agents_truncated: true,
-      },
-      BASE_OPTS,
-    );
-    // The marker is data; `buildSystemPrompt` owns what to DO about it (listAgents).
-    expect(out).toContain("(list truncated)");
-    expect(out).not.toContain('`operation_id: "listAgents"`');
-  });
-
-  it("renders a context block from agents alone (no identity/connections)", () => {
-    const out = contextText(
-      {
-        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain("## Existing agents you can run");
-    expect(out).toContain("`@appstrate/triage`");
-  });
-
-  it("omits the agent block when there are no runnable agents", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [],
-        agents: [],
-      },
-      BASE_OPTS,
-    );
-    expect(out).not.toContain("Existing agents you can run");
   });
 
   it("renders each skill line with id, version, URI and description, dropping what says nothing", () => {
@@ -920,14 +597,6 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("## Skills");
   });
 
-  it("returns an empty string for an unusable payload (so injection is skipped)", () => {
-    expect(contextText({}, BASE_OPTS)).toBe("");
-    expect(contextText(null, BASE_OPTS)).toBe("");
-    expect(contextText({ user: { name: null, email: null }, org: { role: null } }, BASE_OPTS)).toBe(
-      "",
-    );
-  });
-
   it("renders org name/slug and grounds date/language from the server (UTC + fr)", () => {
     const out = contextText(
       {
@@ -942,46 +611,6 @@ describe("formatCallerContext", () => {
     expect(out).toContain("Current date and time:");
     expect(out).toContain("(UTC, rounded to the hour)");
     expect(out).toContain("Reply in the user's language (fr)");
-  });
-
-  it("does NOT render recent runs — they would bust the prompt cache every turn", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        recent_runs: [
-          {
-            packageId: "@appstrate/triage",
-            status: "failed",
-            runNumber: 7,
-            started_at: "2026-06-25T09:00:00.000Z",
-            error: "Gmail token expired",
-          },
-          { packageId: "@acme/report", status: "success", runNumber: 6 },
-        ],
-      },
-      BASE_OPTS,
-    );
-    // The payload field still exists (it backs the MCP `get_me` tool); the
-    // RENDERING is what was removed. `started_at` rewrote the system prompt on
-    // every turn that launched a run, invalidating its single cache breakpoint
-    // and the conversation history behind it. `buildSystemPrompt` tells the model to
-    // call `listRuns` instead.
-    expect(out).not.toContain("The user's recent runs");
-    expect(out).not.toContain("@appstrate/triage");
-    expect(out).not.toContain("Gmail token expired");
-    expect(out).not.toContain("2026-06-25");
-  });
-
-  it("returns an empty block when recent_runs is the only usable field", () => {
-    expect(
-      contextText(
-        {
-          recent_runs: [{ packageId: "@acme/report", status: "success", runNumber: 1 }],
-        },
-        BASE_OPTS,
-      ),
-    ).toBe("");
   });
 
   it("is byte-identical across a 45-minute gap (the cache invariant)", () => {
@@ -1090,36 +719,27 @@ function fakeSkillsClient(opts: {
 describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
-  it("builds the block from the dispatched GET /api/me/context payload", async () => {
-    const payload = {
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "member", name: "Acme", slug: "acme" },
-      connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
-    };
-    const { deps, lastRequest } = fakeDeps(() => Response.json(payload));
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: { cookie: "session=abc", "x-org-id": "org_1" },
-      spaceId: "spc_1",
-      user,
-      deps,
-      capabilities: caps(BUILDER),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: DEFAULT_SKILL_SELECTION,
-      enforced: NO_ENFORCED,
-      openSkillsClient: NO_SKILLS,
-    });
-    // Block is rendered from the dispatched payload, not from request context.
-    expect(out).toContain("`@appstrate/gmail`");
-    expect(out).toContain("## Existing agents you can run");
+  it("builds the block from the request context, with no read of the platform", async () => {
+    const out = await blockText(
+      fakeContext({ orgRole: "member", orgName: "Acme", orgSlug: "acme" }),
+      {
+        spaceId: "spc_1",
+        user,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke"],
+        skills: DEFAULT_SKILL_SELECTION,
+        enforced: NO_ENFORCED,
+        openSkillsClient: NO_SKILLS,
+      },
+    );
+    expect(out).toContain(
+      'You are assisting Ada (ada@acme.com), whose role is "member" in the organization "Acme" (`acme`).',
+    );
     // The path parameter of every space-scoped operation, as data.
     expect(out).toContain("Current space: `spc_1`");
-    // The space-scoped read carries the resolved space id on the dispatch.
-    const req = lastRequest()!;
-    expect(new URL(req.url).pathname).toBe("/api/me/context");
-    expect(req.headers.get("x-space-id")).toBe("spc_1");
-    expect(req.headers.get("cookie")).toBe("session=abc");
+    // Neither the integrations nor the agents: the model looks them up with its tools.
+    expect(out).not.toContain("Integrations the user has connected");
+    expect(out).not.toContain("## Existing agents you can run");
   });
 
   it("resolves the chosen skills over the skills connection, draft first", async () => {
@@ -1137,15 +757,11 @@ describe("buildCallerContextBlock", () => {
       drafts: [skillEntry(A, null, 7), skillEntry(B, null)],
       texts: { [A]: "a draft body", [B]: "b draft body", [C]: "c body" },
     });
-    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        origin: "http://127.0.0.1:3000",
-        headers: { cookie: "session=abc" },
         spaceId: "spc_1",
         user,
-        deps,
         // Strict: the turn holds no `skills:read`, the skills connection still reads.
         capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -1191,13 +807,9 @@ describe("buildCallerContextBlock", () => {
   });
 
   it("leaves the chosen skills out when the skills connection cannot open", async () => {
-    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
       spaceId: "spc_1",
       user,
-      deps,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
@@ -1215,15 +827,11 @@ describe("buildCallerContextBlock", () => {
       texts: {},
       blobs: { [A]: Buffer.from("a body").toString("base64") },
     });
-    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        origin: "http://127.0.0.1:3000",
-        headers: {},
         spaceId: "spc_1",
         user,
-        deps,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
@@ -1246,15 +854,11 @@ describe("buildCallerContextBlock", () => {
       texts: { [A]: "a draft body" },
       savedAfterList: { [A]: "a draft body, saved again" },
     });
-    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        origin: "http://127.0.0.1:3000",
-        headers: {},
         spaceId: "spc_1",
         user,
-        deps,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
@@ -1279,15 +883,11 @@ describe("buildCallerContextBlock", () => {
       texts: { [A]: "a body" },
       savedAfterList: { [A]: "another body" },
     });
-    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        origin: "http://127.0.0.1:3000",
-        headers: {},
         spaceId: "spc_1",
         user,
-        deps,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
@@ -1311,19 +911,11 @@ describe("buildCallerContextBlock", () => {
       drafts: [skillEntry("skill://spc_1/acme/a@draft/a/SKILL.md", null, 7)],
       texts: {},
     });
-    const seen: string[] = [];
-    const { deps } = fakeDeps((req) => {
-      seen.push(new URL(req.url).pathname + new URL(req.url).search);
-      return Response.json({ user: { name: "Ada" } });
-    });
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        origin: "http://127.0.0.1:3000",
-        headers: {},
         spaceId: "spc_1",
         user,
-        deps,
         capabilities: caps(BUILDER),
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
         permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
@@ -1332,7 +924,6 @@ describe("buildCallerContextBlock", () => {
         openSkillsClient: skills.open,
       },
     );
-    expect(seen).toEqual(["/api/me/context"]);
     expect(skills.calls.sort()).toEqual(["close", "skills/list", "skills/list draft"]);
     expect(out).toContain(
       "- `@acme/a` `skill://spc_1/acme/a@draft/a/SKILL.md` — A\n- `@acme/c` (v2.0.0) `skill://spc_1/acme/c/c/SKILL.md` — A",
@@ -1352,11 +943,8 @@ describe("buildCallerContextBlock", () => {
       texts: {},
     });
     const readOnlyOut = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
       spaceId: "spc_1",
       user,
-      deps,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillMode: "auto", pinnedSkills: [] },
@@ -1370,11 +958,8 @@ describe("buildCallerContextBlock", () => {
     // A turn that cannot load a skill lists none, and opens nothing.
     let opened = false;
     await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
       spaceId: "spc_1",
       user,
-      deps,
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
@@ -1392,13 +977,9 @@ describe("buildCallerContextBlock", () => {
       published: [skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0")],
       texts: {},
     });
-    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
       spaceId: "spc_1",
       user,
-      deps,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
@@ -1410,51 +991,10 @@ describe("buildCallerContextBlock", () => {
     expect(skills.calls).toContain("close");
   });
 
-  it("drops the runnable-agents section for a turn that cannot launch", async () => {
-    const payload = {
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "member" },
-      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
-    };
-    const { deps } = fakeDeps(() => Response.json(payload));
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
-      spaceId: "spc_1",
-      user,
-      deps,
-      capabilities: caps([]),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: DEFAULT_SKILL_SELECTION,
-      enforced: NO_ENFORCED,
-      openSkillsClient: NO_SKILLS,
-    });
-    expect(out).not.toContain("## Existing agents you can run");
-    expect(out).not.toContain("@appstrate/triage");
-    expect(out).toContain("Ada (ada@acme.com)");
-  });
-
-  it("derives the role preview from the persona on the request context", async () => {
-    const payload = {
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "member" },
-      agents: [
-        {
-          packageId: "@acme/mine",
-          display_name: "Mine",
-          takes_input: false,
-          published: false,
-          home_writable: false,
-        },
-      ],
-    };
-    const { deps } = fakeDeps(() => Response.json(payload));
+  it("names the persona's organization role while previewing, the real one otherwise", async () => {
     const args = {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
       spaceId: "spc_1",
       user,
-      deps,
       capabilities: caps(NO_AUTHORING),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
@@ -1468,10 +1008,9 @@ describe("buildCallerContextBlock", () => {
       }),
       args,
     );
-    expect(preview).toContain("draft only, not runnable under this role preview");
-    expect(preview).not.toContain("you do not author it");
+    expect(preview).toContain('whose role is "member"');
     const real = await blockText(fakeContext({ orgRole: "owner" }), args);
-    expect(real).toContain("you do not author it");
+    expect(real).toContain('whose role is "owner"');
   });
 
   it("names the current space's role, which is already resolved under the persona", async () => {
@@ -1479,14 +1018,9 @@ describe("buildCallerContextBlock", () => {
     // applies to neither this space nor this block (`personaSpaceMember`).
     // `applySpacePermissions` resolved `spaceRole` for THIS space under the
     // persona, so it is the one answer that agrees with the permissions line.
-    const payload = { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" } };
-    const { deps } = fakeDeps(() => Response.json(payload));
     const args = {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
       spaceId: "spc_1",
       user,
-      deps,
       capabilities: caps(NO_AUTHORING),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
@@ -1517,61 +1051,6 @@ describe("buildCallerContextBlock", () => {
     expect(roleLine(custom)).toBe("Role in this space: Analyste");
   });
 
-  it("falls back to identity-only when the dispatch 400s (no app context)", async () => {
-    const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
-      spaceId: "spc_1",
-      user,
-      deps,
-      capabilities: caps(BUILDER),
-      permissions: ["mcp:read", "mcp:invoke"],
-      // Nothing was resolved, so a chosen skill must not read as unavailable.
-      skills: { skillMode: "manual", pinnedSkills: ["@acme/mine"] },
-      enforced: NO_ENFORCED,
-      openSkillsClient: NO_SKILLS,
-    });
-    expect(out).toContain("Ada (ada@acme.com)");
-    expect(out).toContain("Current space: `spc_1`");
-    expect(out).not.toContain("@acme/mine");
-  });
-
-  it("keeps strict's note in the identity-only fallback", async () => {
-    const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
-      spaceId: "spc_1",
-      user,
-      deps,
-      capabilities: caps(BUILDER.filter((p) => !p.startsWith("skills:"))),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillMode: "strict", pinnedSkills: ["@acme/mine"] },
-      enforced: NO_ENFORCED,
-      openSkillsClient: NO_SKILLS,
-    });
-    expect(out).toContain("This conversation is restricted to the skills shown here");
-    expect(out).not.toContain("@acme/mine");
-  });
-
-  it("degrades to no block on any other dispatch failure", async () => {
-    const { deps } = fakeDeps(() => new Response(null, { status: 503 }));
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
-      spaceId: "spc_1",
-      user,
-      deps,
-      capabilities: caps(BUILDER),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: DEFAULT_SKILL_SELECTION,
-      enforced: NO_ENFORCED,
-      openSkillsClient: NO_SKILLS,
-    });
-    expect(out).toBe("");
-  });
-
   describe("space-enforced skills", () => {
     const HOUSE: EnforcedChatSkill = {
       packageId: "@acme/house",
@@ -1582,13 +1061,10 @@ describe("buildCallerContextBlock", () => {
     };
     const HOUSE_BLOCK =
       '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nHouse body.\n</skill>';
-    const build = (deps: ChatPlatformDeps, enforced: Promise<readonly EnforcedChatSkill[]>) =>
+    const build = (enforced: Promise<readonly EnforcedChatSkill[]>) =>
       blockText(fakeContext({ orgRole: "member" }), {
-        origin: "http://127.0.0.1:3000",
-        headers: {},
         spaceId: "spc_1",
         user,
-        deps,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: DEFAULT_SKILL_SELECTION,
@@ -1596,39 +1072,16 @@ describe("buildCallerContextBlock", () => {
         openSkillsClient: NO_SKILLS,
       });
 
-    it("renders them from the context payload", async () => {
-      const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
-      const out = await build(deps, Promise.resolve([HOUSE]));
+    it("renders them in the block, after the identity", async () => {
+      const out = await build(Promise.resolve([HOUSE]));
       expect(out).toContain("## Your context");
-      expect(out).toContain(HOUSE_BLOCK);
-    });
-
-    it("survives the identity-only fallback", async () => {
-      const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
-      const out = await build(deps, Promise.resolve([HOUSE]));
       expect(out).toContain("Ada (ada@acme.com)");
       expect(out).toContain(HOUSE_BLOCK);
     });
 
-    it("survives a context read that fails or throws, as the section alone", async () => {
-      for (const respond of [
-        () => new Response(null, { status: 503 }),
-        () => {
-          throw new Error("dispatch down");
-        },
-      ]) {
-        const { deps } = fakeDeps(respond);
-        const out = await build(deps, Promise.resolve([HOUSE]));
-        expect(out.startsWith("## Skills\n")).toBe(true);
-        expect(out).toContain(HOUSE_BLOCK);
-        expect(out).not.toContain("## Your context");
-      }
-    });
-
     it("rejects when they cannot be loaded, rather than render without them", async () => {
-      const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
       const failure = new Error("enforced skills unavailable");
-      await expect(build(deps, Promise.reject(failure))).rejects.toBe(failure);
+      await expect(build(Promise.reject(failure))).rejects.toBe(failure);
     });
   });
 });

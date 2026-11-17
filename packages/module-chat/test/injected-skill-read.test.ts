@@ -25,8 +25,6 @@ import {
 } from "../../../apps/api/test/helpers/seed.ts";
 import { mcpRpc, inSpace } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
-import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
-import { buildChatPlatformDeps } from "../src/platform-services.ts";
 import { buildPlatformMcpTools, connectPlatformMcp } from "../src/pi-chat/mcp-tools.ts";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
@@ -60,10 +58,9 @@ beforeEach(async () => {
   expect(created.status).toBe(201);
 });
 
-/** A strict turn by `user` with `headers`: the real block, then its bearer. */
+/** A strict turn by `user`: the real block, then its bearer. */
 async function strictTurn(
   user: { id: string; email: string; name: string },
-  headers: Record<string, string>,
   granted: string[],
   orgRole: "owner" | "guest",
 ) {
@@ -71,11 +68,8 @@ async function strictTurn(
   const block = await buildCallerContextBlock(
     { get: (key: string) => ({ orgRole })[key as "orgRole"] } as never,
     {
-      origin: "http://localhost",
-      headers,
       spaceId: owner.defaultSpaceId,
       user,
-      deps: buildChatPlatformDeps(buildModuleInitContext()),
       capabilities: turnCapabilities((p) => permissions.includes(p)),
       permissions,
       skills: { skillMode: "strict", pinnedSkills: [SKILL_ID] },
@@ -150,7 +144,6 @@ describe("a chosen skill injected in a strict turn, read back through `resources
   it("serves the author's injected draft, then 409s once the draft is edited", async () => {
     const { block, permissions, bearer, unclaimed } = await strictTurn(
       owner.user,
-      authHeaders(owner),
       ["chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
       "owner",
     );
@@ -198,12 +191,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
       customRoleId: role.id,
     });
     const reader = { id: user.id, email: user.email, name: user.name };
-    const { block, bearer, unclaimed } = await strictTurn(
-      reader,
-      authHeaders({ ...owner, cookie: user.cookie }),
-      granted,
-      "guest",
-    );
+    const { block, bearer, unclaimed } = await strictTurn(reader, granted, "guest");
     const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
     expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" version="1.3.0">`);
     expect(block.injected.skills[SKILL_ID]).toEqual({ definition: "published", version: "1.3.0" });
@@ -230,7 +218,7 @@ describe("one skill, the same bytes for the chat, an MCP client and `code sync`"
     });
     const headers = authHeaders({ ...owner, cookie: user.cookie });
     const reader = { id: user.id, email: user.email, name: user.name };
-    const { block, bearer } = await strictTurn(reader, headers, granted, "guest");
+    const { block, bearer } = await strictTurn(reader, granted, "guest");
     const uri = injectedUri(block.text);
 
     // An MCP client: the entry, then every file it lists.

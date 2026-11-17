@@ -206,8 +206,8 @@ export interface McpToolContext {
    */
   observe?: McpObserver;
   /**
-   * The caller already injects the get_me payload (`GET /api/me/context`) into
-   * its own system prompt, so the redundant get_me tool is dropped. Only the
+   * The consumer already injects the caller's identity into its own system
+   * prompt, so the redundant get_me tool is dropped. Only the
    * in-process chat consumer sets this (it injects that block + carries the
    * server instructions); external MCP clients leave it false and keep get_me.
    */

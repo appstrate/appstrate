@@ -245,10 +245,9 @@ describe("runner preset", () => {
   });
 
   it("names the agents a runner may launch and none of the skills it may not read", async () => {
-    // `/api/me/context` is the caller context an AI agent reads — the chat
-    // module injects it into its system prompt and the MCP `get_me` tool
-    // returns it, both by dispatching THIS route in-process with the caller's
-    // headers, so there is one gate and it is here. Agents are a runnable hint
+    // `/api/me/context` is the caller context an AI agent reads — the MCP
+    // `get_me` tool returns it by dispatching THIS route in-process with the
+    // caller's headers, so there is one gate and it is here. Agents are a runnable hint
     // (`agents:run`); the installed skills are a catalog read (`skills:read`),
     // the same disclosure `GET /api/packages/skills` refuses a runner.
     await seedSpacePackage(owner.defaultSpaceId, SKILL_ID);

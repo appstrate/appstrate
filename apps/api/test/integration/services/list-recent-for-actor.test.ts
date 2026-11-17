@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for `listRecentForActor` — the caller-scoped recent-runs read the chat
- * module folds into its system-prompt context block. Covers actor isolation,
+ * Tests for `listRecentForActor` — the caller-scoped recent-runs read
+ * `GET /api/me/context` serves to `get_me`. Covers actor isolation,
  * newest-first ordering across packages and statuses, the failure-only error
  * surface, and the limit.
  */
