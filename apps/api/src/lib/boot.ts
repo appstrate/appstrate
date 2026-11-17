@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
-import type { SQL } from "drizzle-orm";
+import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -63,10 +62,13 @@ import { logInfraMode } from "../infra/index.ts";
 import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { countByKid, type KidCount } from "@appstrate/db/encrypted-columns";
-import { keyringKids, opensWithKeyring } from "@appstrate/connect";
 import { warnOnUnreadEnvKeys } from "./unread-env-keys.ts";
 import { bootStep } from "./boot-step.ts";
+import {
+  assertKeyringCoversCiphertexts,
+  assertOAuthResourceColumnsPresent,
+} from "./boot-guards/schema-invariants.ts";
+import { assertNoPendingDataScripts } from "./boot-guards/pending-data-scripts.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -122,25 +124,11 @@ export async function bootCritical(): Promise<void> {
     assertOAuthResourceColumnsPresent(),
   );
 
-  // Refuse to boot while `oauth_clients.self_service` still disagrees with the
-  // `metadata` JSON key migration 0057 left behind — a self-registered client
-  // reading as operator-provisioned is a security control that is OFF.
-  // Detection only; the fold is an operator task, see the function's doc comment.
-  await bootStep("critical", "assert-self-service-fold", () => assertSelfServiceFoldApplied());
-
-  // Refuse to boot while connection shares still sit in `shared_space_ids`, where nothing reads
-  // them. Detection only; the copy is an operator task, see the function's doc comment.
   const embeddedDataDir = isEmbeddedDb
     ? (await import("node:path")).resolve(env.PGLITE_DATA_DIR)
     : null;
-  await bootStep("critical", "assert-connection-shares-copied", () =>
-    assertConnectionSharesCopied(embeddedDataDir),
-  );
-
-  // Refuse to boot while a package share has no `space_packages` row, where nothing reads it.
-  // Detection only; the fold is an operator task, see the function's doc comment.
-  await bootStep("critical", "assert-package-shares-folded", () =>
-    assertPackageSharesFolded(embeddedDataDir),
+  await bootStep("critical", "pending-data-scripts", () =>
+    assertNoPendingDataScripts(embeddedDataDir),
   );
 
   await bootStep("critical", "assert-keyring-covers-ciphertexts", () =>
@@ -562,305 +550,6 @@ export async function bootBackground(): Promise<void> {
   // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
   // were deleted (files, uploads, run workspaces, org/app/end-user cascades).
   startStorageDeletionWorker();
-}
-
-/**
- * Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
- * are absent although the migrator reported nothing pending.
- *
- * drizzle-orm's postgres-js migrator applies migrations by timestamp watermark
- * (`max(created_at)` in `__drizzle_migrations`), NOT by hash-set membership. A
- * production DB whose watermark was corrupted to a future date (known prod
- * incident) reports nothing pending while every migration below that date was
- * never applied — 0006 among them, which adds `resources text[]` to
- * oauth_access_tokens / oauth_consents / oauth_refresh_tokens and re-defaults
- * oauth_clients.level. The pinned better-auth 1.7 oauth-provider then queries
- * columns that do not exist, and token mint fails on resource/MCP flows.
- * Tier 0 cannot reach this state: `applyCorePGliteMigrations` keys on the
- * journal tag, not on a watermark.
- *
- * This used to re-run 0006's DDL here, idempotently, on every boot of every
- * deployment, forever — a broken database made to work silently, with nothing
- * recording when the repair could stop shipping. That is what
- * `docs/NO_TRANSITIONAL_CODE.md` §3 and §5 forbid. The DDL moved to
- * `scripts/migration/0004-oauth-resources-watermark-drift.sql`, run once by an
- * operator; what stays here detects and refuses.
- *
- * NOT retirement machinery, despite replacing a self-heal: it does not refuse a
- * RETIRED FORM, it detects a watermark corruption that — in this function's own
- * words below — "fires for a drift that first appears from here on". The
- * transition it came from is over; the failure mode it guards is not, so
- * `docs/NO_TRANSITIONAL_CODE.md` §4 does not reach it. A transitional-code
- * audit deleted it once on the strength of the resemblance; that was wrong.
- *
- * Refusing rather than warning, deliberately: the drift is not scoped to 0006.
- * It skipped every migration below the corrupted watermark, so a process that
- * kept running would be serving from a schema nobody can enumerate, failing
- * later at arbitrary unrelated queries. One actionable message at boot beats
- * that. The cost is real and accepted — a deployment this used to repair in
- * place now stays down until the script is run.
- *
- * The probe is a signature, not a proof, and the gap is wider than it looks.
- * It sees one migration, so a watermark corrupted *after* 0006 applied leaves
- * these columns present and this check passes with other migrations still
- * missing. Worse for the upgrade path: the self-heal shipped in every release
- * up to this one and ran on every boot, so a database that drifted BEFORE this
- * release already had the columns restored — it will pass here while its
- * watermark is still corrupt. In practice this fires for a drift that first
- * appears from here on, and for restores of a backup taken before the heal.
- *
- * Restoring the columns therefore clears the boot refusal, not the drift.
- * `scripts/migration/0004-…` ships the ledger diagnostic for the real extent,
- * and its header says the same thing.
- *
- * The general check — compare `max(created_at)` in `__drizzle_migrations`
- * against the largest `when` in `meta/_journal.json` — was considered and
- * rejected. It is exact for this incident but refuses boot after any deliberate
- * ROLLBACK, where a database legitimately carries a watermark from a newer
- * release than the code, and turning routine rollbacks into outages costs more
- * than the corruption it would catch. The diagnostic stays a query an operator
- * runs, not a predicate that stops the process.
- *
- * `columnExists` is injected for tests — production reads the live database.
- */
-export async function assertOAuthResourceColumnsPresent(
-  columnExists: () => Promise<boolean> = oauthResourcesColumnExists,
-): Promise<void> {
-  if (await columnExists()) return;
-
-  throw new Error(
-    "Schema drift: the oauth `resources` columns (migration 0006) are absent even though " +
-      "the migrator reported nothing pending. __drizzle_migrations is ahead of the real " +
-      "schema, so 0006 — and every other migration below the corrupted watermark — was " +
-      "silently skipped. Refusing to boot: token mint would fail at runtime on resource/MCP " +
-      "flows, and the rest of the skipped set is unknown. Apply " +
-      "scripts/migration/0004-oauth-resources-watermark-drift.sql to this database (it ships " +
-      "the diagnostic query for the full extent of the drift), then restart.",
-  );
-}
-
-async function oauthResourcesColumnExists(): Promise<boolean> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const present = toRows(
-    await db.execute(rawSql`
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_name = 'oauth_access_tokens'
-        AND column_name = 'resources'
-      LIMIT 1
-    `),
-  );
-  return present.length > 0;
-}
-
-/**
- * Refuse to boot while `oauth_clients.self_service` still contradicts the
- * `metadata` JSON key it replaced — i.e. while
- * `scripts/migration/0011-oauth-clients-self-service-fold.sql` has not been run
- * on this database.
- *
- * `0057_oauth_provider_1_7_3` lands the column `false` on every row and leaves
- * `metadata` standing, so filling the column from it is operator data repair
- * rather than migration. That opens a window in which every already-registered
- * DCR/CIMD client reads as operator-provisioned.
- *
- * `/oauth2/token` reads `self_service = true` to confine such a client's tokens
- * to exactly one protected resource (`modules/oidc/auth/guards.ts`); a `false`
- * row skips that branch, so the client may bind its token to the broad platform
- * audience and act across the REST API with the connecting user's full
- * authority. Registration is unauthenticated, so it need not be a client an
- * operator knows about.
- *
- * Refusing rather than warning, for the reason
- * {@link assertOAuthResourceColumnsPresent} does.
- *
- * The predicate is EXACTLY the script's `WHERE`, `pg_input_is_valid` included:
- * a row whose `metadata` text is not JSON is one the fold deliberately skips,
- * and counting it here would refuse a boot the script can never clear.
- *
- * §4: delete this, its tests and the README note in the PR that records `0011`
- * as run.
- *
- * `pendingFolds` is injected for tests — production reads the live database.
- */
-export async function assertSelfServiceFoldApplied(
-  pendingFolds: () => Promise<number> = unfoldedSelfServiceClientCount,
-): Promise<void> {
-  const pending = await pendingFolds();
-  if (pending === 0) return;
-
-  throw new Error(
-    `Security control off: ${pending} oauth client(s) carry the metadata key \`selfService\` ` +
-      "while their `self_service` column is still false, so migration 0057 has been applied " +
-      "and scripts/migration/0011-oauth-clients-self-service-fold.sql has not. Until it runs, " +
-      "/oauth2/token reads those self-registered (DCR/CIMD) clients as operator-provisioned " +
-      "and stops confining their tokens to a single protected resource — each one may bind a " +
-      "token to the whole platform audience and act across the REST API with the connecting " +
-      "user's full authority. Refusing to boot: apply " +
-      "scripts/migration/0011-oauth-clients-self-service-fold.sql to this database, then " +
-      "restart.",
-  );
-}
-
-async function unfoldedSelfServiceClientCount(): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const [row] = toRows<{ pending: number }>(
-    await db.execute(rawSql`
-      SELECT count(*)::int AS pending
-      FROM oauth_clients
-      WHERE self_service = false
-        AND metadata IS NOT NULL
-        AND pg_input_is_valid(metadata, 'jsonb')
-        AND metadata::jsonb ->> 'selfService' = 'true'
-    `),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while a connection's shares are still in `integration_connections.shared_space_ids`
- * — i.e. while `scripts/migration/0044-connection-shares.ts` has not been run on this database.
- *
- * Drizzle `0089` creates `integration_connection_shares` empty and leaves the column standing,
- * read only by `0044` and this guard. Every share lives in the table, so until `0044` copies the
- * column into it every existing share is invisible: the members of the target space no longer
- * reach the connection, and a schedule naming it is disabled at its next fire, for good.
- *
- * Refusing rather than warning, for the reason {@link assertOAuthResourceColumnsPresent} does.
- *
- * The predicate is EXACTLY the `WHERE` with which `0044` empties the column, so the script always
- * clears it: a target space it skips (deleted, or of another organization) is emptied all the same.
- * A fresh install never writes the column, and a database `0044` has run on holds it empty.
- *
- * The command it names targets the database this process runs on: `DATABASE_URL`, or, on an
- * embedded database (`embeddedDataDir`), that directory named through `PGLITE_DATA_DIR`, which the
- * script requires so that a run with a forgotten `.env` never opens the default one.
- *
- * §4: delete this and its tests in the release that drops `shared_space_ids`.
- *
- * `pendingCopies` is injected for tests — production reads the live database.
- */
-export async function assertConnectionSharesCopied(
-  embeddedDataDir: string | null,
-  pendingCopies: () => Promise<number> = uncopiedShareConnectionCount,
-): Promise<void> {
-  const pending = await pendingCopies();
-  if (pending === 0) return;
-
-  const script = "bun scripts/migration/0044-connection-shares.ts";
-  const command =
-    embeddedDataDir === null
-      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
-      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
-        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
-        "opens in one process at a time)";
-  throw new Error(
-    `Connection shares not copied: ${pending} connection(s) still hold space ids in ` +
-      "integration_connections.shared_space_ids, so migration 0089 has been applied and " +
-      "scripts/migration/0044-connection-shares.ts has not. Until it runs, every one of those " +
-      "shares is invisible: the spaces they reach lose the connection, and each schedule naming " +
-      `one is disabled at its next fire. Refusing to boot: run ${command}, then restart.`,
-  );
-}
-
-/** `database` is injected for tests that probe a second embedded database. */
-export async function uncopiedShareConnectionCount(
-  database: { execute(query: SQL): PromiseLike<unknown> } = db,
-): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const [row] = toRows<{ pending: number }>(
-    await database.execute(rawSql`
-      SELECT count(*)::int AS pending
-      FROM integration_connections
-      WHERE cardinality(shared_space_ids) > 0
-    `),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while `package_shares` holds a row, i.e. until
- * `scripts/migration/0048-fold-package-shares.ts` has run: unfolded shares would
- * vanish from the spaces they were shared with. Refuses rather than warns, like
- * {@link assertOAuthResourceColumnsPresent}. Delete with the release that drops
- * `package_shares` (§4). `pendingFolds` is injected for tests.
- */
-export async function assertPackageSharesFolded(
-  embeddedDataDir: string | null,
-  pendingFolds: () => Promise<number> = unfoldedPackageShareCount,
-): Promise<void> {
-  const pending = await pendingFolds();
-  if (pending === 0) return;
-
-  const script = "bun scripts/migration/0048-fold-package-shares.ts";
-  const command =
-    embeddedDataDir === null
-      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
-      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
-        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
-        "opens in one process at a time)";
-  throw new Error(
-    `Package shares not folded: package_shares still holds ${pending} row(s), so migration 0100 ` +
-      "has been applied and scripts/migration/0048-fold-package-shares.ts has not. Until it " +
-      "runs, every package shared but never activated is gone from the space it was shared " +
-      `with. Refusing to boot: run ${command}, then restart.`,
-  );
-}
-
-/** `database` is injected for tests that probe a second embedded database. */
-export async function unfoldedPackageShareCount(
-  database: { execute(query: SQL): PromiseLike<unknown> } = db,
-): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const [row] = toRows<{ pending: number }>(
-    await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while the database holds a ciphertext under a key id absent from the keyring
- * (a retired key dropped before `scripts/rekey-encrypted-columns.ts` re-encrypted its rows, a
- * misspelt kid): every read of those rows would fail. The inventory is the rekey script's.
- * A configured kid none of whose samples opens is only warned about: dead rows written by an
- * older key under the same id would make a refusal crash-loop on a correct key.
- */
-export async function assertKeyringCoversCiphertexts(
-  inventory: () => Promise<readonly KidCount[]> = storedCiphertextKids,
-  knownKids: ReadonlySet<string> = keyringKids(),
-): Promise<void> {
-  const missing = new Map<string, string[]>();
-  const opens = new Map<string, boolean>();
-  for (const { table, column, kid, count, samples } of await inventory()) {
-    if (kid === null) continue;
-    if (knownKids.has(kid)) {
-      opens.set(kid, opens.get(kid) || samples.some(opensWithKeyring));
-      continue;
-    }
-    missing.set(kid, [...(missing.get(kid) ?? []), `${table}.${column} (${count})`]);
-  }
-  for (const [kid, opened] of opens) {
-    if (opened) continue;
-    logger.warn("Encryption key opens none of its kid's sampled ciphertexts", {
-      kid,
-      remedy:
-        "a key replaced under the same id? `bun scripts/rekey-encrypted-columns.ts` names the column",
-    });
-  }
-  if (missing.size === 0) return;
-
-  const detail = [...missing].map(([kid, where]) => `'${kid}' in ${where.join(", ")}`);
-  throw new Error(
-    `Missing encryption key(s): the database holds ciphertexts under ${detail.join("; ")}, ` +
-      "and no key with that id is configured. Refusing to boot: every read of those rows " +
-      "would fail. Add each missing key to CONNECTION_ENCRYPTION_KEYS (kid → base64 key), " +
-      "then restart.",
-  );
-}
-
-async function storedCiphertextKids(): Promise<KidCount[]> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  return countByKid(async (text) => toRows(await db.execute(rawSql.raw(text))));
 }
 
 /**

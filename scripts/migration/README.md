@@ -336,7 +336,7 @@ its pre-flight, and it is the one that cannot wait for the window.
    tokens to one protected resource.
 
    **The API refuses to boot until it has run**
-   (`assertSelfServiceFoldApplied`, `apps/api/src/lib/boot.ts`): it counts the
+   (the `0011` entry of `PENDING_DATA_SCRIPTS`, `apps/api/src/lib/boot-guards/pending-data-scripts.ts`): it counts the
    rows still unfolded and exits naming this file, and under a supervisor it
    restarts into the same refusal. The runbook's order is what makes that
    refusal never fire — `0011` is step 4, the application starts at step 5. A
@@ -1239,8 +1239,7 @@ them. A share row carries no author: who added it is in the audit trail (`share_
 
 `0089` copies nothing into the table: an app serving `0089` before `0044` has run sees no
 existing share. So `0044` runs between the migration and the app's start, and the release refuses to
-boot while a connection still holds an entry in `shared_space_ids` (`assertConnectionSharesCopied`,
-`apps/api/src/lib/boot.ts`). `pg_dump` taken BEFORE the deploy, the app stopped, in this order:
+boot while a connection still holds an entry in `shared_space_ids` (the `0044` entry of `PENDING_DATA_SCRIPTS`, `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). `pg_dump` taken BEFORE the deploy, the app stopped, in this order:
 
 1. Run the migrations alone — per deployment, as "Release beta.67" above says (`bun run db:migrate`
    on a local PostgreSQL) — it applies `0089` and the release's other drizzle migrations; the app
@@ -1331,8 +1330,7 @@ guard; the next release drops it.
 
 `0100` copies nothing: an app serving `0100` before `0048` has run no longer sees the packages that
 were shared and never activated. So `0048` runs between the migration and the app's start, and the
-release refuses to boot while `package_shares` holds a row (`assertPackageSharesFolded`,
-`apps/api/src/lib/boot.ts`). `pg_dump` taken BEFORE the deploy, the
+release refuses to boot while `package_shares` holds a row (the `0048` entry of `PENDING_DATA_SCRIPTS`, `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). `pg_dump` taken BEFORE the deploy, the
 app stopped:
 
 1. Run the migrations alone (`bun run db:migrate`, or the migrate service); the app stays stopped.

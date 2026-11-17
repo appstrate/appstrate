@@ -12,7 +12,7 @@ import { encrypt } from "@appstrate/connect";
 import { orgProxies } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { assertKeyringCoversCiphertexts } from "../../../src/lib/boot.ts";
+import { assertKeyringCoversCiphertexts } from "../../../src/lib/boot-guards/schema-invariants.ts";
 
 describe("assertKeyringCoversCiphertexts — live inventory", () => {
   let orgId: string;

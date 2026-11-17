@@ -133,9 +133,9 @@ export const integrationConnections = pgTable(
     label: text("label").notNull(),
     /** Shared with every current and future team space, while the owner administers the org. */
     shareAllSpaces: boolean("share_all_spaces").notNull().default(false),
-    // Read only by scripts/migration/0044 and the boot guard `assertConnectionSharesCopied`
-    // (apps/api/src/lib/boot.ts); no code writes it. Dropped with its CHECKs and the guard in the
-    // next release. Shares live in `integration_connection_shares`.
+    // Read only by scripts/migration/0044 and the `0044` entry of
+    // `PENDING_DATA_SCRIPTS` (apps/api/src/lib/boot-guards/pending-data-scripts.ts); no code writes
+    // it. Dropped with its CHECKs and that entry in the next release. Shares live in `integration_connection_shares`.
     sharedSpaceIds: text("shared_space_ids")
       .array()
       .notNull()

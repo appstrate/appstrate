@@ -19,7 +19,8 @@
 -- drifted database silently worked. §3 (scaffolding with no expiry) and §5 (a
 -- broken form made to work instead of failing loudly). Boot now DETECTS the
 -- same condition and REFUSES to start, naming this file —
--- `assertOAuthResourceColumnsPresent()`.
+-- `assertOAuthResourceColumnsPresent()`
+-- (apps/api/src/lib/boot-guards/schema-invariants.ts).
 --
 -- The bug it fixes: drizzle-orm's postgres-js migrator applies migrations by
 -- timestamp watermark (`max(created_at)` in `__drizzle_migrations`), not by

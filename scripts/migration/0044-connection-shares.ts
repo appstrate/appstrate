@@ -8,7 +8,8 @@
  *     bun scripts/migration/0044-connection-shares.ts [--apply]
  *
  * Drizzle `0089` creates `integration_connection_shares` and leaves `shared_space_ids` in place,
- * read only by this script and the boot guard `assertConnectionSharesCopied`. Each
+ * read only by this script and the `0044` entry of `PENDING_DATA_SCRIPTS`
+ * (`apps/api/src/lib/boot-guards/pending-data-scripts.ts`). Each
  * `(id, unnest(shared_space_ids))` becomes one share row in the connection's org,
  * `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs
  * to another organization is skipped and printed. The column is then emptied, and `updated_at`

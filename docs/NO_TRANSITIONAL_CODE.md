@@ -283,6 +283,12 @@ and adds a gate to enforce a calendar — paying the full reader cost to defer t
 decision. The codebase describes how the system works now. A fresh instance
 carries no legacy-detection mechanism, so neither does the codebase.
 
+A boot refusal that waits on a one-off data script (§2's `scripts/migration/`) is the one
+guard that has a home: an entry of `PENDING_DATA_SCRIPTS`
+(`apps/api/src/lib/boot-guards/pending-data-scripts.ts`), which records the script, the drizzle
+migration that opened the window, what is broken until it runs, and the condition under which the
+entry goes. It is retired by deleting that entry and its test case, nothing else.
+
 Two consequences worth stating, because they are where this gets uncomfortable:
 
 - **Deleting a guard can make an old form silent, and that cost is accepted.**

@@ -28,7 +28,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
-import { assertSelfServiceFoldApplied } from "../../../src/lib/boot.ts";
+import {
+  assertNoPendingDataScripts,
+  PENDING_DATA_SCRIPTS,
+} from "../../../src/lib/boot-guards/pending-data-scripts.ts";
+
+const FOLD_ENTRY = PENDING_DATA_SCRIPTS.find((e) => e.after === "0057")!;
+const foldGate = () => assertNoPendingDataScripts(null, [FOLD_ENTRY]);
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0011-oauth-clients-self-service-fold.sql",
@@ -141,18 +147,18 @@ describe("scripts/migration/0011 — `self_service` folded out of the metadata J
     expect((await clientRow(UNPARSEABLE)).self_service).toBe(false);
   });
 
-  // The boot gate (`assertSelfServiceFoldApplied`) is what makes the window
+  // The boot gate (the `0011` entry of `PENDING_DATA_SCRIPTS`, `lib/boot-guards/pending-data-scripts.ts`) is what makes the window
   // between `0057` and this script visible instead of silent, and it reads the
   // live database through the same predicate. Exercised here rather than beside
   // the gate because the seed above IS the state it exists to catch.
   it("boot refuses until the fold has run, and passes once it has", async () => {
-    await expect(assertSelfServiceFoldApplied()).rejects.toThrow(/Refusing to boot/);
+    await expect(foldGate()).rejects.toThrow(/Refusing to boot/);
 
     await execScript(await Bun.file(SCRIPT).text());
 
     // The unparseable row is still `false` and still says nothing this predicate
     // can read: a boot the script cannot clear would be a permanent outage.
     expect((await clientRow(UNPARSEABLE)).self_service).toBe(false);
-    expect(await assertSelfServiceFoldApplied()).toBeUndefined();
+    expect(await foldGate()).toBeUndefined();
   });
 });
