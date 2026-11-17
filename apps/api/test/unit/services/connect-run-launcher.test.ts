@@ -17,7 +17,7 @@
  *     even on error.
  */
 
-import { describe, it, expect, beforeAll, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, afterEach, spyOn } from "bun:test";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { logger } from "../../../src/lib/logger.ts";
@@ -34,6 +34,10 @@ import type {
 } from "@appstrate/core/platform-types";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
+import {
+  _resetRunCapacityReadyForTesting,
+  markRunCapacityReady,
+} from "../../../src/services/orchestrator/agent-runtime-readiness.ts";
 import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
@@ -708,5 +712,30 @@ describe("createConnectRunExecutor.run", () => {
       _resetOrchestratorRegistryForTesting();
       _resetCacheForTesting();
     }
+  });
+});
+
+describe("createConnectRunExecutor.run — run capacity", () => {
+  // The preload marks the flag ready for the whole process: restore it.
+  afterEach(() => markRunCapacityReady());
+
+  it("refuses with 503 run_capacity_starting before creating any boundary or sidecar", async () => {
+    const { orch, calls } = mockOrchestrator({});
+    const executor = createConnectRunExecutor({ orchestrator: orch });
+    _resetRunCapacityReadyForTesting();
+
+    let err: ApiError | undefined;
+    try {
+      await executor.run(execution());
+    } catch (e) {
+      err = e as ApiError;
+    }
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err!.status).toBe(503);
+    expect(err!.code).toBe("run_capacity_starting");
+    expect(calls.createdBoundaries).toEqual([]);
+    expect(calls.sidecarSpecs).toEqual([]);
+    expect(calls.started).toBe(0);
   });
 });

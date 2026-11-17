@@ -213,7 +213,7 @@ app.route("/api/auth/bootstrap", createAuthBootstrapRouter());
 // auth strategies → Bearer API key → cookie session middleware, org
 // context, and session permission resolution. The test harness
 // (`apps/api/test/helpers/app.ts`) calls the same helper so the two
-// cannot drift. Accessors are lazy: this is wired before `await boot()`
+// cannot drift. Accessors are lazy: this is wired before `bootCritical()`
 // finishes loading modules, so snapshotting here would miss module
 // contributions.
 applyAuthPipeline(app, {
@@ -486,15 +486,7 @@ void bootServing()
     // Never awaited, never fatal; runs after readiness so it can't race the
     // boot gate's 503-until-ready window against a hairpin route.
     void probeUsercontentReachability();
-    const runCapacityStartedAt = performance.now();
-    return Promise.all([
-      bootRunCapacity().then(() =>
-        logger.info("Run capacity ready", {
-          runCapacityMs: Math.round(performance.now() - runCapacityStartedAt),
-        }),
-      ),
-      bootHousekeeping(),
-    ]);
+    return Promise.all([bootRunCapacity(), bootHousekeeping()]);
   })
   .catch(logBootFailureAndExit);
 

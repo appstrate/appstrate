@@ -98,7 +98,7 @@ const ORPHAN_CLEANUP_CONCURRENCY = 6;
  *
  * Everything that is merely *state the handlers read* moves to
  * {@link bootServing} / {@link bootRunCapacity} / {@link bootHousekeeping}, behind the
- * readiness gates in `index.ts`.
+ * boot gate in `index.ts` (serving) and the run-capacity check in the services.
  */
 export async function bootCritical(): Promise<void> {
   // First, so the unread-key line is logged even if a later boot step fails.
@@ -112,7 +112,8 @@ export async function bootCritical(): Promise<void> {
   await bootStep("critical", "permission-audit-logger", () => installPermissionAuditLogger());
 
   // Apply core migrations at boot (before modules, so DB is ready).
-  // Both PGlite and PostgreSQL auto-migrate — no manual `db:migrate` step needed.
+  // Both PGlite and PostgreSQL migrate at boot, except PostgreSQL under
+  // MIGRATIONS_ON_BOOT=verify (see below); no manual `db:migrate` step needed.
   const env = (await import("@appstrate/env")).getEnv();
   await bootStep("critical", "core-migrations", async () => {
     if (isEmbeddedDb) {
@@ -124,7 +125,7 @@ export async function bootCritical(): Promise<void> {
         migrationsOnBoot: env.MIGRATIONS_ON_BOOT,
       });
       // `verify`: a separate step (the compose `appstrate-migrate` service) owns the
-      // migrations, so boot writes no schema and refuses a database behind its code.
+      // migrations, so boot applies no core migration and refuses a database behind its code.
       if (env.MIGRATIONS_ON_BOOT === "verify") {
         await assertCoreMigrationsApplied(env.DATABASE_URL!);
       } else {
@@ -358,6 +359,7 @@ export async function bootServing(): Promise<void> {
  * fatal, as for {@link bootServing}.
  */
 export async function bootRunCapacity(): Promise<void> {
+  const startedAt = performance.now();
   const env = (await import("@appstrate/env")).getEnv();
   // Sequential cleanup: orphan runs must be finalized before container
   // cleanup, and containers must be cleaned before orchestrator init.
@@ -443,6 +445,7 @@ export async function bootRunCapacity(): Promise<void> {
 
   await bootStep("run-capacity", "agent-runtime", () => initializeAgentRuntime(orchestrator));
   markRunCapacityReady();
+  logger.info("Run capacity ready", { runCapacityMs: Math.round(performance.now() - startedAt) });
 
   await Promise.all([
     bootStep("run-capacity", "schedule-worker", () =>
@@ -455,37 +458,6 @@ export async function bootRunCapacity(): Promise<void> {
     bootStep("run-capacity", "inline-compaction-worker", () =>
       initInlineCompactionWorker().catch((err) => {
         logger.warn("Could not initialize inline compaction worker", {
-          error: getErrorMessage(err),
-        });
-      }),
-    ),
-    bootStep("run-capacity", "personal-space-sweeper-worker", () =>
-      initPersonalSpaceSweeperWorker().catch((err) => {
-        logger.warn("Could not initialize personal-space sweeper", {
-          error: getErrorMessage(err),
-        });
-      }),
-    ),
-    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
-    // sidecar's reactive 401-retry path and the on-demand token resolver
-    // cover correctness without it; the worker only matters for credentials
-    // that go dormant long enough that their refresh_token would expire
-    // upstream.
-    bootStep("run-capacity", "oauth-model-refresh-worker", () =>
-      (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
-        (err) => {
-          logger.warn("Could not initialize OAuth model refresh worker", {
-            error: getErrorMessage(err),
-          });
-        },
-      ),
-    ),
-    // Pairing-table cleanup runs unconditionally — pure table-bloat
-    // janitor for `model_provider_pairings`, unrelated to the refresh
-    // hot path.
-    bootStep("run-capacity", "pairing-cleanup-worker", () =>
-      initPairingCleanupWorker().catch((err) => {
-        logger.warn("Could not initialize OAuth model pairing cleanup worker", {
           error: getErrorMessage(err),
         });
       }),
@@ -526,7 +498,39 @@ export async function bootRunCapacity(): Promise<void> {
  * on them. A rejection is fatal, as for {@link bootServing}.
  */
 export async function bootHousekeeping(): Promise<void> {
+  const env = (await import("@appstrate/env")).getEnv();
   await Promise.all([
+    bootStep("housekeeping", "personal-space-sweeper-worker", () =>
+      initPersonalSpaceSweeperWorker().catch((err) => {
+        logger.warn("Could not initialize personal-space sweeper", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
+    // sidecar's reactive 401-retry path and the on-demand token resolver
+    // cover correctness without it; the worker only matters for credentials
+    // that go dormant long enough that their refresh_token would expire
+    // upstream.
+    bootStep("housekeeping", "oauth-model-refresh-worker", () =>
+      (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
+        (err) => {
+          logger.warn("Could not initialize OAuth model refresh worker", {
+            error: getErrorMessage(err),
+          });
+        },
+      ),
+    ),
+    // Pairing-table cleanup runs unconditionally — pure table-bloat
+    // janitor for `model_provider_pairings`, unrelated to the refresh
+    // hot path.
+    bootStep("housekeeping", "pairing-cleanup-worker", () =>
+      initPairingCleanupWorker().catch((err) => {
+        logger.warn("Could not initialize OAuth model pairing cleanup worker", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
     bootStep("housekeeping", "expire-invitations", () =>
       expireOldInvitations()
         .then((expiredCount) => {

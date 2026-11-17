@@ -972,6 +972,11 @@ export const envSchema = z
       path: ["TRUST_PROXY"],
     },
   )
+  .refine((env) => env.MIGRATIONS_ON_BOOT !== "verify" || !!env.DATABASE_URL, {
+    message:
+      "MIGRATIONS_ON_BOOT=verify requires DATABASE_URL: an embedded PGlite database opens in one process, so nothing else can have migrated it. Use MIGRATIONS_ON_BOOT=apply (the default) without DATABASE_URL.",
+    path: ["MIGRATIONS_ON_BOOT"],
+  })
   // The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not
   // three independent knobs: the agent runtime and the sidecar speak a wire
   // protocol to each other, and both speak a container boundary to the
@@ -1009,11 +1014,6 @@ export const envSchema = z
   // three is out of step and what each one currently claims — a fixed string
   // cannot, and "one of your three images is wrong" is the opaque error this
   // check exists to replace.
-  .refine((env) => env.MIGRATIONS_ON_BOOT !== "verify" || !!env.DATABASE_URL, {
-    message:
-      "MIGRATIONS_ON_BOOT=verify requires DATABASE_URL: an embedded PGlite database opens in one process, so nothing else can have migrated it. Use MIGRATIONS_ON_BOOT=apply (the default) without DATABASE_URL.",
-    path: ["MIGRATIONS_ON_BOOT"],
-  })
   .superRefine((env, ctx) => {
     const mismatch = findRuntimeImageTagMismatch({
       platformVersion: env.APP_VERSION,

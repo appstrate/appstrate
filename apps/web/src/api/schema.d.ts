@@ -7708,7 +7708,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description `run_capacity_starting` — the platform is still starting: its orphan-run cleanup and first runtime initialisation are not done, so no run is accepted yet and nothing was written. Transient; retry after the `Retry-After` delay (seconds). The rest of the API already answers. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored. */
+        /** @description `run_capacity_starting` — the platform is still starting: its orphan-run cleanup and first runtime initialisation are not done, so no run is accepted yet and no run is created. Transient; retry after the `Retry-After` delay (seconds). The rest of the API already answers. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored. */
         RunLaunchUnavailable: {
             headers: {
                 /** @description Seconds to wait before retrying (`run_capacity_starting`). */

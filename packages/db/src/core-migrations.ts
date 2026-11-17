@@ -6,24 +6,20 @@
  * Deliberately free of `./client.ts` and of `getEnv()`: the standalone migrator
  * (`migrate.ts`, the compose `appstrate-migrate` service) runs in a container that
  * carries `DATABASE_URL` and nothing else, and the application's boot calls the same
- * functions. One implementation, so "apply" and "verify" cannot disagree about what
+ * functions on PostgreSQL (PGlite keeps `apps/api/src/lib/pglite-migrate.ts`). One implementation, so "apply" and "verify" cannot disagree about what
  * is pending.
  *
  * Scope: the core journal (`drizzle.__drizzle_migrations`) only. `@appstrate/module-ee`
  * keeps its own journal (`drizzle.ee_migrations`) and applies it itself at `init()`.
  */
 
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
 /** Absolute path of the core migration folder (SQL files + `meta/_journal.json`). */
-export const CORE_MIGRATIONS_FOLDER = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../drizzle",
-);
+export const CORE_MIGRATIONS_FOLDER = resolve(import.meta.dir, "../drizzle");
 
 /**
  * Key of the session-level advisory lock that serializes core migrations.
@@ -87,7 +83,10 @@ async function readJournal(): Promise<JournalEntry[]> {
  *
  * Same rule as drizzle's migrator, which decides by WATERMARK and not by file:
  * a migration is applied when its journal `when` (`folderMillis`) is greater than
- * `max(created_at)` of the journal table — see `node_modules/drizzle-orm/pg-core/dialect.js`,
+ * the `created_at` of the LAST journal row, read as drizzle reads it
+ * (`ORDER BY created_at DESC LIMIT 1`; Postgres sorts NULL first in DESC, so a NULL row
+ * makes everything pending, as for the migrator, where `max()` would ignore it) — see
+ * `node_modules/drizzle-orm/pg-core/dialect.js`,
  * `PgDialect.migrate` (`lastDbMigration.created_at < migration.folderMillis`), with
  * `folderMillis` set from `journalEntry.when` in `drizzle-orm/migrator.js`. Mirroring it
  * means a database AHEAD of the code (a rollback) reports nothing pending, exactly as
@@ -102,7 +101,8 @@ export async function listPendingCoreMigrations(databaseUrl: string): Promise<st
       SELECT to_regclass(${JOURNAL_TABLE}) IS NOT NULL AS exists`;
     if (!probe?.exists) return entries.map((e) => e.tag);
     const [row] = await client<{ watermark: string | null }[]>`
-      SELECT max(created_at)::text AS watermark FROM drizzle."__drizzle_migrations"`;
+      SELECT created_at::text AS watermark FROM drizzle."__drizzle_migrations"
+      ORDER BY created_at DESC LIMIT 1`;
     const watermark = row?.watermark ?? null;
     if (watermark === null) return entries.map((e) => e.tag);
     const applied = Number(watermark);

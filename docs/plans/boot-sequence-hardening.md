@@ -109,9 +109,9 @@ par `/health` : aucune porte d'exécution ne le consulte.
 2. Nouvel état `runCapacityReady` (dans `agent-runtime-readiness.ts`), vrai quand
    `bootRunCapacity()` a fini son passage orphelins + nettoyage.
 3. Garde `requireRunCapacity()` montée sur les portes d'exécution : 503 `run_capacity_starting`,
-   `Retry-After`. Portes : `POST /api/agents/{scope}/{name}/run`, `POST /api/runs/remote`,
+   `Retry-After`. Portes : `POST /api/agents/{scope}/{name}/run`,
    le run inline, le tour de chat qui lance un run, et le tick du planificateur (qui ne démarre
-   de toute façon qu'après).
+   de toute façon qu'après). `POST /api/runs/remote` n'est volontairement pas gardée : elle ne démarre aucune charge côté serveur, et la ligne de run créée porte `last_heartbeat_at = now()`, ce qui la tient hors du passage orphelins.
 4. `/health` : agrégation inchangée. Le `HEALTHCHECK` du conteneur exige `healthy` ; laisser
    `agents: degraded` peser sur le statut garde un orchestrateur cassé visible (et redémarrable).
 
