@@ -8,6 +8,8 @@ import type { AgentListItem } from "@appstrate/shared-types";
 
 export interface CardItem {
   id: string;
+  /** The package's home space when the reader reaches it, `null` when withheld; undefined off a catalog index (the agent index, the catalogue). */
+  homeSpaceId?: string | null;
   displayName: string;
   description?: string | null;
   type: PackageType;
@@ -50,6 +52,7 @@ export function agentCardItem(agent: AgentListItem): CardItem {
 /** What every package index row (`usePackageList`) carries, whatever its type. */
 interface PackageIndexRow {
   id: string;
+  home_space_id?: string | null;
   name?: string | null;
   description?: string | null;
   source?: "system" | "local";
@@ -64,6 +67,7 @@ interface PackageIndexRow {
 export function packageCardItem(row: PackageIndexRow, type: PackageType): CardItem {
   return {
     id: row.id,
+    homeSpaceId: row.home_space_id,
     displayName: row.name || row.id,
     description: row.description ?? null,
     type,

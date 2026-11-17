@@ -18,6 +18,7 @@ import { PackageIcon } from "./package-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { CountBadge } from "./count-badge";
 import { rowActionsColumn } from "./row-actions-column";
+import { PackageSharedFrom } from "./package-shared-from";
 import { CellEmpty, CellPlaceholder, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../lib/package-card-item";
@@ -61,6 +62,7 @@ export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> 
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{item.displayName}</span>
+            <PackageSharedFrom homeSpaceId={item.homeSpaceId} system={item.source === "system"} />
             <CountBadge
               count={item.unreadCount ?? 0}
               label={t("dashboard.unreadRuns", { count: item.unreadCount ?? 0 })}

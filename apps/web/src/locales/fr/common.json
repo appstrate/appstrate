@@ -350,6 +350,8 @@
   "status.pending": "en attente",
   "status.timeout": "timeout",
   "status.cancelled": "annulé",
+  "packageSpaces.sharedFrom": "Partagé depuis {{space}}",
+  "packageSpaces.sharedFromHidden": "Partagé depuis un autre espace",
   "table.resizeColumn": "Redimensionner la colonne {{column}}",
   "toolbar.clearAll": "Tout effacer",
   "toolbar.filters": "Filtres",
