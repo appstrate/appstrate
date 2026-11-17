@@ -68,10 +68,10 @@ const SPACES = [
   space("spc_b", ["runs:read", "schedules:read", "files:read", "agents:read", "skills:read"]),
 ];
 
-/** The same agent, active in both spaces: the org route's two rows, one per space. */
-const agent = (spaceId: string) => ({
+/** The agent, active in `space_ids`: the org route's one row naming both spaces. */
+const agent = (space_ids: string[]) => ({
   id: "@acme/reporter",
-  spaceId,
+  space_ids,
   home_space_id: "spc_a",
   source: "local" as const,
   version: "1.0.0",
@@ -88,11 +88,11 @@ const agent = (spaceId: string) => ({
   type: "agent" as const,
   forked_from: null,
 });
-const AGENTS = [agent("spc_a"), agent("spc_b")];
+const AGENTS = [agent(["spc_a", "spc_b"])];
 
-const packageRow = (spaceId: string, extra: Record<string, unknown> = {}) => ({
+const packageRow = (space_ids: string[], extra: Record<string, unknown> = {}) => ({
   id: "@acme/crm",
-  spaceId,
+  space_ids,
   source: "local" as const,
   name: "CRM",
   description: null,
@@ -291,7 +291,7 @@ describe("the agent index in the mode", () => {
   it("offers no write while the space listing has not answered: it appears once, never flips", () => {
     const { html } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", (qc) => {
       qc.removeQueries({ queryKey: ["get", "/api/spaces"] });
-      qc.setQueryData(["agents", "org_1", "spc_a"], [agent("spc_a")]);
+      qc.setQueryData(["agents", "org_1", "spc_a"], [agent(["spc_a"])]);
     });
     expect(html).not.toContain("data-page-actions-trigger");
     expect(html).not.toContain('aria-label="Lancer"');
@@ -322,7 +322,7 @@ describe("the skill index in the mode", () => {
     const { html, asked } = renderIn(true, <PackageIndexPage type="skill" />, "/skills", (qc) =>
       qc.setQueryData(
         ["packages", "skills", "org_1", "across-spaces"],
-        [packageRow("spc_a"), packageRow("spc_b")],
+        [packageRow(["spc_a", "spc_b"])],
       ),
     );
     expect(asked("packages")).toEqual([["packages", "skills", "org_1", "across-spaces"]]);
@@ -338,8 +338,11 @@ describe("the integration index in the mode", () => {
     queryClient.setQueryData(
       ["packages", "integrations", "org_1", "across-spaces"],
       [
-        packageRow("spc_a", { source_kind: "remote", server: null, authenticated: true }),
-        packageRow("spc_b", { source_kind: "remote", server: null, authenticated: true }),
+        packageRow(["spc_a", "spc_b"], {
+          source_kind: "remote",
+          server: null,
+          authenticated: true,
+        }),
       ],
     );
     // The caller's connections: one org-scoped, one in the second space only.
@@ -544,7 +547,7 @@ describe("the dashboard in the mode", () => {
       <DashboardPage />,
       "/",
       (queryClient) => {
-        queryClient.setQueryData(["agents", "org_1", "spc_a"], [agent("spc_a")]);
+        queryClient.setQueryData(["agents", "org_1", "spc_a"], [agent(["spc_a"])]);
         queryClient.setQueryData(["schedules", "org_1", "spc_a"], []);
         queryClient.setQueryData(
           [

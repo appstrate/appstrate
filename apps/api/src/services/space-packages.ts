@@ -32,7 +32,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
-import { assertSpaceInScope } from "./spaces.ts";
+import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { placementRowJoin } from "./package-placement.ts";
 import {
   getLatestVersionId,
@@ -377,20 +377,35 @@ export function activePackagesFilter(scope: OrgScope, type: PackageType) {
 
 /**
  * Narrow `query` (a `$dynamic()` select from `packages`) to the packages of one
- * `type` active in each of `spaceIds` ({@link activePackagesFilter}), one row
- * per (package, space): each space is joined to its own placement row, so one
- * statement serves any number of spaces. `spaces.id` names the row's space.
+ * `type` active in any of `spaceIds` ({@link activePackagesFilter}), one row per
+ * package: each space is joined to its own placement row, so one statement
+ * serves any number of spaces, and the rows are grouped by package. Select
+ * {@link activeSpaceIds} to name the spaces; any column `query` selects beyond
+ * `packages`' own goes in `groupBy`.
  */
 export function activeInSpaces<Q extends PgSelect>(
   query: Q,
   orgId: string,
   spaceIds: readonly string[],
   type: PackageType,
+  groupBy: AnyPgColumn[] = [],
 ) {
   return query
     .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(activePackagesFilter({ orgId }, type));
+    .where(activePackagesFilter({ orgId }, type))
+    .groupBy(packages.id, ...groupBy);
+}
+
+/**
+ * The spaces of {@link activeInSpaces} where a package is active: its home first
+ * when it is one of them, then in the order of a space listing
+ * ({@link spaceListingOrder}). Never empty: a package is listed for its spaces.
+ */
+export function activeSpaceIds() {
+  return sql<
+    string[]
+  >`array_agg(${spaces.id} ORDER BY (${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC, ${sql.join(spaceListingOrder(), sql`, `)})`;
 }
 
 /**
@@ -411,15 +426,13 @@ function packageListingOrder() {
 }
 
 /**
- * List every package of one `type` each of `spaceIds` runs
+ * List every package of one `type` any of `spaceIds` runs
  * ({@link activePackagesFilter}): what can be launched from there, one row per
- * (package, space) carrying its `spaceId` — ONE statement whatever the number
- * of spaces, each space joined to its own placement row. Placed-but-off
- * packages belong to the library (`services/package-library.ts`). The
- * projection omits `draft_content`, which an index card never reads;
- * `latestVersionId` answers {@link isPublished}. Ordered by
- * {@link packageListingOrder}, then by space id: one space's list is in that
- * order, and a package active in several spaces has its rows side by side.
+ * package carrying the spaces it is active in ({@link activeSpaceIds}) — ONE
+ * statement whatever the number of spaces. Placed-but-off packages belong to
+ * the library (`services/package-library.ts`). The projection omits
+ * `draft_content`, which an index card never reads; `latestVersionId` answers
+ * {@link isPublished}. Ordered by {@link packageListingOrder}.
  */
 export async function listActivePackages(
   orgId: string,
@@ -430,7 +443,7 @@ export async function listActivePackages(
   const query = db
     .select({
       id: packages.id,
-      spaceId: spaces.id,
+      spaceIds: activeSpaceIds(),
       type: packages.type,
       draftManifest: packages.draftManifest,
       source: packages.source,
@@ -440,7 +453,9 @@ export async function listActivePackages(
     .from(packages)
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .$dynamic();
-  return activeInSpaces(query, orgId, spaceIds, type).orderBy(...packageListingOrder(), spaces.id);
+  return activeInSpaces(query, orgId, spaceIds, type, [packageDistTags.versionId]).orderBy(
+    ...packageListingOrder(),
+  );
 }
 
 // ---------------------------------------------------------------------------

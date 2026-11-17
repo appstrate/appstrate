@@ -7,7 +7,6 @@
 
 import { describe, expect, it } from "bun:test";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
-import type { InSpaces } from "../../lib/across-spaces.ts";
 import type { DataColumn } from "../../components/data-table.tsx";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
@@ -20,13 +19,12 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-type Row = InSpaces<IntegrationIndexItem>;
+type Row = IntegrationIndexItem;
 
 function integration(id: string, authenticated: boolean): Row {
   return {
     id,
-    spaceId: "spc_a",
-    spaceIds: ["spc_a"],
+    space_ids: ["spc_a"],
     source: "local",
     name: id,
     description: null,

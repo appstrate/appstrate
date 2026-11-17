@@ -30,7 +30,6 @@ const KEYWORD_PILL = "bg-background text-muted-foreground shrink-0 px-2 text-[0.
 
 export function PackageCard({
   id,
-  spaceId,
   spaceIds,
   homeSpaceId,
   displayName,
@@ -100,7 +99,7 @@ export function PackageCard({
                   </button>
                 ) : (
                   <Link
-                    to={linkInSpace(packageDetailPath(type, id), spaceId)}
+                    to={linkInSpace(packageDetailPath(type, id), spaceIds?.[0])}
                     className={titleClass}
                   >
                     {displayName}

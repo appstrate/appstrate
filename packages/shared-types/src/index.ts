@@ -575,8 +575,8 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
-  /** The space whose index lists this row: the agent is active there, and the counters follow the caller's role there. */
-  spaceId: string;
+  /** The spaces of the index where the agent is active, its home first when it is one of them, then in the order of the space listing. */
+  space_ids: string[];
   /** The home space when the caller reaches it, `null` otherwise (system package, withheld home). */
   home_space_id: string | null;
   /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
@@ -749,8 +749,8 @@ export interface AgentDetail {
 // --- Organization Package Types ---
 
 export interface OrgPackageItem extends BasePackageListItem {
-  /** The space whose index lists this row: the package is active there. */
-  spaceId: string;
+  /** The spaces of the index where the package is active, its home first when it is one of them, then in the order of the space listing. */
+  space_ids: string[];
   /** Always a string — `getPackageDisplayName` falls back to the package id. */
   name: string;
   /** Always emitted by the org-package list/detail mappers. */
@@ -825,11 +825,11 @@ export interface IntegrationIndexItem extends OrgPackageItem {
 // dropped from the base via Omit (a sub-interface can't loosen a required
 // field to optional). `icon` and `keywords` go the same way and for the
 // mirror-image reason: they exist so an INDEX row can be drawn without its
-// manifest, and the detail ships `manifest` itself. `spaceId` names the index
-// a row was listed in; a detail is read in the request's space.
+// manifest, and the detail ships `manifest` itself. `space_ids` names the
+// spaces of an index; a detail is read in the request's space.
 export interface OrgPackageItemDetail extends Omit<
   OrgPackageItem,
-  "used_by_agents" | "icon" | "keywords" | "spaceId"
+  "used_by_agents" | "icon" | "keywords" | "space_ids"
 > {
   /**
    * WHICH definition `content`, `manifest` and every field projected from it

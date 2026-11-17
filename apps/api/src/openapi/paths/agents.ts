@@ -29,7 +29,7 @@ const agentListResponses = {
           data: [
             {
               id: "@acme/email-sorter",
-              spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
               home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
               icon: "lucide:mail",
               color: "blue",
@@ -52,7 +52,7 @@ const agentListResponses = {
             },
             {
               id: "@appstrate/code-reviewer",
-              spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
               home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
               icon: null,
               color: null,
@@ -106,7 +106,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List agents across the organization's spaces",
       description:
-        "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` is withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. " +
+        "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. " +
         ORG_READ_REACH +
         " No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],

@@ -54,10 +54,10 @@ import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runReadCondition } from "../../lib/run-visibility.ts";
 import { readsAgentContent, type SpaceGrant } from "../../lib/permissions.ts";
 import {
-  countsBySpace,
+  countsByPackage,
   recordRunFinished,
   unreadRunCondition,
-  type CountsBySpace,
+  type CountsByPackage,
 } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
@@ -1510,7 +1510,7 @@ export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number>
 }
 
 /**
- * Active runs per package in each space of `grants`, in one statement. Each
+ * Active runs per package across the spaces of `grants`, in one statement. Each
  * space counts the runs its own grant reads (`runReadCondition`) — without
  * that the count answers "someone else is running this", which is exactly
  * what `runs:read-all` gates.
@@ -1519,10 +1519,10 @@ export async function getRunningRunCounts(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
-): Promise<CountsBySpace> {
+): Promise<CountsByPackage> {
   if (grants.length === 0) return new Map();
   const rows = await db
-    .select({ spaceId: runs.spaceId, packageId: runs.packageId, count: count() })
+    .select({ packageId: runs.packageId, count: count() })
     .from(runs)
     .where(
       and(
@@ -1531,8 +1531,8 @@ export async function getRunningRunCounts(
         runReadCondition(grants, actor),
       ),
     )
-    .groupBy(runs.spaceId, runs.packageId);
-  return countsBySpace(rows);
+    .groupBy(runs.packageId);
+  return countsByPackage(rows);
 }
 
 export async function getRun(scope: SpaceScope, id: string) {

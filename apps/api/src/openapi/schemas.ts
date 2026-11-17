@@ -248,15 +248,16 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
     "home_writable",
     "home_deletable",
     "home_shareable",
-    "spaceId",
+    "space_ids",
   ],
   properties: {
     id: { type: "string" },
-    spaceId: {
-      type: "string",
-      pattern: SPACE_ID_RE.source,
+    space_ids: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string", pattern: SPACE_ID_RE.source },
       description:
-        "The space whose index lists this row (spc_ prefix): the package is ACTIVE there. A list spanning spaces lists a package once per space it is active in.",
+        "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
     },
     orgId: {
       type: ["string", "null"],
@@ -1001,17 +1002,18 @@ export const schemas = {
       "keywords",
       "version",
       "published",
-      "spaceId",
+      "space_ids",
       "home_space_id",
     ],
     properties: {
       id: { type: "string" },
       home_space_id: PACKAGE_HOME_PROPERTIES.home_space_id,
-      spaceId: {
-        type: "string",
-        pattern: SPACE_ID_RE.source,
+      space_ids: {
+        type: "array",
+        minItems: 1,
+        items: { type: "string", pattern: SPACE_ID_RE.source },
         description:
-          "The space whose index lists this row (spc_ prefix): the agent is ACTIVE there, and the row's counters and dependency summary follow the caller's role there. A list spanning spaces lists an agent once per space it is active in.",
+          "The spaces of the index where the agent is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the agent's home first when it is one of them, then in the order of `GET /api/spaces`.",
       },
       ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },

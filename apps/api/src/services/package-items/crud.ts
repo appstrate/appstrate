@@ -3,7 +3,7 @@
 import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { packages, spaces } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -26,7 +26,7 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
-import { activeInSpaces } from "../space-packages.ts";
+import { activeInSpaces, activeSpaceIds } from "../space-packages.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(public packageId: string) {
@@ -288,12 +288,10 @@ function integrationIndexFields(manifest: IntegrationManifest) {
 }
 
 /**
- * List the items of a type each of `spaceIds` RUNS — the activation rule, per
- * type — one row per (package, space) carrying its `spaceId`, in ONE statement
- * whatever the number of spaces: each space is joined to its own placement row.
- * Ordered system first, then newest first, then by package id and space id: one
- * space's list keeps that order, and a package active in several spaces has its
- * rows side by side.
+ * List the items of a type any of `spaceIds` RUNS — the activation rule, per
+ * type — one row per package carrying the spaces it is active in
+ * (`activeSpaceIds`), in ONE statement whatever the number of spaces. Ordered
+ * system first, then newest first, then by package id.
  */
 export async function listOrgItems(
   orgId: string,
@@ -307,7 +305,7 @@ export async function listOrgItems(
   const query = db
     .select({
       id: packages.id,
-      spaceId: spaces.id,
+      spaceIds: activeSpaceIds(),
       orgId: packages.orgId,
       type: packages.type,
       source: packages.source,
@@ -326,7 +324,6 @@ export async function listOrgItems(
     sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
     desc(packages.createdAt),
     packages.id,
-    spaces.id,
   );
 
   // The catalog page and the usage counts are independent reads over the same
@@ -338,7 +335,7 @@ export async function listOrgItems(
     return {
       id: row.id,
       orgId: row.orgId,
-      spaceId: row.spaceId,
+      space_ids: row.spaceIds,
       name: getPackageDisplayName(row),
       description: m.description ?? null,
       // The two fields an INDEX page needs that a name and a description do not
