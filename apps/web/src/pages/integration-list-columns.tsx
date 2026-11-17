@@ -5,22 +5,29 @@ import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
 import { PackageSharedFrom } from "../components/package-shared-from";
+import { usePackageSpaceColumn } from "../components/space-column";
 import {
   useCatalogueOriginColumn,
   useCatalogueSourceColumn,
 } from "../components/catalogue-columns";
 import { useOrg } from "../hooks/use-org";
+import { packageCardItem } from "../lib/package-card-item";
 
 /**
- * One comparable integration fact per column. `connectionCounts` is the caller's own connections
- * per integration here (`useConnectionCounts`); `undefined` while unknown, when the cell stays
- * empty. An integration that binds no connection (`authenticated: false`) has no count at all,
- * drawn « — » like every other fact that does not apply.
+ * One comparable integration fact per column. `connectionCount` is the caller's own connections
+ * of an integration in a row's spaces (`useConnectionCounts`); `undefined` while unknown, when the
+ * cell stays empty. An integration that binds no connection (`authenticated: false`) has no count
+ * at all, drawn « — » like every other fact that does not apply. `spanning`: an index across
+ * spaces, each row naming its spaces.
  */
 export function useIntegrationListColumns(
-  connectionCounts?: ReadonlyMap<string, number>,
+  connectionCount: ((sourceId: string, spaceIds: readonly string[]) => number) | undefined,
+  spanning: boolean,
 ): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
+  const spaceColumn = usePackageSpaceColumn<IntegrationIndexItem>(spanning, (integration) =>
+    packageCardItem(integration, "integration"),
+  );
   const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
   const source = useCatalogueSourceColumn<IntegrationIndexItem>(
     (integration) => integration.source_kind,
@@ -43,6 +50,7 @@ export function useIntegrationListColumns(
         </div>
       ),
     },
+    ...spaceColumn,
     origin,
     source,
     {
@@ -59,8 +67,8 @@ export function useIntegrationListColumns(
             </span>
           );
         }
-        if (!connectionCounts) return null;
-        const count = connectionCounts.get(integration.id) ?? 0;
+        if (!connectionCount) return null;
+        const count = connectionCount(integration.id, integration.space_ids);
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
             {count}

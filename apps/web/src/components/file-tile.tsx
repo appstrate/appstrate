@@ -16,6 +16,7 @@ import { formatDateField } from "../lib/format-date";
 import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge, MimeIcon } from "./file-badges";
 import { SkeletonLine } from "./skeleton-line";
+import { SpaceNameOf } from "./space-name";
 
 function MimePlaceholder({ mime }: { mime: string }) {
   return (
@@ -27,7 +28,7 @@ function MimePlaceholder({ mime }: { mime: string }) {
 
 // Mount the authenticated read only for images the caller can download.
 function FileTileImage({ file }: { file: FileDto }) {
-  const src = useFileImageSrc(file.id);
+  const src = useFileImageSrc(file.id, file.spaceId);
   if (src === undefined) return <Skeleton className="size-full rounded-none" />;
   if (!src) return <MimePlaceholder mime={file.mime} />;
   return <img src={src} alt="" className="size-full object-cover" />;
@@ -41,6 +42,7 @@ export function FileTile({
   onKeep,
   onPreview,
   showRunLink,
+  showSpace = false,
 }: {
   file: FileDto;
   isKeepPending: boolean;
@@ -49,6 +51,8 @@ export function FileTile({
   onKeep: (file: FileDto) => void;
   onPreview: (file: FileDto) => void;
   showRunLink?: boolean;
+  /** Name the space it lives in: a list spanning spaces. */
+  showSpace?: boolean;
 }) {
   const { t } = useTranslation(["files", "common"]);
   const { preview, download } = file.capabilities;
@@ -96,6 +100,12 @@ export function FileTile({
           <span aria-hidden>·</span>
           <span>{formatDateField(file.createdAt, "datetime")}</span>
           <ExpiryBadge expiresAt={file.expiresAt} />
+          {showSpace && (
+            <>
+              <span aria-hidden>·</span>
+              <SpaceNameOf spaceId={file.spaceId} />
+            </>
+          )}
         </CardDescription>
       </CardHeader>
     </Card>

@@ -52,6 +52,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
+import { useOverviewRules } from "./hooks/use-overview-mode";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -459,6 +460,7 @@ function MainLayout() {
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
+  useOverviewRules();
   useGlobalRunSync();
 
   return (

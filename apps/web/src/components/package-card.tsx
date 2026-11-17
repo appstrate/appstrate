@@ -16,6 +16,8 @@ import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 import { useSharedFromText } from "../hooks/use-shared-from-text";
+import { useSpaceLink } from "../hooks/use-current-space";
+import { PackageSpaces } from "./package-spaces";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -28,6 +30,7 @@ const KEYWORD_PILL = "bg-background text-muted-foreground shrink-0 px-2 text-[0.
 
 export function PackageCard({
   id,
+  spaceIds,
   homeSpaceId,
   displayName,
   description,
@@ -45,10 +48,13 @@ export function PackageCard({
   logo,
   status,
   meta,
+  showSpace = false,
   showRun = true,
   onOpen,
   headingLevel = 2,
 }: CardItem & {
+  /** Name the item's spaces on the card: a list spanning spaces (like `FileTile`'s). */
+  showSpace?: boolean;
   /**
    * Whether an agent card offers to run it. False in the catalogue: a package
    * this space has not activated cannot be run from here, and the button would
@@ -62,6 +68,7 @@ export function PackageCard({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const sharedFrom = useSharedFromText(homeSpaceId, source === "system");
+  const linkInSpace = useSpaceLink();
   // The focus ring is drawn on the stretched overlay, i.e. around the whole
   // card: on the title itself `truncate` would clip it.
   const titleClass =
@@ -91,7 +98,10 @@ export function PackageCard({
                     {displayName}
                   </button>
                 ) : (
-                  <Link to={packageDetailPath(type, id)} className={titleClass}>
+                  <Link
+                    to={linkInSpace(packageDetailPath(type, id), spaceIds)}
+                    className={titleClass}
+                  >
                     {displayName}
                   </Link>
                 )}
@@ -123,6 +133,7 @@ export function PackageCard({
               {type === "agent" && showRun && (
                 <RunAgentButton
                   packageId={id}
+                  spaceIds={spaceIds}
                   variant="ghost"
                   size="icon"
                   className="text-muted-foreground hover:text-primary size-7"
@@ -137,13 +148,14 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {(version || sharedFrom || meta) && (
+          {(version || showSpace || sharedFrom || meta) && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
               {version && (
                 <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
                   v{version}
                 </UIBadge>
               )}
+              {showSpace && <PackageSpaces item={{ homeSpaceId, spaceIds, source }} />}
               {sharedFrom && (
                 <span className="flex min-w-0 items-center gap-1">
                   <Share2 className="size-3 shrink-0" aria-hidden />
@@ -152,7 +164,7 @@ export function PackageCard({
                   </span>
                 </span>
               )}
-              {sharedFrom && meta && <span aria-hidden>·</span>}
+              {(showSpace || sharedFrom) && meta && <span aria-hidden>·</span>}
               {meta}
             </div>
           )}
@@ -200,9 +212,12 @@ export function PackageCard({
 export function PackageCardSkeleton({
   runnable = false,
   meta = "version",
+  spaceName = false,
   keywords = true,
 }: {
   runnable?: boolean;
+  /** The card names its space beside the version (a list spanning spaces). */
+  spaceName?: boolean;
   /** What the line under the description carries: a version badge, a line of text (the catalogue's origin), or both. */
   meta?: "version" | "line" | "both";
   /** The keyword pills under the card's body. */
@@ -221,6 +236,7 @@ export function PackageCardSkeleton({
           <div className="mt-2 flex min-w-0 items-center gap-2 text-xs">
             {meta !== "line" && <SkeletonBadge className="w-14 font-mono text-[10px]" />}
             {meta !== "version" && <SkeletonLine className="w-36" />}
+            {spaceName && <SkeletonLine className="w-20" />}
           </div>
         </div>
       </div>

@@ -130,7 +130,7 @@ describe("document row capabilities", () => {
     const columns = columnsFrom(() =>
       useDocumentColumns({
         pendingKeepId: null,
-        showRunLink: true,
+        showRunLink: () => true,
         onDownload: () => {},
         onKeep: () => {},
         onDelete: () => {},

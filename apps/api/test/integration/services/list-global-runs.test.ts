@@ -23,6 +23,18 @@ import { listGlobalRuns } from "../../../src/services/state/runs.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 import { prefixedId } from "@appstrate/db/ids";
 
+/** One space, every run in it, no agent input: the degenerate case of the org-wide list. */
+function listSpaceRuns(
+  scope: { orgId: string; spaceId: string },
+  options?: Parameters<typeof listGlobalRuns>[2],
+) {
+  return listGlobalRuns(
+    scope.orgId,
+    [{ spaceId: scope.spaceId, permissions: new Set(["runs:read-all"]) }],
+    options,
+  );
+}
+
 const inlineManifest = {
   name: "@inline/r-test",
   display_name: "Inline",
@@ -72,7 +84,7 @@ describe("listGlobalRuns", () => {
   }
 
   it("returns empty list when no runs exist", async () => {
-    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const result = await listSpaceRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     expect(result.data).toEqual([]);
     expect(result.total).toBe(0);
   });
@@ -81,7 +93,7 @@ describe("listGlobalRuns", () => {
     const inline = await seedInlineRun();
     const pkg = await seedPackageRun();
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const result = await listSpaceRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     expect(result.total).toBe(2);
 
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
@@ -94,7 +106,7 @@ describe("listGlobalRuns", () => {
     await seedInlineRun();
     await seedPackageRun();
 
-    const result = await listGlobalRuns(
+    const result = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { kind: "inline" },
     );
@@ -109,7 +121,7 @@ describe("listGlobalRuns", () => {
     await seedPackageRun();
     await seedPackageRun();
 
-    const result = await listGlobalRuns(
+    const result = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { kind: "package" },
     );
@@ -123,7 +135,7 @@ describe("listGlobalRuns", () => {
     await seedInlineRun();
     await seedPackageRun();
 
-    const all = await listGlobalRuns(
+    const all = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { kind: "all" },
     );
@@ -134,7 +146,7 @@ describe("listGlobalRuns", () => {
     await seedInlineRun("success");
     await seedPackageRun("failed");
 
-    const result = await listGlobalRuns(
+    const result = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { status: ["failed"] },
     );
@@ -154,7 +166,7 @@ describe("listGlobalRuns", () => {
     await db.update(runs).set({ chatSessionId: ownSessionId }).where(eq(runs.id, linked.id));
     await seedPackageRun();
 
-    const result = await listGlobalRuns(
+    const result = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { chatSessionId: ownSessionId, actor: { type: "user", id: ctx.user.id } },
     );
@@ -162,7 +174,7 @@ describe("listGlobalRuns", () => {
 
     const other = await createTestUser({ email: "other-run-chat-owner@test.local" });
     await addOrgMember(ctx.orgId, other.id, "member");
-    const denied = await listGlobalRuns(
+    const denied = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { chatSessionId: ownSessionId, actor: { type: "user", id: other.id } },
     );
@@ -184,13 +196,13 @@ describe("listGlobalRuns", () => {
 
     const recent = await seedPackageRun();
 
-    const since2024 = await listGlobalRuns(
+    const since2024 = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { startDate: new Date("2024-01-01") },
     );
     expect(since2024.data.map((r) => r.id)).toEqual([recent.id]);
 
-    const until2023 = await listGlobalRuns(
+    const until2023 = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { endDate: new Date("2023-01-01") },
     );
@@ -211,7 +223,7 @@ describe("listGlobalRuns", () => {
       })
       .returning();
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: otherSpace!.id });
+    const result = await listSpaceRuns({ orgId: ctx.orgId, spaceId: otherSpace!.id });
     expect(result.total).toBe(0);
   });
 
@@ -262,7 +274,7 @@ describe("listGlobalRuns", () => {
     // A run with null input and no files → both counts zero.
     const empty = await seedPackageRun();
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const result = await listSpaceRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
 
     expect(byId[withDocs.id]?.file_counts).toEqual({ input: 2, output: 3 });
@@ -283,7 +295,7 @@ describe("listGlobalRuns", () => {
     await seedOutputFile(many.id);
     await seedOutputFile(many.id);
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const result = await listSpaceRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
 
     expect(byId[zero.id]?.file_counts.output).toBe(0);
@@ -318,7 +330,7 @@ describe("listGlobalRuns", () => {
       .set({ input: { file: `appfile://${docId}` } })
       .where(eq(runs.id, run.id));
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const result = await listSpaceRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const row = result.data.find((r) => r.id === run.id);
     expect(row?.file_counts).toEqual({ input: 1, output: 0 });
   });
@@ -326,7 +338,7 @@ describe("listGlobalRuns", () => {
   it("orders by startedAt DESC and paginates", async () => {
     for (let i = 0; i < 5; i++) await seedPackageRun();
 
-    const page1 = await listGlobalRuns(
+    const page1 = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { limit: 2 },
     );
@@ -334,7 +346,7 @@ describe("listGlobalRuns", () => {
     expect(page1.total).toBe(5);
     expect(page1.hasMore).toBe(true);
 
-    const page2 = await listGlobalRuns(
+    const page2 = await listSpaceRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { limit: 2, startingAfter: page1.data[1]!.id },
     );

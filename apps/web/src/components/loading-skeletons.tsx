@@ -34,11 +34,12 @@ import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useListView } from "../stores/list-view-store";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { CardGridSkeleton } from "./card-grid";
 import { FileTileSkeleton } from "./file-tile";
 import { ShellHeaderActions } from "./shell-header-slots";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { ACROSS_SPACES, agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
 import { DetailBarSkeleton } from "./detail-bar";
 
@@ -243,22 +244,25 @@ function JournalTabBlocks() {
   );
 }
 
-/** The name the family's list already holds for this package, when it was read. */
+/** The name the family's list (the space's, or the one across spaces it was opened from) already holds for this package, when it was read. */
 function useCachedPackageName(type: PackageType, packageId: string | undefined) {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   if (!packageId) return undefined;
+  const cached = <Row extends { id: string }>(...keys: (readonly unknown[])[]) =>
+    keys.flatMap((key) => qc.getQueryData<Row[]>(key) ?? []).find((row) => row.id === packageId);
   if (type === "agent") {
-    return qc
-      .getQueryData<{ id: string; display_name?: string }[]>(agentsKeys.list(orgId, spaceId))
-      ?.find((row) => row.id === packageId)?.display_name;
+    return cached<{ id: string; display_name?: string }>(
+      agentsKeys.list(orgId, spaceId),
+      agentsKeys.list(orgId, ACROSS_SPACES),
+    )?.display_name;
   }
-  return qc
-    .getQueryData<{ id: string; name?: string }[]>(
-      packageKeys.list(PACKAGE_TYPE_ROUTE_SEGMENT[type], orgId, spaceId),
-    )
-    ?.find((row) => row.id === packageId)?.name;
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  return cached<{ id: string; name?: string }>(
+    packageKeys.list(segment, orgId, spaceId),
+    packageKeys.list(segment, orgId, ACROSS_SPACES),
+  )?.name;
 }
 
 /**
@@ -296,17 +300,20 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   );
 }
 
-/** A run's page, under its agent. */
+/** A run's page, under its agent; an inline run (no agent page) under the runs list, as the page. */
 export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
+  const { t } = useTranslation("agents");
   const { scope, name } = useParams();
   const listCrumb = usePackageListCrumb("agent");
   const tab = useOpenTab();
   return (
     <DetailPageSkeleton
       trail={
-        agentName
-          ? [listCrumb, { label: agentName, href: `/agents/${scope}/${name}#runs` }]
-          : [listCrumb]
+        scope === "@inline"
+          ? [{ label: t("runs.title"), href: "/runs" }]
+          : agentName
+            ? [listCrumb, { label: agentName, href: `/agents/${scope}/${name}#runs` }]
+            : [listCrumb]
       }
       tabCount={3}
       meta={false}
@@ -396,6 +403,8 @@ export function ListPageSkeleton({
 
 function ViewedCollectionBlocks({ list, views }: { list: string; views: boolean }) {
   const [view] = useListView(list);
+  // « Tous les espaces » names each card's space.
+  const { on } = useOverviewMode();
   return (
     <CollectionBlocks
       cards={view === "cards"}
@@ -404,6 +413,7 @@ function ViewedCollectionBlocks({ list, views }: { list: string; views: boolean 
       // An integration's card line also says its source.
       cardMeta={list === "integrations" ? "both" : "version"}
       views={views}
+      spaceName={on}
     />
   );
 }
@@ -468,6 +478,7 @@ function TableBlocks({ framed }: { framed: boolean }) {
 function CollectionBlocks({
   cards = false,
   runnable = false,
+  spaceName = false,
   files = false,
   cardMeta = "version",
   views = false,
@@ -479,6 +490,8 @@ function CollectionBlocks({
   cards?: boolean;
   /** The cards carry a run button (agents). */
   runnable?: boolean;
+  /** The cards name their space (a list spanning spaces). */
+  spaceName?: boolean;
   /** The cards are file tiles (the gallery). */
   files?: boolean;
   /** What the cards' line under the description carries. */
@@ -495,7 +508,9 @@ function CollectionBlocks({
           <CardGridSkeleton min="12rem" placeholder={<FileTileSkeleton />} />
         ) : (
           <CardGridSkeleton
-            placeholder={<PackageCardSkeleton runnable={runnable} meta={cardMeta} />}
+            placeholder={
+              <PackageCardSkeleton runnable={runnable} meta={cardMeta} spaceName={spaceName} />
+            }
           />
         )
       ) : (
@@ -662,8 +677,10 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
+ * In « Tous les espaces » the agent cards name their space.
  */
 export function DashboardBodySkeleton() {
+  const { on } = useOverviewMode();
   return (
     <Waiting className="flex flex-col gap-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -676,7 +693,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable />
+              <PackageCardSkeleton runnable spaceName={on} />
             </div>
           ))}
         </div>

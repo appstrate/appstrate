@@ -279,7 +279,7 @@ export interface ConnectionOutsideRun {
  * inside a run.
  */
 export async function activeIntegrationIds(scope: SpaceScope): Promise<string[]> {
-  return (await listActivePackages(scope, "integration"))
+  return (await listActivePackages(scope.orgId, [scope.spaceId], "integration"))
     .filter((row) => !isRuntimeBoundIntegration(row.draftManifest))
     .map((row) => row.id);
 }

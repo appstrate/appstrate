@@ -6,7 +6,13 @@ import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, endUsers, runs, type ScheduleDisabledReason } from "@appstrate/db/schema";
+import {
+  schedules,
+  endUsers,
+  runs,
+  packages,
+  type ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
@@ -21,6 +27,7 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
+import { getPackageDisplayName, orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
@@ -41,6 +48,8 @@ import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { runReadCondition } from "../lib/run-visibility.ts";
+import type { SpaceGrant } from "../lib/permissions.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -712,17 +721,33 @@ export async function triggerScheduledRun(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Schedules of `orgId` across the spaces of `grants` — one per space where the
+ * caller holds `schedules:read` — oldest first. Powers `GET /api/schedules`
+ * (one grant, the request's space) and `GET /api/orgs/{orgId}/schedules`. The
+ * run counters of each schedule follow its own space's grant
+ * (`runReadCondition`): a schedule's runs live in its space.
+ */
 export async function listSchedules(
-  scope: SpaceScope,
+  orgId: string,
+  grants: readonly SpaceGrant[],
   viewer: Actor | null,
-  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
+  if (grants.length === 0) return [];
   const rows = await db
     .select()
     .from(schedules)
-    .where(scopedWhere(schedules, { orgId: scope.orgId, spaceId: scope.spaceId }))
-    .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
+    .where(
+      and(
+        eq(schedules.orgId, orgId),
+        inArray(
+          schedules.spaceId,
+          grants.map((g) => g.spaceId),
+        ),
+      ),
+    )
+    .orderBy(asc(schedules.createdAt), asc(schedules.id));
+  return enrichSchedules(rows.map(toSchedule), orgId, viewer, runReadCondition(grants, viewer));
 }
 
 export async function listPackageSchedules(
@@ -783,18 +808,22 @@ interface ScheduleRunStats {
 const EMPTY_RUN_STATS: ScheduleRunStats = { runningRuns: 0, unreadCount: 0, lastRunNumber: 0 };
 
 /**
- * Enrichment fields for the (unreachable in practice) branch where the
- * enrichment query returns no row for a schedule we just wrote. Spread rather
- * than re-listed at each call site so a new `EnrichedSchedule` field cannot be
- * added to the happy path alone.
+ * The schedule as served in the (unreachable in practice) branch where the
+ * enrichment query returns no row for a schedule we just wrote. One function
+ * rather than a re-listing at each call site, so a new `EnrichedSchedule` field
+ * cannot be added to the happy path alone.
  */
-const UNENRICHED_SCHEDULE_FIELDS = {
-  actor_name: null,
-  actor_type: null,
-  running_runs: 0,
-  unread_count: 0,
-  last_run_number: 0,
-} satisfies Omit<EnrichedSchedule, keyof ScheduleWireDto>;
+function unenrichedSchedule(schedule: ScheduleWireDto): EnrichedSchedule {
+  return {
+    ...schedule,
+    agent_name: schedule.packageId,
+    actor_name: null,
+    actor_type: null,
+    running_runs: 0,
+    unread_count: 0,
+    last_run_number: 0,
+  };
+}
 
 /**
  * The three run counters every schedule card shows — active runs, unread runs
@@ -817,8 +846,10 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *    as run lists, so a member and an end-user never observe each other's
  *    read state. A null viewer (no actor context) reports 0.
  *
- * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
- * the counters span exactly the runs the caller may open from the card. Without
+ * `visibility` is the caller's run-read predicate — `runReadCondition` over the
+ * listed spaces for {@link listSchedules}, `runVisibilityFilter` for one
+ * agent's schedules — so the counters span exactly the runs the caller may
+ * open from the card. Without
  * it a member without `runs:read-all` would read "3 running" off a colleague's
  * schedule and find an empty run list behind it.
  */
@@ -862,8 +893,8 @@ async function loadScheduleRunStats(
 }
 
 /**
- * Enrich schedules with the display name of the actor (member or end-user)
- * each schedule runs as, plus the viewer-scoped run counters the list UI would
+ * Enrich schedules with the display name of their agent and of the actor
+ * (member or end-user) each schedule runs as, plus the viewer-scoped run counters the list UI would
  * otherwise fetch per row. Batches every lookup across the whole list.
  *
  * @param viewer Actor the response is being rendered for — scopes
@@ -884,7 +915,9 @@ async function enrichSchedules(
     ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
   ];
 
-  const [userNameMap, endUserRows, runStats] = await Promise.all([
+  const packageIds = [...new Set(schedules.map((s) => s.packageId))];
+
+  const [userNameMap, endUserRows, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
     endUserIds.length > 0
       ? db
@@ -901,8 +934,16 @@ async function enrichSchedules(
       viewer,
       visibility,
     ),
+    // The agent's name rides on the schedule so a list spanning spaces names an
+    // agent the caller's working space does not place — the client has no
+    // other way to resolve it. The package is there: a schedule cascades with it.
+    db
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(and(inArray(packages.id, packageIds), orgOrSystemFilter(orgId))),
   ]);
   const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
+  const agentNameMap = new Map(packageRows.map((r) => [r.id, getPackageDisplayName(r)]));
 
   return schedules.map((schedule) => {
     let actorName: string | null = null;
@@ -918,6 +959,7 @@ async function enrichSchedules(
     const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;
     return {
       ...schedule,
+      agent_name: agentNameMap.get(schedule.packageId) ?? schedule.packageId,
       actor_name: actorName,
       actor_type: actorType,
       running_runs: stats.runningRuns,
@@ -1000,7 +1042,7 @@ export async function createSchedule(
   // Neither a viewer nor a visibility predicate is needed here: the schedule
   // was just created, so it has no runs and every counter is zero for anyone.
   const [enriched] = await enrichSchedules([schedule], scope.orgId, null, undefined);
-  return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
+  return enriched ?? unenrichedSchedule(schedule);
 }
 
 /** The caller's read of the row a write is judged against: the `updatedAt` token + fallbacks. */
@@ -1127,7 +1169,7 @@ export async function updateSchedule(
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // update response matches the GET detail shape (actor/run counters).
   const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer, visibility);
-  return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
+  return enriched ?? unenrichedSchedule(schedule);
 }
 
 /**

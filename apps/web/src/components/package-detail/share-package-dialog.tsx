@@ -26,7 +26,8 @@ import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceGrant } from "../../hooks/use-permissions";
-import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
+import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationsById } from "../../hooks/use-integrations";
 import {

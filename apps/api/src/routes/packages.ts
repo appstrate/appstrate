@@ -13,8 +13,8 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles } from "@appstrate/db/schema";
+import { eq, and } from "drizzle-orm";
+import { packages } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "@appstrate/core/list-query";
 import { postInstallPackage } from "../services/post-install-package.ts";
@@ -36,10 +36,10 @@ import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { assertVersionNotLower, getVersionForDownload } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
+import { listPackageIndex } from "../services/package-index.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
   getPackageById,
-  listOrgItems,
   getOrgItem,
   deleteOrgItem,
   PackageAlreadyExistsError,
@@ -53,6 +53,7 @@ import {
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type ManifestIssue, type PackageType } from "@appstrate/core/validation";
+import { getSpaceScope } from "../lib/scope.ts";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../lib/conditional-request.ts";
@@ -441,26 +442,6 @@ export const shareTargetSchema = z
   })
   .strict();
 
-/** Enrich items with creator display names (batch lookup). */
-async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
-  items: T[],
-): Promise<(T & { created_by_name?: string })[]> {
-  const userIds = [...new Set(items.map((i) => i.created_by).filter(Boolean))] as string[];
-  if (userIds.length === 0) return items;
-
-  const rows = await db
-    .select({ id: profiles.id, displayName: profiles.displayName })
-    .from(profiles)
-    .where(inArray(profiles.id, userIds));
-
-  const nameMap = new Map(rows.map((p) => [p.id, p.displayName]));
-
-  return items.map((item) => ({
-    ...item,
-    created_by_name: item.created_by ? (nameMap.get(item.created_by) ?? undefined) : undefined,
-  }));
-}
-
 /** Publish a valid initial snapshot; incomplete authoring drafts remain editable. */
 async function createVersionSafe(params: {
   packageId: string;
@@ -587,40 +568,24 @@ const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
 
 // --- Handler factories ---
 
+/** `GET /api/packages/{type}`: the type's index of the request's space (`listPackageIndex`). */
 function makeListHandler(rcfg: PackageRouteConfig) {
-  return async (c: Context<AppEnv>) => {
-    const orgId = c.get("orgId");
-    const spaceId = c.get("spaceId");
-    // The ACTIVE set of this space, and only it — the index page answers "what
-    // can I launch here?". The ONE activation rule decides
-    // (`services/package-activation.ts`, applied in SQL by `listOrgItems`): the
-    // placement row when there is one and the package is placed here, the
-    // deployment's default when there is not. That is the same rule the
-    // integration resolver, the run gate and the caller-context hints state,
-    // the env-backed system integrations active without a row included, so no
-    // type needs a correction pass behind this listing.
-    //
-    // What is merely PLACED here — a package switched off —
-    // belongs to the space library (`GET /api/spaces/{id}/library`), which
-    // carries the per-placement state and the switch that repairs it.
-    const items = await listOrgItems(orgId, rcfg.cfg, spaceId);
-    const enriched = await enrichWithCreatorNames(items);
-    // `home_space_id` / `home_writable` are computed HERE, not in
-    // `listOrgItems`: both depend on the caller's reach (RBAC spec §6.9), which
-    // a service has no access to. One `packageAccessSpaces` read for the page.
-    const accessible = await packageAccessSpaces(c);
-    return c.json(
-      listResponse(
-        enriched.map(({ homeSpaceId, ...item }) => ({
-          ...item,
-          ...homeWireForCaller(
-            { type: rcfg.cfg.type, source: item.source, homeSpaceId },
-            accessible,
-          ),
-        })),
-      ),
-    );
+  return (c: Context<AppEnv>) => {
+    const scope = getSpaceScope(c);
+    return respondPackageIndex(c, rcfg.cfg.type, scope.orgId, [scope.spaceId]);
   };
+}
+
+/** One type's index over `spaceIds`: `GET /api/packages/{type}` and its org twin. */
+export async function respondPackageIndex(
+  c: Context<AppEnv>,
+  type: PackageType,
+  orgId: string,
+  spaceIds: string[],
+) {
+  return c.json(
+    listResponse(await listPackageIndex(type, orgId, spaceIds, packageAccessSpaces(c))),
+  );
 }
 
 function makeCreateHandler(rcfg: PackageRouteConfig) {

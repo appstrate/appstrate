@@ -84,7 +84,7 @@ const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
  * group, on every shape that carries a package's home (`AgentDetail`,
  * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`,
- * `PackageHome`). ONE
+ * `PackageHome`); `AgentListItem` carries `home_space_id` alone. ONE
  * definition: the server computes all four in one place (`homeWireForCaller`),
  * and four hand-copied descriptions drifted the moment the contract changed.
  */
@@ -225,6 +225,15 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
  * schema object: verify-openapi's shared-type check reads only the properties
  * declared there, never through `allOf`.
  */
+/** `space_ids` of an index row (`AgentListItem`, `OrgPackageItem`). */
+const INDEX_SPACE_IDS = {
+  type: "array",
+  minItems: 1,
+  items: { type: "string", pattern: SPACE_ID_RE.source },
+  description:
+    "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
+};
+
 const ORG_PACKAGE_ITEM_SCHEMA = {
   type: "object",
   // Always emitted by the listOrgItems mapper. `created_by_name` stays
@@ -248,9 +257,11 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
     "home_writable",
     "home_deletable",
     "home_shareable",
+    "space_ids",
   ],
   properties: {
     id: { type: "string" },
+    space_ids: INDEX_SPACE_IDS,
     orgId: {
       type: ["string", "null"],
       description: "Owning organization ID (null for system packages)",
@@ -994,9 +1005,13 @@ export const schemas = {
       "keywords",
       "version",
       "published",
+      "space_ids",
+      "home_space_id",
     ],
     properties: {
       id: { type: "string" },
+      home_space_id: PACKAGE_HOME_PROPERTIES.home_space_id,
+      space_ids: INDEX_SPACE_IDS,
       ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
@@ -1841,6 +1856,7 @@ export const schemas = {
       "next_run_at",
       "createdAt",
       "updatedAt",
+      "agent_name",
       "actor_name",
       "actor_type",
       "running_runs",
@@ -1890,6 +1906,11 @@ export const schemas = {
       next_run_at: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+      agent_name: {
+        type: "string",
+        description:
+          "Display name of the scheduled agent: its draft manifest's `display_name`, else its package id — the name the package catalog shows.",
+      },
       actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
       running_runs: {

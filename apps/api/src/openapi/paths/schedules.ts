@@ -4,6 +4,7 @@ import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { connectionConflictContent } from "../responses.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 /**
  * The 409 both schedule writes answer when an armed schedule leaves a connection choice open, or
@@ -35,40 +36,62 @@ const scheduleWriteSchema = {
   ],
 };
 
+/** The answer of both schedule lists (`GET /api/schedules`, `GET /api/orgs/{orgId}/schedules`). */
+const scheduleListResponses = {
+  "200": {
+    description: "Schedule list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Schedule" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
+
 export const schedulesPaths = {
   "/api/schedules": {
     get: {
       operationId: "listSchedules",
       tags: ["Schedules"],
       summary: "List all schedules",
-      description: "List all schedules across all agents for the organization.",
+      description:
+        "List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
-        "200": {
-          description: "Schedule list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Schedule" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        ...scheduleListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/schedules": {
+    get: {
+      operationId: "listOrgSchedules",
+      tags: ["Schedules"],
+      summary: "List schedules across the organization's spaces",
+      description:
+        "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...scheduleListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
       },
     },
   },
@@ -229,6 +252,7 @@ export const schedulesPaths = {
                 next_run_at: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-15T10:30:00Z",
                 updatedAt: "2026-01-15T10:30:00Z",
+                agent_name: "Email Sorter",
                 actor_name: "Pierre",
                 actor_type: "user",
                 running_runs: 0,
@@ -319,6 +343,7 @@ export const schedulesPaths = {
                 next_run_at: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-14T14:00:00Z",
                 updatedAt: "2026-01-15T09:00:05Z",
+                agent_name: "Email Sorter",
                 actor_name: "Pierre",
                 actor_type: "user",
                 running_runs: 0,

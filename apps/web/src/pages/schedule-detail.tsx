@@ -24,7 +24,6 @@ import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ScopedRunList } from "../components/scoped-run-list";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { NextRunPreview } from "../components/next-run-preview";
 import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
@@ -32,7 +31,6 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { isQueryInFlight } from "../lib/query-state";
-import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
 import {
@@ -196,14 +194,10 @@ function ScheduleParams({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents"]);
-  const agentsQuery = useAgents();
-  const { data: agents } = agentsQuery;
-  const agentsPending = isQueryInFlight(agentsQuery);
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
   const nextRunAt = scheduleNextRunAt(schedule);
-  const agentDisplayName =
-    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
+  const agentDisplayName = schedule.agent_name;
   const input = schedule.input;
   const navigate = useNavigate();
   const open = (section: ScheduleSettingsSection) => ({
@@ -220,9 +214,7 @@ function ScheduleParams({
       >
         <FactGrid columns={2}>
           <Fact label={t("schedule.agent")}>
-            {agentsPending ? (
-              <Skeleton className="h-4 w-32" />
-            ) : canReach(agentPath) ? (
+            {canReach(agentPath) ? (
               <Link className="text-primary hover:underline" to={agentPath}>
                 {agentDisplayName}
               </Link>
@@ -310,9 +302,7 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: agents } = useAgents();
-  const agentName =
-    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
+  const agentName = schedule.agent_name;
 
   const isActive = schedule.enabled;
 

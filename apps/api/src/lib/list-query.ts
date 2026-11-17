@@ -13,8 +13,21 @@
  */
 
 import type { Context } from "hono";
-import type { ListPagination } from "@appstrate/core/list-query";
-import { invalidRequest } from "./errors.ts";
+import { z } from "zod";
+import { zFilePurposeEnum } from "@appstrate/db/schema";
+import { parseListPagination, type ListPagination } from "@appstrate/core/list-query";
+import type { AppEnv } from "../types/index.ts";
+import type { ListFilesFilters } from "../services/files.ts";
+import { invalidRequest, parseBody } from "./errors.ts";
+
+/**
+ * The query of a list that reads none: any parameter is a 400 naming it, so a
+ * misspelled filter never reads as a list that was narrowed.
+ */
+export function parseEmptyQuery(c: Context): void {
+  const [name] = Object.keys(c.req.queries());
+  if (name !== undefined) throw invalidRequest(`Unknown query parameter '${name}'`, name);
+}
 
 /** Slice an in-memory array into a page + report `total` / `hasMore`. */
 export function paginate<T>(
@@ -75,4 +88,41 @@ export function projectFields<T extends object>(
     }
   }
   return out;
+}
+
+const listFilesQuerySchema = z
+  .object({
+    purpose: zFilePurposeEnum.optional(),
+    runId: z.string().optional(),
+    packageId: z.string().optional(),
+    chat_session_id: z.string().optional(),
+    context_chat_session_id: z.string().optional(),
+    q: z.string().max(200).trim().optional(),
+    startingAfter: z.string().optional(),
+    // Checked by `parseListPagination` (anything but 1..100 is a 400).
+    limit: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * The gallery filters of `GET /api/files` and `GET /api/orgs/{orgId}/files`.
+ * Query-param casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b):
+ * `runId`, `packageId` and the `startingAfter` pagination param are camelCase;
+ * `chat_session_id` is a snake_case domain field. Strict: an unknown or
+ * misspelled filter is a 400, never a silently widened listing.
+ */
+export function parseListFilesQuery(c: Context<AppEnv>): ListFilesFilters {
+  const parsed = parseBody(listFilesQuerySchema, c.req.query());
+  const filters: ListFilesFilters = {};
+  if (parsed.purpose) filters.purpose = parsed.purpose;
+  if (parsed.runId) filters.runId = parsed.runId;
+  if (parsed.packageId) filters.packageId = parsed.packageId;
+  if (parsed.chat_session_id) filters.chatSessionId = parsed.chat_session_id;
+  if (parsed.context_chat_session_id) {
+    filters.contextChatSessionId = parsed.context_chat_session_id;
+  }
+  if (parsed.q) filters.search = parsed.q;
+  if (parsed.startingAfter) filters.startingAfter = parsed.startingAfter;
+  filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
+  return filters;
 }

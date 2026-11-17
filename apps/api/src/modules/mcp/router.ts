@@ -587,9 +587,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // and cannot have been skipped: the org guard just proved `orgId` is set,
     // and that is the middleware's only early return.
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
-    // Dispatched calls re-enter the space this request entered.
+    // Dispatched calls re-enter the space this request entered — and, on the
+    // endpoint pinned to it, stay confined to it whatever the credential pins:
+    // the caller's reach is then that space only, for the lists spanning spaces
+    // and for the package home authority alike.
     authHeaders.set("x-space-id", scope.spaceId);
-    const dispatch: Dispatch = dispatchInProcess;
+    const dispatch: Dispatch = orgSpaces
+      ? dispatchInProcess
+      : (request) => dispatchInProcess(request, scope.spaceId);
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.

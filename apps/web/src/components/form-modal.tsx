@@ -11,6 +11,8 @@ interface FormModalProps {
   title: string;
   /** What the dialog does, read by assistive technology after the title. */
   description?: string;
+  /** The form acts in the working space: `Modal`'s `inSpace`. */
+  inSpace?: boolean;
   onClose: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
   /** The request is in flight: the modal does not close and Cancel is disabled. */
@@ -37,6 +39,7 @@ interface FormModalProps {
 export function FormModal({
   title,
   description,
+  inSpace,
   onClose,
   onSubmit,
   isPending = false,
@@ -58,6 +61,7 @@ export function FormModal({
       preventClose={isPending}
       title={title}
       description={description}
+      inSpace={inSpace}
       className={className}
       actions={
         <>

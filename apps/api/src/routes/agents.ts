@@ -5,8 +5,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { getRunningRunCounts } from "../services/state/runs.ts";
-import { getUnreadRunCountsByAgent } from "../services/state/run-reads.ts";
+import { listAgentIndex } from "../services/package-index.ts";
 import {
   listPinnedSlots,
   listMemories,
@@ -21,27 +20,20 @@ import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import { db } from "@appstrate/db/client";
-import {
-  isPublished,
-  listActivePackages,
-  updateSpacePackage,
-  getSpacePackageSettings,
-} from "../services/space-packages.ts";
+import { updateSpacePackage, getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import type { AgentManifest } from "../types/index.ts";
 import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
-import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { readAgentAppearance } from "@appstrate/core/validation";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
   assertExplicitModelExists,
@@ -54,7 +46,6 @@ import {
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
 import {
-  agentReadIsSummary,
   assertCatalogPackageAccess,
   assertDraftSelectorAllowed,
   assertPackageCopyAllowed,
@@ -197,73 +188,20 @@ async function requireBundleDependencyReadPermissions(
   }
 }
 
+/** The agent index over `grants`: `GET /api/agents` and `GET /api/orgs/{orgId}/agents`. */
+export async function respondAgentIndex(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  return c.json(
+    listResponse(await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c))),
+  );
+}
+
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/agents — list agents accessible to the current space
-  router.get("/", requireAgentRead, async (c) => {
-    const scope = getSpaceScope(c);
-    const summaryOnly = agentReadIsSummary(c);
-
-    // Single query: the activation rule (`activeHereSql` — placed here AND
-    // switched on, or a system agent with no row) via LEFT JOIN. This page
-    // answers "what can I launch here?", so every row on it is launchable;
-    // an agent placed here but switched off (or never switched on) lives on the
-    // space library instead (`GET /api/spaces/{id}/library`), which
-    // carries its origin, its state and the switch.
-    const visibility = runVisibilityFilter(c);
-    const [rows, runningCounts, unreadCounts] = await Promise.all([
-      listActivePackages(scope, "agent"),
-      getRunningRunCounts(scope, visibility),
-      getUnreadRunCountsByAgent(scope, getActor(c), visibility),
-    ]);
-
-    const agentList = rows.map((row) => {
-      const manifest = asRecord(row.draftManifest) as AgentManifest;
-      const parsed = parseScopedName(manifest.name);
-      const appearance = readAgentAppearance(manifest as Record<string, unknown>);
-      return {
-        id: row.id,
-        ...appearance,
-        display_name: manifest.display_name,
-        description: manifest.description,
-        schema_version: manifest.schema_version,
-        author: manifest.author,
-        keywords: manifest.keywords ?? [],
-        // `skills` says what the agent is BUILT FROM — the
-        // one thing in this list a summary read withholds. `integrations` says
-        // which SaaS it talks to, which is what a launcher connects, so it
-        // answers every caller. Everything else is how the launcher names and
-        // picks an agent, which `agents:run` is entitled to.
-        dependencies: {
-          ...(summaryOnly
-            ? {}
-            : {
-                skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-              }),
-          integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
-        },
-        running_runs: runningCounts[row.id] ?? 0,
-        // The caller's own unread runs of this agent (per recipient, like a
-        // schedule's `unread_count`).
-        unread_count: unreadCounts[row.id] ?? 0,
-        source: row.source ?? "local",
-        // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
-        // list output is directly usable as `{scope}` path-param input — one
-        // operation's output must be valid input for the next.
-        scope: parsed ? `@${parsed.scope}` : null,
-        // `version` from the manifest may be absent on a partial draft; the DB
-        // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
-        version: manifest.version ?? null,
-        // The draft manifest's `version` above says nothing about publication:
-        // `published` is whether omitting the version selector at launch resolves.
-        published: isPublished(row),
-        type: row.type,
-      };
-    });
-
-    return c.json(listResponse(agentList));
-  });
+  // GET /api/agents — the agents index of the current space (`listAgentIndex`)
+  router.get("/", requireAgentRead, (c) =>
+    respondAgentIndex(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
   // input defaults + field locks (admin-only).

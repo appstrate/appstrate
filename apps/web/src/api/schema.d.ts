@@ -3199,6 +3199,26 @@ export interface paths {
         patch: operations["updateOrganization"];
         trace?: never;
     };
+    "/api/orgs/{orgId}/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List agents across the organization's spaces
+         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/cli-sessions": {
         parameters: {
             query?: never;
@@ -3236,6 +3256,26 @@ export interface paths {
          * @description Force a member's CLI session out from the dashboard. Logged with `revoked_reason='org_admin_revoked'` so the audit trail distinguishes admin force-outs from user-initiated logouts and reuse-detection revocations. Returns 404 when the family is unknown, doesn't belong to a current member of `orgId`, or has already been revoked — the route layer collapses these cases so an admin cannot probe membership outside the org through this endpoint.
          */
         delete: operations["revokeOrgCliSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List files across the organization's spaces
+         * @description Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3324,6 +3364,86 @@ export interface paths {
          * @description Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile.
          */
         delete: operations["removeMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/packages/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List integration packages across the organization's spaces
+         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgIntegrationPackages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/packages/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List skills across the organization's spaces
+         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List runs across the organization's spaces
+         * @description Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. A caller who reads runs in no space gets an empty page. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List schedules across the organization's spaces
+         * @description Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgSchedules"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4698,7 +4818,7 @@ export interface paths {
         };
         /**
          * List all schedules
-         * @description List all schedules across all agents for the organization.
+         * @description List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.
          */
         get: operations["listSchedules"];
         put?: never;
@@ -5686,6 +5806,10 @@ export interface components {
         };
         AgentListItem: {
             id: string;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            home_space_id: string | null;
+            /** @description The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`. */
+            space_ids: string[];
             /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
@@ -6172,6 +6296,8 @@ export interface components {
         };
         IntegrationIndexItem: {
             id: string;
+            /** @description The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`. */
+            space_ids: string[];
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
             name: string;
@@ -6533,6 +6659,8 @@ export interface components {
         };
         OrgPackageItem: {
             id: string;
+            /** @description The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`. */
+            space_ids: string[];
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
             name: string;
@@ -7208,6 +7336,8 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            /** @description Display name of the scheduled agent: its draft manifest's `display_name`, else its package id — the name the package catalog shows. */
+            agent_name: string;
             /** @description Display name of the schedule actor */
             actor_name: string | null;
             /** @enum {string|null} */
@@ -7809,6 +7939,8 @@ export interface components {
         IfMatchRequired: string;
         /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
         XOrgId: string;
+        /** @description Organization ID. */
+        OrgIdPath: string;
         /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
         SseOrgId: string;
         /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
@@ -8282,6 +8414,10 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/email-sorter",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": "lucide:mail",
                      *           "color": "blue",
                      *           "display_name": "Email Sorter",
@@ -8306,6 +8442,10 @@ export interface operations {
                      *         },
                      *         {
                      *           "id": "@appstrate/code-reviewer",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": null,
                      *           "color": null,
                      *           "display_name": "Code Reviewer",
@@ -9312,6 +9452,7 @@ export interface operations {
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z",
+                     *       "agent_name": "Email Sorter",
                      *       "actor_name": "Pierre",
                      *       "actor_type": "user",
                      *       "running_runs": 0,
@@ -20561,6 +20702,108 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listOrgAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "list",
+                     *       "hasMore": false,
+                     *       "data": [
+                     *         {
+                     *           "id": "@acme/email-sorter",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "icon": "lucide:mail",
+                     *           "color": "blue",
+                     *           "display_name": "Email Sorter",
+                     *           "description": "Automatically sorts and labels incoming emails",
+                     *           "schema_version": "0.1",
+                     *           "author": "Acme Corp",
+                     *           "keywords": [
+                     *             "email",
+                     *             "automation"
+                     *           ],
+                     *           "source": "local",
+                     *           "scope": "@acme",
+                     *           "version": "1.2.0",
+                     *           "published": true,
+                     *           "type": "agent",
+                     *           "running_runs": 1,
+                     *           "unread_count": 2,
+                     *           "dependencies": {
+                     *             "skills": {},
+                     *             "integrations": {}
+                     *           }
+                     *         },
+                     *         {
+                     *           "id": "@appstrate/code-reviewer",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "icon": null,
+                     *           "color": null,
+                     *           "display_name": "Code Reviewer",
+                     *           "description": "Reviews pull requests and suggests improvements",
+                     *           "schema_version": "0.1",
+                     *           "author": "Appstrate",
+                     *           "keywords": [
+                     *             "code",
+                     *             "review",
+                     *             "github"
+                     *           ],
+                     *           "source": "system",
+                     *           "scope": "@appstrate",
+                     *           "version": "2.0.0",
+                     *           "published": true,
+                     *           "type": "agent",
+                     *           "running_runs": 0,
+                     *           "unread_count": 0,
+                     *           "dependencies": {
+                     *             "skills": {
+                     *               "@appstrate/summarize": "^1.0.0"
+                     *             },
+                     *             "integrations": {
+                     *               "@appstrate/github": "^2.0.0"
+                     *             }
+                     *           }
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["AgentListItem"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listOrgCliSessions: {
         parameters: {
             query?: never;
@@ -20636,6 +20879,112 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Session not found / not in this org / already revoked. */
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listOrgFiles: {
+        parameters: {
+            query?: {
+                /** @description Filter by file purpose. */
+                purpose?: "user_upload" | "agent_output";
+                /** @description Filter to files anchored to this run. */
+                runId?: string;
+                /** @description Filter to files produced by this agent package. */
+                packageId?: string;
+                /** @description Filter to files anchored to this chat session. */
+                chat_session_id?: string;
+                /** @description Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session. */
+                context_chat_session_id?: string;
+                /** @description Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`. */
+                q?: string;
+                /** @description Keyset cursor — file id to page after (newest-first order). */
+                startingAfter?: string;
+                /** @description Page size (1–100, default 20). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of files. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "file";
+                            /** @description Opaque file id (`file_…`). */
+                            id: string;
+                            /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
+                            uri: string;
+                            /** @enum {string} */
+                            purpose: "user_upload" | "agent_output";
+                            spaceId: string;
+                            /** @description Run container, or null. */
+                            runId: string | null;
+                            /** @description Chat-session container, or null. */
+                            chat_session_id: string | null;
+                            /** @description Producing agent package id, or null. */
+                            packageId: string | null;
+                            /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                            name: string;
+                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                            mime: string;
+                            /** @description Size in bytes. */
+                            size: number;
+                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                            sha256?: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                            downloadable: boolean;
+                            /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            capabilities: {
+                                /** @description The caller can resolve this file at all (container ACL). */
+                                visible: boolean;
+                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                                metadata: boolean;
+                                /** @description The caller may fetch the bytes (`/content`). */
+                                download: boolean;
+                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                                preview: boolean;
+                                /** @description The caller may pin/clear the retention deadline. */
+                                keep: boolean;
+                                /** @description The caller may delete the file. */
+                                delete: boolean;
+                            };
+                            /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                            previewable: boolean;
+                            /**
+                             * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @enum {string|null}
+                             */
+                            preview_kind: "html" | "image" | "pdf" | "text" | null;
+                            /**
+                             * Format: date-time
+                             * @description Retention deadline, or null when permanent.
+                             */
+                            expiresAt: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -20900,6 +21249,199 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listOrgIntegrationPackages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Integration package list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["IntegrationIndexItem"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listOrgSkills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Skill list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "list",
+                     *       "hasMore": false,
+                     *       "data": [
+                     *         {
+                     *           "id": "@acme/summarize",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
+                     *           "name": "Summarize",
+                     *           "description": "Summarizes long text into key points",
+                     *           "icon": "lucide:file-text",
+                     *           "keywords": [
+                     *             "summary",
+                     *             "text"
+                     *           ],
+                     *           "source": "local",
+                     *           "version": "1.0.0",
+                     *           "created_by": "usr_cm3abc123",
+                     *           "used_by_agents": 2,
+                     *           "auto_installed": false,
+                     *           "forked_from": null,
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "home_writable": true,
+                     *           "home_deletable": true,
+                     *           "home_shareable": true,
+                     *           "createdAt": "2026-01-10T08:00:00Z",
+                     *           "updatedAt": "2026-01-10T08:00:00Z"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["OrgPackageItem"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listOrgRuns: {
+        parameters: {
+            query?: {
+                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
+                user?: "me";
+                limit?: number;
+                /** @description Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it. */
+                startingAfter?: string;
+                /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
+                kind?: "all" | "package" | "inline";
+                /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: components["parameters"]["RunStatusFilter"];
+                start_date?: string;
+                end_date?: string;
+                /** @description Return only runs launched from this chat session. */
+                chat_session_id?: string;
+                /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
+                q?: components["parameters"]["RunSearch"];
+                /** @description When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`. */
+                unread?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated run list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["Run"][];
+                        total: number;
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, … */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listOrgSchedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Schedule list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["Schedule"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getOrgSettings: {
@@ -22241,6 +22783,9 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/summarize",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "name": "Summarize",
                      *           "description": "Summarizes long text into key points",
                      *           "icon": "lucide:file-text",
@@ -24148,7 +24693,7 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 user?: "me";
                 limit?: number;
                 /** @description Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it. */
@@ -24197,7 +24742,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid query parameter (unknown `user` value, malformed date, …) */
+            /** @description Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, … */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25765,6 +26310,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -25822,6 +26368,7 @@ export interface operations {
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-14T14:00:00Z",
                      *       "updatedAt": "2026-01-15T09:00:05Z",
+                     *       "agent_name": "Email Sorter",
                      *       "actor_name": "Pierre",
                      *       "actor_type": "user",
                      *       "running_runs": 0,

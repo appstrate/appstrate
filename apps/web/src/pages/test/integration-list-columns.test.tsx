@@ -19,9 +19,12 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-function integration(id: string, authenticated: boolean): IntegrationIndexItem {
+type Row = IntegrationIndexItem;
+
+function integration(id: string, authenticated: boolean): Row {
   return {
     id,
+    space_ids: ["spc_a"],
     source: "local",
     name: id,
     description: null,
@@ -45,10 +48,11 @@ function integration(id: string, authenticated: boolean): IntegrationIndexItem {
 }
 
 /** The connections cell of `row`, rendered with `counts` as the caller's counts here. */
-function connectionsCell(row: IntegrationIndexItem, counts?: ReadonlyMap<string, number>): string {
-  let column: DataColumn<IntegrationIndexItem> | undefined;
+function connectionsCell(row: Row, counts?: ReadonlyMap<string, number>): string {
+  let column: DataColumn<Row> | undefined;
+  const counter = counts && ((sourceId: string) => counts.get(sourceId) ?? 0);
   function Harness() {
-    column = useIntegrationListColumns(counts).find(({ id }) => id === "connections");
+    column = useIntegrationListColumns(counter, false).find(({ id }) => id === "connections");
     return null;
   }
   render(<Harness />);

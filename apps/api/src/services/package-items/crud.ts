@@ -3,7 +3,7 @@
 import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -26,8 +26,7 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
-import { activeHereSql } from "../package-activation.ts";
-import { placementRowJoin } from "../package-placement.ts";
+import { activeInSpaces, activeSpaceIds } from "../space-packages.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(public packageId: string) {
@@ -288,14 +287,25 @@ function integrationIndexFields(manifest: IntegrationManifest) {
   };
 }
 
-/** List the items of a type this space RUNS — the activation rule, per type. */
-export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
-  // The index lists the active set only ({@link activeHereSql}, shared with the
+/**
+ * List the items of a type any of `spaceIds` RUNS — the activation rule, per
+ * type — one row per package carrying the spaces it is active in
+ * (`activeSpaceIds`), in ONE statement whatever the number of spaces. Ordered
+ * system first, then newest first, then by package id.
+ */
+export async function listOrgItems(
+  orgId: string,
+  cfg: PackageTypeConfig,
+  spaceIds: readonly string[],
+) {
+  if (spaceIds.length === 0) return [];
+  // The index lists the active set only ({@link activeInSpaces}, shared with the
   // hints and the run gate); placed-but-off packages live in the space library.
   // `draftContent` is not projected: the mapper never reads it.
-  const dataQuery = db
+  const query = db
     .select({
       id: packages.id,
+      spaceIds: activeSpaceIds(),
       orgId: packages.orgId,
       type: packages.type,
       source: packages.source,
@@ -309,19 +319,12 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
       lockVersion: packages.lockVersion,
     })
     .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-    .where(
-      and(
-        orgOrSystemFilter(orgId),
-        eq(packages.type, cfg.type),
-        notEphemeralFilter(),
-        activeHereSql(),
-      ),
-    )
-    .orderBy(
-      sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
-      desc(packages.createdAt),
-    );
+    .$dynamic();
+  const dataQuery = activeInSpaces(query, orgId, spaceIds, cfg.type).orderBy(
+    sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
+    desc(packages.createdAt),
+    packages.id,
+  );
 
   // The catalog page and the usage counts are independent reads over the same
   // tenant — issued concurrently rather than one after the other.
@@ -332,6 +335,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
     return {
       id: row.id,
       orgId: row.orgId,
+      space_ids: row.spaceIds,
       name: getPackageDisplayName(row),
       description: m.description ?? null,
       // The two fields an INDEX page needs that a name and a description do not

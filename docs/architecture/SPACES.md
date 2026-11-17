@@ -178,6 +178,16 @@ Member mutations record `space.member_added` / `space.member_role_changed` / `sp
 
 Mutations record audit events with `resourceType: "space"` and actions `space.created` / `space.updated` / `space.deleted` (`apps/api/src/routes/spaces.ts`).
 
+## Reading across spaces
+
+Every write acts in ONE space. A read may span the spaces of one organization, on the org-path family (`/api/orgs/{orgId}/…`, no `X-Space-Id`): `GET /api/orgs/{orgId}/runs|schedules|files|agents` and `GET /api/orgs/{orgId}/packages/skills|integrations` (`apps/api/src/routes/cross-space-reads.ts`). They take no space filter, and since no space is entered there, the authorization is the reach itself.
+
+- **The reach** is `callerReachableSpaces` (`apps/api/src/lib/reachable-spaces.ts`): the spaces `GET /api/spaces` lists where the caller holds a role, each with the caller's effective set there (persona overlay and credential ceiling applied). A `closed` space not joined, or a `private` one without a role, is not reached. A request pinned to a space — by its credential (`credentialSpaceId`) or by the space-pinned MCP endpoint (`dispatchSpacePin`, `lib/internal-dispatch.ts`) — reaches that space only. The package reach behind `home_*` (`packageAccessSpaces`, `lib/package-access.ts`) is the same reach.
+- **One preamble.** Each route names its read permissions once; `readAcrossSpaces` derives the scope ceiling from them (a delegated credential omitting them all is a 403, not an empty page) and `readableSpacesAcross` keeps the reached spaces granting one of them, as one `SpaceGrant` per space, refusing an end-user (403) before the query is read. The query parsers are strict on both doors: an unknown parameter is a 400.
+- **One function per list, each row following its own space.** The single-space route calls the same function with its one grant (`respondRunList`, `respondScheduleList`, `respondFileList`, `respondAgentIndex`, `respondPackageIndex`), one query whatever the number of spaces. Every rule the single-space list reads from the caller's permissions is read from the grant of the row's space: which runs (`runReadCondition`, `lib/run-visibility.ts`), a run's `input` (`readsAgentContent`), a schedule's counters, a file's visibility and `keep`/`delete`. An index lists each space's ACTIVE set, a package active in two spaces being one row (`activeInSpaces`, `services/space-packages.ts`).
+- **Rows carry their space**, on the single-space route too: `spaceId` on runs, schedules and files, `space_ids` on index rows — the package's home first when it is one of them, then in the order of `GET /api/spaces`.
+- **The web client's « Tous les espaces »** (`apps/web/src/hooks/use-overview-mode.ts`, `lib/space-lists.ts`) draws its lists from these routes with the same screens; every write still goes to a single-space route. A row's action acts in the row's space; an action naming no space is offered where some space grants it, its trigger becoming a menu of them (`hooks/use-space-action.tsx`), and enters the space chosen.
+
 ## Connections
 
 A connection (`integration_connections`, `packages/db/src/schema/integrations.ts`) is never wider than the OAuth client that minted it: a refresh token is bound to the client that obtained it (RFC 6749 §6). `org_id` is NOT NULL; `space_id IS NULL` is an org-scoped row.

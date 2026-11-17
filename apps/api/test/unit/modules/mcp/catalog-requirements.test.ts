@@ -255,6 +255,25 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ...rowDecided("the caller's own credential, then each space's own guards, read in the handler", [
     [["GET"], "/api/library"],
   ]),
+  ...rowDecided("the run-read grant of each space the caller reaches, read in the handler", [
+    [["GET"], "/api/orgs/{orgId}/runs"],
+  ]),
+  ...rowDecided(
+    "`schedules:read` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/schedules"]],
+  ),
+  ...rowDecided(
+    "`files:read` in each space the caller reaches, and its run-read and `files:delete` grants there per row, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/files"]],
+  ),
+  ...rowDecided(
+    "`agents:read` or `agents:run` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/agents"]],
+  ),
+  ...rowDecided("`<type>:read` in each space the caller reaches, read in the handler", [
+    [["GET"], "/api/orgs/{orgId}/packages/skills"],
+    [["GET"], "/api/orgs/{orgId}/packages/integrations"],
+  ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
     [["POST"], "/api/spaces/{id}/packages"],
     [["PATCH", "DELETE"], "/api/spaces/{id}/packages/{scope}/{name}"],

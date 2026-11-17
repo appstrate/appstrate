@@ -13,6 +13,8 @@ const { render } = await import("../../test/render");
 const { useFileImageSrc } = await import("../use-files");
 const { client } = await import("../../api/client");
 const { queryClient } = await import("../../lib/query-client");
+const { orgStore } = await import("../../stores/org-store");
+const { spaceStore } = await import("../../stores/space-store");
 
 function Image() {
   useFileImageSrc("file_network");
@@ -80,6 +82,40 @@ describe("image preview cache", () => {
       get.mockRestore();
       create.mockRestore();
       queryClient.clear();
+    }
+  });
+
+  it("reads a file of another space in that space, whatever the current one grants", () => {
+    const stubs = [
+      spyOn(orgStore, "getInitialState").mockReturnValue({
+        ...orgStore.getInitialState(),
+        id: "org_1",
+      }),
+      spyOn(spaceStore, "getInitialState").mockReturnValue({
+        ...spaceStore.getInitialState(),
+        id: "spc_1",
+      }),
+    ];
+    try {
+      const qc = new QueryClient();
+      function Elsewhere() {
+        useFileImageSrc("file_other", "spc_2");
+        return null;
+      }
+      // No permission set is seeded: the current space grants nothing.
+      render(<Elsewhere />, { queryClient: qc });
+      const query = qc
+        .getQueryCache()
+        .findAll()
+        .find((q) => q.queryKey[0] === "file-blob");
+      expect(query?.queryKey).toEqual([
+        "file-blob",
+        "file_other",
+        { "X-Org-Id": "org_1", "X-Space-Id": "spc_2" },
+      ]);
+      expect((query?.options as { enabled?: unknown }).enabled).toBe(true);
+    } finally {
+      for (const stub of stubs) stub.mockRestore();
     }
   });
 });

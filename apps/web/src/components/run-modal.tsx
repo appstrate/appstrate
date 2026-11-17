@@ -47,6 +47,7 @@ function RunModalForm({
 
   return (
     <FormModal
+      inSpace
       onClose={onClose}
       title={t("input.title", { name: agent.display_name })}
       onSubmit={submit}

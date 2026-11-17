@@ -202,7 +202,7 @@ describe("Multi-tenancy isolation", () => {
         status: "success",
       });
 
-      const res = await app.request("/api/runs?packageId=@org-a/agent", {
+      const res = await app.request("/api/runs", {
         headers: authHeaders(orgB),
       });
 

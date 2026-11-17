@@ -50,7 +50,7 @@ import { ApiError } from "../api/errors";
 import { fetchPackageDetail, useVersionInfo } from "../hooks/use-packages";
 import { TextSkeleton } from "./loading-skeletons";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useHereSpaceId } from "../hooks/use-overview-mode";
 import { missingIntegrations } from "../lib/activation-closure";
 import type { IntegrationSource } from "../lib/integration-collection";
 import { IntegrationSourceLabel } from "./integration-source-label";
@@ -182,7 +182,7 @@ export function CataloguePreview({
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
   const orgId = useCurrentOrgId();
-  const currentSpaceId = useCurrentSpaceId();
+  const currentSpaceId = useHereSpaceId();
   const from = detailSpace(placement, spaces, currentSpaceId);
   const {
     data: detail,

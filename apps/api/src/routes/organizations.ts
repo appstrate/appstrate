@@ -7,14 +7,8 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  effectiveInSpace,
-  personaFor,
-  personaMemberships,
-  resolveListingViewAs,
-} from "../lib/view-as.ts";
+import { resolveListingViewAs } from "../lib/view-as.ts";
+import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -56,7 +50,7 @@ import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { mayCreateOrganization } from "@appstrate/db/auth-policy";
-import { createDefaultSpace, listSpacesForPrincipal } from "../services/spaces.ts";
+import { createDefaultSpace } from "../services/spaces.ts";
 import { listSpacesOfMembers } from "../services/space-members.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
@@ -274,20 +268,11 @@ async function memberSpacesForCaller(
   c: Context<AppEnv>,
   orgId: string,
 ): Promise<Map<string, OrganizationMemberSpace[]>> {
-  const entries = await listSpacesForPrincipal(
-    orgId,
-    callerOrgRole(c, orgId),
-    c.get("user").id,
-    callerPersonalOwnerId(c, orgId),
-    personaMemberships(personaFor(c, orgId)),
+  const readable = (await callerReachableSpaces(c, orgId)).flatMap(({ id, permissions }) =>
+    permissions.has("space-members:read")
+      ? [{ spaceId: id, includeImplicit: permissions.has("members:read") }]
+      : [],
   );
-  const pinnedSpaceId = c.get("spaceId");
-  const readable = entries.flatMap(({ space, role }) => {
-    if (pinnedSpaceId && space.id !== pinnedSpaceId) return [];
-    const permissions = effectiveInSpace(c, role);
-    if (!permissions.has("space-members:read")) return [];
-    return [{ spaceId: space.id, includeImplicit: permissions.has("members:read") }];
-  });
   return listSpacesOfMembers(orgId, readable);
 }
 

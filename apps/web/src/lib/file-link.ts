@@ -28,6 +28,20 @@ export function readerContext(params: URLSearchParams): FileContext | undefined 
   return orgId && spaceId ? { orgId, spaceId } : undefined;
 }
 
+/**
+ * The context a file of `spaceId` is read in: its own space when the reader stands in another
+ * (a list spanning spaces); none for a file of the current space, or before there is one.
+ */
+export function otherSpaceFileContext(
+  spaceId: string | undefined,
+  orgId: string | null,
+  currentSpaceId: string | null,
+): FileContext | undefined {
+  return spaceId && orgId && currentSpaceId && spaceId !== currentSpaceId
+    ? { orgId, spaceId }
+    : undefined;
+}
+
 /** `context` as request headers; without one the client's middleware sends the current scope. */
 export function fileContextHeader(context: FileContext | undefined) {
   return context && { "X-Org-Id": context.orgId, "X-Space-Id": context.spaceId };

@@ -37,6 +37,7 @@ function integration(
 ): IntegrationIndexItem {
   return {
     id,
+    space_ids: [SPACE_ID],
     source: "local",
     name,
     description: null,

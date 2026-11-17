@@ -8,6 +8,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
+import { authStore } from "../../stores/auth-store.ts";
+import { overviewStore } from "../../stores/overview-store.ts";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -33,14 +35,17 @@ const space = (id: string, name: string): components["schemas"]["SpaceObject"] =
   personal: false,
   access: "member",
   role: null,
-  permissions: [],
+  permissions: ["runs:read"],
   created_by: null,
   createdAt: "2026-09-05T00:00:00Z",
   updatedAt: "2026-09-05T00:00:00Z",
 });
 
-/** `node` rendered with the reader standing in `spc_a`, who reaches Atelier, Studio and Coffre. */
-function renderInSpaces(node: ReactElement): string {
+/**
+ * `node` rendered with the reader standing in `spc_a`, who reaches Atelier, Studio and Coffre;
+ * `overview`: with « Tous les espaces » chosen (offered: the spaces read runs).
+ */
+function renderInSpaces(node: ReactElement, overview = false): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
@@ -49,6 +54,14 @@ function renderInSpaces(node: ReactElement): string {
   const spaceSnapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
     ...spaceStore.getInitialState(),
     id: "spc_a",
+  });
+  const authSnapshot = spyOn(authStore, "getInitialState").mockReturnValue({
+    ...authStore.getInitialState(),
+    user: { id: "u_1", email: "u@example.test", emailVerified: true },
+  });
+  const overviewSnapshot = spyOn(overviewStore, "getInitialState").mockReturnValue({
+    ...overviewStore.getInitialState(),
+    chosen: overview ? { "u_1:org_1": true } : {},
   });
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } })
@@ -64,6 +77,8 @@ function renderInSpaces(node: ReactElement): string {
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
+    authSnapshot.mockRestore();
+    overviewSnapshot.mockRestore();
   }
 }
 
@@ -84,5 +99,11 @@ describe("PackageSharedFrom", () => {
     ["a row off an index", undefined, false],
   ] as const)("shows nothing for %s", (_label, home, system) => {
     expect(renderInSpaces(<PackageSharedFrom homeSpaceId={home} system={system} />)).toBe("");
+  });
+
+  it("shows nothing in « Tous les espaces », where the Space column names the spaces", () => {
+    const shared = <PackageSharedFrom homeSpaceId="spc_b" system={false} />;
+    expect(renderInSpaces(shared, true)).toBe("");
+    expect(renderInSpaces(shared)).toContain("Partagé depuis Studio");
   });
 });

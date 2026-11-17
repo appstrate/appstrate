@@ -10,9 +10,14 @@
  *
  * Like every piece of the shell's slots it is a portal, so what it renders keeps
  * the page's context and leaves with the page.
+ *
+ * In « Tous les espaces » a row's page (`isListRow`: a run, an agent, a schedule, a file…)
+ * acts in one space, entered when the row was opened, which the switcher does not name: the
+ * meta line starts with it. Out of the mode, or on a page of no space, nothing is added.
  */
 
 import type { ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
@@ -24,6 +29,23 @@ import {
   ShellHeaderTabs,
 } from "@/components/shell-header-slots";
 import { HeaderTabBar, type DetailTab } from "@/components/detail-tabs";
+import { useOverviewMode } from "@/hooks/use-overview-mode";
+import { routeOf } from "@/lib/route-match";
+import { isListRow } from "@/lib/space-lists";
+import { WorkingSpaceName } from "@/components/space-name";
+
+/** The space a row's page acts in, opening the meta line in « Tous les espaces »; `separated` when meta follows. */
+function DetailBarSpace({ separated }: { separated: boolean }) {
+  const { on } = useOverviewMode();
+  const { pathname } = useLocation();
+  if (!on || !isListRow(routeOf(pathname))) return null;
+  return (
+    <>
+      <WorkingSpaceName size="sm" className="shrink-0" />
+      {separated && <span aria-hidden>·</span>}
+    </>
+  );
+}
 
 /** A package's id in the small line under the title, with its copy button. */
 export function DetailBarId({ id }: { id: string }) {
@@ -76,6 +98,7 @@ export function DetailBar<T extends string = string>({
               {badge}
             </div>
             <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5 md:mt-0.5">
+              <DetailBarSpace separated={!!meta} />
               {meta}
             </div>
           </div>
@@ -121,12 +144,12 @@ export function DetailBarSkeleton({
             ) : (
               <SkeletonLine className="w-44 text-base leading-6 font-semibold md:text-[17px]" />
             )}
-            {/* The meta line's own box (`text-xs leading-5`), so it is 20px tall, not the bar's 12. */}
-            {meta ? (
-              <SkeletonLine className="w-32 text-xs leading-5 md:mt-0.5" />
-            ) : (
-              <div className="md:mt-0.5" />
-            )}
+            {/* The meta line's own box (`text-xs leading-5`), so it is 20px tall, not the bar's 12;
+                the space it opens with is known from the listing, so it is drawn, not waited for. */}
+            <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5 md:mt-0.5">
+              <DetailBarSpace separated={meta} />
+              {meta && <SkeletonLine className="w-32 text-xs leading-5" />}
+            </div>
           </div>
         </div>
       </ShellHeaderLead>
