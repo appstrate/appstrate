@@ -33,7 +33,7 @@ import {
   seedSpaceGrant,
 } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 
 const app = getTestApp();
 
@@ -229,18 +229,10 @@ describe("package indexes across the organization's spaces", () => {
   });
 
   it("serves summary rows to a credential whose ceiling omits agents:read", async () => {
-    const token = mintMcpLoopbackToken({
-      userId: member.user.id,
-      email: member.user.email,
-      name: member.user.name,
-      orgId: owner.orgId,
-      orgRole: "member",
-      permissions: ["agents:run", "runs:read"],
-    });
-    const agents = await rows("agents", {
-      Authorization: `Bearer ${token}`,
-      "X-Org-Id": owner.orgId,
-    });
+    const agents = await rows(
+      "agents",
+      memberLoopbackHeaders(member, owner.orgId, ["agents:run", "runs:read"]),
+    );
     expect(Object.keys(agents).sort()).toEqual(["a", "b"]);
     expect(agents.a!.space_ids).toEqual([s.un, s.deux]);
     // Un grants `agents:read`, `agents:run` and `runs:read-all`; the ceiling

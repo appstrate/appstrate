@@ -32,7 +32,6 @@ export function DocumentRowActions({
   const { t } = useTranslation(["files", "common"]);
   const linkInSpace = useSpaceLink();
   const runPath = showRunLink ? fileRunHref(doc) : undefined;
-  // A run of another space (a list spanning several) names it: the run detail enters it.
   const runHref = runPath && linkInSpace(runPath, doc.spaceId);
 
   return (

@@ -40,7 +40,7 @@ import {
   seedSpace,
   seedSpaceGrant,
 } from "../../helpers/seed.ts";
-import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 
 const app = getTestApp();
 
@@ -190,17 +190,8 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {
-    const loopback = (permissions: string[]) => ({
-      Authorization: `Bearer ${mintMcpLoopbackToken({
-        userId: member.user.id,
-        email: member.user.email,
-        name: member.user.name,
-        orgId: owner.orgId,
-        orgRole: "member",
-        permissions,
-      })}`,
-      "X-Org-Id": owner.orgId,
-    });
+    const loopback = (permissions: string[]) =>
+      memberLoopbackHeaders(member, owner.orgId, permissions);
     expect((await list(loopback(["schedules:read", "runs:read-all"]))).counters).toEqual(
       expected({ un: 2, deux: 1, default: 1 }),
     );

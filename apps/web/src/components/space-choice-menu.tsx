@@ -3,10 +3,11 @@
 /**
  * The space an action naming no space acts in, chosen where the action is (`useSpaceAction`'s
  * `choose`): its own trigger opens a menu of the spaces it may act in, under a label naming the
- * deed (« Créer dans… »). The catalogue's « Ajouter à… » (`CatalogueAddButton`) is the same menu
- * and shares its label. One click on a space acts; nothing else is asked.
+ * deed (« Créer dans… »). The catalogue's « Ajouter à… » (`CatalogueAddButton`) is the same menu,
+ * its entries carrying a state. One click on a space acts; nothing else is asked.
  */
 import type { ReactNode } from "react";
+import { Check } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,29 +21,46 @@ import {
 import type { SpaceChoiceMenu } from "../lib/menu-action";
 import { SpaceName } from "./space-name";
 
-/** The label heading a menu of spaces: what a click on one of them does there. */
-export function SpaceMenuLabel({ children }: { children: ReactNode }) {
-  return (
-    <DropdownMenuLabel className="text-muted-foreground text-xs font-medium">
-      {children}
-    </DropdownMenuLabel>
-  );
+/**
+ * A space's state in a menu that has one: `done` ticks it, inert, its text at the end (where the
+ * deed is already done); `badge` follows its name.
+ */
+interface SpaceEntryState {
+  done?: string;
+  badge?: string;
 }
 
+type EntryStates = (spaceId: string) => SpaceEntryState;
+
 /** The menu's body: its label, then one entry per space. */
-function SpaceChoiceItems({ choice }: { choice: SpaceChoiceMenu }) {
+function SpaceChoiceItems({ choice, states }: { choice: SpaceChoiceMenu; states?: EntryStates }) {
   return (
     <>
-      <SpaceMenuLabel>{choice.label}</SpaceMenuLabel>
-      {choice.spaces.map((space) => (
-        <DropdownMenuItem
-          key={space.id}
-          data-space-choice={space.id}
-          onSelect={() => choice.onPick(space.id)}
-        >
-          <SpaceName space={space} size="md" />
-        </DropdownMenuItem>
-      ))}
+      <DropdownMenuLabel className="text-muted-foreground text-xs font-medium">
+        {choice.label}
+      </DropdownMenuLabel>
+      {choice.spaces.map((space) => {
+        const state = states?.(space.id);
+        return (
+          <DropdownMenuItem
+            key={space.id}
+            disabled={!!state?.done}
+            onSelect={() => choice.onPick(space.id)}
+          >
+            {states && <Check className={state?.done ? "text-success" : "invisible"} aria-hidden />}
+            <SpaceName space={space} size="md" className="flex-1">
+              {state?.badge && (
+                <span className="bg-primary/15 text-primary rounded px-1 text-[10px] leading-4 font-medium">
+                  {state.badge}
+                </span>
+              )}
+            </SpaceName>
+            {state?.done && (
+              <span className="text-muted-foreground shrink-0 text-xs">{state.done}</span>
+            )}
+          </DropdownMenuItem>
+        );
+      })}
     </>
   );
 }
@@ -53,9 +71,11 @@ function SpaceChoiceItems({ choice }: { choice: SpaceChoiceMenu }) {
  */
 export function SpaceChoiceDropdown({
   choice,
+  states,
   children,
 }: {
   choice: SpaceChoiceMenu | undefined;
+  states?: EntryStates;
   children: ReactNode;
 }) {
   if (!choice) return <>{children}</>;
@@ -68,7 +88,7 @@ export function SpaceChoiceDropdown({
         className="min-w-56"
         onClick={(event) => event.stopPropagation()}
       >
-        <SpaceChoiceItems choice={choice} />
+        <SpaceChoiceItems choice={choice} states={states} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

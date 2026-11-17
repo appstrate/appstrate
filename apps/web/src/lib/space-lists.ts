@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The lists that span spaces and which spaces admit each: held with a role, where the permission
- * of the list's route holds (the org route lists nothing elsewhere). The « Tous les espaces » mode,
- * chosen in the switcher, opens them, and the dashboard drawn from them, on every space; outside
- * it each list is the current space's.
+ * The lists that span spaces in « Tous les espaces » and which spaces admit each: held with a role,
+ * where the permission of the list's route holds.
  */
 
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
@@ -56,10 +54,8 @@ function gateIn(
 }
 
 /**
- * The spaces held with a role that `admits`, judging the caller's gate there as
- * `usePermissions().can` judges the working space: where a list spanning spaces finds its rows,
- * where an action naming no space may act. A list's permissions are of space level, so its
- * verdicts need no `orgPermissions`.
+ * The spaces held with a role that `admits`, each judged as `usePermissions().can` judges the
+ * working space. A list's permissions are of space level, so its verdicts need no `orgPermissions`.
  */
 export function spacesWhere<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
@@ -71,11 +67,7 @@ export function spacesWhere<S extends ListedSpace>(
   );
 }
 
-/**
- * How an action naming no space finds one in « Tous les espaces »: not offered without an eligible
- * space, the only one taken without asking, chosen by the reader between several (its trigger is
- * then a menu of them, `SpaceChoiceDropdown`).
- */
+/** An action naming no space: none eligible, one taken without asking, or the reader chooses. */
 type SpaceChoice = { kind: "none" } | { kind: "one"; spaceId: string } | { kind: "ask" };
 
 /** `preferred`, when eligible, is taken without asking: a row's action in the working space. */
@@ -97,18 +89,11 @@ export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boo
   return spacesWhere(spaces, undefined, admits).length >= 2;
 }
 
-/** The listing proves the mode no longer offered (a space lost): the choice is withdrawn. */
-export function overviewLapsed(spaces: readonly ListedSpace[] | undefined): boolean {
-  return spaces !== undefined && !overviewOffered(spaces);
-}
-
 const listOf = (path: RoutePath) => SPACE_LISTS.find((list) => LIST_ROUTE[list] === path);
 
 /**
  * One row of a list: the list's route followed by a parameter (`/schedules/:id`,
- * `/agents/:scope/:name`, its versions and its runs). A row opened from a spanning list runs in
- * the row's space (`?enterSpace=`), the mode staying on, and its page names that space
- * (`DetailBar`). `/integrations/new/mcp` creates: no row.
+ * `/agents/:scope/:name`, …). `/integrations/new/mcp` creates: no row.
  */
 export function isListRow(path: RoutePath | undefined): boolean {
   return path !== undefined && SPACE_LISTS.some((list) => path.startsWith(`${LIST_ROUTE[list]}/:`));
@@ -120,10 +105,9 @@ const isOrgLevel = (permission: string) =>
   (CORE_RESOURCE_LEVELS as Record<string, string>)[permission.split(":")[0]!] === "org";
 
 /**
- * A route judged by one space's permissions: the workspace settings, and any route a permission
- * of space level (or a module's, which the SPA cannot grade) opens. The organization and account
- * settings, the catalogue (its add menu names the space of each deed), and the `open` routes
- * (`/` among them), belong to no space.
+ * A route judged by one space's permissions: the workspace settings, and any route a space-level
+ * (or module) permission opens. Organization and account settings, the catalogue and the `open`
+ * routes belong to no space.
  */
 function belongsToSpace(path: RoutePath): boolean {
   if (isUnder(path, SETTINGS_INDEX.workspace)) return true;
@@ -135,9 +119,8 @@ function belongsToSpace(path: RoutePath): boolean {
 }
 
 /**
- * Whether rendering `path` keeps the mode: the lists and their rows, any route of no space (the
- * dashboard, `/`, is one), and an address no route declares. Any other route leaves it, into the
- * working space (the one the last action naming no space entered).
+ * Whether rendering `path` keeps the mode: the lists and their rows, any route of no space, and an
+ * undeclared address. Any other route leaves it, into the working space.
  */
 export function holdsOverview(path: RoutePath | undefined): boolean {
   return path === undefined || ofList(path) || !belongsToSpace(path);

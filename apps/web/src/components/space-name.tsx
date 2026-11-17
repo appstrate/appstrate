@@ -12,7 +12,7 @@ import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel } from "../lib/space-label";
 
 /** What naming a space reads of it. */
-export type SpaceListed = Parameters<typeof spaceTile>[0];
+type SpaceListed = Parameters<typeof spaceTile>[0];
 
 /** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row, `lg` heading a table row. */
 const SIZES = {

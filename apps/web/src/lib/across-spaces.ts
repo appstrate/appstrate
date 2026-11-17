@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Lists spanning several spaces of the org (runs, schedules, files, the package indexes, and the
- * dashboard drawn from them): the pieces they share.
- *
- * A row of another space than the current one links to its detail with `?enterSpace=`; the
- * resolver enters that space (`useSpaceResolver`), then the route's gate drops the param
- * (`useEnterLinkedSpace`). Not `?space=`: the
- * file reader's `?org=…&space=…` names where to read WITHOUT switching.
- *
- * The param is dropped with `replace`: the entry it named becomes the plain detail, so Back from
- * the detail returns to the list instead of to the same detail still naming the space.
+ * Lists spanning several spaces. A row of another space links to its detail with `?enterSpace=`
+ * (not `?space=`, the file reader's read-without-switching), which the resolver enters and the
+ * route's gate then drops with `replace`, so Back returns to the list.
  */
 
 import { isSpaceEnterable } from "./space-lists";

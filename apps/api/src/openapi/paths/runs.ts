@@ -913,9 +913,8 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs across the organization's spaces",
       description:
-        "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. " +
-        ORG_READ_REACH +
-        " Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
+        "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. A caller who reads runs in no space gets an empty page. " +
+        ORG_READ_REACH,
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, ...runListQueryParameters],
       responses: {
         ...runListPageResponses,

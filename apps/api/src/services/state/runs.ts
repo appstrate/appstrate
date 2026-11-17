@@ -53,12 +53,7 @@ import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runReadCondition } from "../../lib/run-visibility.ts";
 import { readsAgentContent, type SpaceGrant } from "../../lib/permissions.ts";
-import {
-  countsByPackage,
-  recordRunFinished,
-  unreadRunCondition,
-  type CountsByPackage,
-} from "./run-reads.ts";
+import { countsByPackage, recordRunFinished, unreadRunCondition } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
@@ -1519,7 +1514,7 @@ export async function getRunningRunCounts(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
-): Promise<CountsByPackage> {
+): Promise<Map<string, number>> {
   if (grants.length === 0) return new Map();
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })

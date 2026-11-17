@@ -199,13 +199,10 @@ export async function markAllRunsRead(scope: SpaceScope, actor: Actor): Promise<
   return updated.length;
 }
 
-/** A count per package: `counts.get(packageId)`. */
-export type CountsByPackage = Map<string, number>;
-
-/** Fold `(packageId, count)` rows into {@link CountsByPackage}; a row with no package is dropped. */
+/** Fold `(packageId, count)` rows into a map; a row with no package is dropped. */
 export function countsByPackage(
   rows: readonly { packageId: string | null; count: number }[],
-): CountsByPackage {
+): Map<string, number> {
   return new Map(
     rows.flatMap(({ packageId, count: value }) => (packageId ? [[packageId, value]] : [])),
   );
@@ -222,7 +219,7 @@ export async function getUnreadRunCountsByAgent(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
-): Promise<CountsByPackage> {
+): Promise<Map<string, number>> {
   if (grants.length === 0) return new Map();
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })

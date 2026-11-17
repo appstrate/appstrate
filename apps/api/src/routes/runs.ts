@@ -23,7 +23,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict, internalError, type ResolutionFieldError } from "../lib/errors.ts";
 import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
-import { callerSpaceGrant } from "../lib/permissions.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { setCursorLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import {
@@ -63,8 +63,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { parseRunListFilters } from "../lib/run-list-filters.ts";
-import { parseGlobalRunListQuery } from "../lib/run-list-query.ts";
+import { parseGlobalRunListQuery, parseRunListFilters } from "../lib/run-list-filters.ts";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -200,6 +199,14 @@ async function replayRun(c: Context<AppEnv>, response: Response): Promise<Respon
     throw notFound("Run not found");
   }
   return c.json({ ...cached, ...run }, 201, { "Idempotent-Replayed": "true" });
+}
+
+/** The global run list over `grants`: `GET /api/runs` and `GET /api/orgs/{orgId}/runs`. */
+export async function respondRunList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  const filters = parseGlobalRunListQuery(c);
+  const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
+  setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
+  return c.json(result);
 }
 
 export function createRunsRouter() {
@@ -447,17 +454,10 @@ export function createRunsRouter() {
   });
 
   // GET /api/runs — global run list across the space, keyset-paged on `startingAfter` (a run
-  // id) + `limit`. The filters are `parseGlobalRunListQuery`'s, shared with
-  // `GET /api/orgs/{orgId}/runs`.
-  router.get("/runs", requireRunsRead, async (c) => {
-    const filters = parseGlobalRunListQuery(c);
-    const result = await listGlobalRuns(getSpaceScope(c).orgId, [callerSpaceGrant(c)], {
-      ...filters,
-      actor: getActor(c),
-    });
-    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
-    return c.json(result);
-  });
+  // id) + `limit`.
+  router.get("/runs", requireRunsRead, (c) =>
+    respondRunList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // PUT /api/runs/read-all — the caller reads every run of the space. Bulk
   // mutation: returns a documented operation result ({ updated_count }).

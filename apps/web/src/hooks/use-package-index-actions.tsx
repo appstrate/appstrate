@@ -13,11 +13,8 @@ import { usePermissions } from "./use-permissions";
 import { useSpaceAction, useSpacesFor } from "./use-space-action";
 
 /**
- * A package index's deeds: browse the catalogue, import, create. Creating — by hand, with the
- * chat or by import — is a write on the type, as its routes are; the import names the type, so
- * the server refuses an archive of another one. Each is offered where a space grants it; the
- * dialogs open in the working space, which the action entered (its entry a menu of the spaces
- * when several may take it). The catalogue names no space: its add menu picks one per package.
+ * A package index's deeds: browse the catalogue, import, create — each a write on the type,
+ * offered where a space grants it and opened in the space the action entered.
  */
 export function usePackageIndexActions(type: PackageType, createLabel: string) {
   const { t } = useTranslation(["settings", "common"]);

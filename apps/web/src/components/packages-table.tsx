@@ -3,9 +3,9 @@
 import { useTranslation } from "react-i18next";
 import type { CollectionState } from "./collection";
 import { DataTable, type DataColumn } from "./data-table";
-import { useSpaceLink } from "../hooks/use-current-space";
-import type { CardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
+import type { CardItem } from "../lib/package-card-item";
+import { useSpaceLink } from "../hooks/use-current-space";
 
 export function PackagesTable({
   tableId,

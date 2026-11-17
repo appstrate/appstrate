@@ -19,13 +19,12 @@ import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { CountBadge } from "./count-badge";
 import { rowActionsColumn } from "./row-actions-column";
 import { usePackageSpaceColumn } from "./space-column";
-import { PackageSharedFrom } from "./package-spaces";
 import { CellEmpty, CellPlaceholder, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../lib/package-card-item";
 
 /** The package identity shared by the index, usage and catalogue tables. */
-export function usePackageNameColumn(holds?: PackageType, spanning = false): DataColumn<CardItem> {
+export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> {
   const { t } = useTranslation(["agents", "common"]);
   return {
     id: "name",
@@ -63,9 +62,6 @@ export function usePackageNameColumn(holds?: PackageType, spanning = false): Dat
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{item.displayName}</span>
-            {!spanning && (
-              <PackageSharedFrom homeSpaceId={item.homeSpaceId} system={item.source === "system"} />
-            )}
             <CountBadge
               count={item.unreadCount ?? 0}
               label={t("dashboard.unreadRuns", { count: item.unreadCount ?? 0 })}
@@ -97,12 +93,8 @@ export function usePackageNameColumn(holds?: PackageType, spanning = false): Dat
  */
 export function usePackageColumns(holds: PackageType, spanning = false): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
-  const name = usePackageNameColumn(holds, spanning);
-  const spaceColumn = usePackageSpaceColumn<CardItem>(spanning, (item) => ({
-    homeSpaceId: item.homeSpaceId,
-    spaceIds: item.spaceIds,
-    system: item.source === "system",
-  }));
+  const name = usePackageNameColumn(holds);
+  const spaceColumn = usePackageSpaceColumn<CardItem>(spanning, (item) => item);
   const runnable = holds === "agent";
   const origin = useCatalogueOriginColumn<CardItem>(useOrg().currentOrg?.name ?? "");
   const columns: DataColumn<CardItem>[] = [
@@ -153,5 +145,5 @@ export function usePackageColumns(holds: PackageType, spanning = false): DataCol
     ),
   ];
 
-  return columns.filter((c) => runnable || (c.id !== "state" && c.id !== "actions"));
+  return runnable ? columns : columns.filter((c) => c.id !== "state" && c.id !== "actions");
 }

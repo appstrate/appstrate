@@ -25,14 +25,19 @@
  * creator (an end-user cleaning up its own upload holds no org permission).
  */
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { callerPermissions, callerSpaceGrant, fileLifecycleCeiling } from "../lib/permissions.ts";
+import {
+  callerPermissions,
+  callerSpaceGrant,
+  fileLifecycleCeiling,
+  type SpaceGrant,
+} from "../lib/permissions.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
@@ -50,7 +55,7 @@ import {
   getFileCapabilities,
   parseStorageKey,
 } from "../services/files.ts";
-import { parseListFilesQuery } from "../lib/file-list-query.ts";
+import { parseListFilesQuery } from "../lib/list-query.ts";
 import {
   verifyPreviewToken,
   previewKind,
@@ -61,21 +66,21 @@ import {
   PREVIEW_MAX_BYTES,
 } from "../services/file-preview.ts";
 
+/** The gallery list over `grants`: `GET /api/files` and `GET /api/orgs/{orgId}/files`. */
+export async function respondFileList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  const filters = parseListFilesQuery(c);
+  return c.json(
+    await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c)),
+  );
+}
+
 export function createFilesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/files — gallery list.
-  router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
-    const scope = getSpaceScope(c);
-    const page = await listFilesForActor(
-      scope.orgId,
-      [callerSpaceGrant(c)],
-      getActor(c),
-      parseListFilesQuery(c),
-      fileLifecycleCeiling(c),
-    );
-    return c.json(page);
-  });
+  router.get("/files", rateLimit(120), requirePermission("files", "read"), (c) =>
+    respondFileList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.

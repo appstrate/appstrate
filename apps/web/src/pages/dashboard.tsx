@@ -9,7 +9,6 @@ import { useOverviewMode } from "../hooks/use-overview-mode";
 import { ErrorState } from "../components/page-states";
 import { DashboardBodySkeleton } from "../components/loading-skeletons";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
-import { recentAgentsFirst } from "../lib/recent-agents";
 import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 /**
@@ -49,12 +48,38 @@ export function DashboardPage() {
 
   const runs = runsData?.data ?? [];
 
+  // Build agent lookup map
+  const agentMap = new Map<string, NonNullable<typeof agents>[number]>();
+  if (agents) {
+    for (const agent of agents) agentMap.set(agent.id, agent);
+  }
+
+  // Deduplicate runs by packageId (keep first = most recent), limit to 8
+  // Only include agents that still exist (agentMap lookup)
+  const recentAgentIds: string[] = [];
+  const seen = new Set<string>();
+  for (const exec of runs) {
+    if (!exec.packageId || seen.has(exec.packageId)) continue;
+    seen.add(exec.packageId);
+    if (agentMap.has(exec.packageId)) {
+      recentAgentIds.push(exec.packageId);
+    }
+    if (recentAgentIds.length >= 8) break;
+  }
+
+  const orderedAgents = recentAgentIds
+    .map((id) => agentMap.get(id))
+    .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
+  for (const agent of agents ?? []) {
+    if (!seen.has(agent.id)) orderedAgents.push(agent);
+  }
+
   return (
     <DashboardContent
       {...{
         firstName,
         spanning,
-        agents: recentAgentsFirst(runs, agents ?? []),
+        agents: orderedAgents,
         runs,
         runTotal: runsData?.total ?? runs.length,
         schedules: schedules ?? [],

@@ -39,7 +39,7 @@ import { CardGridSkeleton } from "./card-grid";
 import { FileTileSkeleton } from "./file-tile";
 import { ShellHeaderActions } from "./shell-header-slots";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { ACROSS_SPACES, agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
 import { DetailBarSkeleton } from "./detail-bar";
 
@@ -255,13 +255,13 @@ function useCachedPackageName(type: PackageType, packageId: string | undefined) 
   if (type === "agent") {
     return cached<{ id: string; display_name?: string }>(
       agentsKeys.list(orgId, spaceId),
-      agentsKeys.acrossSpaces(orgId),
+      agentsKeys.list(orgId, ACROSS_SPACES),
     )?.display_name;
   }
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return cached<{ id: string; name?: string }>(
     packageKeys.list(segment, orgId, spaceId),
-    packageKeys.acrossSpaces(segment, orgId),
+    packageKeys.list(segment, orgId, ACROSS_SPACES),
   )?.name;
 }
 

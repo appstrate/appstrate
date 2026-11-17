@@ -33,7 +33,7 @@ import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from 
 import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
-import { callerSpaceGrant } from "../lib/permissions.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
   assertExplicitModelExists,
@@ -188,22 +188,20 @@ async function requireBundleDependencyReadPermissions(
   }
 }
 
+/** The agent index over `grants`: `GET /api/agents` and `GET /api/orgs/{orgId}/agents`. */
+export async function respondAgentIndex(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  return c.json(
+    listResponse(await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c))),
+  );
+}
+
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/agents — the agents index of the current space (`listAgentIndex`)
-  router.get("/", requireAgentRead, async (c) => {
-    return c.json(
-      listResponse(
-        await listAgentIndex(
-          getSpaceScope(c).orgId,
-          [callerSpaceGrant(c)],
-          getActor(c),
-          packageAccessSpaces(c),
-        ),
-      ),
-    );
-  });
+  router.get("/", requireAgentRead, (c) =>
+    respondAgentIndex(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
   // input defaults + field locks (admin-only).

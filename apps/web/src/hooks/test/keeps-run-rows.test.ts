@@ -3,7 +3,7 @@
 /** Which key changes keep a run list's rows on screen while the next key loads. */
 
 import { describe, it, expect } from "bun:test";
-import { paginatedRunsKeys } from "../../lib/query-keys.ts";
+import { ACROSS_SPACES, paginatedRunsKeys } from "../../lib/query-keys.ts";
 import { keepsRunRows } from "../use-paginated-runs.ts";
 
 const key = (overrides: { status?: string; search?: string; limit?: number } = {}) =>
@@ -34,8 +34,10 @@ describe("keepsRunRows", () => {
 
   it("treats a list across spaces like any list: searching keeps, entering or leaving it drops", () => {
     const across = (search = "") =>
-      paginatedRunsKeys.acrossSpaces(
+      paginatedRunsKeys.list(
         "org_1",
+        ACROSS_SPACES,
+        "/runs",
         undefined,
         undefined,
         undefined,

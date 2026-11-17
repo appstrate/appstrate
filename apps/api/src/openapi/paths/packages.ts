@@ -324,9 +324,8 @@ const integrationPackageListResponses = {
 function orgPackageIndexDescription(noun: string, single: string, permission: string): string {
   return (
     `Read-only index of the ${noun} of every space of the organization where the caller holds \`${permission}\`: the rows of \`${single}\`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). ` +
-    "`space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. " +
-    `${ORG_READ_REACH} ` +
-    "No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`."
+    "`space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. " +
+    ORG_READ_REACH
   );
 }
 

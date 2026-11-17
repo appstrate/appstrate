@@ -18,19 +18,14 @@ import type { AppEnv } from "../types/index.ts";
 import { requireOrgPathMembership } from "../middleware/org-path-context.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAnyCeiling } from "../middleware/require-permission.ts";
-import { listGlobalRuns } from "../services/state/runs.ts";
-import { listSchedules } from "../services/scheduler.ts";
-import { listFilesForActor } from "../services/files.ts";
-import { listAgentIndex, listPackageIndex } from "../services/package-index.ts";
 import { readableSpacesAcross } from "../lib/reachable-spaces.ts";
-import { fileLifecycleCeiling, type Permission, type SpaceGrant } from "../lib/permissions.ts";
-import { getActor } from "../lib/actor.ts";
-import { listResponse } from "@appstrate/core/list-query";
+import type { Permission, SpaceGrant } from "../lib/permissions.ts";
 import { parseEmptyQuery } from "../lib/list-query.ts";
-import { setCursorLinkHeader } from "../lib/pagination-link.ts";
-import { parseGlobalRunListQuery } from "../lib/run-list-query.ts";
-import { parseListFilesQuery } from "../lib/file-list-query.ts";
-import { packageAccessSpaces } from "../lib/package-access.ts";
+import { respondRunList } from "./runs.ts";
+import { respondScheduleList } from "./schedules.ts";
+import { respondFileList } from "./files.ts";
+import { respondAgentIndex } from "./agents.ts";
+import { respondPackageIndex } from "./packages.ts";
 
 /**
  * The package indexes served across spaces besides the agents' own, each with
@@ -48,66 +43,40 @@ const INDEXED_PACKAGE_TYPES = [
  * The handlers of one list spanning the spaces of `:orgId`. `permissions`
  * (any one admits) is both the ceiling a delegated credential must name — a
  * 403, not an empty page — and the per-space grant that keeps a space: that
- * grant list IS the authorization. The spaces resolve before `parseQuery`, so a
- * refused end-user is a 403 whatever its query.
+ * grant list IS the authorization. The spaces resolve before `list` reads the
+ * query, so a refused end-user is a 403 whatever its query.
  */
-function readAcrossSpaces<Q>(
+function readAcrossSpaces(
   permissions: readonly Permission[],
-  parseQuery: (c: Context<AppEnv>) => Q,
-  list: (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[], query: Q) => Promise<Response>,
+  list: (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) => Promise<Response>,
 ) {
   return [
     requireOrgPathMembership,
     requireAnyCeiling(permissions),
     async (c: Context<AppEnv>) => {
       const orgId = c.req.param("orgId")!;
-      const grants = await readableSpacesAcross(c, orgId, permissions);
-      return list(c, orgId, grants, parseQuery(c));
+      return list(c, orgId, await readableSpacesAcross(c, orgId, permissions));
     },
   ] as const;
 }
 
+/** An index whose single-space twin reads no query: the org route still refuses one. */
+const withEmptyQuery =
+  (list: (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) => Promise<Response>) =>
+  (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) => {
+    parseEmptyQuery(c);
+    return list(c, orgId, grants);
+  };
+
 export function createCrossSpaceReadsRouter() {
   const router = new Hono<AppEnv>();
 
-  router.get(
-    "/:orgId/runs",
-    ...readAcrossSpaces(
-      RUNS_READ_PERMISSIONS,
-      parseGlobalRunListQuery,
-      async (c, orgId, grants, filters) => {
-        const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
-        setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
-        return c.json(result);
-      },
-    ),
-  );
-
-  router.get(
-    "/:orgId/schedules",
-    ...readAcrossSpaces(["schedules:read"], parseEmptyQuery, async (c, orgId, grants) =>
-      c.json(listResponse(await listSchedules(orgId, grants, getActor(c)))),
-    ),
-  );
-
-  router.get(
-    "/:orgId/files",
-    rateLimit(120),
-    ...readAcrossSpaces(["files:read"], parseListFilesQuery, async (c, orgId, grants, filters) =>
-      c.json(await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c))),
-    ),
-  );
-
+  router.get("/:orgId/runs", ...readAcrossSpaces(RUNS_READ_PERMISSIONS, respondRunList));
+  router.get("/:orgId/schedules", ...readAcrossSpaces(["schedules:read"], respondScheduleList));
+  router.get("/:orgId/files", rateLimit(120), ...readAcrossSpaces(["files:read"], respondFileList));
   router.get(
     "/:orgId/agents",
-    ...readAcrossSpaces(
-      packageSightPermissions("agent"),
-      parseEmptyQuery,
-      async (c, orgId, grants) =>
-        c.json(
-          listResponse(await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c))),
-        ),
-    ),
+    ...readAcrossSpaces(packageSightPermissions("agent"), withEmptyQuery(respondAgentIndex)),
   );
 
   for (const { type, segment } of INDEXED_PACKAGE_TYPES) {
@@ -115,18 +84,14 @@ export function createCrossSpaceReadsRouter() {
       `/:orgId/packages/${segment}`,
       ...readAcrossSpaces(
         [packagePermission(type, "read")],
-        parseEmptyQuery,
-        async (c, orgId, grants) =>
-          c.json(
-            listResponse(
-              await listPackageIndex(
-                type,
-                orgId,
-                grants.map((g) => g.spaceId),
-                packageAccessSpaces(c),
-              ),
-            ),
+        withEmptyQuery((c, orgId, grants) =>
+          respondPackageIndex(
+            c,
+            type,
+            orgId,
+            grants.map((g) => g.spaceId),
           ),
+        ),
       ),
     );
   }

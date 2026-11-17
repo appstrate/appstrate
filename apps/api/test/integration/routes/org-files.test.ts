@@ -46,7 +46,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage, seedRun, seedSpace, seedSpaceGrant } from "../../helpers/seed.ts";
-import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 
 const app = getTestApp();
 
@@ -310,17 +310,8 @@ describe("GET /api/orgs/{orgId}/files", () => {
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {
-    const loopback = (permissions: string[]) => ({
-      Authorization: `Bearer ${mintMcpLoopbackToken({
-        userId: member.user.id,
-        email: member.user.email,
-        name: member.user.name,
-        orgId: owner.orgId,
-        orgRole: "member",
-        permissions,
-      })}`,
-      "X-Org-Id": owner.orgId,
-    });
+    const loopback = (permissions: string[]) =>
+      memberLoopbackHeaders(member, owner.orgId, permissions);
     const full = await list(loopback(["files:read", "runs:read-all", "files:delete"]));
     expect(ids(full)).toEqual(pick(...memberRows));
     // Without `runs:read-all` in its ceiling, the supervision arms drop out everywhere.
