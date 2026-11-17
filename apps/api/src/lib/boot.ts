@@ -507,15 +507,17 @@ export async function bootHousekeeping(): Promise<void> {
     // cover correctness without it; the worker only matters for credentials
     // that go dormant long enough that their refresh_token would expire
     // upstream.
-    bootStep("housekeeping", "oauth-model-refresh-worker", () =>
-      (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
-        (err) => {
-          logger.warn("Could not initialize OAuth model refresh worker", {
-            error: getErrorMessage(err),
-          });
-        },
-      ),
-    ),
+    ...(env.OAUTH_REFRESH_WORKER_ENABLED
+      ? [
+          bootStep("housekeeping", "oauth-model-refresh-worker", () =>
+            initOAuthModelRefreshWorker().catch((err) => {
+              logger.warn("Could not initialize OAuth model refresh worker", {
+                error: getErrorMessage(err),
+              });
+            }),
+          ),
+        ]
+      : []),
     // Pairing-table cleanup runs unconditionally — pure table-bloat
     // janitor for `model_provider_pairings`, unrelated to the refresh
     // hot path.

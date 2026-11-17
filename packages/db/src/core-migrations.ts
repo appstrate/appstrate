@@ -42,16 +42,16 @@ const MAX_TAGS_LISTED = 10;
 /**
  * Apply every pending core migration.
  *
- * A dedicated `max: 1` client: the advisory lock is per SESSION, so the lock, the
- * `SET` and the migration must all run on the one connection (a pool would hand the
- * migrator a different one and the lock would guard nothing).
+ * A dedicated `max: 1` client: the advisory lock is per SESSION, so the lock and the
+ * migration must run on the one connection (a pool would hand the migrator a different
+ * one and the lock would guard nothing). `onnotice` is silenced: on an up-to-date
+ * database the migrator's `IF NOT EXISTS` statements raise a notice on every boot.
  */
 export async function applyCoreMigrations(databaseUrl: string): Promise<void> {
   const client = postgres(databaseUrl, { max: 1, onnotice: () => {} });
   try {
     await client`SELECT pg_advisory_lock(${String(CORE_MIGRATION_LOCK_KEY)}::bigint)`;
     try {
-      await client`SET client_min_messages TO 'warning'`;
       await migrate(drizzle(client), { migrationsFolder: CORE_MIGRATIONS_FOLDER });
     } finally {
       await client`SELECT pg_advisory_unlock(${String(CORE_MIGRATION_LOCK_KEY)}::bigint)`.catch(
@@ -95,7 +95,7 @@ async function readJournal(): Promise<JournalEntry[]> {
  */
 export async function listPendingCoreMigrations(databaseUrl: string): Promise<string[]> {
   const entries = await readJournal();
-  const client = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+  const client = postgres(databaseUrl, { max: 1 });
   try {
     const [probe] = await client<{ exists: boolean }[]>`
       SELECT to_regclass(${JOURNAL_TABLE}) IS NOT NULL AS exists`;
