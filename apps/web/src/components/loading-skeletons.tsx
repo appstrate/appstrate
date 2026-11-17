@@ -338,6 +338,27 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
   );
 }
 
+/** A notification's page: the bar, then the card holding its message. */
+export function NotificationDetailSkeleton() {
+  const { t } = useTranslation("common");
+  return (
+    <DetailPageSkeleton
+      trail={[{ label: t("notifications.ariaLabel") }]}
+      tabCount={0}
+      panel={
+        <div className="bg-muted/40 flex min-w-0 flex-col overflow-hidden rounded-lg border">
+          <div className="flex min-h-5 items-center gap-2 px-4 py-3">
+            <SkeletonLine className="w-24 text-sm font-semibold" />
+          </div>
+          <div className="bg-card rounded-t-lg border-t p-4">
+            <Lines lines={3} />
+          </div>
+        </div>
+      }
+    />
+  );
+}
+
 /** A schedule's page, under the schedules list. */
 export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");

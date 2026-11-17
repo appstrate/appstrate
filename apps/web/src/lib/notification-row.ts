@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import type { TFunction } from "i18next";
+import { formatDateField } from "./format-date";
+import { catalogueHref } from "./catalogue-link";
+import type { paths } from "../api/client";
+
+/** One notification as returned by `GET /api/notifications`. */
+export type NotificationItem =
+  paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
+
+/** What a row says and where it leads (`null` when that page is closed to the caller). */
+interface NotificationRow {
+  title: string;
+  status: string | null;
+  /** The text an agent sent (`agent_message`). */
+  message: string | null;
+  /** The line under the row: its date, and who sent it for an agent's message. */
+  meta: string;
+  target: string | null;
+}
+
+/**
+ * One row per kind — the notification's page reads it too. Notifications follow
+ * the session's ceiling, not the space's reads, so each target is asked of `canReach`.
+ */
+export function notificationRow(
+  notification: NotificationItem,
+  agentName: (packageId: string) => string | undefined,
+  canReach: (target: string) => boolean,
+  t: TFunction<["common", "agents"]>,
+): NotificationRow {
+  const date = formatDateField(notification.createdAt);
+  if (notification.type === "package_shared") {
+    // One share, one decision: open THAT package's sheet, not a list to search.
+    const share = notification.payload;
+    const href = share ? catalogueHref(share.package_type, { packageId: share.packageId }) : null;
+    return {
+      title: t("notifications.packageShared", {
+        name: share?.shared_by_name ?? "",
+        package: share?.packageId ?? "",
+      }),
+      status: null,
+      message: null,
+      meta: date,
+      target: href && canReach(href) ? href : null,
+    };
+  }
+  const packageId = notification.payload?.packageId ?? null;
+  const href =
+    packageId && notification.runId ? `/agents/${packageId}/runs/${notification.runId}` : null;
+  const target = href && canReach(href) ? href : null;
+  const liveName = packageId ? agentName(packageId) : undefined;
+  if (notification.type === "agent_message") {
+    // A message the agent sent from its run (`notify`): its own title and text, no status.
+    const sent = notification.payload;
+    const agent =
+      liveName ?? sent?.agent_name ?? packageId ?? t("runs.deletedAgent", { ns: "agents" });
+    return {
+      title: sent?.title ?? agent,
+      status: null,
+      message: sent?.message ?? null,
+      meta: t("notifications.agentMessageFrom", { agent, date }),
+      target,
+    };
+  }
+  // A run that needs attention: it failed or timed out.
+  return {
+    // Live name, else the one stamped on the run (agent switched off or deleted).
+    title:
+      liveName ??
+      notification.payload?.agent_name ??
+      packageId ??
+      t("runs.deletedAgent", { ns: "agents" }),
+    status: notification.payload?.status ?? null,
+    message: null,
+    meta: date,
+    target,
+  };
+}

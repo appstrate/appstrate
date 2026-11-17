@@ -2713,7 +2713,7 @@ export interface paths {
         get?: never;
         /**
          * Mark all notifications as read
-         * @description Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their failure notices with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllNotificationsRead"];
         post?: never;
@@ -2735,6 +2735,26 @@ export interface paths {
          * @description Returns the number of unread notifications in the current recipient's feed. Unread runs are counted by `GET /api/runs?unread=true`.
          */
         get: operations["getUnreadNotificationCount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a notification
+         * @description Returns one notification of the current recipient. A pure read: marking it read is `PUT /api/notifications/{id}/read`. Returns 404 when the notification does not belong to the caller.
+         */
+        get: operations["getNotification"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4507,7 +4527,7 @@ export interface paths {
         get?: never;
         /**
          * Mark every run read
-         * @description Marks every unread run of the space read for the caller (read state is per recipient), and the notifications the bell held for them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks every unread run of the space read for the caller (read state is per recipient), and the failure notices (`run_failed`) the bell held for them; the messages agents sent stay unread. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllRunsRead"];
         post?: never;
@@ -4745,7 +4765,7 @@ export interface paths {
         get?: never;
         /**
          * Mark a run read
-         * @description Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its notification when the bell held one. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.
+         * @description Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its failure notice (`run_failed`) when the bell held one — never a message its agent sent (`agent_message`), which is read on its own page. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.
          */
         put: operations["markRunRead"];
         post?: never;
@@ -19126,6 +19146,133 @@ export interface operations {
                     "application/json": {
                         /** @description Number of unread notifications */
                         count: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getNotification: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Notification id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notification */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "id": "550e8400-e29b-41d4-a716-446655440000",
+                     *       "type": "agent_message",
+                     *       "runId": "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
+                     *       "payload": {
+                     *         "packageId": "@acme/weekly-report",
+                     *         "agent_name": "Weekly report",
+                     *         "title": "Report ready",
+                     *         "message": "This week's report is in the shared drive."
+                     *       },
+                     *       "read_at": null,
+                     *       "createdAt": "2026-01-15T10:31:12Z"
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @constant */
+                        type: "run_failed";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The run's agent; null once the agent is deleted. */
+                            packageId: string | null;
+                            /** @description The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted). */
+                            agent_name: string | null;
+                            /** @enum {string} */
+                            status: "failed" | "timeout";
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @constant */
+                        type: "package_shared";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            packageId: string;
+                            /** @enum {string} */
+                            package_type: "agent" | "skill" | "integration";
+                            shared_by_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @constant */
+                        type: "agent_message";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The agent of the run that sent it; null when the run no longer references its agent. */
+                            packageId: string | null;
+                            /** @description The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted). */
+                            agent_name: string | null;
+                            /** @description Headline the agent wrote (`notify` tool). */
+                            title: string;
+                            /** @description Body the agent wrote (`notify` tool). */
+                            message: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
                     };
                 };
             };
