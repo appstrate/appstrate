@@ -13,7 +13,7 @@ import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CountBadge } from "@/components/count-badge";
-import { useSpacesFor } from "@/hooks/use-space-action";
+import { useCanReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { useChatCan, useShellChatTransport } from "@/modules/chat/use-chat-runtime";
@@ -37,7 +37,8 @@ export function ProductTabs() {
   // The chat serves the organization in every mode (its sessions act across spaces): it is offered
   // where some space opens it, and writable where it may act (the acting set), whatever the
   // working space grants.
-  const { offered: chatReachable } = useSpacesFor({ route: "/chat" });
+  const canReach = useCanReach();
+  const chatReachable = canReach("/chat");
   const canWrite = useChatCan()("chat:write");
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;

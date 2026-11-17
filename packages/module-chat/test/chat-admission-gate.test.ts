@@ -38,6 +38,7 @@ import type { ChatPlatformDeps } from "../src/platform-services.ts";
 import type { ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import type { UIMessage } from "ai";
+import { reachableSpace } from "./reachable-space.ts";
 
 // Boot the shared harness (DB migrations, auth, singletons). The handler is
 // invoked directly, but createTestContext needs the initialized platform.
@@ -73,15 +74,12 @@ function fakeContext(opts: {
     user: opts.user,
     // What the router's middleware writes on every chat route: the spaces the caller reaches.
     reachable: [
-      {
+      reachableSpace({
         id: opts.spaceId,
         name: "Default",
         role: "owner",
         permissions: ["chat:read", "chat:write", "mcp:read", "mcp:invoke"],
-        credentialProxyOpen: false,
-        isDefault: false,
-        personal: false,
-      },
+      }),
     ],
     reachableOrgHalf: new Set<string>(),
     principalKind: "user",

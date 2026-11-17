@@ -16,7 +16,7 @@ import { SkillChips } from "../src/ui/skill-chips.tsx";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider, type ChatTransport } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
-import { testHost } from "./test-host.ts";
+import { conversationScope, testHost } from "./test-host.ts";
 import type { ChatSkillSelection, SkillHint } from "../src/skills.ts";
 
 const host = testHost({
@@ -54,15 +54,7 @@ function render({
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={{ ...host, can: () => canReadSkills }}>
-        <ConversationScopeProvider
-          value={{
-            originSpaceId,
-            restricted: false,
-            generating: false,
-            pending: false,
-            setRestricted: () => {},
-          }}
-        >
+        <ConversationScopeProvider value={conversationScope({ originSpaceId, restricted: false })}>
           <TooltipProvider>
             <SkillChips
               transport={transport === null ? undefined : transport}

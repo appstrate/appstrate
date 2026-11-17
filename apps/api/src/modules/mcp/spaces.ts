@@ -9,11 +9,8 @@ import type { Context } from "hono";
 import type { AppEnv } from "../../types/index.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
-import {
-  callerReachableSpaces,
-  toReachableSpaceWire,
-  type ReachableSpace,
-} from "../../lib/reachable-spaces.ts";
+import { callerReachableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
+import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
 import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
@@ -54,10 +51,13 @@ export async function listReachableSpaces(
 ): Promise<McpSpace[]> {
   return (await callerReachableSpaces(c, orgId))
     .filter((space) => space.permissions.has("mcp:read"))
-    .map((space) => {
-      const wire = toReachableSpaceWire(space);
-      return { ...wire, surface: surfaceOf(wire.permissions, wire) };
-    });
+    .map((space) => ({
+      id: space.id,
+      name: space.name,
+      role: toSpaceRoleWire(space.role)!.name,
+      permissions: space.permissions,
+      surface: surfaceOf(space.permissions, space),
+    }));
 }
 
 /**

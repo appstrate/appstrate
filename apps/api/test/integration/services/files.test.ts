@@ -607,7 +607,7 @@ describe("files service + routes", () => {
     );
   });
 
-  it("does not reveal a conversation's context from another space", async () => {
+  it("lists a conversation's files only in the space they belong to", async () => {
     // A file belongs to the space it was created in, so the SAME user asking
     // for the conversation's files from another space resolves nothing.
     const sessionId = `chs_${crypto.randomUUID()}`;
@@ -1347,6 +1347,9 @@ describe("files service + routes", () => {
     // A run of the same space that belongs to no conversation is not context.
     const unrelated = await seedRunRow(otherScope);
     await publishStream(otherScope, unrelated, "unrelated.txt", "unrelated");
+    // A file of a listed space produced by the session's run in the other space: the space
+    // filter keeps it, only the run's own space decides.
+    const { row: crossed } = await publishStream(scope, inOther, "crossed.txt", "crossed");
 
     const grants = [
       { spaceId: ctx.defaultSpaceId, permissions: READS_EVERY_RUN },
@@ -1358,8 +1361,9 @@ describe("files service + routes", () => {
           await listFilesForActor(ctx.orgId, listed, userActor, { contextChatSessionId: sessionId })
         ).data.map((file) => file.id),
       );
-    expect(await ids(grants)).toEqual(new Set([first.id, second.id]));
-    // The session's runs are read in the listed spaces only.
+    expect(await ids(grants)).toEqual(new Set([first.id, second.id, crossed.id]));
+    // The session's runs are read in the listed spaces only: `crossed` sits in the listed space,
+    // its run does not.
     expect(await ids(grants.slice(0, 1))).toEqual(new Set([first.id]));
 
     // Someone else's conversation resolves nothing.
@@ -1478,6 +1482,38 @@ describe("files service + routes", () => {
     expect(announced).toEqual([ctx.defaultSpaceId]);
     expect(await filesOfSession()).toHaveLength(1);
     expect(resolved.spaceId).toBe(ctx.defaultSpaceId);
+  });
+
+  it("a chat attachment the caller cannot read announces no space", async () => {
+    const colleague = await createTestUser({ email: "colleague@refused-attach.test" });
+    await addOrgMember(ctx.orgId, colleague.id, "member");
+    const theirRun = await seedRunRow(scope, { userId: colleague.id });
+    const { row: theirOutput } = await publishStream(scope, theirRun, "leur.txt", "leur livrable");
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: chatSessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+    });
+    const announced: string[] = [];
+    const attach = (permissions: ReadonlySet<string>) =>
+      resolveChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        chatSessionId,
+        uri: `appfile://${theirOutput.id}`,
+        spaces: [{ id: ctx.defaultSpaceId, permissions }],
+        beforeResolve: async (spaceId) => {
+          announced.push(spaceId);
+        },
+      });
+
+    // Refused by the ACL: a 404, and the space is recorded nowhere.
+    await expect(attach(NO_GRANTS)).rejects.toMatchObject({ status: 404 });
+    expect(announced).toEqual([]);
+    // Readable: announced once, then resolved.
+    expect((await attach(READS_EVERY_RUN)).spaceId).toBe(ctx.defaultSpaceId);
+    expect(announced).toEqual([ctx.defaultSpaceId]);
   });
 
   it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {

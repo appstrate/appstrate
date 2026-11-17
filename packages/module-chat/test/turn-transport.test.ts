@@ -15,12 +15,12 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-function capture(status: number): string[] {
+function capture(): string[] {
   const urls: string[] = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       urls.push(String(input));
-      return new Response(status === 204 ? null : "", { status });
+      return new Response("");
     },
     { preconnect: realFetch.preconnect },
   );
@@ -37,7 +37,7 @@ describe("the turn transport", () => {
     });
     // The host's transport arrives after the conversation's was built.
     host.transport = transportOver(async () => new Response());
-    const urls = capture(200);
+    const urls = capture();
 
     await turns.sendMessages({
       chatId: "chs_1",

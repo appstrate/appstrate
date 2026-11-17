@@ -171,10 +171,9 @@ export interface ChatHost {
   can: ChatCan;
   /**
    * The caller's grant in one NAMED space, for what a call of a conversation did there (its run,
-   * its files): `can` answers for the chat as a whole. Absent in a mount that has no space
-   * listing: `can` then answers.
+   * its files): `can` answers for the chat as a whole.
    */
-  canIn?: ChatCanIn;
+  canIn: ChatCanIn;
   /**
    * The spaces the chat acts in (the host's acting set). The skills picker lists them, and a new
    * conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it is
@@ -187,7 +186,7 @@ export interface ChatHost {
    * working space stays the one entered. A limited conversation takes a file only while this is
    * its origin space.
    */
-  workingSpaceId?: string | null;
+  workingSpaceId: string | null;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
@@ -210,19 +209,18 @@ export interface ChatHost {
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
-  /** Names spaces; absent in a mount that has no space listing. */
-  renderSpaces?: RenderSpaces;
+  /** Names spaces. */
+  renderSpaces: RenderSpaces;
   /**
    * Where an in-app `path` opens for a row of `spaceId`: the host names the space in the link when
    * it is not the working one (its `?enterSpace=` convention), else returns `path` unchanged.
-   * Absent: links stay plain paths.
    */
-  linkInSpace?: (path: string, spaceId: string | undefined) => string;
+  linkInSpace: (path: string, spaceId: string | undefined) => string;
   /**
    * A hook returning a space's plain name by id (`undefined` for one the caller does not reach),
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
    */
-  useSpaceLabelOf?: () => (spaceId: string | null | undefined) => string | undefined;
+  useSpaceLabelOf: () => (spaceId: string | null | undefined) => string | undefined;
 }
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */
@@ -267,5 +265,5 @@ export function useChatHost(): ChatHost {
  */
 export function useCanIn(): (spaceId: string | undefined, permission: string) => boolean {
   const { can, canIn } = useChatHost();
-  return (spaceId, permission) => (spaceId && canIn ? canIn(spaceId, permission) : can(permission));
+  return (spaceId, permission) => (spaceId ? canIn(spaceId, permission) : can(permission));
 }

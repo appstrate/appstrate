@@ -13,7 +13,6 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { changeLimit, creationFields, useConversationLimit } from "../src/ui/conversation-limit.ts";
 import {
-  callSpaceOf,
   ConversationScopeProvider,
   attachAvailability,
   useAttachAvailability,
@@ -31,7 +30,7 @@ import {
   type SessionSummary,
 } from "../src/ui/sessions.ts";
 import { requestAnswering, transportOf, transportOver } from "./fake-request.ts";
-import { testHost } from "./test-host.ts";
+import { conversationScope, testHost } from "./test-host.ts";
 
 describe("what the first message carries", () => {
   it("is the origin space, and the limit only when it is on", () => {
@@ -50,60 +49,44 @@ describe("what the first message carries", () => {
 
 describe("when the limit is on offer", () => {
   const acting = ["spc_a"];
-
-  it("is when the conversation has an origin space the chat acts in", () => {
-    expect(
-      limitAvailability({ originSpaceId: "spc_a", restricted: false, generating: false }, acting),
-    ).toEqual({
-      available: true,
-    });
+  const scope = (originSpaceId: string | null, restricted = false, generating = false) => ({
+    originSpaceId,
+    restricted,
+    generating,
   });
 
-  it("is not in « Tous les espaces » or for a conversation without an origin", () => {
-    expect(
-      limitAvailability({ originSpaceId: null, restricted: false, generating: false }, acting),
-    ).toEqual({
+  it("is when the conversation has an origin space the chat acts in", () => {
+    expect(limitAvailability(scope("spc_a"), acting)).toEqual({ available: true });
+  });
+
+  it("is « no-space » for a conversation without an origin, whatever space the host is in", () => {
+    // « Tous les espaces », or a filter on a space the chat does not act in: no origin was taken.
+    expect(limitAvailability(scope(null), acting)).toEqual({
       available: false,
       reason: "no-space",
     });
   });
 
-  it("is not when the origin space is outside the acting set", () => {
-    expect(
-      limitAvailability({ originSpaceId: "spc_x", restricted: false, generating: false }, acting),
-    ).toEqual({
+  it("is « outside » when the origin space left the acting set", () => {
+    expect(limitAvailability(scope("spc_x"), acting)).toEqual({
       available: false,
       reason: "outside",
     });
   });
 
-  it("is not while a turn generates, even to release the limit (the server refuses)", () => {
+  it("is « generating » while a turn generates, even to release the limit (the server refuses)", () => {
     for (const restricted of [false, true]) {
-      expect(
-        limitAvailability({ originSpaceId: "spc_a", restricted, generating: true }, acting),
-      ).toEqual({ available: false, reason: "generating" });
+      for (const origin of ["spc_a", "spc_x", null]) {
+        expect(limitAvailability(scope(origin, restricted, true), acting)).toEqual({
+          available: false,
+          reason: "generating",
+        });
+      }
     }
   });
 
-  it("is « outside », not « no-space », when the host works in a space the chat does not act in", () => {
-    const none = { originSpaceId: null, restricted: false, generating: false };
-    expect(limitAvailability(none, acting, "spc_x")).toEqual({
-      available: false,
-      reason: "outside",
-    });
-    // The overview keeps the entered space as working space: that one is acted in.
-    expect(limitAvailability(none, acting, "spc_a")).toEqual({
-      available: false,
-      reason: "no-space",
-    });
-  });
-
   it("always lets a limited conversation be released", () => {
-    expect(
-      limitAvailability({ originSpaceId: "spc_x", restricted: true, generating: false }, acting),
-    ).toEqual({
-      available: true,
-    });
+    expect(limitAvailability(scope("spc_x", true), acting)).toEqual({ available: true });
   });
 });
 
@@ -185,18 +168,7 @@ describe("changing the limit of an existing conversation", () => {
   });
 });
 
-describe("the space a tool card shows", () => {
-  it("is the one the engine stamped on the call, whatever the conversation's limit is now", () => {
-    const stamped = { providerMetadata: { appstrate: { spaceId: "spc_a" } } };
-    expect(callSpaceOf(stamped)).toBe("spc_a");
-  });
-
-  it("is none for a call that acted in no space", () => {
-    expect(callSpaceOf({})).toBeUndefined();
-    expect(callSpaceOf({ providerMetadata: { appstrate: {} } })).toBeUndefined();
-    expect(callSpaceOf({ providerMetadata: { appstrate: { spaceId: 4 } } })).toBeUndefined();
-  });
-
+describe("the space a limited conversation acts in", () => {
   it("pins the origin only while the conversation is limited", () => {
     expect(limitedSpaceOf({ originSpaceId: "spc_a", restricted: true })).toBe("spc_a");
     expect(limitedSpaceOf({ originSpaceId: "spc_a", restricted: false })).toBeUndefined();
@@ -269,13 +241,7 @@ describe("the composer's limit chip", () => {
   }
 
   it("names the space and offers to lift the limit when the conversation is limited", () => {
-    const out = html({
-      originSpaceId: "spc_a",
-      restricted: true,
-      generating: false,
-      pending: false,
-      setRestricted: () => {},
-    });
+    const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true }));
     expect(out).toContain('data-testid="composer-limit-chip"');
     expect(out).toContain('data-spaces="spc_a"');
     expect(out).toContain('aria-label="composer.limit.undo|Studio"');
@@ -283,37 +249,23 @@ describe("the composer's limit chip", () => {
   });
 
   it("cannot be lifted while a turn generates", () => {
-    const out = html({
-      originSpaceId: "spc_a",
-      restricted: true,
-      generating: true,
-      pending: false,
-      setRestricted: () => {},
-    });
+    const out = html(
+      conversationScope({ originSpaceId: "spc_a", restricted: true, generating: true }),
+    );
     expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
   });
 
   it("disables the chip's X and the menu item while a change is in flight", () => {
-    const out = html({
-      originSpaceId: "spc_a",
-      restricted: true,
-      generating: false,
-      pending: true,
-      setRestricted: () => {},
-    });
+    const out = html(
+      conversationScope({ originSpaceId: "spc_a", restricted: true, pending: true }),
+    );
     expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
   });
 
   it("is absent when the conversation is not limited", () => {
-    expect(
-      html({
-        originSpaceId: "spc_a",
-        restricted: false,
-        generating: false,
-        pending: false,
-        setRestricted: () => {},
-      }),
-    ).not.toContain("composer-limit-chip");
+    expect(html(conversationScope({ originSpaceId: "spc_a" }))).not.toContain(
+      "composer-limit-chip",
+    );
   });
 });
 
@@ -360,13 +312,7 @@ describe("attaching a file in a limited conversation", () => {
         // No transport is published: the overview's list filter is null whatever the working space.
         <ChatHostProvider value={{ ...host, workingSpaceId }}>
           <ConversationScopeProvider
-            value={{
-              originSpaceId: "spc_a",
-              restricted: true,
-              generating: false,
-              pending: false,
-              setRestricted: () => {},
-            }}
+            value={conversationScope({ originSpaceId: "spc_a", restricted: true })}
           >
             <Verdict />
           </ConversationScopeProvider>

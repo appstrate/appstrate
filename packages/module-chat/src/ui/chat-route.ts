@@ -72,15 +72,21 @@ export function createTurnTransport(read: {
   headers: () => Record<string, string>;
   body: (request: { id: string; messages: UIMessage[]; body: object | undefined }) => object;
 }): DefaultChatTransport<UIMessage> {
+  // A turn needs the organization's route: without the host's transport there is nowhere to send it.
+  const transport = (): ChatTransport => {
+    const current = read.getTransport();
+    if (!current) throw new Error("module-chat: a turn was sent before the host's transport");
+    return current;
+  };
   return new DefaultChatTransport<UIMessage>({
     credentials: "include",
     headers: read.headers,
     prepareSendMessagesRequest: (request) => ({
-      api: chatPath(read.getTransport()!),
+      api: chatPath(transport()),
       body: read.body(request),
     }),
     prepareReconnectToStreamRequest: ({ id }) => ({
-      api: chatPath(read.getTransport()!, `/sessions/${id}/stream`),
+      api: chatPath(transport(), `/sessions/${id}/stream`),
     }),
   });
 }

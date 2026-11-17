@@ -17,10 +17,13 @@
  * stream finalizes (`finalize-stream.ts`). The second is `persistNotice`, which
  * posts a server-authored message into a session with NO live turn — today only
  * the orphaned-run reconciliation (`run-reconcile.ts`), driven by the
- * `onRunStatusChange` event. The two never overlap: `persistNotice` takes the
- * session row's lock and refuses while `active_stream_id` is set, so a turn
- * owns its conversation from start to finalize. The routes below therefore
- * never accept a message — `GET …/sessions/:id` returns the stored
+ * `onRunStatusChange` event. A conversation runs one turn at a time: a turn
+ * claims it by setting `active_stream_id`, refused (409 `chat_turn_in_flight`)
+ * while another live turn holds it. The two writers never overlap:
+ * `persistNotice` takes the session row's lock and refuses while
+ * `active_stream_id` is set, so a turn owns its conversation from start to
+ * finalize. The routes below therefore never accept a message —
+ * `GET …/sessions/:id` returns the stored
  * messages for the client's read-only history adapter, in `seq` order, as
  * `{ id, content }` nodes assistant-ui's `ai-sdk/v6` format adapter decodes.
  *
@@ -38,7 +41,8 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import {
   PERMISSION_REQUIREMENT_MARKER,
-  requireModulePermission,
+  reportPermissionDenial,
+  type requireModulePermission,
 } from "@appstrate/core/permissions";
 import { conflict, forbidden, invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
@@ -217,35 +221,50 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     return next();
   });
 
-  // `acting`: the route starts a turn or a conversation, so it needs a space the turn may act
-  // in, not just any `chat:write`. Managing an existing conversation needs the permission alone.
-  const guard = (permission: ChatPermission, acting = false): PermissionGuard => {
+  // A route guard decided on the reach: `holds` picks the spaces that satisfy it, and none
+  // refuses. It reports its denial through the platform's audit hook and carries the markers
+  // `makePermissionGuard` stamps, so the route table reads back what it enforces.
+  const reachGuard = (
+    required: string,
+    holds: (reachable: ChatEnv["Variables"]["reachable"]) => readonly unknown[],
+    refusal: string,
+  ): PermissionGuard => {
     const check: PermissionGuard = async (c, next) => {
       // The guard type sees the context through its `get` alone; it is the router's own.
-      const reachable = (c as Context<ChatEnv>).get("reachable");
-      const holders = acting ? actingSpaces(reachable) : spacesHolding(reachable, permission);
-      if (holders.length === 0) {
-        throw forbidden(
-          acting
-            ? "You hold chat:write, chat:read and mcp:read together in no space of this organization."
-            : `You hold ${permission} in no space of this organization.`,
-        );
+      if (holds((c as Context<ChatEnv>).get("reachable")).length === 0) {
+        reportPermissionDenial(c, required);
+        throw forbidden(refusal);
       }
       return next();
     };
-    // The requirement the route table reads back, as `requireModulePermission` stamps it.
-    return Object.defineProperty(check, PERMISSION_REQUIREMENT_MARKER, { value: permission });
+    Object.defineProperty(check, Symbol.for("appstrate.permissionGuard"), { value: true });
+    Object.defineProperty(check, PERMISSION_REQUIREMENT_MARKER, { value: required });
+    return check;
   };
+  const guard = (permission: ChatPermission | "mcp:read"): PermissionGuard =>
+    reachGuard(
+      permission,
+      (reachable) => spacesHolding(reachable, permission),
+      `You hold ${permission} in no space of this organization.`,
+    );
+  // Starting a turn or a conversation needs a space the turn may act in (`actingSpaces`):
+  // chat:write, chat:read and mcp:read held together in one space. One guard per grant, so
+  // the route table reads each requirement; the last asks for them in the same space.
+  // Managing an existing conversation needs its permission alone.
+  const actingGuards = [
+    guard("chat:read"),
+    guard("mcp:read"),
+    reachGuard(
+      "chat:write",
+      actingSpaces,
+      "You hold chat:write, chat:read and mcp:read together in no space of this organization.",
+    ),
+  ] as const;
 
   // Registered with literal paths (what verify:openapi reads).
   const handlers = createSessionHandlers(deps);
   router.get("/api/orgs/:orgId/chat/sessions", guard("chat:read"), handlers.list);
-  router.post(
-    "/api/orgs/:orgId/chat/sessions",
-    rateLimited(30),
-    guard("chat:write", true),
-    handlers.create,
-  );
+  router.post("/api/orgs/:orgId/chat/sessions", rateLimited(30), ...actingGuards, handlers.create);
   router.get("/api/orgs/:orgId/chat/sessions/:id", guard("chat:read"), handlers.get);
   router.patch("/api/orgs/:orgId/chat/sessions/:id", guard("chat:write"), handlers.update);
   router.put(
@@ -293,7 +312,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // 20/min: every call fans out into metered LLM traffic. The server is the
   // single writer of messages (user before inference, assistant on finalize) —
   // there is no client message-write endpoint.
-  router.post("/api/orgs/:orgId/chat", rateLimited(20), guard("chat:write", true), (c) =>
+  router.post("/api/orgs/:orgId/chat", rateLimited(20), ...actingGuards, (c) =>
     handleChatStream(c, deps),
   );
 
@@ -405,7 +424,7 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
           "restricted",
         );
       }
-      // A turn in flight keeps the reach it was minted with, so the limit changes between turns.
+      // The turn in flight keeps the reach it was minted with, so the limit changes between turns.
       const limitChanges = restricted !== undefined && restricted !== session.restricted;
       const updated = await db
         .update(chatSessions)

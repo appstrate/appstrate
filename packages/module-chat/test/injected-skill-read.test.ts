@@ -34,6 +34,7 @@ import { turnPermissions } from "../src/turn-permissions.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { createHash } from "node:crypto";
 import { unzipArtifact } from "@appstrate/core/zip";
+import { reachableSpace } from "./reachable-space.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -70,15 +71,12 @@ async function strictTurn(
     {
       restricted: false,
       spaces: [
-        {
+        reachableSpace({
           id: owner.defaultSpaceId,
           name: "Default",
           role: orgRole,
           permissions: [...new Set([...granted, "chat:read"])],
-          credentialProxyOpen: false,
-          isDefault: false,
-          personal: false,
-        },
+        }),
       ],
       user,
       capabilities: turnCapabilities((p) => permissions.includes(p), []),

@@ -34,13 +34,15 @@ const SPACE_LISTS = Object.keys(LIST_ROUTE) as SpaceList[];
 /** What the caller may do in one space: its effective set there, the org-level grants included. */
 export type SpaceGate = (permission: string) => boolean;
 
+/** A route's declaration, read uniformly: the permissions that open it, if any. */
+const accessOf = (path: RoutePath) =>
+  ROUTE_ACCESS[path] as { anyOf?: readonly string[]; spansSpaces?: boolean };
+
 /** A space admits a route where its gate opens it. */
 const routeAdmits =
   (path: RoutePath) =>
-  (can: SpaceGate): boolean => {
-    const access = ROUTE_ACCESS[path] as { anyOf?: readonly string[] };
-    return access.anyOf?.some(can) ?? false;
-  };
+  (can: SpaceGate): boolean =>
+    accessOf(path).anyOf?.some(can) ?? false;
 
 /** A space admits a list where its gate opens the list's route. */
 export const listAdmits = (list: SpaceList) => routeAdmits(LIST_ROUTE[list]);
@@ -134,13 +136,11 @@ function belongsToSpace(path: RoutePath): boolean {
   if (isUnder(path, SETTINGS_INDEX.organization) || isUnder(path, SETTINGS_INDEX.account)) {
     return false;
   }
-  const access = ROUTE_ACCESS[path] as { anyOf?: readonly string[] };
-  return access.anyOf?.some((permission) => !isOrgLevel(permission)) ?? false;
+  return accessOf(path).anyOf?.some((permission) => !isOrgLevel(permission)) ?? false;
 }
 
 /** A route that serves the organization in the mode (`spansSpaces`: the chat). */
-const spansSpaces = (path: RoutePath) =>
-  "spansSpaces" in ROUTE_ACCESS[path] && ROUTE_ACCESS[path].spansSpaces === true;
+const spansSpaces = (path: RoutePath) => accessOf(path).spansSpaces === true;
 
 /**
  * Whether rendering `path` keeps the mode: the lists and their rows, the routes serving the

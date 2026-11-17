@@ -4,18 +4,19 @@
  * The spaces the open conversation touched, as icons at the right of the chat's top bar: the
  * tiles of the first ones (the rest counted « +N ») in one button that never wraps. Hover or
  * focus names them, a click opens a read-only list of each (tile and name). A conversation that touched
- * none draws nothing. The spaces come from the conversation itself (the list's row meanwhile):
- * they follow its refetch when it touches a new one.
+ * none draws nothing. The spaces are the open conversation's server row (`useActiveSession`),
+ * refetched by the session signal when it touches a new one.
  */
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { useSessionDetail, useSessions } from "@appstrate/module-chat/unread";
+import type { ChatTransport } from "@appstrate/module-chat/ui";
+import { useActiveSession } from "@appstrate/module-chat/unread";
 import { SpaceName, SpaceTileStack, type SpaceListed } from "../../components/space-name";
 import { useSpacesOf } from "../../hooks/use-spaces";
-import { spaceLabel } from "../../lib/space-label";
+import { spaceLabels } from "../../lib/space-label";
 
 /** Tiles drawn in the trigger before the rest is counted. */
 const VISIBLE_SPACE_TILES = 3;
@@ -28,7 +29,7 @@ export function ConversationSpacesControl({
 }) {
   const { t } = useTranslation(["chat", "settings"]);
   if (spaces.length === 0) return null;
-  const names = spaces.map((space) => spaceLabel(space, t)).join(", ");
+  const names = spaceLabels(spaces, t);
   const label = t("chat:spaces.trigger", { names });
   return (
     <Popover>
@@ -65,11 +66,14 @@ export function ConversationSpacesControl({
 }
 
 /** {@link ConversationSpacesControl} of a stored conversation, read by id. */
-export function ConversationSpaces({ conversationId }: { conversationId: string | null }) {
-  const { data: sessions } = useSessions();
-  const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
-  // The same query as the title crumb's and the info panel's, refetched by the session signal.
-  const detail = useSessionDetail(conversationId);
-  const spaces = useSpacesOf(detail.data?.space_ids ?? listed?.space_ids ?? []);
+export function ConversationSpaces({
+  conversationId,
+  transport,
+}: {
+  conversationId: string | null;
+  transport: ChatTransport | undefined;
+}) {
+  const row = useActiveSession(transport, conversationId ?? "", conversationId !== null);
+  const spaces = useSpacesOf(row?.space_ids ?? []);
   return <ConversationSpacesControl spaces={spaces} />;
 }

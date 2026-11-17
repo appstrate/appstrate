@@ -5,40 +5,51 @@
  * "Chat / <conversation>" inside one (the parent links back to a new conversation). The name
  * is a plain segment; renaming lives in the conversation's settings dialog.
  *
- * The name comes from the conversation list while it holds the row (renames and the first title land
- * there live) and from the conversation itself otherwise: a conversation belongs to the organization,
- * so one opened from outside the list's space filter keeps its name. The spaces it touched are not
- * part of the trail: `ConversationSpaces` draws them in the header's actions.
+ * The name is the open conversation's server row (`useActiveSession`): a conversation belongs to
+ * the organization, so one opened from outside the list's space filter keeps its name. The spaces
+ * it touched are not part of the trail: `ConversationSpaces` draws them in the header's actions.
  *
  * While sessions load (or cannot be asked yet, `pending`) a skeleton slot reserves the space; an unknown (deleted) conversation
  * publishes "Chat" alone rather than a made-up name.
  */
 
+import { useIsFetching } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { useSessionDetail, useSessions } from "@appstrate/module-chat/unread";
+import type { ChatTransport } from "@appstrate/module-chat/ui";
+import { useActiveSession, useSessions } from "@appstrate/module-chat/unread";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
-import { chatTrailEntries, resolveCrumbTitle } from "./chat-crumb-title";
+import { chatTrailEntries } from "./chat-crumb-title";
 
 export function ChatTitleCrumb({
   conversationId,
+  transport,
   pending = false,
 }: {
   conversationId: string | null;
+  transport?: ChatTransport;
   /** The sessions cannot be asked yet (the scope they are read in is not known): the slot is reserved. */
   pending?: boolean;
 }) {
   const { t } = useTranslation(["chat", "common"]);
-  const { data: sessions, isLoading } = useSessions();
-  const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
-  // The conversation itself, whatever the list's filter: its name when the list lacks the row.
-  const detail = useSessionDetail(pending ? null : conversationId);
-  const title = resolveCrumbTitle(listed, detail.data ?? undefined, t("threads.new"));
-
-  // `isLoading` is the sessions list's; the conversation's own read only matters when the list lacks the row.
-  const loading =
-    conversationId !== null && (pending || isLoading || (!listed && detail.isLoading));
+  const { isLoading } = useSessions(transport);
+  const row = useActiveSession(
+    transport,
+    conversationId ?? "",
+    conversationId !== null && !pending,
+  );
+  // The conversation's own read, made when the list lacks its row.
+  const reading =
+    useIsFetching({
+      queryKey: [
+        "get",
+        "/api/orgs/{orgId}/chat/sessions/{id}",
+        { params: { path: { id: conversationId } } },
+      ],
+    }) > 0;
+  const title = row ? (row.title ?? t("threads.new")) : null;
+  const loading = conversationId !== null && !row && (pending || isLoading || reading);
 
   const chat = t("common:products.chat");
   usePageBreadcrumb(chatTrailEntries(chat, title, loading));

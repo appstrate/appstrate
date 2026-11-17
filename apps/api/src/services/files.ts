@@ -1359,16 +1359,17 @@ export async function resolveChatAttachment(
     );
   }
   const scope: SpaceScope = { orgId: request.orgId, spaceId: space.id };
-  // Before the ACL read and above all before an upload is materialized: a caller the chat
-  // refuses in this space leaves no file behind.
-  await request.beforeResolve(space.id);
-
+  // `beforeResolve` records the space as touched: only once the attachment is readable (a
+  // refused file touches nothing), and before an upload is materialized (a caller the chat
+  // refuses in this space leaves no file behind).
   let row: Awaited<ReturnType<typeof createFileFromUpload>>;
   if ("fileId" in source) {
     const resolved = await getFileForActor(scope, actor, source.fileId, space.permissions);
     if (!resolved) throw notFound(`File '${source.fileId}' not found`);
+    await request.beforeResolve(space.id);
     row = resolved.row;
   } else {
+    await request.beforeResolve(space.id);
     row = await createFileFromUpload(scope, actor, source.uploadId, {
       chatSessionId: request.chatSessionId,
     });

@@ -44,23 +44,16 @@ export function useConversationScope(): ConversationScope {
 
 /**
  * Whether « Limiter à cet espace » can change: not while a turn generates (the server refuses),
- * else there is an origin space and the chat acts in it (`outside` also when the host's working
- * space is one the chat does not act in, so no origin was taken). A conversation already limited can always
+ * else there is an origin space and the chat acts in it. A conversation already limited can always
  * be released, whatever the acting set became.
  */
 export function limitAvailability(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted" | "generating">,
   actingSpaceIds: readonly string[],
-  workingSpaceId?: string | null,
 ): { available: true } | { available: false; reason: "generating" | "no-space" | "outside" } {
   if (scope.generating) return { available: false, reason: "generating" };
   if (scope.restricted) return { available: true };
-  if (!scope.originSpaceId) {
-    // No origin: « Tous les espaces », or a working space the chat does not act in (the origin is
-    // only ever a space it acts in).
-    const outside = !!workingSpaceId && !actsIn(actingSpaceIds, workingSpaceId);
-    return { available: false, reason: outside ? "outside" : "no-space" };
-  }
+  if (!scope.originSpaceId) return { available: false, reason: "no-space" };
   if (!actsIn(actingSpaceIds, scope.originSpaceId)) return { available: false, reason: "outside" };
   return { available: true };
 }
@@ -90,30 +83,25 @@ export function useAttachAvailability(): ReturnType<typeof attachAvailability> {
   return attachAvailability(actingSpaceIds, useConversationScope(), workingSpaceId);
 }
 
-const noLabels = () => undefined;
-const useNoLabels = () => noLabels;
-
 /**
  * The plain name of the conversation's origin space, for accessible names (the node below carries
  * a tile a label would drop); the generic « this space » when the host does not name it.
  */
 export function useOriginSpaceLabel(): string {
-  const { t, useSpaceLabelOf = useNoLabels } = useChatHost();
+  const { t, useSpaceLabelOf } = useChatHost();
   const { originSpaceId } = useConversationScope();
   return useSpaceLabelOf()(originSpaceId) ?? t("composer.limit.thisSpace");
 }
 
 /**
- * The conversation's origin space as the host renders it (tile and name); without the host's
- * rendering or an origin, the generic « this space ». Never a plain string for an accessible name:
- * use {@link useOriginSpaceLabel} for those.
+ * The conversation's origin space as the host renders it (tile and name); without an origin, the
+ * generic « this space ». Never a plain string for an accessible name: use
+ * {@link useOriginSpaceLabel} for those.
  */
 export function useOriginSpaceNode(): ReactNode {
   const { t, renderSpaces } = useChatHost();
   const { originSpaceId } = useConversationScope();
-  return originSpaceId && renderSpaces
-    ? renderSpaces([originSpaceId])
-    : t("composer.limit.thisSpace");
+  return originSpaceId ? renderSpaces([originSpaceId]) : t("composer.limit.thisSpace");
 }
 
 /** The origin space a limited conversation acts in alone: set only while it is limited. */

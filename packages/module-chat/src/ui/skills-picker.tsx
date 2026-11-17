@@ -79,7 +79,7 @@ export function SkillsPickerPanel({
   onChange,
 }: Pick<SkillsPickerProps, "transport" | "selection" | "onChange">) {
   const { t } = useChatHost();
-  const { catalogue } = useSkillCatalogue(transport, true);
+  const catalogue = useSkillCatalogue(transport, true);
   const skills = catalogue.data ?? [];
   const enforcedQuery = useEnforcedSkills(transport);
   const enforced = enforcedQuery.data ?? [];

@@ -18,3 +18,11 @@ export function spaceLabel(
     ns: "settings",
   });
 }
+
+/** Several spaces named in one line (« Studio, Coffre »). */
+export function spaceLabels(
+  spaces: readonly Parameters<typeof spaceLabel>[0][],
+  t: TFunction,
+): string {
+  return spaces.map((space) => spaceLabel(space, t)).join(", ");
+}

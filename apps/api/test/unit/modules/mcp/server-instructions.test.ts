@@ -380,7 +380,6 @@ describe("buildServerInstructions grounding", () => {
   it("points every client at get_me, the chat included: the tool is declared for all", () => {
     for (const rendersCards of [false, true]) {
       expect(instructionsFor(permissions, rendersCards)).toContain("Start by calling get_me");
-      expect(instructionsFor(permissions, rendersCards)).not.toContain("there is no get_me tool");
     }
   });
 });

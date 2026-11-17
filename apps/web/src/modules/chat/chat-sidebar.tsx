@@ -45,7 +45,7 @@ export function ChatSidebar() {
   return (
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={select}>
-        <ChatTitleCrumb conversationId={conversationId} />
+        <ChatTitleCrumb conversationId={conversationId} transport={transport} />
         <ChatConversationList
           activeId={conversationId}
           t={t}

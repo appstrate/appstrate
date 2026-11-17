@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { PiChatUiStreamMapper, stripMcpToolPrefix } from "../src/pi-chat/ui-stream-mapper.ts";
-import { dispatchSpace } from "../src/pi-chat/mcp-tools.ts";
+import {
+  dispatchSpace,
+  PiChatUiStreamMapper,
+  stripMcpToolPrefix,
+} from "../src/pi-chat/ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
@@ -499,20 +502,26 @@ describe("the space a tool call is stamped with", () => {
     } as AgentSessionEvent,
   ];
 
+  const available = (args: Record<string, unknown>, turnSpaces: ReadonlySet<string>) => {
+    const mapper = new PiChatUiStreamMapper({ turnSpaces });
+    return callEnd(args)
+      .flatMap((e) => mapper.map(e))
+      .find((c) => c.type === "tool-input-available") as { providerMetadata?: unknown };
+  };
+
   it("rides tool-input-available as providerMetadata.appstrate.spaceId", () => {
-    const mapper = new PiChatUiStreamMapper({ callSpace: dispatchSpace });
-    const chunks = callEnd({ space_id: "spc_o" }).flatMap((e) => mapper.map(e));
-    const available = chunks.find((c) => c.type === "tool-input-available") as
-      { providerMetadata?: unknown } | undefined;
-    expect(available?.providerMetadata).toEqual({ appstrate: { spaceId: "spc_o" } });
+    expect(available({ space_id: "spc_o" }, new Set(["spc_o"])).providerMetadata).toEqual({
+      appstrate: { spaceId: "spc_o" },
+    });
   });
 
   it("is the named space_id, and nothing for a call naming none", () => {
     expect(dispatchSpace({ space_id: "spc_b" })).toBe("spc_b");
     expect(dispatchSpace({})).toBeUndefined();
-    const mapper = new PiChatUiStreamMapper({ callSpace: dispatchSpace });
-    const chunks = callEnd({}).flatMap((e) => mapper.map(e));
-    const available = chunks.find((c) => c.type === "tool-input-available") as object;
-    expect("providerMetadata" in available).toBe(false);
+    expect("providerMetadata" in available({}, new Set(["spc_o"]))).toBe(false);
+  });
+
+  it("stamps nothing for a space outside the turn's, which the call is refused in", () => {
+    expect("providerMetadata" in available({ space_id: "spc_x" }, new Set(["spc_o"]))).toBe(false);
   });
 });

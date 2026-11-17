@@ -4,8 +4,8 @@ import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 import {
-  ENTER_SPACE_PARAM,
   linkedSpaceEnterable,
   linkedSpacePath,
   linkedSpaceStep,

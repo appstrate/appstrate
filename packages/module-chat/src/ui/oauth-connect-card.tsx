@@ -148,6 +148,9 @@ export function OAuthConnectCard({
 }) {
   const aui = useAui();
   const transport = useChatTransport();
+  // The scoping headers alone: the host keeps this function across a list-filter change, which
+  // rebuilds the transport around it, so the completion listener does not reconnect then.
+  const getHeaders = transport?.getHeaders;
   const { t } = useChatHost();
   // Without `integrations:read` (in the call's space) the chip keeps the bare package id.
   const readsIntegration = useCanIn()(callSpaceId, "integrations:read");
@@ -161,7 +164,7 @@ export function OAuthConnectCard({
   // brand instead of the bare `@scope/name` id. Under the shell's typed key for
   // `GET /api/integrations/{packageId}`: its detail reads and this one are one cache entry. A
   // failed read is not fatal: the chip falls back to the package id, no brand icon.
-  const { orgId, spaceId: workingSpaceId } = orgSpaceFromHeaders(transport?.getHeaders());
+  const { orgId, spaceId: workingSpaceId } = orgSpaceFromHeaders(getHeaders?.());
   const spaceId = callSpaceId ?? workingSpaceId;
   const integration = useQuery({
     queryKey: [
@@ -274,7 +277,7 @@ export function OAuthConnectCard({
     const stopListening = listenConnectCompletion(card, onCompletion, window);
 
     const closeSse = watchConnectionSse(
-      transport?.getHeaders,
+      getHeaders,
       packageId,
       () => waiter.connected(),
       callSpaceId,
@@ -284,7 +287,7 @@ export function OAuthConnectCard({
       stopListening();
       closeSse();
     };
-  }, [phase, state, packageId, transport, waiter, complete, callSpaceId]);
+  }, [phase, state, packageId, getHeaders, waiter, complete, callSpaceId]);
 
   // Flip to the expired state when the session lapses, so the button never
   // outlives its link; `start` re-checks for anything the timer misses.

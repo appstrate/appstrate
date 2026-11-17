@@ -25,7 +25,7 @@ import { agentCardItem } from "../lib/package-card-item";
 import { spacesWhere } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useChatCan } from "../modules/chat/use-chat-runtime";
-import { useSpacesFor } from "../hooks/use-space-action";
+import { useCanReach } from "../hooks/use-can-reach";
 import { useSpaces } from "../hooks/use-spaces";
 import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
@@ -80,7 +80,8 @@ export function DashboardHeader({
   runningCount?: number;
 }) {
   const { t, i18n } = useTranslation("agents");
-  const chat = useSpacesFor({ route: "/chat" });
+  const canReach = useCanReach();
+  const chatReachable = canReach("/chat");
   // The chat acts across the caller's spaces: writing is judged over them, as the product tabs do.
   const canChat = useChatCan()("chat:write");
   const { copy } = useCopyToClipboard();
@@ -144,7 +145,7 @@ export function DashboardHeader({
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens (the module loaded AND the caller's grants) and the caller may write in it. */}
-            {chat.offered && canChat && (
+            {chatReachable && canChat && (
               <ChoiceCard
                 icon={MessageSquareText}
                 title={t("dashboard.askAi.chat")}

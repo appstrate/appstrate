@@ -23,6 +23,7 @@ import {
   type SkillEntry,
 } from "@appstrate/core/skill-uri";
 import { callerIdentity } from "./caller-identity.ts";
+import { reachableSpace } from "./reachable-space.ts";
 
 /** The rendered texts; the injected-skills claim has its own cases. */
 const contextText = (...args: Parameters<typeof identityContext>) => identityContext(...args).text;
@@ -65,15 +66,13 @@ const NO_AUTHORING = BUILDER.filter((permission) => permission !== "agents:write
 
 /** The one space the builder reaches, with the grants that make it part of the acting set. */
 const REACH = [
-  {
+  reachableSpace({
     id: "spc_1",
     name: "One",
     role: "builder",
     permissions: ["chat:read", "chat:write", ...BUILDER],
     credentialProxyOpen: true,
-    isDefault: false,
-    personal: false,
-  },
+  }),
 ];
 
 /**
@@ -686,43 +685,22 @@ function fakeSkillsClient(opts: {
 describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
-  describe("the origin space", () => {
-    const build = (extra: { origin?: typeof ORIGIN; restricted?: boolean }) =>
-      blockText(fakeContext({ orgRole: "member" }), {
+  it("marks the turn's permissions as a role preview while one is on, and only then", async () => {
+    const build = (vars: Record<string, unknown>) =>
+      blockText(fakeContext(vars), {
         spaces: REACH,
         restricted: false,
-        ...extra,
         user,
         capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke"],
+        permissions: ["mcp:read"],
         skills: DEFAULT_SKILL_SELECTION,
         enforced: NO_ENFORCED,
         openSkillsClient: NO_SKILLS,
       });
-
-    it("lists the acting spaces and names the origin space as the default", async () => {
-      const out = await build({ origin: ORIGIN });
-      expect(out).toContain("- `spc_1` — One (role builder)");
-      expect(out).toContain(
-        "This conversation was started in One (`spc_1`): when the user names no space, pass `spc_1` as the `space_id`.",
-      );
-    });
-
-    it("names no default without an origin space (the overview)", async () => {
-      const out = await build({});
-      expect(out).not.toContain("This conversation was started in");
-      expect(out).toContain("Ask the user which space when the request does not say");
-    });
-
-    it("says a limited conversation acts in its origin space alone, naming it on every call", async () => {
-      const out = await build({ origin: ORIGIN, restricted: true });
-      expect(out).toContain(
-        "This conversation is limited to One (`spc_1`): pass `spc_1` as the `space_id` of every call; no other space can be reached.",
-      );
-      expect(out).toContain("The user lifts the limit in the composer");
-      expect(out).not.toContain("Ask the user which space");
-      expect(out).not.toContain("This conversation was started in");
-    });
+    expect(await build({ orgRole: "owner", viewAs: { orgRole: "member" } })).toContain(
+      "Permissions this turn (role preview active)",
+    );
+    expect(await build({ orgRole: "owner" })).not.toContain("role preview");
   });
 
   it("resolves the chosen skills over the skills connection, draft first", async () => {

@@ -34,7 +34,8 @@ import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
-import { useChatHost } from "./runtime-context.ts";
+import { useChatHost, type ChatHost } from "./runtime-context.ts";
+import { CallSpace } from "./call-space.tsx";
 import {
   autoPresentFile,
   buildRunPageHref,
@@ -219,9 +220,6 @@ export function ChatRunProgressCard({
   // Without a run read nothing will ever report on a live run: say so rather
   // than reading "starting" forever, and offer no link to a page that 403s.
   const denied = !!runId && runDenied && !terminal;
-  // The run opens in the space its call named (the host skips naming it when that is the working one).
-  const runPageHref = (path: string | undefined, space: string | undefined) =>
-    path && linkInSpace ? linkInSpace(path, space) : path;
   const line = terminal
     ? { id: -1, text: t(runStatusLineKey(effectiveStatus)) }
     : launchFailed
@@ -231,7 +229,7 @@ export function ChatRunProgressCard({
         : current;
   const effectiveRunHref = runDenied
     ? undefined
-    : (runHref ?? (runId ? runPageHref(buildRunPageHref(packageId, runId), spaceId) : undefined));
+    : (runHref ?? (runId ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined));
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints
@@ -315,13 +313,16 @@ export function ChatRunProgressCard({
   );
 }
 
-/** The space a tool call acted in (the one stamped on it), named by the host. */
-export function CallSpace({ spaceId }: { spaceId: string | undefined }) {
-  const { renderSpaces } = useChatHost();
-  if (!renderSpaces || !spaceId) return null;
-  return (
-    <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
-      {renderSpaces([spaceId])}
-    </span>
-  );
+/**
+ * The run's page in the space its call named, through the host's `linkInSpace` (which names the
+ * space only when it is not the working one); the server-side reconcile names it itself.
+ */
+function runPageHref(
+  linkInSpace: ChatHost["linkInSpace"],
+  packageId: string | undefined,
+  runId: string,
+  spaceId: string | undefined,
+): string | undefined {
+  const path = buildRunPageHref(packageId, runId);
+  return path && linkInSpace(path, spaceId);
 }

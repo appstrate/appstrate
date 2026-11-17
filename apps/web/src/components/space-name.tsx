@@ -9,7 +9,7 @@ import { useSpaces, useSpacesOf } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { spaceTile } from "../lib/identity-tile-props";
-import { spaceLabel } from "../lib/space-label";
+import { spaceLabel, spaceLabels } from "../lib/space-label";
 
 /** What naming a space reads of it. */
 export type SpaceListed = Parameters<typeof spaceTile>[0];
@@ -160,7 +160,7 @@ export function SpaceTilesOf({
   if (spaces.length === 0) return null;
   if (spaces.length === 1)
     return <SpaceName space={spaces[0]!} size={size} className={className} />;
-  const names = spaces.map((space) => spaceLabel(space, t)).join(", ");
+  const names = spaceLabels(spaces, t);
   return (
     <span
       className={cn("flex min-w-0 items-center", SIZES[size].box, className)}

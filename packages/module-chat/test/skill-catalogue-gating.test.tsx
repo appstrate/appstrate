@@ -9,7 +9,7 @@ import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { useSkillCatalogue } from "../src/ui/use-skill-catalogue.ts";
 import { transportOf } from "./fake-request.ts";
-import { testHost } from "./test-host.ts";
+import { conversationScope, testHost } from "./test-host.ts";
 
 // The chat acts in spc_a and spc_b; only spc_b grants `skills:read`.
 const host = testHost({
@@ -18,42 +18,40 @@ const host = testHost({
   actingSpaceIds: ["spc_a", "spc_b"],
 });
 
-function Readable() {
-  const { readable } = useSkillCatalogue(
+function Catalogue() {
+  const catalogue = useSkillCatalogue(
     transportOf(() => ({})),
     true,
   );
-  return <b data-readable={String(readable)} />;
+  return <b data-fetch={catalogue.fetchStatus} />;
 }
 
-function readable(originSpaceId: string, restricted: boolean): string {
+/** Whether the catalogue is requested, and for which spaces. */
+function request(originSpaceId: string, restricted: boolean) {
+  const qc = new QueryClient();
   const html = renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
-        <ConversationScopeProvider
-          value={{
-            originSpaceId,
-            restricted,
-            generating: false,
-            pending: false,
-            setRestricted: () => {},
-          }}
-        >
-          <Readable />
+        <ConversationScopeProvider value={conversationScope({ originSpaceId, restricted })}>
+          <Catalogue />
         </ConversationScopeProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
-  return html.match(/data-readable="(\w+)"/)![1]!;
+  const [query] = qc.getQueryCache().findAll({ queryKey: ["packages", "skills"] });
+  return {
+    fetches: html.match(/data-fetch="(\w+)"/)![1] === "fetching",
+    spaceIds: query?.queryKey[3],
+  };
 }
 
 describe("the skills catalogue of a conversation", () => {
-  it("is read, unlimited, when some space where the chat acts grants it", () => {
-    expect(readable("spc_a", false)).toBe("true");
+  it("is read, unlimited, across the acting set when some space where the chat acts grants it", () => {
+    expect(request("spc_a", false)).toEqual({ fetches: true, spaceIds: ["spc_a", "spc_b"] });
   });
 
-  it("is read, limited, only when the origin space grants it", () => {
-    expect(readable("spc_b", true)).toBe("true");
-    expect(readable("spc_a", true)).toBe("false");
+  it("is read, limited, in the origin space alone and only when that space grants it", () => {
+    expect(request("spc_b", true)).toEqual({ fetches: true, spaceIds: ["spc_b"] });
+    expect(request("spc_a", true)).toEqual({ fetches: false, spaceIds: ["spc_a"] });
   });
 });

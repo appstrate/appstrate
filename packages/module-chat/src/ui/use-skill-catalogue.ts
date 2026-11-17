@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSkills } from "./chat-skills.ts";
 import { limitedSpaceOf, useConversationScope } from "./conversation-scope.ts";
@@ -10,7 +9,6 @@ import { useCanIn, useChatHost, type ChatTransport } from "./runtime-context.ts"
  * The skills the picker chooses from, shared with the composer's chips (one cache entry, so a
  * pinned chip is named by what the picker lists). Read only when `wanted`, with `skills:read`: in
  * the origin space for a limited conversation, in some space the chat acts in otherwise.
- * `readable` says whether that permission allows the read, wanted or not.
  */
 export function useSkillCatalogue(transport: ChatTransport | undefined, wanted: boolean) {
   const { actingSpaceIds } = useChatHost();
@@ -18,12 +16,9 @@ export function useSkillCatalogue(transport: ChatTransport | undefined, wanted: 
   // A limited conversation reaches its origin space alone: its skills, not the acting set's.
   const scope = useConversationScope();
   const limitedSpaceId = limitedSpaceOf(scope);
-  const catalogueSpaceIds = useMemo(
-    () => (limitedSpaceId ? [limitedSpaceId] : actingSpaceIds),
-    [limitedSpaceId, actingSpaceIds],
-  );
+  const catalogueSpaceIds = limitedSpaceId ? [limitedSpaceId] : actingSpaceIds;
   const readable = !!transport && canIn(limitedSpaceId, "skills:read");
-  const catalogue = useQuery({
+  return useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the acting set keys it.
@@ -32,5 +27,4 @@ export function useSkillCatalogue(transport: ChatTransport | undefined, wanted: 
     enabled: wanted && readable,
     staleTime: 60_000,
   });
-  return { catalogue, readable };
 }

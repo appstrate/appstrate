@@ -117,6 +117,7 @@ const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
   },
   org_deleting: { text: "turn.error.orgDeleting" },
   chat_turn_scope_changed: { text: "turn.error.scopeChanged" },
+  chat_turn_in_flight: { text: "turn.error.turnInFlight" },
   model_credential_required: {
     text: "turn.error.modelCredentialRequired",
     policyDisabledText: "turn.error.modelCredentialRequiredPolicy",

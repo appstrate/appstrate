@@ -34,11 +34,10 @@ const resolve = (
   contents: SkillContent[] = [],
   enforced: EnforcedChatSkill[] = [],
 ) =>
-  resolveChatSkills(
-    selection,
-    new Map(contents.map((skill) => [skill.packageId, skill])),
-    enforced,
-  );
+  resolveChatSkills(selection, new Map(contents.map((skill) => [skill.packageId, skill])), {
+    spaceId: "space-1",
+    skills: enforced,
+  });
 
 describe("resolveChatSkills", () => {
   it("auto: injects nothing and notices nothing — the chosen skills are kept but unused", () => {
@@ -253,23 +252,10 @@ describe("injectedSkills", () => {
     ]);
   });
 
-  it("gives a required skill whose address names no space its own notice", () => {
-    const result = resolve(
-      { skillMode: "auto", pinnedSkills: [] },
-      [],
-      [{ ...enforcedSkill("@a/house"), uri: "https://example.com/SKILL.md" }],
-    );
-    expect(result.enforced).toEqual([]);
-    expect(result.notices).toEqual([
-      "The skill `@a/house` is required by this conversation's origin space but its address names no space, so it cannot be served.",
-    ]);
-  });
-
   it("notices a chosen skill the platform answered malformed, and names it nowhere", () => {
     const result = resolveChatSkills(
       { skillMode: "manual", pinnedSkills: ["@a/odd"] },
       new Map([["@a/odd", null]]),
-      [],
     );
     expect(result.notices).toEqual([
       "The skill `@a/odd` was chosen for this conversation but could not be read.",

@@ -111,19 +111,17 @@ function sign(payload: string): string {
 
 /** Serialize + sign a claims payload into a `chatloop_` bearer; `ttlMs` sets its `exp`. */
 function mint({ ttlMs, ...claims }: Omit<LoopbackClaims, "exp"> & { ttlMs: number }): string {
-  const { chatSessionId, viewAs, injectedSkills, spaceIds } = claims;
+  const { chatSessionId, injectedSkills } = claims;
   const payload = Buffer.from(
     JSON.stringify({
       ...claims,
       exp: Date.now() + ttlMs,
       // Absent rather than empty: a claim the verifier reads only when present.
       chatSessionId: chatSessionId || undefined,
-      viewAs,
       injectedSkills:
         injectedSkills && Object.keys(injectedSkills.skills).length > 0
           ? injectedSkills
           : undefined,
-      spaceIds,
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -194,7 +192,7 @@ export function mintMcpLoopbackToken(
     permissions: [...permissions],
     firstPartyLoopback: false,
     ttlMs: opts?.ttlMs ?? TOKEN_TTL_MS,
-    ...(spaceIds ? { spaceIds: [...spaceIds] } : {}),
+    spaceIds: spaceIds && [...spaceIds],
   });
 }
 

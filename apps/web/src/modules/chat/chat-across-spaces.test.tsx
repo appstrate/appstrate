@@ -19,10 +19,11 @@ const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
 const { SpaceTilesOf } = await import("../../components/space-name.tsx");
-const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
+const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
 const { ConversationRuns, ShownFile } = await import("./conversation-sidebar.tsx");
+const { useConversationTabs } = await import("./use-conversation-tabs.ts");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
 const { useCanReach } = await import("../../hooks/use-can-reach.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
@@ -140,6 +141,23 @@ describe("the conversation panel", () => {
       ACROSS_SPACES_POLL_MS,
     );
   });
+
+  function Tabs() {
+    return (
+      <p>
+        {useConversationTabs("runs")
+          .tabs.map(({ id }) => id)
+          .join(",")}
+      </p>
+    );
+  }
+
+  it("lists the runs and files tabs where some space admits them, else Info alone", () => {
+    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>runs,info</p>");
+    const files = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read", "files:read"])];
+    expect(renderOverview(<Tabs />, files).html).toContain("<p>files,info</p>");
+    expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain("<p>info</p>");
+  });
 });
 
 describe("the grants the chat module reads", () => {
@@ -152,15 +170,13 @@ describe("the grants the chat module reads", () => {
   function Probe({ permission }: { permission: string }) {
     return <p>{String(useChatCan()(permission))}</p>;
   }
-  const can = (permission: string, chosen: boolean) =>
-    renderOverview(<Probe permission={permission} />, spaces, chosen).html;
+  const can = (permission: string) =>
+    renderOverview(<Probe permission={permission} />, spaces).html;
 
-  it("is what some space where the chat acts grants, in the overview and out of it", () => {
-    for (const chosen of [true, false]) {
-      expect(can("skills:read", chosen)).toContain("<p>true</p>");
-      expect(can("chat:write", chosen)).toContain("<p>true</p>");
-      expect(can("files:read", chosen)).toContain("<p>false</p>");
-    }
+  // The rule itself is `grantedInSomeActingSpace` (`lib/test/space-lists.test.ts`): this pins the wiring.
+  it("reads the space listing and the organization's grants", () => {
+    expect(can("skills:read")).toContain("<p>true</p>");
+    expect(can("files:read")).toContain("<p>false</p>");
   });
 });
 
@@ -242,6 +258,12 @@ describe("the stream's chat channel", () => {
       expect(renderOverview(<Reach />, spaces, true).html).toContain("<p>true</p>");
       expect(renderOverview(<Reach />, spaces, false).html).toContain("<p>true</p>");
     });
+  });
+
+  it("is not wanted while the chat is turned off, whatever the spaces grant", () => {
+    const spaces = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read"])];
+    expect(renderOverview(<Reach />, spaces, true).html).toContain("<p>false</p>");
+    expect(renderOverview(<Reach />, spaces, false).html).toContain("<p>false</p>");
   });
 
   it("is not wanted, in either mode, when no space reads the chat", () => {

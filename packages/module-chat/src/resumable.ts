@@ -23,7 +23,7 @@
  * store resolves to "no active stream".
  */
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
@@ -274,7 +274,8 @@ export async function sweepStaleActiveStreams(): Promise<number> {
 }
 
 /**
- * A marker younger than this is never treated as stale by the resume route.
+ * A marker younger than this is never treated as stale, by the resume route or
+ * by the next turn's claim (`setActiveStream`).
  *
  * A live turn can look exactly like a crashed one — marker set, no recording —
  * for its WHOLE duration, not just the few statements between `claimTurn` and
@@ -283,32 +284,38 @@ export async function sweepStaleActiveStreams(): Promise<number> {
  * marker with nothing under it while the turn keeps streaming. A resume GET
  * (a second tab, a reload) must not wipe a live turn's marker — that strands
  * its resume on 204 and reopens the `persistNotice` window the claim ordering
- * closes. What bounds a live turn is `CHAT_TURN_DEADLINE_MS`: past it the
- * turn is aborted and its own teardown clears the marker. `setActiveStream`
- * stamps `updated_at` in the same statement as the marker, so a marker older
- * than the deadline plus a teardown allowance with no recording is stale by
- * construction.
+ * closes — and a second turn must not take it over. What bounds a live turn
+ * is `CHAT_TURN_DEADLINE_MS`: past it the turn is aborted and its own teardown
+ * clears the marker. `setActiveStream` stamps `updated_at` in the same
+ * statement as the marker, so a marker older than the deadline plus a teardown
+ * allowance is stale by construction.
  */
 export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
+/** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
+type StreamClaim = "claimed" | "scope_changed" | "in_flight";
+
 /**
  * Mark a session's in-flight stream so a reloaded client can reconnect to it.
- * `updated_at` is stamped in the same statement: it is what lets the resume
- * route tell a freshly claimed turn from a marker whose producer died (see
- * {@link STALE_MARKER_MIN_AGE_MS}). Emits no signal: the caller's user-message
- * write does; on its failure `clearActiveStream` does.
+ * A conversation runs one turn at a time: the claim takes a free marker, or one
+ * stale by {@link STALE_MARKER_MIN_AGE_MS} (its producer is gone), never a live
+ * one. `updated_at` is stamped in the same statement: it is what tells a freshly
+ * claimed turn from a marker whose producer died. Emits no signal: the caller's
+ * user-message write does; on its failure `clearActiveStream` does.
  *
- * A compare-and-set on the scope the turn read (its origin space and limit): the
- * turn's spaces and bearer were computed from that read, and the limit PATCH is
- * refused only once a marker is set, so a change landing between the read and this
- * claim must refuse the turn rather than let it act with the reach it no longer has.
- * `false`: the scope moved, nothing was written.
+ * Also a compare-and-set on the scope the turn read (its origin space and limit):
+ * the turn's spaces and bearer were computed from that read, and the limit PATCH
+ * is refused only while a marker is set, so a change landing between the read and
+ * this claim refuses the turn rather than letting it act with a reach it no
+ * longer has. `scope_changed`: the scope moved (or the row is gone);
+ * `in_flight`: another turn holds the conversation. Neither writes anything.
  */
 export async function setActiveStream(
   sessionId: string,
   streamId: string,
   scope: { spaceId: string | null; restricted: boolean },
-): Promise<boolean> {
+): Promise<StreamClaim> {
+  const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
   const claimed = await db
     .update(chatSessions)
     .set({ activeStreamId: streamId, updatedAt: new Date() })
@@ -317,20 +324,26 @@ export async function setActiveStream(
         eq(chatSessions.id, sessionId),
         eq(chatSessions.restricted, scope.restricted),
         sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
+        or(isNull(chatSessions.activeStreamId), lt(chatSessions.updatedAt, staleBefore)),
       ),
     )
     .returning({ id: chatSessions.id });
-  return claimed.length > 0;
+  if (claimed.length > 0) return "claimed";
+  const [row] = await db
+    .select({ spaceId: chatSessions.spaceId, restricted: chatSessions.restricted })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId))
+    .limit(1);
+  return row && row.spaceId === scope.spaceId && row.restricted === scope.restricted
+    ? "in_flight"
+    : "scope_changed";
 }
 
 /**
  * Clear the in-flight marker once a turn finalizes (or fails) — but ONLY when
- * it still points at THIS turn's stream. If a concurrent (newer) turn on the
- * same session has already overwritten `active_stream_id` with its own id via
- * `setActiveStream`, an unconditional clear would wipe the newer turn's marker
- * and leave its still-live stream unreconnectable (a reloaded client's resume
- * GET would 204). The `activeStreamId = streamId` guard makes the clear a no-op
- * in that race.
+ * it still points at THIS turn's stream. A stale marker is taken over by the
+ * next claim (`setActiveStream`); the turn it belonged to, should its teardown
+ * still run, must not wipe the marker of the turn that took it over.
  */
 export async function clearActiveStream(sessionId: string, streamId: string): Promise<void> {
   const [row] = await db
@@ -338,6 +351,6 @@ export async function clearActiveStream(sessionId: string, streamId: string): Pr
     .set({ activeStreamId: null })
     .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)))
     .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  // No-op race (a newer turn already owns the marker) → no row, no signal.
+  // The marker belongs to another turn → no row, no signal.
   if (row) notifySessionUpdate(sessionId, row.orgId, row.userId);
 }

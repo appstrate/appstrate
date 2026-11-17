@@ -9,8 +9,6 @@
 import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 import { isSpaceEnterable } from "./space-lists";
 
-export { ENTER_SPACE_PARAM };
-
 /**
  * The space a row listed in several spaces (a package index) opens in: the current one when it is
  * among them, else the first.

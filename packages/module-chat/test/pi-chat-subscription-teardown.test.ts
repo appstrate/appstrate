@@ -32,6 +32,14 @@ import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
 import type { OrgModel } from "../src/llm.ts";
+import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
+
+/** The turn's one space; nothing here records a touched space. */
+const ORGANIZATION: TurnSpaces = {
+  spaces: [{ id: "spc_1", name: "One", role: "admin" }],
+  touch: async () => {},
+  spaceOfUri: async () => undefined,
+};
 
 /** Nothing listens here — every hop must go through the injected transport. */
 const ORIGIN = "http://127.0.0.1:1";
@@ -202,7 +210,12 @@ async function runStubbedTurn(abortSettles: boolean) {
     ] as UIMessage[],
     system: "You are a helpful assistant.",
     generation: {},
-    platformMcp: { url: MCP_URL, headers: {}, spaceId: "spc_1", fetch: transport.fetch },
+    platformMcp: {
+      url: MCP_URL,
+      headers: {},
+      organization: ORGANIZATION,
+      fetch: transport.fetch,
+    },
     abortSignal: stop.signal,
     onError: (error) => String(error),
     recordUsage: () => {},

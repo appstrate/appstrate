@@ -2,8 +2,9 @@
 
 /**
  * What the chat assistant can do for the caller: their RBAC translated into the
- * assistant's acts (its MCP bearer carries the caller's set minus what the
- * authoring switch turns off, never more). Not a gate (acts are re-checked
+ * assistant's acts (its MCP bearer carries the caller's grants in the spaces the
+ * turn acts in, minus what the authoring switch turns off, never more). A verdict
+ * says the act is held in some space of the turn, not in every one. Not a gate (acts are re-checked
  * server-side), but a row must never claim what the route would refuse; pinned
  * to the routes' guards by `catalog-requirements.test.ts` (apps/api).
  */
@@ -18,7 +19,7 @@ import { maySetPackageActive, type SpaceGrant } from "../../lib/package-permissi
 import type { GateablePermission } from "../../hooks/use-permissions";
 
 export interface ChatAccessContext {
-  /** The caller's org ∪ space effective set, as `usePermissions().can`. */
+  /** Held in some space the chat acts in: the union the turn's capabilities read (`useChatCan`). */
   can: (permission: GateablePermission) => boolean;
   /** The caller's standing in each space the chat acts in; empty while they load. */
   spaceGrants: readonly SpaceGrant[];

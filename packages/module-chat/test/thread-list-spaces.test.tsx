@@ -23,7 +23,7 @@ const sessions: SessionSummary[] = [
 ];
 
 /** The list under `filter` (`null`: « Tous les espaces »), seeded with `rows`. */
-function render(filter: string | null, withSeam = true, rows = sessions): string {
+function render(filter: string | null, rows = sessions): string {
   const transport = transportOf(() => ({ "X-Org-Id": "org_1" }), filter);
   const qc = new QueryClient();
   qc.setQueryData<SessionsCache>(sessionsQueryKey(filter), {
@@ -39,9 +39,7 @@ function render(filter: string | null, withSeam = true, rows = sessions): string
               activeId={null}
               t={(key) => key}
               can={() => true}
-              renderSpaces={
-                withSeam ? (ids) => <i data-spaces={ids.join(",")}>spaces</i> : undefined
-              }
+              renderSpaces={(ids) => <i data-spaces={ids.join(",")}>spaces</i>}
             />
           </ChatTransportProvider>
         </SidebarProvider>
@@ -68,11 +66,7 @@ describe("the conversation list's space line", () => {
 
   it("draws a line on every row", () => {
     // Three rows: three space lines, none of them skipped for being the filter's own space.
-    expect(render("spc_a").match(/h-4 min-w-0 items-center/g)).toHaveLength(3);
-  });
-
-  it("draws none without the host's rendering", () => {
-    expect(render(null, false)).not.toContain("common:overview.title");
+    expect(render("spc_a").match(/data-testid="chat-session-spaces"/g)).toHaveLength(3);
   });
 
   it("leaves a row's actions to the chat's own grant", () => {

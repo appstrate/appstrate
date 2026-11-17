@@ -7,8 +7,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   connectionActions,
+  withinSpaces,
   type ConnectionCaller,
 } from "../../../src/services/connection-reach.ts";
 import { testCaller } from "../../helpers/connection-shares.ts";
@@ -145,6 +148,19 @@ describe("connectionActions", () => {
     expect(connectionActions(spaceRow(OWNER, ELSEWHERE), bound, false)).toEqual(["share"]);
   });
 
+  it("a person bound to spaces (a confined credential) is never offered all-spaces consent", () => {
+    const bound = reader({
+      principal: {
+        kind: "person",
+        actor: { type: "user", id: OWNER },
+        binding: { orgId: "org_1", spaceIds: [HERE] },
+      },
+      canShareAllSpaces: () => true,
+    });
+    expect(connectionActions(orgRow(), bound, false, "owner")).toEqual(["share"]);
+    expect(connectionActions(spaceRow(), bound, false, "owner")).toEqual(["rename", "share"]);
+  });
+
   it("a delegated credential pinning no space renames like the person", () => {
     const unpinned = reader({
       principal: {
@@ -154,5 +170,22 @@ describe("connectionActions", () => {
       },
     });
     expect(connectionActions(orgRow(), unpinned, false)).toEqual(["rename", "share"]);
+  });
+});
+
+describe("withinSpaces", () => {
+  const render = (clause: ReturnType<typeof withinSpaces>) =>
+    clause === undefined ? undefined : new PgDialect().sqlToQuery(clause).sql;
+  const inSpace = (spaceId: string) => sql`space_id = ${spaceId}`;
+
+  it("bounds nothing for no list, matches nothing for an empty one", () => {
+    expect(withinSpaces(null, inSpace)).toBeUndefined();
+    expect(render(withinSpaces([], inSpace))).toBe("FALSE");
+  });
+
+  it("holds for one of the listed spaces", () => {
+    expect(render(withinSpaces([HERE, ELSEWHERE], inSpace))).toBe(
+      "(space_id = $1 or space_id = $2)",
+    );
   });
 });

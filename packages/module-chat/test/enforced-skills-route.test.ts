@@ -128,14 +128,15 @@ describe("GET /api/orgs/:orgId/chat/enforced-skills", () => {
     expect((await list(ctx, "spc_unknown")).status).toBe(400);
   });
 
-  it("accepts a space where the caller only reads the chat, once it is named", async () => {
+  it("answers a space where the caller only reads the chat, as one where they chat", async () => {
     await seedEnforcedSkill();
     // A viewer holds `chat:read` in the default space; its chat:write comes from the runner space.
     const caller = await memberContext(ctx, "member", "viewer");
     const quiet = (await seedSpace({ orgId: ctx.orgId, name: "Quiet", visibility: "closed" })).id;
     await seedSpaceMember({ spaceId: quiet, userId: caller.user.id, presetRole: "runner" });
+    await seedSpacePackage(quiet, SKILL_ID, { chatEnforced: true });
     expect(await ids(await list(caller, ctx.defaultSpaceId))).toEqual([SKILL_ID]);
-    expect(await ids(await list(caller, quiet))).toEqual([]);
+    expect(await ids(await list(caller, quiet))).toEqual([SKILL_ID]);
   });
 
   it("ignores X-Space-Id, and refuses another organization", async () => {

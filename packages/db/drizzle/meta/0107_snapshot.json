@@ -10094,7 +10094,7 @@
           "tableTo": "spaces",
           "columnsFrom": ["space_id", "org_id"],
           "columnsTo": ["id", "org_id"],
-          "onDelete": "set null",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },

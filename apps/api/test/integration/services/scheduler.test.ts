@@ -208,7 +208,7 @@ describeRequiresRedis("scheduler service", () => {
   describe("createSchedule", () => {
     it("creates a record with correct fields", async () => {
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -234,7 +234,7 @@ describeRequiresRedis("scheduler service", () => {
       const inputData = { query: "test search", limit: 10 };
 
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -248,7 +248,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("defaults timezone to UTC when not specified", async () => {
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -261,7 +261,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("computes nextRunAt in the future", async () => {
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -276,7 +276,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("persists per-schedule overrides verbatim", async () => {
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -299,7 +299,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("defaults all overrides to null when omitted", async () => {
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -318,16 +318,16 @@ describeRequiresRedis("scheduler service", () => {
 
   describe("listSchedules", () => {
     it("returns schedules for the org", async () => {
-      await createJudgedSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+      await createJudgedSchedule({ orgId: orgId, spaceId: defaultSpaceId }, packageId, actor, {
         name: "Schedule A",
         cronExpression: "0 * * * *",
       });
-      await createJudgedSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+      await createJudgedSchedule({ orgId: orgId, spaceId: defaultSpaceId }, packageId, actor, {
         name: "Schedule B",
         cronExpression: "*/30 * * * *",
       });
 
-      const schedules = await listSchedulesIn({ orgId, spaceId: defaultSpaceId }, actor);
+      const schedules = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
 
       expect(schedules).toHaveLength(2);
       const names = schedules.map((s) => s.name);
@@ -336,7 +336,7 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("does not return schedules from other orgs", async () => {
-      await createJudgedSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+      await createJudgedSchedule({ orgId: orgId, spaceId: defaultSpaceId }, packageId, actor, {
         name: "My Schedule",
         cronExpression: "0 * * * *",
       });
@@ -368,7 +368,7 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const schedules = await listSchedulesIn({ orgId, spaceId: defaultSpaceId }, actor);
+      const schedules = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("My Schedule");
 
@@ -381,7 +381,7 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("returns an empty array when no schedules exist", async () => {
-      const schedules = await listSchedulesIn({ orgId, spaceId: defaultSpaceId }, actor);
+      const schedules = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -402,17 +402,17 @@ describeRequiresRedis("scheduler service", () => {
         },
       });
 
-      await createJudgedSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+      await createJudgedSchedule({ orgId: orgId, spaceId: defaultSpaceId }, packageId, actor, {
         name: "Agent 1 Schedule",
         cronExpression: "0 * * * *",
       });
-      await createJudgedSchedule({ orgId, spaceId: defaultSpaceId }, pkg2.id, actor, {
+      await createJudgedSchedule({ orgId: orgId, spaceId: defaultSpaceId }, pkg2.id, actor, {
         name: "Agent 2 Schedule",
         cronExpression: "*/15 * * * *",
       });
 
       const schedules = await listPackageSchedules(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         undefined,
@@ -421,7 +421,7 @@ describeRequiresRedis("scheduler service", () => {
       expect(schedules[0]!.name).toBe("Agent 1 Schedule");
 
       const schedules2 = await listPackageSchedules(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         pkg2.id,
         actor,
         undefined,
@@ -432,7 +432,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("returns empty array for package with no schedules", async () => {
       const schedules = await listPackageSchedules(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         undefined,
@@ -447,7 +447,7 @@ describeRequiresRedis("scheduler service", () => {
   describe("getSchedule", () => {
     it("returns an existing schedule", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -459,7 +459,7 @@ describeRequiresRedis("scheduler service", () => {
 
       const found = await getSchedule(
         created.id,
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         null,
         undefined,
       );
@@ -475,7 +475,7 @@ describeRequiresRedis("scheduler service", () => {
     it("returns null for a non-existent ID", async () => {
       const found = await getSchedule(
         "sched_nonexistent",
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         null,
         undefined,
       );
@@ -488,7 +488,7 @@ describeRequiresRedis("scheduler service", () => {
   describe("updateSchedule", () => {
     it("updates cronExpression and recomputes nextRunAt", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -497,7 +497,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       const updated = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         created,
         {
           cronExpression: "*/5 * * * *",
@@ -514,7 +514,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("updates name", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -524,7 +524,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       const updated = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         created,
         {
           name: "Updated Name",
@@ -539,7 +539,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("clears overrides when set to null, keeps when undefined", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -553,7 +553,7 @@ describeRequiresRedis("scheduler service", () => {
 
       // Cron-only update — overrides untouched (undefined leaves them).
       const partialUpdate = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         created,
         { cronExpression: "*/15 * * * *" },
         null,
@@ -567,7 +567,7 @@ describeRequiresRedis("scheduler service", () => {
       // Explicit null clears the override (UI's "Inherit" sentinel).
       // Judged against the row the previous write left (its cron moved).
       const cleared = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         partialUpdate,
         {
           generationConfigOverride: null,
@@ -586,7 +586,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("sets nextRunAt to null when enabled is false", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -598,7 +598,7 @@ describeRequiresRedis("scheduler service", () => {
       expect(created.next_run_at).not.toBeNull();
 
       const updated = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         created,
         {
           enabled: false,
@@ -614,7 +614,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("re-enables and recomputes nextRunAt", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -623,7 +623,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       const disabled = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         created,
         {
           enabled: false,
@@ -633,7 +633,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       const updated = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         disabled,
         {
           enabled: true,
@@ -650,7 +650,7 @@ describeRequiresRedis("scheduler service", () => {
 
     it("updates input data", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -660,7 +660,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       const updated = await updateJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         created,
         {
           input: { key: "updated", extra: true },
@@ -679,7 +679,7 @@ describeRequiresRedis("scheduler service", () => {
   describe("deleteSchedule", () => {
     it("removes the record and returns true", async () => {
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -687,12 +687,12 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const deleted = await deleteSchedule({ orgId, spaceId: defaultSpaceId }, created.id);
+      const deleted = await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, created.id);
       expect(deleted).toBe(true);
 
       const found = await getSchedule(
         created.id,
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         null,
         undefined,
       );
@@ -700,13 +700,16 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("returns false for a non-existent ID", async () => {
-      const deleted = await deleteSchedule({ orgId, spaceId: defaultSpaceId }, "sched_nonexistent");
+      const deleted = await deleteSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        "sched_nonexistent",
+      );
       expect(deleted).toBe(false);
     });
 
     it("does not affect other schedules", async () => {
       const schedule1 = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -715,7 +718,7 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
       const schedule2 = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         {
@@ -724,9 +727,9 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      await deleteSchedule({ orgId, spaceId: defaultSpaceId }, schedule2.id);
+      await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, schedule2.id);
 
-      const remaining = await listSchedulesIn({ orgId, spaceId: defaultSpaceId }, actor);
+      const remaining = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
@@ -745,7 +748,7 @@ describeRequiresRedis("scheduler service", () => {
   describe("triggerScheduledRun version resolution", () => {
     it("surfaces a failed run when an inheriting schedule fires on a never-published agent", async () => {
       const schedule = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         { cronExpression: "0 * * * *" }, // no versionOverride → inherit
@@ -1132,7 +1135,7 @@ describeRequiresRedis("scheduler service", () => {
       const spaceB = await seedSpace({ orgId, name: "Space B" });
       spaceBId = spaceB.id;
       const created = await createJudgedSchedule(
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         packageId,
         actor,
         { name: "Space A Schedule", cronExpression: "0 * * * *" },
@@ -1142,26 +1145,43 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("does not list a schedule belonging to another space", async () => {
-      expect(await listSchedulesIn({ orgId, spaceId: spaceBId }, actor)).toHaveLength(0);
+      expect(await listSchedulesIn({ orgId: orgId, spaceId: spaceBId }, actor)).toHaveLength(0);
       // Control: the same org, the owning space — still there.
-      expect(await listSchedulesIn({ orgId, spaceId: defaultSpaceId }, actor)).toHaveLength(1);
+      expect(await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor)).toHaveLength(
+        1,
+      );
     });
 
     it("does not list a package's schedules from another space", async () => {
       expect(
-        await listPackageSchedules({ orgId, spaceId: spaceBId }, packageId, actor, undefined),
+        await listPackageSchedules(
+          { orgId: orgId, spaceId: spaceBId },
+          packageId,
+          actor,
+          undefined,
+        ),
       ).toHaveLength(0);
       expect(
-        await listPackageSchedules({ orgId, spaceId: defaultSpaceId }, packageId, actor, undefined),
+        await listPackageSchedules(
+          { orgId: orgId, spaceId: defaultSpaceId },
+          packageId,
+          actor,
+          undefined,
+        ),
       ).toHaveLength(1);
     });
 
     it("does not resolve a schedule by id from another space", async () => {
       expect(
-        await getSchedule(scheduleIdInA, { orgId, spaceId: spaceBId }, actor, undefined),
+        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: spaceBId }, actor, undefined),
       ).toBeNull();
       expect(
-        await getSchedule(scheduleIdInA, { orgId, spaceId: defaultSpaceId }, actor, undefined),
+        await getSchedule(
+          scheduleIdInA,
+          { orgId: orgId, spaceId: defaultSpaceId },
+          actor,
+          undefined,
+        ),
       ).not.toBeNull();
     });
 
@@ -1170,7 +1190,7 @@ describeRequiresRedis("scheduler service", () => {
     it("refuses an update issued from another space, and the row is unchanged", async () => {
       await expect(
         updateJudgedSchedule(
-          { orgId, spaceId: spaceBId },
+          { orgId: orgId, spaceId: spaceBId },
           scheduleInA,
           {
             name: "Hijacked",
@@ -1181,7 +1201,7 @@ describeRequiresRedis("scheduler service", () => {
       ).rejects.toMatchObject({ status: 409 });
       const survivor = await getSchedule(
         scheduleIdInA,
-        { orgId, spaceId: defaultSpaceId },
+        { orgId: orgId, spaceId: defaultSpaceId },
         actor,
         undefined,
       );
@@ -1189,13 +1209,20 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("reports no delete from another space, and the row survives", async () => {
-      expect(await deleteSchedule({ orgId, spaceId: spaceBId }, scheduleIdInA)).toBe(false);
+      expect(await deleteSchedule({ orgId: orgId, spaceId: spaceBId }, scheduleIdInA)).toBe(false);
       expect(
-        await getSchedule(scheduleIdInA, { orgId, spaceId: defaultSpaceId }, actor, undefined),
+        await getSchedule(
+          scheduleIdInA,
+          { orgId: orgId, spaceId: defaultSpaceId },
+          actor,
+          undefined,
+        ),
       ).not.toBeNull();
       // Control: the identical call from the OWNING space does delete, so
       // "false + survives" above is the predicate at work, not a broken id.
-      expect(await deleteSchedule({ orgId, spaceId: defaultSpaceId }, scheduleIdInA)).toBe(true);
+      expect(await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, scheduleIdInA)).toBe(
+        true,
+      );
     });
   });
 

@@ -21,6 +21,7 @@ import {
   setSessionRestricted,
   type SessionHistory,
   type SessionsCache,
+  type SessionSummary,
 } from "./sessions.ts";
 
 /** The origin and limit a conversation started in this mount took, frozen at its first message. */
@@ -81,8 +82,8 @@ interface UseConversationLimitArgs {
   transport: ChatTransport | undefined;
   /** The conversation existed when the page opened (its id came from the URL). */
   persistedAtMount: boolean;
-  /** Its stored origin and limit, once the detail has loaded. */
-  stored: Pick<SessionHistory, "spaceId" | "restricted"> | undefined;
+  /** Its stored origin and limit, once its session row is known. */
+  stored: Pick<SessionSummary, "spaceId" | "restricted"> | undefined;
   /** The space a new conversation would take as origin (selected and acted in), if any. */
   selectedSpaceId: string | undefined;
   /** A turn is generating: the server refuses to change the limit until it ends. */
@@ -104,7 +105,7 @@ export function useConversationLimit({
   const queryClient = useQueryClient();
   const [created, setCreated] = useState<Created | null>(null);
   // Frozen at the first message: a retry after a failed first turn keeps it. Every later turn
-  // carries it too, and the server ignores it once the conversation exists.
+  // carries it too, and the server reads it only on the turn that creates the conversation.
   const frozen = useRef<Created | null>(null);
   // A conversation started in a space is limited to it unless the user lifts the limit before
   // sending; from the overview there is no origin to limit to, so it starts unlimited.
@@ -148,7 +149,6 @@ export function useConversationLimit({
     // the stored limit (another tab, a refetch) is not masked by it.
     onSuccess: (_data, next) => {
       setOverride(undefined);
-      if (frozen.current) frozen.current = { ...frozen.current, restricted: next };
       setCreated((prev) => (prev ? { ...prev, restricted: next } : prev));
     },
   });

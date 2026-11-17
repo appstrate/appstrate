@@ -58,6 +58,8 @@ test("a limited conversation lifts its limit, survives a space switch and the de
   await new Sidebar(page).switchSpace(elsewhere.name);
   await page.goto(`/chat/${session.id}`);
   await expect(page).toHaveURL(new RegExp(`/chat/${session.id}$`));
+  // The conversation itself is shown (its name in the trail), not a not-found page.
+  await expect(page.locator("[data-trail]")).toContainText("Across spaces");
   await expect(chip).toHaveCount(0);
   expect((await read()).spaceId).toBe(origin.id);
 

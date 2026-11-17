@@ -325,7 +325,7 @@ export async function setConnectionShareAllSpaces(input: EditInput & { enabled: 
 }
 
 /** A space by id and name, as the share targets name it. */
-interface NamedSpace {
+interface ShareTargetSpace {
   id: string;
   name: string;
 }
@@ -340,8 +340,8 @@ export async function shareableSpaces(
   caller: ConnectionCaller,
   rows: readonly Pick<ConnectionRow, "id" | "orgId" | "userId" | "endUserId" | "spaceId">[],
   orgRoles: ReadonlyMap<string, OrgRole>,
-): Promise<Map<string, NamedSpace[]>> {
-  const out = new Map<string, NamedSpace[]>();
+): Promise<Map<string, ShareTargetSpace[]>> {
+  const out = new Map<string, ShareTargetSpace[]>();
   const byOrg = new Map<string, string[]>();
   for (const row of rows) {
     if (!connectionActions(row, caller, false).includes("share")) continue;

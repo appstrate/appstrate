@@ -199,57 +199,66 @@ function logAndMarkStreamError(error: unknown, requestId: string): string {
 }
 
 /**
- * Claim the conversation for this turn, then write its user message. Returns the
- * user message id, which the assistant turn derives its own id from.
+ * Claim the conversation for this turn: set its in-flight marker, before anything
+ * of the turn is written — its attachments, its touched spaces, its user message.
+ * A conversation runs one turn at a time (`setActiveStream`), so a refused claim
+ * leaves nothing behind: 409 `chat_turn_scope_changed` when the scope the turn read
+ * moved (a resend computes it afresh), 409 `chat_turn_in_flight` while another turn
+ * holds the conversation.
  *
  * THE ORDER IS THE INVARIANT, not a preference. Chat persistence has a second
  * writer — `persistNotice`, driving the orphaned-run reconciliation — and the
  * rule it obeys is "a turn owns its conversation from start to finalize",
  * evaluated as `chat_sessions.active_stream_id IS NULL` under the session row's
- * lock. Writing the user message first left a window in which that predicate was
+ * lock. Were the user message written before the claim, that predicate would be
  * TRUE while a turn was already under way: `onRunStatusChange` →
- * `reconcileChatRun` → `persistNotice` took the lock, legitimately saw NULL, and
- * committed a notice at the seq BETWEEN this turn's user message and its
- * assistant message. The transcript then read user / notice / assistant, and the
- * session was marked unread while its owner sat watching it generate.
+ * `reconcileChatRun` → `persistNotice` would take the lock, legitimately see
+ * NULL, and commit a notice at the seq BETWEEN this turn's user message and its
+ * assistant message — user / notice / assistant, and the session marked unread
+ * while its owner sat watching it generate.
  *
- * Claiming first closes the window instead of narrowing it, and costs nothing
- * that anything reads back. The two things that consult the marker both already
- * treat "set, but no live producer" as no stream: the resume GET answers 204
- * when the store has no producer for the id (`routes.ts`), which is the same
- * answer it already owes a stale id left by a crash, and `POST …/stop` looks the
- * id up in the stop registry, where this turn's controller is registered a few
- * statements later — the same gap it already had. What is briefly true is the
- * DTO's `generating` flag, for the duration of one INSERT, and that is simply
- * the truth: the turn has started.
- *
- * A locked transaction spanning both writes would close the window too. This is
- * the cheaper half of that choice: no transaction on the pre-inference path of
- * every turn, and no lock held across a `chat_messages` insert.
+ * Claiming first costs nothing that anything reads back. The two things that
+ * consult the marker both treat "set, but no live producer" as no stream: the
+ * resume GET answers 204 when the store has no producer for the id (`routes.ts`),
+ * and `POST …/stop` looks the id up in the stop registry, where this turn's
+ * controller is registered a few statements later. What is briefly true is the
+ * DTO's `generating` flag, and that is simply the truth: the turn has started.
  */
 export async function claimTurn(
   sessionId: string,
   streamId: string,
-  message: UIMessage,
   scope: { spaceId: string | null; restricted: boolean },
-): Promise<string> {
-  // The scope the turn's spaces and bearer were computed from: a limit changed (or an origin
-  // space deleted) since that read refuses the turn, which a resend computes afresh.
-  if (!(await setActiveStream(sessionId, streamId, scope))) {
+): Promise<void> {
+  const claim = await setActiveStream(sessionId, streamId, scope);
+  if (claim === "scope_changed") {
     throw conflict(
       "chat_turn_scope_changed",
       "The conversation's limit changed while this turn was starting. Send the message again.",
     );
   }
+  if (claim === "in_flight") {
+    throw conflict(
+      "chat_turn_in_flight",
+      "A turn is already running in this conversation. Send the message again once it ends.",
+    );
+  }
+}
+
+/**
+ * Write the user message of a turn that holds its claim ({@link claimTurn}) and
+ * return its id, which the assistant turn derives its own id from. A claim must not
+ * outlive the turn it was taken for: on a failed write the marker is cleared, else the
+ * session stays generating forever — the resume GET keeps answering 204,
+ * `persistNotice` keeps refusing, the sidebar keeps a spinner.
+ */
+export async function persistClaimedUserMessage(
+  sessionId: string,
+  streamId: string,
+  message: UIMessage,
+): Promise<string> {
   try {
     return await persistUserMessage(sessionId, message);
   } catch (err) {
-    // A claim must not outlive the turn it was taken for. Without this, a failed
-    // user-message write would leave the session marked generating forever: the
-    // resume GET keeps answering 204, `persistNotice` keeps refusing, and the
-    // sidebar keeps a spinner on a turn that never started. `clearActiveStream`
-    // only clears a marker still pointing at THIS stream, so a newer turn that
-    // already claimed the session is left alone.
     await clearActiveStream(sessionId, streamId).catch(() => {});
     throw err;
   }
@@ -620,10 +629,10 @@ export async function handleChatStream(
   // prompt through the MCP server's `instructions`, which this route does not
   // fetch; the engine appends them and applies the policy itself
   // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
-  // could only misfire, since the context block below carries org-authored agent
-  // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt(capabilities);
-  if (contextBlock) system += `\n\n${contextBlock}`;
+  // could only misfire, since the context block below carries org-authored names
+  // (spaces, skills) and would be truncated at any that happened to spell the heading.
+  // The block always opens with its own heading, so it is never empty.
+  const system = `${buildSystemPrompt(capabilities)}\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.
   const credentialMode = isSubscription ? "oauth2" : "api-key";
@@ -654,16 +663,40 @@ export async function handleChatStream(
   if (!slot) throw chatCapacityError();
   const modelBinding = resolution.binding;
 
+  // Per-turn resumable stream id. It is the key for both the resumable producer
+  // (live reconnect) and the stop registry, and is stored on the session as
+  // `active_stream_id` so a reloaded client's resume GET can find the live turn.
+  const streamId = crypto.randomUUID();
+
+  // ── Server-authoritative persistence + resumable streaming ───────────────
+  // The order: claim the conversation, materialize the attachments, persist the user
+  // turn, then generate; the assistant turn is persisted when the stream finalizes
+  // (in `finalize` below). Generation runs through a resumable producer that drains to
+  // completion independently of the client, so leaving the conversation mid-inference
+  // cannot drop messages. Every refusal before this point (the admission gate, the model
+  // binding, capacity) and the claim's own refusal write nothing into the conversation.
+  const claimedSessionId = sessionId && lastMessage?.id ? sessionId : undefined;
+  let claimTurnMs = 0;
+  if (claimedSessionId) {
+    const claimStart = Date.now();
+    try {
+      await claimTurn(claimedSessionId, streamId, scope);
+    } catch (err) {
+      // The slot is reserved but generation has not started, so neither `finalize`
+      // nor `failCleanup` (below) owns it yet.
+      slot.release();
+      throw err;
+    }
+    claimTurnMs = Date.now() - claimStart;
+  }
+
   // Materialize the new turn's composer attachments into durable, session-scoped
   // files and rewrite each `upload://` (or already-`appfile://`) file part
-  // to its stable `appfile://` URI, BEFORE the turn is persisted (persistence
+  // to its stable `appfile://` URI, before the turn is persisted (persistence
   // stores only `appfile://`) and before it reaches the engine (the model is
-  // shown the attachment as a text line, never a raw file URL). Needs the session
-  // (the file container) and the turn's spaces, both known here. After every refusal
-  // (the admission gate, the model binding, capacity), because resolving an attachment
-  // touches its space on the conversation, which a refused turn must not widen; before
-  // the claim and the MCP session, so a quota/cap rejection surfaces as a clean error
-  // with only the slot to release. Only the last message can carry fresh uploads —
+  // shown the attachment as a text line, never a raw file URL). After the claim,
+  // because resolving an attachment touches its space on the conversation, which a
+  // refused turn must not widen. Only the last message can carry fresh uploads —
   // earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage) {
     // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
@@ -689,44 +722,29 @@ export async function handleChatStream(
       });
     } catch (err) {
       slot.release();
+      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
       throw err;
     }
     messages[messages.length - 1] = lastMessage;
   }
 
-  // ── Server-authoritative persistence + resumable streaming ───────────────
-  // Persist the user turn BEFORE inference; the assistant turn is persisted when
-  // the stream finalizes (in `finalize` below). Generation runs through a
-  // resumable producer that drains to completion independently of the client, so
-  // leaving the conversation mid-inference cannot drop messages.
-  // Per-turn resumable stream id. It is the key for both the resumable producer
-  // (live reconnect) and the stop registry, and is stored on the session as
-  // `active_stream_id` so a reloaded client's resume GET can find the live turn.
-  const streamId = crypto.randomUUID();
-
-  // The session row was already ensured up front (joined with phase A). Claim
-  // the conversation and persist the user turn now, just before generation.
   let userMessageId: string | undefined;
-  let claimTurnMs = 0;
-  if (sessionId && lastMessage?.id) {
-    const claimStart = Date.now();
+  let persistUserMessageMs = 0;
+  if (claimedSessionId && lastMessage) {
+    const persistStart = Date.now();
     try {
-      userMessageId = await claimTurn(sessionId, streamId, lastMessage, scope);
-      claimTurnMs = Date.now() - claimStart;
+      userMessageId = await persistClaimedUserMessage(claimedSessionId, streamId, lastMessage);
     } catch (err) {
-      // The concurrency slot is already reserved but generation has not started,
-      // so neither `finalize` (teardown via onSettled) nor `failCleanup` (defined
-      // below) owns it yet. Release it on this error path before rethrowing, or
-      // one slot leaks per failed turn. `claimTurn` has already undone its own
-      // half (the in-flight marker); the slot is this function's to undo.
+      // The claim is already undone; the slot is this function's to undo.
       slot.release();
       throw err;
     }
+    persistUserMessageMs = Date.now() - persistStart;
   }
 
   // Everything before generation, for an ADMITTED turn: the two overlapped
   // phases (their wall times, not a sum — phase B may outlast phase A),
-  // the claim/persist round trips, and the whole span since the request was
+  // the claim and user-message round trips, and the whole span since the request was
   // parsed. A rejected turn (gate, dead credential, unsupported family,
   // saturated capacity) returns above and is not measured here.
   logger.info("chat preamble", {
@@ -735,6 +753,7 @@ export async function handleChatStream(
     phaseAMs,
     phaseBMs,
     claimTurnMs,
+    persistUserMessageMs,
     preambleMs: Date.now() - turnStart,
   });
 
@@ -757,11 +776,11 @@ export async function handleChatStream(
         sessionId && userMessageId
           ? (assistant, preceding) => persistAssistantMessage(sessionId, assistant, preceding)
           : undefined,
-      onSettled: () => {
+      onSettled: async () => {
         unregisterStopController(streamId);
-        // Fire-and-forget teardown — swallow rejections so a failed DB update
-        // can't surface as an unhandled rejection.
-        if (sessionId) void clearActiveStream(sessionId, streamId).catch(() => {});
+        // Before the client's stream closes, so its next turn finds the conversation free.
+        // Swallowed: a failed DB update must not surface as an unhandled rejection.
+        if (sessionId) await clearActiveStream(sessionId, streamId).catch(() => {});
       },
     });
 

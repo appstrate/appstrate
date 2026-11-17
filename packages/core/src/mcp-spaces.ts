@@ -30,8 +30,7 @@ interface SpaceIdRefusal {
 
 /**
  * The refusal a call's `space_id` earns on an organization-wide connection, or
- * undefined when it names one of `spaces`. Shared by the MCP server and the
- * chat's local tools, so the wording the model reads is the same on both.
+ * undefined when it names one of `spaces`.
  */
 export function spaceIdRefusal(
   spaces: readonly NamedSpace[],

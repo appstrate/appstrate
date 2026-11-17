@@ -11,7 +11,6 @@ import {
   type InjectedSkill,
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
 
 export interface SkillHint {
   packageId: string;
@@ -92,28 +91,26 @@ interface ResolvedChatSkills {
  * one budget. A pin naming an injected enforced skill is dropped silently; one
  * whose enforced copy was left out stands as an ordinary pin. `contents` holds
  * the chosen skills active here and read (`null`: answered malformed); any
- * other becomes a notice.
+ * other becomes a notice. `enforced`: the skills the origin space enforces, served
+ * in that space (none without an origin space).
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
-  enforced: readonly EnforcedChatSkill[],
+  enforced?: { spaceId: string; skills: readonly EnforcedChatSkill[] },
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { enforced: [], chosen: [], notices: [] };
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
   const requiredBy = "this conversation's origin space";
-  for (const { packageId, version, uri, content } of enforced) {
-    // The space its URI names is the one its claim entry binds the skill to.
-    const spaceId = uri === null ? undefined : parseSkillUri(uri)?.spaceId;
+  const required = enforced
+    ? enforced.skills.map((skill) => ({ ...skill, spaceId: enforced.spaceId }))
+    : [];
+  for (const { packageId, version, uri, content, spaceId } of required) {
     if (content === null || uri === null) {
       resolved.notices.push(
         `The skill \`${packageId}\` is required by ${requiredBy} but has no published version to follow.`,
-      );
-    } else if (spaceId === undefined) {
-      resolved.notices.push(
-        `The skill \`${packageId}\` is required by ${requiredBy} but its address names no space, so it cannot be served.`,
       );
     } else if (content.length > left) {
       resolved.notices.push(

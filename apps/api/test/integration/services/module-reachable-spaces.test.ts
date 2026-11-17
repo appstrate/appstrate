@@ -49,4 +49,26 @@ describe("PlatformServices.reachableSpaces", () => {
     expect(flags.get(personal!.id)).toEqual([false, true]);
     expect(flags.get(team.id)).toEqual([false, false]);
   });
+
+  it("an unconfined caller is not confined, and each space's set is an array", async () => {
+    const { services } = buildModuleInitContext();
+    const reached = await services.reachableSpaces(requestOf(), ctx.orgId);
+    expect(reached.confined).toBe(false);
+    expect(reached.spaces.every((space) => Array.isArray(space.permissions))).toBe(true);
+  });
+
+  it("a credential confined to an allowlist reaches it alone, says so, and names its org half", async () => {
+    const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
+    const { services } = buildModuleInitContext();
+    const reached = await services.reachableSpaces(
+      requestOf({
+        credentialSpaceIds: [team.id],
+        orgPermissions: new Set(["org:read", "spaces:read"]),
+      }),
+      ctx.orgId,
+    );
+    expect(reached.confined).toBe(true);
+    expect(reached.spaces.map((space) => space.id)).toEqual([team.id]);
+    expect([...reached.orgPermissions].sort()).toEqual(["org:read", "spaces:read"]);
+  });
 });

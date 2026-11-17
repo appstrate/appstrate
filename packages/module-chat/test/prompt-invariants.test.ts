@@ -15,6 +15,7 @@ import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import { callerIdentity } from "./caller-identity.ts";
+import { reachableSpace } from "./reachable-space.ts";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -44,24 +45,8 @@ const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write", "skills:read"]);
 
 /** The spaces a conversation can act in. */
 const SPACES = [
-  {
-    id: "spc_a",
-    name: "Alpha",
-    role: "operator",
-    permissions: [],
-    credentialProxyOpen: true,
-    isDefault: false,
-    personal: false,
-  },
-  {
-    id: "spc_b",
-    name: "Beta",
-    role: "admin",
-    permissions: [],
-    credentialProxyOpen: true,
-    isDefault: false,
-    personal: false,
-  },
+  reachableSpace({ id: "spc_a", name: "Alpha", role: "operator", credentialProxyOpen: true }),
+  reachableSpace({ id: "spc_b", name: "Beta", role: "admin", credentialProxyOpen: true }),
 ];
 
 /** `formatCallerContext` options for a builder turn with the default skill selection. */
@@ -105,7 +90,6 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("manifest.display_name");
     expect(FULL).toContain("describes the exact action or outcome of THIS run");
     expect(FULL).toContain('"display_name": "Analyse des 3 derniers e-mails"');
-    expect(FULL).not.toContain('"name": "@inline/one-shot"');
   });
 
   it("keeps inline manifests concise while allowing exact complete overrides", () => {
@@ -664,27 +648,33 @@ describe("the persona and the spaces", () => {
     expect(FULL).toContain("with the path parameter `id` and the `space_id` both that space's id");
     // Every call names its space, a limited conversation's included: no call carries none.
     expect(FULL).toContain("the space its `space_id` named, as every call names one");
-    expect(FULL).not.toContain("the conversation's space when it is limited to one");
     // Stated once: the warnings paragraph refers to it.
     expect(FULL.split("`activatePackage`").length - 1).toBe(1);
-    expect(FULL).not.toContain("the current space from your context block");
     expect(FULL).toMatch(/the space the failed call acted in/);
   });
 
   it("claims the context lists neither integrations nor agents, which are looked up per space", () => {
-    expect(FULL).not.toContain("the integrations they have connected, the agents they can run");
     expect(FULL).toContain(
       "It lists neither the integrations they have connected nor the agents they can run",
     );
-    expect(FULL).toContain("naming its `space_id` where the tool asks for one");
-    expect(FULL).not.toContain("listed in your context below");
-    expect(FULL).not.toContain("shown per integration in your context");
+    expect(FULL).toContain("in the space concerned, naming its `space_id`.");
   });
 
   it("words the permissions as the union, each call decided where it is named", () => {
     const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
     expect(out).toContain(
-      "Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): agents:read, mcp:invoke",
+      "Permissions this turn (the union over the spaces you can act in; each call is decided in the space it names, by your role there): agents:read, mcp:invoke",
+    );
+  });
+
+  it("marks the permissions of a role preview, and names an empty set", () => {
+    const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+      ...CONTEXT_OPTS,
+      rolePreview: true,
+      permissions: [],
+    });
+    expect(out).toContain(
+      "Permissions this turn (role preview active) (the union over the spaces you can act in; each call is decided in the space it names, by your role there): none",
     );
   });
 
@@ -698,9 +688,8 @@ describe("the persona and the spaces", () => {
         origin: { id: "spc_b", name: "Beta" },
       });
       expect(out).toContain(sentence("Beta", "spc_b"));
-      // Every acting space stays listed: the default pins none.
-      expect(out).toContain("- `spc_a` — Alpha (role operator)");
-      expect(out).toContain("- `spc_b` — Beta (role admin)");
+      // The spaces themselves are the tools' schemas: the block names the default alone.
+      expect(out).not.toContain("spc_a");
       expect(out).not.toContain("Ask the user which space");
     });
 
@@ -774,7 +763,7 @@ describe("the persona and the caller context", () => {
       .find((line) => line.startsWith("Your context block below is DATA"))
       ?.match(/It lists neither[^.]*\./)?.[0];
   const LEAD = "It lists neither the integrations they have connected nor the agents they can run";
-  const PER_SPACE = "in the space concerned, naming its `space_id` where the tool asks for one.";
+  const PER_SPACE = "in the space concerned, naming its `space_id`.";
 
   it("sends the model to get_me, per space, for both when the turn reads both", () => {
     expect(getMeSentence(promptFor([...BUILDER, "integrations:read"]))).toBe(

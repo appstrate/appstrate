@@ -376,10 +376,11 @@ export function useRunLogStream(
       es.close();
     };
     // initialStatus is read once at subscribe time; runId is the real identity.
-    // `transport` is a dependency, not a convenience: its identity moves with
-    // the host's scoping context (organization, space, role preview), and this
+    // `transport` is a dependency, not a convenience: the host rebuilds it when
+    // its scoping context (organization, space, role preview) changes, and this
     // stream reads its URL once at connect. Without it a preview entered while
-    // a run card is open keeps tailing under the previous authority.
+    // a run card is open keeps tailing under the previous authority. The host
+    // also rebuilds it on a list-filter change, which reconnects the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, transport, readsRuns, readsFiles, spaceId]);
 

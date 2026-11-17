@@ -7,7 +7,12 @@
  * only session list/CRUD + history load.
  */
 
-import { queryOptions, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  skipToken,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
@@ -64,8 +69,17 @@ export function sessionsSearchQueryKey(spaceId: string | null, q: string): reado
  * `GET /api/orgs/{orgId}/chat/sessions/{id}`: one cache for the module and the host, which
  * refetches it on the conversation's session signal.
  */
-export function sessionQueryKey(orgId: string, id: string): readonly unknown[] {
+export function sessionQueryKey(orgId: string | undefined, id: string | null): readonly unknown[] {
   return ["get", "/api/orgs/{orgId}/chat/sessions/{id}", { params: { path: { orgId, id } } }];
+}
+
+/**
+ * The history a conversation's runtime is seeded with, read once per mount. Its own key, which no
+ * session signal matches: the runtime takes the first answer only, so a refetch would cost the
+ * whole history for nothing.
+ */
+export function historyQueryKey(orgId: string | undefined, id: string): readonly unknown[] {
+  return ["chat", "history", orgId, id];
 }
 
 export interface SessionsPage {
@@ -99,6 +113,43 @@ export function patchSessionsCache(
   if (!prev)
     return seed ? { pages: [{ data: [seed], hasMore: false }], pageParams: [undefined] } : prev;
   return { ...prev, pages: prev.pages.map((p, i) => ({ ...p, data: fn(p.data, i === 0) })) };
+}
+
+/**
+ * One filtered list as a turn of conversation `id` starts: its row marked generating and moved to
+ * the head. A conversation created by this turn (`created`: its origin and limit) is not listed
+ * yet, so its row is made, with its origin as the only space it touched. An existing one missing
+ * from the list stays out: the filter excludes it, and only the server knows which spaces it touched.
+ */
+export function startTurnRow(
+  prev: SessionsCache | undefined,
+  turn: {
+    id: string;
+    created: { originSpaceId: string | null; restricted: boolean } | null;
+    now: string;
+  },
+): SessionsCache | undefined {
+  const { id, created, now } = turn;
+  const listed: SessionSummary | undefined = prev?.pages
+    .flatMap((p) => p.data)
+    .find((s) => s.id === id);
+  const base =
+    listed ??
+    (created && {
+      id,
+      title: null,
+      unread: false,
+      spaceId: created.originSpaceId,
+      restricted: created.restricted,
+      space_ids: created.originSpaceId ? [created.originSpaceId] : [],
+    });
+  if (!base) return prev;
+  const row: SessionSummary = { ...base, generating: true, updatedAt: now };
+  return patchSessionsCache(
+    prev,
+    (rows, first) => [...(first ? [row] : []), ...rows.filter((s) => s.id !== id)],
+    row,
+  );
 }
 
 /**
@@ -202,11 +253,37 @@ export async function loadHistory(
  */
 export function sessionQuery(transport: ChatTransport | null | undefined, id: string | null) {
   return queryOptions({
-    queryKey: sessionQueryKey(transport?.orgId ?? "", id ?? ""),
-    queryFn: () => loadHistory(transport!, id!),
-    enabled: !!transport && !!id,
+    queryKey: sessionQueryKey(transport?.orgId, id),
+    queryFn: transport && id ? () => loadHistory(transport, id) : skipToken,
     staleTime: Infinity,
     // Read again on every mount: nothing else refreshes a conversation no one was watching.
+    gcTime: 0,
+  });
+}
+
+/** What seeds a conversation's runtime: its stored messages and skill selection. */
+export type SessionSeed = Pick<SessionHistory, "messages" | "skills">;
+
+/**
+ * The seed of conversation `id` (`null`: no such conversation), read through the conversation's
+ * own entry so a read the host holds or has in flight serves both. Read on every mount, never again:
+ * the row's live fields (limit, unread, `generating`) come from the session row, not from here.
+ */
+export function sessionSeedQuery(
+  queryClient: QueryClient,
+  transport: ChatTransport | null | undefined,
+  id: string,
+) {
+  return queryOptions({
+    queryKey: historyQueryKey(transport?.orgId, id),
+    queryFn: transport
+      ? async (): Promise<SessionSeed | null> => {
+          // A cached entry has an observer, which the session signal keeps fresh.
+          const history = await queryClient.fetchQuery(sessionQuery(transport, id));
+          return history && { messages: history.messages, skills: history.skills };
+        }
+      : skipToken,
+    staleTime: Infinity,
     gcTime: 0,
   });
 }

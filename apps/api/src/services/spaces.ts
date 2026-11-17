@@ -474,8 +474,8 @@ async function deleteSpaceInTx(
   }
 
   // A conversation originating in this space outlives it: its origin is not an owner. It is
-  // detached here rather than by the FK's `SET NULL`, because its limit needs an origin
-  // (`chat_sessions_restricted_needs_space`) and falls in the same statement. What it holds in
+  // detached here (the FK has no delete action), and its limit, which needs an origin
+  // (`chat_sessions_restricted_needs_space`), falls in the same statement. What it holds in
   // this space leaves with the space, like any file here; what it holds elsewhere stays with it.
   await tx
     .update(chatSessions)

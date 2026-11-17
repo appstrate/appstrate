@@ -594,15 +594,6 @@ export async function callerPlacementAuthority(
   };
 }
 
-/**
- * A share's target space — placed into or withdrawn from — is one the request's credential may
- * name (`credentialAdmitsSpace`), whichever side's authority acts: home authority reaches the
- * package, not every space it could be placed in. `null`: a personal space the share would create.
- */
-export function assertShareTargetAdmitted(c: Context<AppEnv>, spaceId: string | null): void {
-  if (!credentialAdmitsSpace(c, spaceId)) throw unnameableSpace(c, spaceId);
-}
-
 /** Which side's authority withdrew a placement — recorded on `package.unshared`. */
 export type PlacementRemovalAuthority = "home" | "recipient";
 
@@ -621,7 +612,9 @@ export async function assertPlacementRemovalAccess(
   pkg: PackageAccessRow;
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
 }> {
-  assertShareTargetAdmitted(c, targetSpaceId);
+  // The target is a space the credential may name, whichever side's authority acts: home
+  // authority reaches the package, not every space it could be placed in.
+  if (!credentialAdmitsSpace(c, targetSpaceId)) throw unnameableSpace(c, targetSpaceId);
   const { pkg, accessible } = await loadGovernedPackage(c, packageId, "share");
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);

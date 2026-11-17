@@ -172,7 +172,7 @@ ${tools(
   "- Run an agent instead when the task needs a runtime — a shell, a filesystem, code execution, files written to `outputs/`, long multi-step processing, a fan-out — or the integration tools cannot do it:",
   "- If the request needs an integration, an MCP, or any external action, run an agent:",
 )}
-  1. Prefer an existing agent the user can run when one matches the intent — \`get_me\`, for the space concerned (naming its \`space_id\` where the tool asks for one), lists the agents of that space they can run, each with \`published\`, \`home_writable\` and \`takes_input\`; when its \`agents_truncated\` is true, look the rest up with \`invoke_operation\` — and call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent declares an input schema (it is validated against it); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent with no published version (\`published: false\`) runs only as \`version:"draft"\`, and only for a user who authors it (\`home_writable: true\`): for anyone else it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
+  1. Prefer an existing agent the user can run when one matches the intent — \`get_me\`, for the space concerned (naming its \`space_id\`), lists the agents of that space they can run, each with \`published\`, \`home_writable\` and \`takes_input\`; when its \`agents_truncated\` is true, look the rest up with \`invoke_operation\` — and call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent declares an input schema (it is validated against it); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent with no published version (\`published: false\`) runs only as \`version:"draft"\`, and only for a user who authors it (\`home_writable: true\`): for anyone else it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
 ${inline(
   `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a \`manifest\` plus a top-level \`prompt\`. ${INLINE_MANIFEST_RULE} Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"); the platform derives the matching \`@inline/<kebab-case-slug>\` name. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version, looked up for the space concerned${connections(": `get_me` gives both, as `integration_package_id` and `version`, for each integration the user has connected there")}), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (read with \`getIntegration\`) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. To know which tools an integration offers, read it with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` when the task means nothing without it, to refuse the launch instead.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
 
@@ -223,10 +223,10 @@ Files the user attaches to the conversation are shown to you as \`[Attached file
 
 ${runs(`Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
 
-`)}Your context block below is DATA — the user's identity and role, the current date, the spaces they can act in${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run${
+`)}Your context block below is DATA — the user's identity and role, the current date, the space a request naming none acts in${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run${
     getMeReturns.length === 0
       ? ""
-      : `: both differ per space, so call \`get_me\` for ${new Intl.ListFormat("en").format(getMeReturns)} in the space concerned, naming its \`space_id\` where the tool asks for one`
+      : `: both differ per space, so call \`get_me\` for ${new Intl.ListFormat("en").format(getMeReturns)} in the space concerned, naming its \`space_id\``
   }. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
@@ -306,7 +306,11 @@ function formatSkillsSection(opts: {
   /** The origin space, which owns the enforced skills. */
   origin?: { id: string; name: string };
 }): RenderedContext {
-  const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
+  const skills = resolveChatSkills(
+    opts.selection,
+    opts.contents,
+    opts.origin && { spaceId: opts.origin.id, skills: opts.enforced },
+  );
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
   const injected = new Set(skills.enforced.map((skill) => skill.packageId));
   // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
@@ -345,7 +349,7 @@ type CallerContextOpts = {
   now?: Date;
   capabilities: TurnCapabilities;
   rolePreview: boolean;
-  /** The spaces the turn can act in: its calls name them (the origin space alone when limited). */
+  /** The spaces the turn can act in (the origin alone when limited): the default is picked among them. */
   spaces: readonly ReachableSpaceGrant[];
   /** The conversation's origin space, when it can act there: the default of a request naming none. */
   origin?: { id: string; name: string };
@@ -390,18 +394,15 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // The spaces the turn acts in, then the default of a request naming no space, never a pin:
-  // the origin space, else the caller's personal space, else the organization's default space,
-  // when the turn acts there (with none, the model asks). A limited conversation's spaces are
-  // its origin alone, which every call still names. That a refused action is never moved to
-  // another space is the server's instructions' (`NO_FALLBACK_HINT`), not repeated here.
-  const preview = opts.rolePreview ? " (role preview active)" : "";
+  // The default of a request naming no space, never a pin: the origin space, else the caller's
+  // personal space, else the organization's default space, when the turn acts there (with
+  // none, the model asks); a limited conversation's origin alone. The spaces themselves, and
+  // that every space-acting tool takes a `space_id`, are the tools' schemas and the server's
+  // instructions (`NO_FALLBACK_HINT` included), not repeated here.
   const fallback = opts.origin
     ? undefined
     : (opts.spaces.find((space) => space.personal) ?? opts.spaces.find((space) => space.isDefault));
   lines.push(
-    `Spaces you can act in${preview}; every tool that acts in a space takes the \`space_id\` of one of them:`,
-    ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
     opts.restricted && opts.origin
       ? `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`): pass \`${opts.origin.id}\` as the \`space_id\` of every call; no other space can be reached. The user lifts the limit in the composer.`
       : opts.origin
@@ -410,11 +411,12 @@ export function formatCallerContext(
           ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`.`
           : "Ask the user which space when the request does not say; never guess it.",
   );
-  // The set is the union over the spaces listed above: it bounds what the turn may attempt,
-  // while each call is decided by the role held in the space it names. Permissions are in the
+  // The set is the union over the turn's spaces: it bounds what the turn may attempt, while
+  // each call is decided by the role held in the space it names. Permissions are in the
   // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
+  const preview = opts.rolePreview ? " (role preview active)" : "";
   lines.push(
-    `Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): ${
+    `Permissions this turn${preview} (the union over the spaces you can act in; each call is decided in the space it names, by your role there): ${
       opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
     }`,
   );

@@ -7,7 +7,7 @@
  * differs from the defaults.
  */
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   BookOpenIcon,
@@ -70,13 +70,13 @@ export function ComposerTools({
   authorsPackages,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds, workingSpaceId } = useChatHost();
+  const { t, actingSpaceIds } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
   // The plain name, for the accessible names: the node below carries a tile the name does not.
   const spaceLabel = useOriginSpaceLabel();
-  const limit = limitAvailability(scope, actingSpaceIds, workingSpaceId);
-  // The space as the host names it; without the host's rendering, the sentence stays generic.
+  const limit = limitAvailability(scope, actingSpaceIds);
+  // The space as the host names it; without an origin, the sentence stays generic.
   const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -119,20 +119,17 @@ export function ComposerTools({
           ) : (
             // An upload lands in the working space: where the chat does not act, or off the
             // origin of a limited conversation.
-            <DropdownMenuItem disabled data-testid="composer-attach-item">
-              <PaperclipIcon />
-              <span className="flex flex-col">
-                {t("composer.attach")}
-                <span
-                  className="text-muted-foreground max-w-56 text-xs whitespace-normal"
-                  data-testid="composer-attach-reason"
-                >
-                  {attach.reason === "limited"
-                    ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
-                    : t("composer.attachUnavailable")}
-                </span>
-              </span>
-            </DropdownMenuItem>
+            <UnavailableItem
+              icon={<PaperclipIcon />}
+              label={t("composer.attach")}
+              reason={
+                attach.reason === "limited"
+                  ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
+                  : t("composer.attachUnavailable")
+              }
+              testId="composer-attach-item"
+              reasonTestId="composer-attach-reason"
+            />
           )}
           {showPicker && (
             <DropdownMenuItem
@@ -156,15 +153,12 @@ export function ComposerTools({
             </DropdownMenuCheckboxItem>
           ) : (
             // A turn generating, no origin space (« Tous les espaces »), or one the chat cannot act in.
-            <DropdownMenuItem disabled data-testid="composer-limit-item">
-              <MapPinIcon />
-              <span className="flex flex-col">
-                {t("composer.limit.generic")}
-                <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">
-                  {t(LIMIT_REASON_KEY[limit.reason])}
-                </span>
-              </span>
-            </DropdownMenuItem>
+            <UnavailableItem
+              icon={<MapPinIcon />}
+              label={t("composer.limit.generic")}
+              reason={t(LIMIT_REASON_KEY[limit.reason])}
+              testId="composer-limit-item"
+            />
           )}
           {authorsPackages && (
             <DropdownMenuCheckboxItem
@@ -181,46 +175,24 @@ export function ComposerTools({
       {/* On is the default, so the chip marks the departure from it: an author
           who turned creation off sees it, and its X turns creation back on. */}
       {authorsPackages && !creationMode && (
-        <span
-          className={cn(
-            badgeVariants({ variant: "secondary" }),
-            "text-muted-foreground h-7 shrink-0 gap-1.5 py-0 pr-1 pl-2.5 font-normal",
-          )}
+        <RemovableChip
+          icon={<PackageIcon />}
+          removeLabel={t("composer.creationOff.undo")}
+          onRemove={() => setPackageAuthoringEnabled(true)}
         >
-          <PackageIcon className="size-3.5" />
           {t("composer.creationOff")}
-          <button
-            type="button"
-            aria-label={t("composer.creationOff.undo")}
-            onClick={() => setPackageAuthoringEnabled(true)}
-            className="hover:bg-foreground/10 flex size-5 items-center justify-center rounded-full"
-          >
-            <XIcon className="size-3" />
-          </button>
-        </span>
+        </RemovableChip>
       )}
       {scope.restricted && (
-        <span
-          data-testid="composer-limit-chip"
-          className={cn(
-            badgeVariants({ variant: "secondary" }),
-            "text-muted-foreground h-7 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-1 pl-2.5 font-normal",
-          )}
+        <RemovableChip
+          icon={<MapPinIcon />}
+          removeLabel={t("composer.limit.undo", { name: spaceLabel })}
+          removeDisabled={scope.generating || scope.pending}
+          onRemove={() => scope.setRestricted(false)}
+          testId="composer-limit-chip"
         >
-          <MapPinIcon className="size-3.5 shrink-0" />
-          <span className="block min-w-0 truncate">
-            {sentenceWithNode(t, "composer.limitChip", spaceNode)}
-          </span>
-          <button
-            type="button"
-            aria-label={t("composer.limit.undo", { name: spaceLabel })}
-            disabled={scope.generating || scope.pending}
-            onClick={() => scope.setRestricted(false)}
-            className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
-          >
-            <XIcon className="size-3" />
-          </button>
-        </span>
+          {sentenceWithNode(t, "composer.limitChip", spaceNode)}
+        </RemovableChip>
       )}
       {(showPicker || showEnforced) && (
         <SkillChips
@@ -243,5 +215,74 @@ export function ComposerTools({
     >
       {cluster}
     </SkillsPicker>
+  );
+}
+
+/** A menu item that cannot be chosen here, with the reason under its label. */
+function UnavailableItem({
+  icon,
+  label,
+  reason,
+  testId,
+  reasonTestId,
+}: {
+  icon: ReactNode;
+  label: ReactNode;
+  reason: ReactNode;
+  testId: string;
+  reasonTestId?: string;
+}) {
+  return (
+    <DropdownMenuItem disabled data-testid={testId}>
+      {icon}
+      <span className="flex flex-col">
+        {label}
+        <span
+          className="text-muted-foreground max-w-56 text-xs whitespace-normal"
+          data-testid={reasonTestId}
+        >
+          {reason}
+        </span>
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
+/** A setting that departs from the default, shown as a chip whose X restores the default. */
+function RemovableChip({
+  icon,
+  children,
+  removeLabel,
+  removeDisabled = false,
+  onRemove,
+  testId,
+}: {
+  icon: ReactNode;
+  children: ReactNode;
+  removeLabel: string;
+  removeDisabled?: boolean;
+  onRemove: () => void;
+  testId?: string;
+}) {
+  return (
+    <span
+      data-testid={testId}
+      className={cn(
+        badgeVariants({ variant: "secondary" }),
+        "text-muted-foreground h-7 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-1 pl-2.5 font-normal [&>svg]:size-3.5 [&>svg]:shrink-0",
+      )}
+    >
+      {icon}
+      <span className="block min-w-0 truncate">{children}</span>
+      <button
+        type="button"
+        aria-label={removeLabel}
+        disabled={removeDisabled}
+        onClick={onRemove}
+        className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
+      >
+        <XIcon className="size-3" />
+      </button>
+    </span>
   );
 }

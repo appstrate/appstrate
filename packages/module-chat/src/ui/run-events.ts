@@ -693,9 +693,8 @@ export function extractRunPackageId(result: unknown): string | undefined {
  * Build the in-app run-detail path (`/agents/{packageId}/runs/{runId}`, the same
  * route the run table links to). `undefined` when the run has no package id
  * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
- * slashes literal to match the route; only the run id is encoded. The UI opens it in the run's
- * space through the host's `linkInSpace`; `spaceId` names it directly for the server-side
- * reconcile, which has no host to ask.
+ * slashes literal to match the route; only the run id is encoded. `spaceId` names the space it
+ * opens in (the host's `?enterSpace=` convention).
  */
 export function buildRunPageHref(
   packageId: string | undefined,

@@ -59,6 +59,7 @@ function render(granted: string[], hasMore = false): string {
               activeId={null}
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
+              renderSpaces={(ids) => ids.join(", ")}
             />
           </ChatTransportProvider>
         </SidebarProvider>

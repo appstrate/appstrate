@@ -106,7 +106,6 @@ function buildPlatformServices(): PlatformServices {
       return {
         spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
           ...toReachableSpaceWire(space),
-          permissions: [...space.permissions],
           isDefault: space.isDefault,
           personal: personalOwner !== null && space.ownerUserId === personalOwner,
         })),

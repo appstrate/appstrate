@@ -33,7 +33,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
-import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
+import { dispatchSpace, stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
   mergeConnectOffers,
   offerScopeOf,
@@ -402,11 +402,6 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** The space a platform tool call names (`space_id`), where it is dispatched; none when it names none. */
-export function dispatchSpace(args: Record<string, unknown>): string | undefined {
-  return typeof args.space_id === "string" ? args.space_id : undefined;
-}
-
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -429,15 +424,16 @@ function makeForwardExtension(
         const args = (params as Record<string, unknown>) ?? {};
         // The call names its space: refused like `run_and_wait`'s when it is outside the turn's
         // spaces, else recorded before it is made.
-        if (typeof args.space_id === "string") {
-          const refusal = spaceIdRefusal(organization.spaces, args.space_id);
+        const spaceId = dispatchSpace(args);
+        if (spaceId !== undefined) {
+          const refusal = spaceIdRefusal(organization.spaces, spaceId);
           if (refusal) {
             return withTurnBudgetNote(
               toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
               turnBudget,
             );
           }
-          await organization.touch(args.space_id);
+          await organization.touch(spaceId);
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(

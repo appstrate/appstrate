@@ -42,7 +42,8 @@ import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
-import { CallSpace, ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { CallSpace } from "./call-space.tsx";
 import {
   extractAgentLabel,
   extractRunFiles,

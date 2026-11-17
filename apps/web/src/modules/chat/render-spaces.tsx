@@ -4,9 +4,9 @@ import type { RenderSpaces } from "@appstrate/module-chat/ui";
 import { SpaceTilesOf } from "../../components/space-name";
 
 /**
- * The chat's seam to name spaces: the app's own tile and name per space, none counted away (a
- * type-only import of the module: the entry chunk stays free of it). Several spaces stack their
- * tiles, ringed in `--space-tile-ring` — the colour a conversation row sets for its current state
- * (rest, hover, active).
+ * The chat's seam to name spaces: {@link SpaceTilesOf}, none counted away. Several spaces stack
+ * their tiles, ringed in `--space-tile-ring`, the colour a conversation row sets for its current
+ * state (rest, hover, active). A file of its own: a component file exports components only (fast
+ * refresh).
  */
 export const renderSpaces: RenderSpaces = (spaceIds) => <SpaceTilesOf spaceIds={spaceIds} />;

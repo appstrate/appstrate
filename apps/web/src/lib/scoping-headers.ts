@@ -29,7 +29,7 @@ export function buildScopingHeaders(
  */
 export function missingScopingHeaders(
   present: Headers,
-  { scoping = buildScopingHeaders() }: { scoping?: Record<string, string> } = {},
+  scoping: Record<string, string> = buildScopingHeaders(),
 ): Record<string, string> {
   const otherOrg = present.has("X-Org-Id") && present.get("X-Org-Id") !== scoping["X-Org-Id"];
   return Object.fromEntries(

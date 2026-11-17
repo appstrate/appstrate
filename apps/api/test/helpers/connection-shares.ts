@@ -21,6 +21,7 @@ export function testCaller(
     spaceId: null,
     canConnect: true,
     governs: false,
+    // A stand-in for the door's `credentialAdmitsSpace`, which reads a request context.
     admitsSpace: (spaceId) => bound === null || bound.includes(spaceId),
     permissionsIn: async () => new Set(),
     spacesSeen: async () => [],

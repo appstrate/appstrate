@@ -495,14 +495,10 @@ export function credentialAdmitsSpace(c: Context<AppEnv>, spaceId: string | null
 }
 
 /**
- * Whether the request's credential is confined to spaces: it pins one, or allowlists a set. The
- * resources that read it refuse such a credential whatever its permissions: org-level webhooks,
- * sharing a connection into every space, a person as a share target, the organization chat
- * endpoint, and its owner's connections serving the whole org (`connectionPrincipal`). It is not
- * a blanket org-level refusal: the chat's bearer carries an allowlist in both its cases, and an
- * unlimited conversation keeps its caller's org-level grants (it acts for them across their
- * spaces), while a limited one is denied the org-level writes by its ceiling instead
- * (`limitedConversationPermissions`, module-chat). See `docs/architecture/SPACES.md`.
+ * Whether the request's credential is confined to spaces: it pins one, or allowlists a set. Such a
+ * credential reaches no org-level resource spanning every space that the platform scopes by
+ * credential, and is bound on connections (`connectionPrincipal`). The list of what it is refused:
+ * `docs/architecture/SPACES.md` → "The chat's bearer is a credential bound to a set of spaces".
  */
 export function credentialConfinedToSpaces(c: Context<AppEnv>): boolean {
   return c.get("credentialSpaceId") !== undefined || c.get("credentialSpaceIds") !== undefined;

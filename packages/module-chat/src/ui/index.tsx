@@ -74,12 +74,13 @@ import {
   patchSessionsCache,
   sessionQuery,
   sessionQueryKey,
+  sessionSeedQuery,
   sessionsQueryKey,
   SESSIONS_QUERY_KEY,
+  startTurnRow,
   stopSession,
   type SessionHistory,
   type SessionsCache,
-  type SessionSummary,
 } from "./sessions.ts";
 import { useActiveSession } from "./use-sessions.ts";
 import {
@@ -134,7 +135,10 @@ const MODELS_STALE_MS = 60_000;
 const EMPTY_MODELS: OrgModelOption[] = [];
 
 export interface ChatPageProps {
-  /** The scoping headers and the request function (see `ChatTransport`). Pass a stable object. */
+  /**
+   * The scoping headers and the request function (see `ChatTransport`). Memoise it: rebuild it
+   * only when what it carries changes (the scoping, the list filter).
+   */
   transport?: ChatTransport;
   /**
    * Active conversation id (`chs_…`) from the host URL, or `null`/`undefined`
@@ -181,11 +185,11 @@ export interface ChatPageProps {
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
   /** The caller's grants in a named space (see `ChatHost`). Pass a stable function. */
-  canIn?: ChatHost["canIn"];
+  canIn: ChatHost["canIn"];
   /** The spaces the chat acts in (see `ChatHost`). Pass a stable array. */
   actingSpaceIds: ChatHost["actingSpaceIds"];
   /** The host's working space, where an upload lands (see `ChatHost`). */
-  workingSpaceId?: ChatHost["workingSpaceId"];
+  workingSpaceId: ChatHost["workingSpaceId"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -197,11 +201,11 @@ export interface ChatPageProps {
   /** The user's first name, greeted on a new conversation (see `ChatHost`). */
   firstName?: ChatHost["firstName"];
   /** Names spaces (see `ChatHost`). Pass a stable function. */
-  renderSpaces?: ChatHost["renderSpaces"];
+  renderSpaces: ChatHost["renderSpaces"];
   /** Links a path in a row's space (see `ChatHost`). Pass a stable function. */
-  linkInSpace?: ChatHost["linkInSpace"];
+  linkInSpace: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
-  useSpaceLabelOf?: ChatHost["useSpaceLabelOf"];
+  useSpaceLabelOf: ChatHost["useSpaceLabelOf"];
 }
 
 export function ChatPage({
@@ -388,11 +392,14 @@ export function ChatPage({
   );
   const authorsPackages = canAuthorPackages(can);
 
-  // The active row reduced to two primitives so the memoised `Conversation` re-renders only when
-  // they change (a few times per turn), not on every list refetch. Feeds the history self-heal in
-  // `ConversationInner` (see `history-reconcile.ts`).
+  // The active row reduced to primitives so the memoised `Conversation` re-renders only when
+  // they change (a few times per turn), not on every list refetch. `generating` and `updatedAt`
+  // feed the history self-heal in `ConversationInner` (see `history-reconcile.ts`); the origin and
+  // the limit are the stored ones `useConversationLimit` reads.
   const serverGenerating = activeRow?.generating;
   const serverUpdatedAt = activeRow?.updatedAt;
+  const storedSpaceId = activeRow?.spaceId;
+  const storedRestricted = activeRow?.restricted;
 
   return (
     <ChatTransportProvider value={transport ?? null}>
@@ -419,6 +426,8 @@ export function ChatPage({
               canWrite={canWrite}
               serverGenerating={serverGenerating}
               serverUpdatedAt={serverUpdatedAt}
+              storedSpaceId={storedSpaceId}
+              storedRestricted={storedRestricted}
             />
           </div>
         </ChatHostProvider>
@@ -444,6 +453,10 @@ interface ConversationProps {
   serverGenerating: boolean | undefined;
   /** Server session row `updatedAt`, from the list or the conversation; `undefined` = no row. */
   serverUpdatedAt: string | undefined;
+  /** Server session row origin space; `undefined` = no row. */
+  storedSpaceId: string | null | undefined;
+  /** Server session row limit; `undefined` = no row. */
+  storedRestricted: boolean | undefined;
 }
 
 /**
@@ -455,9 +468,9 @@ interface ConversationProps {
  *
  * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
- * `isPersisted`, `serverGenerating`, `serverUpdatedAt`), a stable host function
- * (`transport`, `onConversationChange` — the host must memoise it, as
- * documented on `ChatPageProps`), or a `useMemo` product of `ChatPage`
+ * `isPersisted`, the `server*` / `stored*` fields of the active row), a host
+ * value the host memoises (`onConversationChange`, and `transport`, rebuilt
+ * when the list filter changes), or a `useMemo` product of `ChatPage`
  * (`attachments`, `composerSlot`), so a list refetch that leaves the active row
  * untouched is a no-op here.
  */
@@ -469,6 +482,8 @@ const Conversation = memo(function Conversation({
   authorsPackages,
   canPinSkills,
   canWrite,
+  storedSpaceId,
+  storedRestricted,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -480,18 +495,22 @@ const Conversation = memo(function Conversation({
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
   const { t, actingSpaceIds } = useChatHost();
+  const queryClient = useQueryClient();
   const history = useQuery({
-    ...sessionQuery(transport, id),
-    enabled: persistedAtMount && !!transport,
+    ...sessionSeedQuery(queryClient, transport, id),
+    enabled: persistedAtMount,
   });
 
-  // The conversation's origin space and limit: stored once it exists, the selected space and a
-  // local choice before its first message (see `conversation-limit.ts`).
+  // The conversation's origin space and limit: the session row's once it exists, the selected
+  // space and a local choice before its first message (see `conversation-limit.ts`).
   const { scope, getCreation } = useConversationLimit({
     id,
     transport,
     persistedAtMount,
-    stored: history.data ?? undefined,
+    stored:
+      storedRestricted === undefined
+        ? undefined
+        : { spaceId: storedSpaceId ?? null, restricted: storedRestricted },
     selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
     generating: rest.serverGenerating === true,
   });
@@ -597,7 +616,10 @@ function ConversationInner({
   serverUpdatedAt,
   getChosenSkills,
   getCreation,
-}: Omit<ConversationProps, "canPinSkills" | "canWrite" | "authorsPackages"> & {
+}: Omit<
+  ConversationProps,
+  "canPinSkills" | "canWrite" | "authorsPackages" | "storedSpaceId" | "storedRestricted"
+> & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
@@ -610,7 +632,7 @@ function ConversationInner({
   const getScope = useLatest(useConversationScope());
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
-  // The seed, frozen: `useChat` reads it once, and the shared detail refetches under it.
+  // The seed, frozen: `useChat` reads it once.
   const [seedMessages] = useState(initialMessages);
 
   // Pre-select the model of this conversation's newest turn. A layout effect,
@@ -756,30 +778,15 @@ function ConversationInner({
   const generating = chat.status === "submitted" || chat.status === "streaming";
   const wasGenerating = useRef(false);
   useEffect(() => {
-    // A conversation that touched no space is listed under every filter, so its row is created
-    // in the open one; once the turn touches spaces, the list refetch decides where it stays.
     if (generating) {
-      const { originSpaceId, restricted } = getScope();
-      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) => {
-        const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
-        const row: SessionSummary = {
-          ...(existing ?? {
-            id,
-            title: null,
-            unread: false,
-            spaceId: originSpaceId,
-            restricted,
-            space_ids: originSpaceId ? [originSpaceId] : [],
-          }),
-          generating: true,
-          updatedAt: new Date().toISOString(),
-        };
-        return patchSessionsCache(
-          prev,
-          (rows, first) => [...(first ? [row] : []), ...rows.filter((s) => s.id !== id)],
-          row,
-        );
-      });
+      const scope = getScope();
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) =>
+        startTurnRow(prev, {
+          id,
+          created: isPersisted ? null : scope,
+          now: new Date().toISOString(),
+        }),
+      );
     } else if (wasGenerating.current) {
       queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) =>
         patchSessionsCache(prev, (rows) =>
@@ -789,7 +796,7 @@ function ConversationInner({
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }
     wasGenerating.current = generating;
-  }, [generating, id, filterSpaceId, getScope, queryClient]);
+  }, [generating, id, isPersisted, filterSpaceId, getScope, queryClient]);
 
   // On the first message of a brand-new conversation, lazily adopt its id into
   // the URL (the server creates the session on that same POST). `id` is stable

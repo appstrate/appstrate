@@ -1717,7 +1717,8 @@ describe("integration-pins-service — DB access/ownership", () => {
         actor: { type: "user", id: memberId },
         binding: { orgId: ctx.orgId, spaceIds: [scope.spaceId] },
       };
-      // As the door builds it: the credential admits the space it is bound to, alone.
+      // `testCaller` admits the bound space alone, the rule the door's `credentialAdmitsSpace`
+      // applies (`connectionCaller`, asserted in `test/unit/lib/connection-principal.test.ts`).
       const bound = testCaller(boundPrincipal, { permissionsIn: async () => CONNECT });
       const orgRow = await seedConnection({
         spaceId: other,

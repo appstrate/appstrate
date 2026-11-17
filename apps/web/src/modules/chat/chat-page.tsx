@@ -38,6 +38,7 @@ import {
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
+import { renderSpaces } from "./render-spaces";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -45,7 +46,6 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { renderSpaces } from "./render-spaces";
 import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
@@ -100,7 +100,6 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
-  // The mode decides which conversations the list holds: wait for the listing that tells it.
   const { known } = useChatFilter();
   // What the chat may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
@@ -154,6 +153,8 @@ export function ChatModulePage() {
   const queryClient = useQueryClient();
   // The assistant creates and imports packages: the lists show them as the editor's would.
   const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
+  // The mode decides which conversations the list holds: until it is known the page holds its shape.
+  if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -164,13 +165,11 @@ export function ChatModulePage() {
   // area: it belongs to the conversation, and it opens in a sheet on narrow screens.
   // One toggle sits in the shell's header, portaled there for the page's lifetime;
   // the tabs live in the panel's own header.
-  // The mode decides which conversations the list holds: until it is known the page holds its shape.
-  if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
   return (
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
-          <ConversationSpaces conversationId={conversationId ?? null} />
+          <ConversationSpaces conversationId={conversationId ?? null} transport={transport} />
           <ChatConversationSettingsButton
             activeId={conversationId ?? null}
             t={translate}

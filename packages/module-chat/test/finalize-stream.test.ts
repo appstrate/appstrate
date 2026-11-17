@@ -100,6 +100,26 @@ describe("finalizeChatStream — disconnect survival", () => {
     expect(saved).toEqual([{ id: "asst_1", precedingMessageId: "user_1" }]);
   });
 
+  it("closes the client's stream only once the turn has settled", async () => {
+    // A client that sends its next turn as this one closes must find the marker cleared.
+    const engineResponse = engine(async ({ writer }) => {
+      writer.write({ type: "start", messageId: "asst_settle" });
+      writer.write({ type: "finish" });
+    });
+    let settled = false;
+    const res = await finalizeChatStream({
+      engineResponse,
+      streamId: crypto.randomUUID(),
+      onAssistant: () => {},
+      onSettled: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        settled = true;
+      },
+    });
+    await res.body!.pipeTo(new WritableStream());
+    expect(settled).toBe(true);
+  });
+
   it("retries the persist once when the first attempt fails, then saves the turn", async () => {
     const engineResponse = engine(async ({ writer }) => {
       writer.write({ type: "start", messageId: "asst_retry" });

@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getActor, type Actor } from "./actor.ts";
 import { unauthorized } from "./errors.ts";
+import { credentialConfinedToSpaces } from "./view-as.ts";
 
 /**
  * Where a credential confines the caller on connections: one org, and within it the spaces it
@@ -16,8 +17,8 @@ interface ConnectionBinding {
 
 /**
  * Who acts on connections, decided once at the door. A user principal acts as the person, whatever
- * the transport, bound only when its credential carries a space allowlist (the chat's bearer:
- * `credentialSpaceIds`), to the allowlist's org and spaces. Any other credential is delegated:
+ * the transport, bound only when its credential is confined to spaces (`credentialConfinedToSpaces`:
+ * a pin, an allowlist), to its org and the spaces it names. Any other credential is delegated:
  * bound to its org, and to the space it pins when it pins one. `X-Space-Id` addresses the request
  * space and grants no binding.
  */
@@ -27,13 +28,13 @@ export type ConnectionPrincipal =
 
 export function connectionPrincipal(c: Context<AppEnv>): ConnectionPrincipal {
   const actor = getActor(c);
-  const allowlist = c.get("credentialSpaceIds");
-  if (c.get("principalKind") === "user" && allowlist === undefined) {
+  if (c.get("principalKind") === "user" && !credentialConfinedToSpaces(c)) {
     return { kind: "person", actor, binding: null };
   }
   const orgId = c.get("orgId");
   if (!orgId) throw unauthorized("Credential is missing its organization binding");
   const pinned = c.get("credentialSpaceId");
+  const allowlist = c.get("credentialSpaceIds");
   // A pin and an allowlist both confine: the spaces both admit.
   const spaceIds =
     pinned && allowlist ? allowlist.filter((id) => id === pinned) : pinned ? [pinned] : allowlist;

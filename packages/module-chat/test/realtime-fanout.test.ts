@@ -22,7 +22,7 @@ import {
 import { collectSSEEvents } from "../../../apps/api/test/helpers/sse.ts";
 import { initRealtime } from "../../../apps/api/src/services/realtime.ts";
 import { notifySessionUpdate } from "../src/realtime.ts";
-import { claimTurn } from "../src/chat-stream.ts";
+import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 
 const app = getTestApp();
 
@@ -87,12 +87,12 @@ describe("chat_session_update SSE fan-out", () => {
     const res = await openStream(ctx);
     await wait();
 
-    await claimTurn(
-      session.id,
-      "strm_1",
-      { id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] },
-      { spaceId: null, restricted: false },
-    );
+    await claimTurn(session.id, "strm_1", { spaceId: null, restricted: false });
+    await persistClaimedUserMessage(session.id, "strm_1", {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    });
 
     // The helper rejects when fewer frames than asked arrive: asking for two
     // and getting one is the assertion.

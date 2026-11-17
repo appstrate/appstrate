@@ -90,13 +90,13 @@ async function resolveReachableSpaces(
   );
 }
 
-/** A reachable space as the wire names it: the role by its wire name, the set by value. */
+/** A reachable space as the wire names it: the role by its wire name, the set as an array. */
 export function toReachableSpaceWire(space: ReachableSpace) {
   return {
     id: space.id,
     name: space.name,
     role: toSpaceRoleWire(space.role)!.name,
-    permissions: space.permissions,
+    permissions: [...space.permissions],
     credentialProxyOpen: space.credentialProxyOpen,
   };
 }
@@ -138,8 +138,8 @@ export async function readableSpacesAcross(
 /**
  * The refusal for a space the request's credential may not name (`credentialAdmitsSpace`). It
  * depends on the credential alone, never on the space, so it confirms nothing about an id. A
- * credential pinned to one space is told what it already knows, a 403 (the contract API keys and
- * space-bound tokens have always had); a credential bound to a SET of spaces gets the 404 a space
+ * credential pinned to one space is told what it already knows, a 403 (the contract of API keys
+ * and space-bound tokens); a credential bound to a SET of spaces gets the 404 a space
  * outside its reach gets everywhere else (`enterSpaceById`), so the set is not probed by status.
  * `spaceId` is `null` for a personal space the request would create.
  */

@@ -23,16 +23,20 @@ import {
   memberHolding,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import {
-  seedApiKey,
-  seedEndUser,
-  seedSpace,
-  seedSpaceMember,
-} from "../../../apps/api/test/helpers/seed.ts";
+import { seedApiKey, seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
 import { ensureSession, touchSessionSpace } from "../src/persistence.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
+import { installPermissionAuditLogger } from "../../../apps/api/src/lib/permission-audit.ts";
+import { readHandlerMarker } from "../../../apps/api/src/middleware/handler-marker.ts";
+import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
+import {
+  PERMISSION_REQUIREMENT_MARKER,
+  setPermissionDenialHandler,
+} from "@appstrate/core/permissions";
+import { createChatRouter } from "../src/routes.ts";
+import { buildChatPlatformDeps } from "../src/platform-services.ts";
 
 const app = getTestApp();
 
@@ -281,8 +285,11 @@ describe("chat sessions", () => {
       const created = await createSession(ctx, { spaceId: spaceB });
       const updatedAtOf = async () =>
         (await db.select().from(chatSessions).where(eq(chatSessions.id, created.id)))[0]!.updatedAt;
-      const before = await updatedAtOf();
-      await Bun.sleep(5);
+      const before = new Date("2026-01-01T00:00:00.000Z");
+      await db
+        .update(chatSessions)
+        .set({ updatedAt: before })
+        .where(eq(chatSessions.id, created.id));
       expect((await patch(ctx, created.id, { restricted: true })).status).toBe(204);
       expect((await patch(ctx, created.id, { restricted: false })).status).toBe(204);
       expect((await updatedAtOf()).getTime()).toBe(before.getTime());
@@ -341,6 +348,18 @@ describe("chat sessions", () => {
       expect(row).toMatchObject({ title: null, restricted: false });
       // Restating the stored limit changes nothing, so the turn does not stand in the way.
       expect((await patch(ctx, created.id, { title: "T", restricted: false })).status).toBe(204);
+    });
+
+    it("refuses lifting the limit while a turn is running (409): the turn keeps its narrow reach", async () => {
+      const created = await createSession(ctx, { spaceId: spaceB, restricted: true });
+      await db
+        .update(chatSessions)
+        .set({ activeStreamId: "stream_live" })
+        .where(eq(chatSessions.id, created.id));
+      const refused = await patch(ctx, created.id, { restricted: false });
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+      expect(await restrictedOf(created.id)).toBe(true);
     });
   });
 
@@ -469,18 +488,12 @@ describe("chat sessions", () => {
     const dto = (await (await orgCall(member, `/sessions/${session.id}`)).json()) as SessionDto;
     expect(dto.space_ids).toEqual([ctx.defaultSpaceId]);
 
-    // A touched space the member does not reach hides the session everywhere.
+    // A touched space the member does not reach hides the session (every route: the table below).
     await touch(session.id, closed);
-    expect((await orgCall(member, `/sessions/${session.id}`)).status).toBe(404);
-    expect((await orgCall(member, `/sessions/${session.id}`, { method: "DELETE" })).status).toBe(
-      404,
-    );
-    expect((await orgCall(member, `/sessions/${session.id}/stream`)).status).toBe(204);
     expect(await listSessionIds(member)).not.toContain(session.id);
 
-    // The space going away drops it from the record (cascade): visible again.
+    // The space going away drops it from the record (cascade): listed again.
     await db.delete(spaces).where(eq(spaces.id, closed));
-    expect((await orgCall(member, `/sessions/${session.id}`)).status).toBe(200);
     expect(await listSessionIds(member)).toContain(session.id);
   });
 
@@ -600,6 +613,46 @@ describe("chat sessions", () => {
     });
   });
 
+  it("reports a denial through the platform's audit hook, naming the grant it lacked", async () => {
+    const denied: string[] = [];
+    setPermissionDenialHandler(({ required }) => denied.push(required));
+    try {
+      // Its own org: Space B, open, would make any member of this one an operator.
+      const outsider = await memberHolding(await createTestContext({ orgSlug: "denied" }), [
+        "agents:read",
+      ]);
+      expect((await orgCall(outsider, "/sessions")).status).toBe(403);
+      expect(denied).toEqual(["chat:read"]);
+    } finally {
+      installPermissionAuditLogger();
+    }
+  });
+
+  it("stamps each route with what its guards enforce, a turn with the three grants it acts on", () => {
+    const router = createChatRouter(buildChatPlatformDeps(buildModuleInitContext()));
+    const requirements = (method: string, path: string) =>
+      router.routes
+        .filter((route) => route.method === method && route.path === path)
+        .map((route) => readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER))
+        .filter((value) => value !== undefined);
+    expect(requirements("POST", "/api/orgs/:orgId/chat")).toEqual([
+      "chat:read",
+      "mcp:read",
+      "chat:write",
+    ]);
+    expect(requirements("POST", "/api/orgs/:orgId/chat/sessions")).toEqual([
+      "chat:read",
+      "mcp:read",
+      "chat:write",
+    ]);
+    expect(requirements("GET", "/api/orgs/:orgId/chat/sessions")).toEqual(["chat:read"]);
+    expect(requirements("PATCH", "/api/orgs/:orgId/chat/sessions/:id")).toEqual(["chat:write"]);
+    for (const route of router.routes.filter((r) => r.path.startsWith("/api/orgs/:orgId/chat"))) {
+      if (readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER) === undefined) continue;
+      expect(readHandlerMarker(route.handler, Symbol.for("appstrate.permissionGuard"))).toBe(true);
+    }
+  });
+
   it("refuses a credential pinned to a space, whatever it grants", async () => {
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -643,33 +696,6 @@ describe("chat sessions", () => {
       expect(((await res.json()) as { detail: string }).detail).toContain("confined to spaces");
     }
     expect(await db.select({ id: chatSessions.id }).from(chatSessions)).toEqual([]);
-  });
-
-  it("refuses an API key", async () => {
-    const key = await seedApiKey({
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      createdBy: ctx.user.id,
-      scopes: ["runs:read-all"],
-    });
-    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
-      headers: { Authorization: `Bearer ${key.rawKey}` },
-    });
-    expect(res.status).toBe(403);
-  });
-
-  it("refuses an end-user", async () => {
-    const key = await seedApiKey({
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      createdBy: ctx.user.id,
-      scopes: ["runs:read-all"],
-    });
-    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
-    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
-      headers: { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id },
-    });
-    expect(res.status).toBe(403);
   });
 });
 

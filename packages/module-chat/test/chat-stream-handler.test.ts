@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSpaces, files } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
@@ -60,6 +60,8 @@ import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
 import { ensureSession } from "../src/persistence.ts";
+import { reachableSpace } from "./reachable-space.ts";
+import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -277,15 +279,12 @@ describe("handleChatStream", () => {
 
   /** The test context's one space, holding `permissions` on top of what makes it an acting space. */
   function defaultReach(permissions: ReadonlySet<string> = new Set()): ReachableSpaceGrant {
-    return {
+    return reachableSpace({
       id: ctx.defaultSpaceId,
       name: "Default",
       role: "owner",
       permissions: [...new Set(["chat:read", "chat:write", "mcp:read", ...permissions])],
-      credentialProxyOpen: false,
-      isDefault: false,
-      personal: false,
-    };
+    });
   }
 
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
@@ -475,6 +474,86 @@ describe("handleChatStream", () => {
       "runs:read-all",
     ]);
     await waitForAssistantPersist(sessionId);
+  });
+
+  describe("a turn its claim refuses", () => {
+    const attachment = {
+      type: "file",
+      url: "upload://upl_refused",
+      mediaType: "text/plain",
+      filename: "r.txt",
+    };
+    async function refusedTurn(sessionId: string, beforeClaim: () => Promise<void>) {
+      const requests: ChatAttachmentRequest[] = [];
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        parts: [{ type: "text", text: "lis ceci" }, attachment],
+        // Runs after the turn read the conversation, before it claims it.
+        resolveChatModel: async () => {
+          await beforeClaim();
+          return { subscription: false };
+        },
+        resolveChatAttachment: async (request) => {
+          requests.push(request);
+          await request.beforeResolve?.(ctx.defaultSpaceId);
+          return {
+            uri: "appfile://file_refused0",
+            name: "r.txt",
+            mime: "text/plain",
+            size: 1,
+            spaceId: ctx.defaultSpaceId,
+          };
+        },
+      });
+      return { res, requests, calls };
+    }
+    const rowOf = async (sessionId: string) =>
+      (await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)))[0]!;
+
+    it("on a scope change materializes nothing, records no space and writes no message", async () => {
+      const sessionId = mintSessionId();
+      await ensureSession(
+        sessionId,
+        ctx.orgId,
+        ctx.user.id,
+        [ctx.defaultSpaceId],
+        undefined,
+        () => ({
+          spaceId: ctx.defaultSpaceId,
+          restricted: false,
+        }),
+      );
+      const { res, requests, calls } = await refusedTurn(sessionId, async () => {
+        await db
+          .update(chatSessions)
+          .set({ restricted: true })
+          .where(eq(chatSessions.id, sessionId));
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("chat_turn_scope_changed");
+      expect(requests).toEqual([]);
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatSessionSpaces)).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      expect((await rowOf(sessionId)).activeStreamId).toBeNull();
+    });
+
+    it("while another turn is live answers chat_turn_in_flight and leaves that turn's marker", async () => {
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+      const { res, requests, calls } = await refusedTurn(sessionId, async () => {
+        await db
+          .update(chatSessions)
+          .set({ activeStreamId: "strm_live" })
+          .where(eq(chatSessions.id, sessionId));
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+      expect(requests).toEqual([]);
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      expect((await rowOf(sessionId)).activeStreamId).toBe("strm_live");
+    });
   });
 
   it("rejects generation settings unsupported by the selected model", async () => {
@@ -922,13 +1001,14 @@ describe("handleChatStream", () => {
   });
 
   describe("space-enforced skills", () => {
-    const HOUSE = {
+    /** The origin space's enforced skill, served in that space. */
+    const house = () => ({
       packageId: "@acme/house",
       name: "House rules",
       version: "2.0.0",
-      uri: "skill://space-1/acme/house/house/SKILL.md",
+      uri: `skill://${ctx.defaultSpaceId}/acme/house/house/SKILL.md`,
       content: "Always sign with the house motto.",
-    };
+    });
 
     it("refuses the turn with a 503 when they cannot be loaded: no message, no marker, no engine", async () => {
       const sessionId = mintSessionId();
@@ -1002,7 +1082,7 @@ describe("handleChatStream", () => {
           body: { spaceId: ctx.defaultSpaceId, skill_mode: skillMode, pinned_skills: [] },
           loadEnforcedChatSkills: async (orgId, spaceId) => {
             loaded.push([orgId, spaceId]);
-            return [HOUSE];
+            return [house()];
           },
         });
         expect(res.status).toBe(200);
@@ -1015,7 +1095,7 @@ describe("handleChatStream", () => {
           `This space — Default (\`${ctx.defaultSpaceId}\`), where this conversation was started — requires these skills in every conversation.`,
         );
         expect(system).toContain(
-          '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
+          `<skill id="@acme/house" uri="skill://${ctx.defaultSpaceId}/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>`,
         );
         if (skillMode === "strict") {
           expect(system).toContain(
@@ -1039,8 +1119,8 @@ describe("handleChatStream", () => {
             "@acme/house": {
               definition: "published",
               version: "2.0.0",
-              // The space its URI names, as the platform minted it.
-              spaceId: "space-1",
+              // The origin space, which enforces it.
+              spaceId: ctx.defaultSpaceId,
             },
           },
         });
@@ -1417,13 +1497,13 @@ describe("handleChatStream", () => {
       spaceB = (await seedSpace({ orgId: ctx.orgId, name: "Beta" })).id;
       spaceC = (await seedSpace({ orgId: ctx.orgId, name: "Gamma" })).id;
       reach = [
-        {
+        reachableSpace({
           id: ctx.defaultSpaceId,
           name: "Alpha",
           role: "operator",
           permissions: ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "agents:run"],
-        },
-        {
+        }),
+        reachableSpace({
           id: spaceB,
           name: "Beta",
           role: "builder",
@@ -1435,13 +1515,13 @@ describe("handleChatStream", () => {
             "agents:write",
             "skills:write",
           ],
-        },
-        {
+        }),
+        reachableSpace({
           id: spaceC,
           name: "Gamma",
           role: "viewer",
           permissions: ["chat:read", "mcp:read", "runs:read-all"],
-        },
+        }),
       ];
     });
 
@@ -1512,26 +1592,6 @@ describe("handleChatStream", () => {
       expect(granted).toContain("agents:run");
     });
 
-    it("lists the spaces in the prompt instead of a current space", async () => {
-      const { res, calls } = await turn(mintSessionId());
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
-      const system = calls[0]!.system;
-      expect(system).not.toContain("Current space");
-      expect(system).not.toContain("Role in this space");
-      expect(system).not.toContain("This conversation was started in");
-      expect(system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
-      expect(system).toContain(`- \`${spaceB}\` — Beta (role builder)`);
-      // Reached but outside the acting set: neither listed nor acted in.
-      expect(system).not.toContain(spaceC);
-      expect(system).not.toContain("Gamma");
-      expect(system).toContain("takes the `space_id` of one of them");
-      expect(system).toContain("Ask the user which space when the request does not say");
-      // The server's instructions say a refusal is final (`NO_FALLBACK_HINT`): the block does not.
-      expect(system).not.toContain("refused action");
-      expect(system).toContain(CONTEXT_ORG_MARKER);
-    });
-
     describe("the origin space (`spaceId`)", () => {
       const touchedBy = async (sessionId: string) =>
         (
@@ -1559,8 +1619,7 @@ describe("handleChatStream", () => {
         expect(calls[0]!.system).toContain(
           `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
         );
-        // The default pins nothing: every acting space stays listed, on the organization endpoint.
-        expect(calls[0]!.system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
+        // The default pins nothing: the turn acts on the organization endpoint.
         expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: spaceB, restricted: false });
         // The origin space is touched by definition, recorded nowhere else.
@@ -1581,7 +1640,6 @@ describe("handleChatStream", () => {
         expect(calls[0]!.system).toContain(
           `When the user names no space, pass \`${spaceB}\` (Beta, the organization's default space) as the \`space_id\``,
         );
-        expect(calls[0]!.system).not.toContain("Ask the user which space");
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
       });
 
@@ -1592,7 +1650,6 @@ describe("handleChatStream", () => {
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
-        expect(calls[0]!.system).not.toContain("This conversation was started in");
         expect(calls[0]!.system).toContain(
           "Ask the user which space when the request does not say",
         );
@@ -1755,18 +1812,13 @@ describe("handleChatStream", () => {
         );
       });
 
-      it("tells the model it is limited to that space and lists no other", async () => {
+      it("tells the model it is limited to that space", async () => {
         const { res, calls } = await limitedTurn(mintSessionId());
         expect(res.status).toBe(200);
         await collectUiChunks(res);
-        const system = calls[0]!.system;
-        expect(system).toContain(`- \`${spaceB}\` — Beta (role builder)`);
-        expect(system).toContain(
+        expect(calls[0]!.system).toContain(
           `This conversation is limited to Beta (\`${spaceB}\`): pass \`${spaceB}\` as the \`space_id\` of every call`,
         );
-        expect(system).toContain("The user lifts the limit in the composer");
-        expect(system).not.toContain(ctx.defaultSpaceId);
-        expect(system).not.toContain("Alpha");
       });
 
       it("touches its origin space with nothing recorded, the only space its tools may name", async () => {
@@ -1885,6 +1937,28 @@ describe("handleChatStream", () => {
         );
         expect(await organization.spaceOfUri("appfile://file_missing00")).toBeUndefined();
         expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
+      });
+
+      it("places an existing file in its space, which `read_resource` refuses outside the turn's", async () => {
+        const fileId = "file_gammareport0";
+        await db.insert(files).values({
+          id: fileId,
+          orgId: ctx.orgId,
+          spaceId: spaceC,
+          purpose: "user_upload",
+          userId: ctx.user.id,
+          storageKey: `files/${spaceC}/${fileId}/report.txt`,
+          name: "report.txt",
+          mime: "text/plain",
+          size: 1,
+          sha256: "deadbeef",
+        });
+        const organization = await organizationOf(mintSessionId());
+        // Gamma is reached but outside the acting set: the space `read_resource` checks.
+        expect(await organization.spaceOfUri(`appfile://${fileId}`)).toBe(spaceC);
+        expect(spaceIdRefusal(organization.spaces, spaceC)).toMatchObject({
+          code: "unknown_space",
+        });
       });
 
       it("leaves a space outside the acting set out of the turn's spaces and of its bearer: unknown, reached without the grants, or unreadable", async () => {

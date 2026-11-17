@@ -13,8 +13,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatPage } from "../src/ui/index.tsx";
-import { sessionQueryKey } from "../src/ui/sessions.ts";
+import { historyQueryKey } from "../src/ui/sessions.ts";
 import { transportOf } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 
 // `ChatPage` reads the tab's visibility during render; SSR has no `document`.
 const realDocument: unknown = Reflect.get(globalThis, "document");
@@ -31,12 +32,16 @@ afterAll(() => {
 /** The spaces the chat acts in. */
 const ACTING = ["spc_a"];
 
+/** The host's space services, as the shell passes them. */
+const { canIn, workingSpaceId, renderSpaces, linkInSpace, useSpaceLabelOf } = testHost();
+const SPACE_PROPS = { canIn, workingSpaceId, renderSpaces, linkInSpace, useSpaceLabelOf };
+
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
 /** Seeds the history read, so the render is the answer and not a fetch. */
 function render(history: unknown, can: (permission: string) => boolean): string {
   const qc = new QueryClient();
-  qc.setQueryData(sessionQueryKey("org_1", "chs_gone"), history);
+  qc.setQueryData(historyQueryKey("org_1", "chs_gone"), history);
   return renderToString(
     <QueryClientProvider client={qc}>
       <TooltipProvider>
@@ -50,6 +55,7 @@ function render(history: unknown, can: (permission: string) => boolean): string 
           t={(key) => key}
           can={can}
           actingSpaceIds={ACTING}
+          {...SPACE_PROPS}
         />
       </TooltipProvider>
     </QueryClientProvider>,
@@ -78,6 +84,7 @@ describe("a conversation URL the caller has no conversation for", () => {
     // which must not replace the user's message, its error and Retry.
     const qc = new QueryClient();
     qc.setQueryDefaults(["get", "/api/orgs/{orgId}/chat/sessions/{id}"], { initialData: null });
+    qc.setQueryDefaults(["chat", "history"], { initialData: null });
     const html = renderToString(
       <QueryClientProvider client={qc}>
         <TooltipProvider>
@@ -91,6 +98,8 @@ describe("a conversation URL the caller has no conversation for", () => {
             t={(key) => key}
             can={() => true}
             actingSpaceIds={ACTING}
+            {...SPACE_PROPS}
+            {...SPACE_PROPS}
           />
         </TooltipProvider>
       </QueryClientProvider>,
@@ -125,6 +134,8 @@ describe("a new conversation", () => {
             t={(key) => key}
             can={() => true}
             actingSpaceIds={ACTING}
+            {...SPACE_PROPS}
+            {...SPACE_PROPS}
           />
         </TooltipProvider>
       </QueryClientProvider>,

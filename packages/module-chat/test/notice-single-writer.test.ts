@@ -22,7 +22,7 @@
  * A guard that cannot be raced is only half of the invariant, though: it still
  * answers whatever the session row says, and the TURN is what has to make that
  * row say the truth. `claimTurn` is the other half — it marks the session as
- * claimed BEFORE it writes the user message, so the window in which
+ * claimed BEFORE `persistClaimedUserMessage` writes the user message, so the window in which
  * `active_stream_id IS NULL` is true of a turn already under way does not
  * exist. Asserting that needs no second connection, only a look at the row as
  * the message lands; see `installClaimProbe`.
@@ -38,9 +38,9 @@ import { createTestContext, type TestContext } from "../../../apps/api/test/help
 import { seedPackage, seedRun } from "../../../apps/api/test/helpers/seed.ts";
 import { describeRequiresPostgres } from "../../../apps/api/test/helpers/tier.ts";
 import { persistNotice, persistUserMessage } from "../src/persistence.ts";
-import { claimTurn } from "../src/chat-stream.ts";
+import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 import { reconcileChatRun, runNoticeMessageId } from "../src/run-reconcile.ts";
-import { setActiveStream } from "../src/resumable.ts";
+import { setActiveStream, STALE_MARKER_MIN_AGE_MS } from "../src/resumable.ts";
 
 /** The scope of a session created with no origin space and no limit. */
 const UNLIMITED = { spaceId: null, restricted: false };
@@ -189,6 +189,15 @@ beforeEach(async () => {
   packageId = pkg.id;
 });
 
+async function activeStreamId(sessionId: string): Promise<string | null | undefined> {
+  const [row] = await db
+    .select({ activeStreamId: chatSessions.activeStreamId })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId))
+    .limit(1);
+  return row?.activeStreamId;
+}
+
 describe("persistNotice single-writer guard", () => {
   it("writes into an idle session", async () => {
     // Control: the guard must not be a blanket refusal. Passes before and after.
@@ -226,7 +235,8 @@ describe("persistNotice single-writer guard", () => {
     const sessionId = await createSession();
     await installClaimProbe();
     try {
-      await claimTurn(sessionId, "strm_claim", userMessage("u1", "bonjour"), UNLIMITED);
+      await claimTurn(sessionId, "strm_claim", UNLIMITED);
+      await persistClaimedUserMessage(sessionId, "strm_claim", userMessage("u1", "bonjour"));
       // Exactly one message landed, and the session was already claimed when it
       // did. With the write ordered first this reads `[null]`: a notice
       // committing in that gap takes the seq between the user message and the
@@ -242,10 +252,11 @@ describe("persistNotice single-writer guard", () => {
     // never started, or the session is stuck "generating" for good — the resume
     // GET answering 204 and `persistNotice` refusing forever.
     const sessionId = await createSession();
+    await claimTurn(sessionId, "strm_failed", UNLIMITED);
     await failEveryMessageInsert();
     try {
       await expect(
-        claimTurn(sessionId, "strm_failed", userMessage("u1", "bonjour"), UNLIMITED),
+        persistClaimedUserMessage(sessionId, "strm_failed", userMessage("u1", "bonjour")),
       ).rejects.toThrow();
     } finally {
       await removeClaimProbe();
@@ -270,7 +281,7 @@ describe("persistNotice single-writer guard", () => {
       .set({ spaceId: ctx.defaultSpaceId, restricted: true })
       .where(eq(chatSessions.id, sessionId));
     const claim = (scope: { spaceId: string | null; restricted: boolean }) =>
-      claimTurn(sessionId, "strm_scope", userMessage("u1", "bonjour"), scope);
+      claimTurn(sessionId, "strm_scope", scope);
 
     for (const read of [
       { spaceId: ctx.defaultSpaceId, restricted: false },
@@ -290,7 +301,43 @@ describe("persistNotice single-writer guard", () => {
 
     // The scope as stored: claimed.
     await claim({ spaceId: ctx.defaultSpaceId, restricted: true });
-    expect(await messageIds(sessionId)).toEqual(["u1"]);
+    expect(await activeStreamId(sessionId)).toBe("strm_scope");
+  });
+
+  it("refuses the claim when only the origin space moved", async () => {
+    // The limit as read, the origin space not: the default of a request naming no space moved.
+    const sessionId = await createSession();
+    await db
+      .update(chatSessions)
+      .set({ spaceId: ctx.defaultSpaceId, restricted: false })
+      .where(eq(chatSessions.id, sessionId));
+    await expect(
+      claimTurn(sessionId, "strm_origin", { spaceId: null, restricted: false }),
+    ).rejects.toMatchObject({ status: 409, code: "chat_turn_scope_changed" });
+    expect(await activeStreamId(sessionId)).toBeNull();
+  });
+
+  it("refuses a second turn while one is live, and leaves the first one's marker", async () => {
+    // One turn at a time: a second claim must not take the marker, or the first turn's
+    // teardown would not find it and the limit PATCH would pass while it still acts.
+    const sessionId = await createSession();
+    await claimTurn(sessionId, "strm_first", UNLIMITED);
+    await expect(claimTurn(sessionId, "strm_second", UNLIMITED)).rejects.toMatchObject({
+      status: 409,
+      code: "chat_turn_in_flight",
+    });
+    expect(await activeStreamId(sessionId)).toBe("strm_first");
+  });
+
+  it("takes over a stale marker, whose producer is gone", async () => {
+    const sessionId = await createSession();
+    await claimTurn(sessionId, "strm_dead", UNLIMITED);
+    await db
+      .update(chatSessions)
+      .set({ updatedAt: new Date(Date.now() - STALE_MARKER_MIN_AGE_MS - 1_000) })
+      .where(eq(chatSessions.id, sessionId));
+    await claimTurn(sessionId, "strm_next", UNLIMITED);
+    expect(await activeStreamId(sessionId)).toBe("strm_next");
   });
 
   it("still signals the owner after a write commits", async () => {

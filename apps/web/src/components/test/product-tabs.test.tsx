@@ -140,6 +140,9 @@ describe("the products toggle", () => {
     const inMode = tabs(true, chatter, true);
     expect(inMode).toContain('href="/chat"');
     expect(inMode).toContain('aria-label="3 conversations non lues"');
-    expect(tabs(false, chatter, true)).not.toContain("3 conversations non lues");
+    // Out of the mode it counts the selected space's list: one.
+    const outOfMode = tabs(false, chatter, true);
+    expect(outOfMode).toContain('aria-label="1 conversation non lue"');
+    expect(outOfMode).not.toContain("3 conversations non lues");
   });
 });

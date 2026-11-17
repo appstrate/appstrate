@@ -9,8 +9,8 @@
  *    `false` for a set still in flight, which is indistinguishable from a
  *    denial — a summary that painted then would tell every user, on every hard
  *    reload, that the assistant may do nothing;
- *  - the verdicts judge the spaces the chat ACTS in, not the working space the
- *    shell stands in; the label names the working space's role, with the org
+ *  - the verdicts judge the spaces the conversation ACTS in (the origin space
+ *    alone once it is limited), not the working space the shell stands in; the label names the working space's role, with the org
  *    role as the fallback for a caller standing in none.
  *
  * The capability verdicts themselves are `chat-access.test.ts` — pure, and
@@ -89,6 +89,8 @@ function summary(options: {
   spaceRole?: { kind: "preset" | "custom"; key: string; name: string } | null;
   /** Extra rows of the space listing, beside the working space. */
   otherSpaces?: ReturnType<typeof spaceFixture>[];
+  /** The conversation's stored scope (`undefined`: loading); none stored yet by default. */
+  conversation?: { spaceId: string | null; restricted: boolean } | null;
 }): string {
   const qc = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   qc.setQueryData(
@@ -128,7 +130,12 @@ function summary(options: {
     id: SPACE_ID,
   });
   try {
-    return render(<ChatAccessSummary />, { queryClient: qc });
+    return render(
+      <ChatAccessSummary conversation={"conversation" in options ? options.conversation : null} />,
+      {
+        queryClient: qc,
+      },
+    );
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
@@ -196,6 +203,46 @@ describe("the chat access summary", () => {
         .find((li) => li.includes(runAgents))!;
     expect(row(withActing)).toContain(granted);
     expect(row(without)).not.toContain(granted);
+  });
+
+  it("judges a limited conversation in its origin space alone", () => {
+    // `spc_b` grants running agents; the origin space, where the chat acts too, does not.
+    const runAgents = i18n.t("chat:access.capability.runAgents");
+    const callApi = i18n.t("chat:access.capability.callApi");
+    const granted = i18n.t("chat:access.granted");
+    const chatPermissions = ["chat:write", "chat:read", "mcp:read", "mcp:invoke"];
+    const origin = {
+      ...spaceFixture({ kind: "preset", key: "operator", name: "operator" }),
+      id: "spc_origin",
+      isDefault: false,
+      permissions: chatPermissions,
+    };
+    const runner = {
+      ...origin,
+      id: "spc_b",
+      permissions: [...chatPermissions, "agents:run", "runs:read"],
+    };
+    const row = (html: string, label: string) =>
+      [...html.matchAll(/<li[^>]*>(.*?)<\/li>/g)]
+        .map((m) => m[1]!)
+        .find((li) => li.includes(label))!;
+    const judged = (restricted: boolean) =>
+      summary({
+        seedSpaces: true,
+        spaceRole: null,
+        otherSpaces: [origin, runner],
+        conversation: { spaceId: "spc_origin", restricted },
+      });
+
+    expect(row(judged(false), runAgents)).toContain(granted);
+    expect(row(judged(true), runAgents)).not.toContain(granted);
+    // The origin space's own grants still hold.
+    expect(row(judged(true), callApi)).toContain(granted);
+  });
+
+  it("holds its box while the conversation's scope loads", () => {
+    const html = summary({ seedSpaces: true, spaceRole: null, conversation: undefined });
+    expect(html).toContain("animate-pulse");
   });
 
   it("lists the capabilities under the caller's role once permissions are known", () => {

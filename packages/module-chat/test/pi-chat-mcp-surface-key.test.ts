@@ -37,6 +37,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaces } from "@appstrate/db/schema";
 import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
+import { reachableSpace } from "./reachable-space.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -60,7 +61,7 @@ const reachOf = (
   role: string,
   permissions: readonly string[],
 ): ReachableSpaceGrant[] => [
-  {
+  reachableSpace({
     id: ctx.defaultSpaceId,
     name: "Default",
     role,
@@ -68,8 +69,7 @@ const reachOf = (
     // The default space opens the credential proxy, as seeded.
     credentialProxyOpen: true,
     isDefault: true,
-    personal: false,
-  },
+  }),
 ];
 
 /** One chat turn's handshake against the real server, uncached: key + what it learned. */
@@ -189,15 +189,6 @@ describe("platform MCP surface key purity", () => {
     expect(previewed!.tools).toBe(real!.tools);
   });
 
-  it("keys the spaces in reach order, the order every descriptor lists them in", () => {
-    const second = { ...reachOf(ownerA, "owner", grant)[0]!, id: "spc_second", name: "Second" };
-    const [first] = reachOf(ownerA, "owner", grant);
-    const url = platformMcpUrl(ORIGIN, ownerA.orgId);
-    expect(platformMcpSurfaceKey(url, grant, [first!, second])).not.toBe(
-      platformMcpSurfaceKey(url, grant, [second, first!]),
-    );
-  });
-
   it("answers a different permission list differently, under a different key", async () => {
     const caller: Caller = {
       ctx: ownerA,
@@ -238,15 +229,12 @@ describe("platform MCP surface key purity", () => {
       ctx: ownerA,
       orgRole: "owner",
       spaces: [
-        {
+        reachableSpace({
           id: closedSpace.id,
           name: "Closed",
           role: "owner",
           permissions: [...grant],
-          credentialProxyOpen: false,
-          isDefault: false,
-          personal: false,
-        },
+        }),
       ],
     };
     const [opened, shut] = await Promise.all([handshake(open, grant), handshake(closed, grant)]);

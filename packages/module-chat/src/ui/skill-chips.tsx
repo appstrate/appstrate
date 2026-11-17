@@ -44,7 +44,7 @@ function useLoadedSkills(
     pickable && injectsSkills(selection.skillMode)
       ? ownPins(selection.pinnedSkills, enforcedIds)
       : [];
-  const { catalogue } = useSkillCatalogue(transport, pinnedIds.length > 0);
+  const catalogue = useSkillCatalogue(transport, pinnedIds.length > 0);
   const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
   const enforced: LoadedSkill[] = enforcedSkills.map((s) => ({
     packageId: s.packageId,

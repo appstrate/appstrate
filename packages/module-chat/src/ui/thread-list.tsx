@@ -58,7 +58,6 @@ import {
   SidebarGroupLabel,
   SidebarInput,
   SidebarMenu,
-  SidebarMenuSkeleton,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
@@ -163,8 +162,8 @@ export function ChatConversationList({
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  /** Names spaces: given, every row shows the spaces its conversation touched. */
-  renderSpaces?: RenderSpaces;
+  /** Names spaces: every row shows the spaces its conversation touched. */
+  renderSpaces: RenderSpaces;
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
@@ -200,7 +199,7 @@ export function ChatConversationList({
       now={now}
       t={t}
       canWrite={canWrite}
-      spaceLine={renderSpaces ?? null}
+      renderSpaces={renderSpaces}
     />
   );
   return (
@@ -263,7 +262,7 @@ export function ChatConversationList({
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
-                {renderSpaces ? <ConversationRowSkeleton /> : <SidebarMenuSkeleton />}
+                <ConversationRowSkeleton />
               </SidebarMenuItem>
             ))}
           {searching
@@ -332,7 +331,7 @@ function ConversationRow({
   now,
   t,
   canWrite,
-  spaceLine,
+  renderSpaces,
 }: {
   session: SessionSummary;
   active: boolean;
@@ -340,8 +339,7 @@ function ConversationRow({
   now: number;
   t: ChatTranslate;
   canWrite: boolean;
-  /** The host's space rendering when the list names each session's space; null otherwise. */
-  spaceLine: RenderSpaces | null;
+  renderSpaces: RenderSpaces;
 }) {
   const transport = useChatTransport();
   const select = useSelectConversation();
@@ -376,26 +374,23 @@ function ConversationRow({
       <SidebarMenuButton
         isActive={active}
         onClick={() => select?.(session.id)}
-        size={spaceLine ? "lg" : "default"}
+        size="lg"
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
         // ring themselves in `--space-tile-ring`: the row's background in each of its states.
         className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]"
       >
-        {spaceLine ? (
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className={cn("block truncate text-left leading-4", unread && "font-semibold")}>
-              {session.title ?? t("threads.new")}
-            </span>
-            <span className="text-sidebar-foreground/70 flex h-4 min-w-0 items-center text-xs">
-              {sessionSpaces(session, spaceLine, t)}
-            </span>
-          </span>
-        ) : (
-          <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className={cn("block truncate text-left leading-4", unread && "font-semibold")}>
             {session.title ?? t("threads.new")}
           </span>
-        )}
+          <span
+            data-testid="chat-session-spaces"
+            className="text-sidebar-foreground/70 flex h-4 min-w-0 items-center text-xs"
+          >
+            {sessionSpaces(session, renderSpaces, t)}
+          </span>
+        </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
