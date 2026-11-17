@@ -12,7 +12,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { testHost } from "./test-host.ts";
 import { OAuthConnectCard } from "../src/ui/oauth-connect-card.tsx";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
@@ -33,17 +34,7 @@ const helpers: ChatHelpers = {
   clearError: () => {},
 };
 
-const host: ChatHost = {
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: () => null,
-  t: (key) => key,
-  can: () => false,
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-  onPackagesChanged: () => {},
-};
+const host = testHost({ can: () => false });
 
 function Card({ expiresAt }: { expiresAt?: string }) {
   const runtime = useAISDKRuntime(helpers);

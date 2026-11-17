@@ -21,13 +21,13 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { cn } from "@appstrate/ui/cn";
 import type { ChatSkillSelection } from "../skills.ts";
-import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
-import { SkillsChip, SkillsPicker } from "./skills-picker.tsx";
+import { SkillChips } from "./skill-chips.tsx";
+import { SkillsPicker } from "./skills-picker.tsx";
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
@@ -130,14 +130,12 @@ export function ComposerTools({
           </button>
         </span>
       )}
-      {showPicker ? (
-        <SkillsChip
+      {(showPicker || showEnforced) && (
+        <SkillChips
           transport={transport}
           selection={selection}
-          onClick={() => setSkillsOpen(true)}
+          onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
         />
-      ) : (
-        showEnforced && <EnforcedSkillsIndicator transport={transport} />
       )}
     </div>
   );

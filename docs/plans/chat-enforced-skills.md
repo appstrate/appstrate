@@ -190,4 +190,4 @@ failure answers the same 503.
   - They are excluded from the choosable rows and from the pin cap.
 - **Read-only indicator:** a member with `chat:write` but no picker (no
   `skills:read`) sees the enforced names in the composer
-  (`EnforcedSkillsIndicator`).
+  (`SkillChips`, its locked pill).
