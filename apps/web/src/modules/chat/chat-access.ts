@@ -2,8 +2,9 @@
 
 /**
  * What the chat assistant can do for the caller: their RBAC translated into the
- * assistant's acts (its MCP bearer carries the caller's set minus what the
- * authoring switch turns off, never more). Not a gate (acts are re-checked
+ * assistant's acts (its MCP bearer carries the caller's grants in the spaces the
+ * turn acts in, minus what the authoring switch turns off, never more). A verdict
+ * says the act is held in some space of the turn, not in every one. Not a gate (acts are re-checked
  * server-side), but a row must never claim what the route would refuse; pinned
  * to the routes' guards by `catalog-requirements.test.ts` (apps/api).
  */
@@ -18,10 +19,10 @@ import { maySetPackageActive, type SpaceGrant } from "../../lib/package-permissi
 import type { GateablePermission } from "../../hooks/use-permissions";
 
 export interface ChatAccessContext {
-  /** The caller's org ∪ space effective set, as `usePermissions().can`. */
+  /** Held in some space the chat acts in: the union the turn's capabilities read (`useChatCan`). */
   can: (permission: GateablePermission) => boolean;
-  /** The caller's standing in the current space; `undefined` while it loads. */
-  spaceGrant: SpaceGrant | undefined;
+  /** The caller's standing in each space the chat acts in; empty while they load. */
+  spaceGrants: readonly SpaceGrant[];
   /** The composer's package-authoring switch. */
   authoring: boolean;
 }
@@ -73,10 +74,13 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (ctx, turn) => turn.invokes && ctx.can("integrations:connect"),
   },
   {
-    // Not the raw grant: a personal-space owner may activate without it.
+    // Not the raw grant: a personal-space owner may activate without it. Held when some space
+    // the chat acts in allows it.
     id: "activateIntegrations",
     labelKey: "access.capability.activateIntegrations",
-    held: (ctx, turn) => turn.invokes && maySetPackageActive(ctx.spaceGrant, "integration", true),
+    held: (ctx, turn) =>
+      turn.invokes &&
+      ctx.spaceGrants.some((grant) => maySetPackageActive(grant, "integration", true)),
   },
   {
     id: "schedule",
@@ -94,7 +98,7 @@ export interface ResolvedChatCapability extends ChatCapability {
 /** `chat:write` gates the turn itself: a `chat:read`-only caller holds no row. */
 export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCapability[] {
   const converses = ctx.can("chat:write");
-  const turn = turnCapabilities(ctx.can);
+  const turn = turnCapabilities(ctx.can, []);
   return CHAT_CAPABILITIES.map((capability) => ({
     ...capability,
     verdict: !(converses && capability.held(ctx, turn))

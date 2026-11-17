@@ -350,7 +350,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       );
     };
 
-    for (const query of ["?context=injected", ""]) {
+    for (const query of ["?renders_cards=true", ""]) {
       const result = await launch(query, false);
       expect(result.data.done).toBe(true);
       const warnings = result.data.warnings as Array<Record<string, unknown>>;

@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat system-prompt construction: the static tool-grounding prompt, the caller
- * context (`GET /api/me/context`) rendering, and its assembler. Split out of
- * `chat-stream.ts` so prompt authoring lives apart from stream orchestration.
+ * The chat's system prompt: the persona (`buildSystemPrompt`) and the caller context block
+ * (`buildCallerContextBlock`, rendered by `formatCallerContext`, with the skills it injects).
  *
- * The prompt deliberately does NOT restate the cross-cutting guidance the
- * platform MCP server already sends via its `instructions` (async runs, the
- * run_and_wait shortcut, integration selection/preference, connect-before-run,
- * heavy-list projection). The chat engine already receives that server text
- * through its own MCP handshake, so duplicating it here only lets the two
- * drift. Keep only
- * chat-specific value: persona, the operation-vs-agent decision tree, the inline
- * manifest authoring pattern, and how to consume a run's result.
+ * Neither restates what the platform MCP server's `instructions` already send through the
+ * engine's own handshake (space selection and refusals, integration preference, async runs,
+ * heavy lists): a second copy only drifts. Only chat-specific guidance lives here.
  */
 
 import type { Context } from "hono";
@@ -21,12 +15,12 @@ import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
-  SKILL_URI_PREFIX,
+  parseSkillUri,
   parseSkillUriPackage,
   skillFileDigest,
 } from "@appstrate/core/skill-uri";
 import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
-import type { PrincipalKind } from "@appstrate/core/module";
+import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
@@ -35,7 +29,6 @@ import {
 } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
-import type { ChatPlatformDeps } from "./platform-services.ts";
 import {
   injectedSkills,
   injectsSkills,
@@ -51,11 +44,6 @@ const warningCode = (code: ConnectionResolutionWarningCode) => `\`${code}\``;
 
 /** The name a run's agent sees for the platform `log` tool. */
 const PLATFORM_LOG_TOOL = platformToolName("log");
-
-/** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
-type SpaceRoleRefLike =
-  | { kind: "preset"; preset: string }
-  | { kind: "custom"; role: { id: string; name?: string | null } };
 
 /**
  * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
@@ -74,14 +62,13 @@ export type ChatEnv = {
      */
     principalKind: PrincipalKind;
     /**
-     * Space the router entered (`enterSpaceContext`, mounted on every
-     * `/api/chat/*` route). Always set: entering is what makes the space-level
-     * `chat:*` guards satisfiable, and a caller that names no space is refused
-     * there before any handler runs. `credentialProxyOpen` is the setting that
-     * withholds the integration tools from the MCP surface, so it keys the
-     * surface cache.
+     * The spaces the caller reaches (role and effective permissions in each), read once by
+     * the chat router's middleware before any handler. The conversation enters no space:
+     * its acting set is the part of this reach where the caller may chat, read and use the tools.
      */
-    space: { id: string; credentialProxyOpen: boolean };
+    reachable: readonly ReachableSpaceGrant[];
+    /** The org-level half of the caller's grants (`ReachedSpaces.orgPermissions`), read with `reachable`. */
+    reachableOrgHalf: ReadonlySet<string>;
     orgRole?: string;
     /**
      * Role preview (`X-View-As`), as the platform resolved it. `orgRole` is the
@@ -90,27 +77,15 @@ export type ChatEnv = {
      * payload is wider than what is read here. `orgRole` above stays REAL.
      */
     viewAs?: { orgRole: string } & Record<string, unknown>;
-    /** Role in THIS space, under any persona (whose own `space` half may name another). */
-    spaceRole?: SpaceRoleRefLike;
     orgName?: string;
     orgSlug?: string;
-    /**
-     * Caller's resolved RBAC permission set. Always set, for the same reason
-     * `space` above is: entering the space is what writes it, and every
-     * `/api/chat/*` route enters one before a handler runs. Two things read it,
-     * and both need the whole set — the scoped platform-MCP bearer the Pi engine
-     * hands its external binary (so the meta-tools authorize with exactly the
-     * caller's own permissions, no amplification), and the container ACL of an
-     * `appfile://` attachment.
-     */
-    permissions: Set<string>;
   };
 };
 
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
-const SKILLS_ENFORCED_LEAD =
-  "This space requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.";
+const enforcedLead = (origin: { id: string; name: string }) =>
+  `This space — ${origin.name} (\`${origin.id}\`), where this conversation was started — requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.`;
 // The turn's MCP bearer names every injected definition, so `resources/read`
 // serves exactly its files, whatever `skills:*` — but only over the transport.
 const SKILLS_FILES = {
@@ -125,7 +100,7 @@ const SKILLS_INJECTED_LEAD =
 const SKILLS_MANUAL_NOTE =
   "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
 const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills shown here — those the space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "This conversation is restricted to the skills shown here — those this conversation's origin space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the origin space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -133,7 +108,14 @@ const SKILLS_STRICT_NOTE =
  * the platform, not this text, refuses the act.
  */
 export function buildSystemPrompt(capabilities: TurnCapabilities): string {
-  const { invokes, authors, authorsPackages, readsSkills } = capabilities;
+  const {
+    invokes,
+    authors,
+    authorsPackages,
+    readsSkills,
+    readsConnections,
+    callsIntegrationTools,
+  } = capabilities;
   const mayRun = reaches(capabilities.runLevel, "run");
   const mayRead = reaches(capabilities.runLevel, "read");
   const mayCompose = reaches(capabilities.runLevel, "compose");
@@ -143,6 +125,13 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const author = (yes: string, no = "") => (authors ? yes : no);
   const invoke = (yes: string, no = "") => (invokes ? yes : no);
   const skills = (yes: string, no = "") => (readsSkills ? yes : no);
+  const tools = (yes: string, no = "") => (callsIntegrationTools ? yes : no);
+  const connections = (yes: string, no = "") => (readsConnections ? yes : no);
+  // What `get_me` returns this turn, by the grant each half of its payload reads.
+  const getMeReturns = [
+    ...(readsConnections ? ["the integrations they have connected (`connections`)"] : []),
+    ...(mayRun ? ["the agents they can run (`agents`)"] : []),
+  ];
   // Dropped whole when no target applies: a bullet naming none misleads.
   const idVerbatimTargets = [
     ...(authors ? ["`dependencies.integrations`"] : []),
@@ -155,13 +144,12 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
       : `- Use every \`@scope/name\` id verbatim: ${new Intl.ListFormat("en").format(
           idVerbatimTargets.map((target) => `in ${target}`),
         )}.\n`;
-  // Only a list the context renders: the route of one never shown may refuse.
-  const truncatedListBullet = runs(
-    '- A list marked `(list truncated)` is partial: call `invoke_operation` with `operation_id: "listAgents"` for the full one.\n',
-  );
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
-**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}
+**You have no ability of your own to act on the outside world.** ${tools(
+    `You cannot browse the web, read email or call third-party APIs yourself. Your only powers are invoking Appstrate operations and calling the tools of the integrations connected in a space, with \`search_integration_tools\` then \`call_integration_tool\`.${runs(" For work those tools cannot do, your hands are Appstrate agents: run one and read its result back.")} Never claim an external action that no tool result shows.`,
+    `You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}`,
+  )}
 
 Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
     "search for the right operation with `search_operations`, read its schema with `describe_operation`, then invoke it with `invoke_operation`",
@@ -176,12 +164,17 @@ ${invoke(
       : "- Do not create, import or modify any package (agent, skill, integration) in this turn, not even through `invoke_operation`.\n"
   }`,
 )}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
-${runs(
-  `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
-- If the request needs an integration, an MCP, or any external action, run an agent:
-  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent marked "draft only, yours to run" has no published version but the user authors it, so pass \`version:"draft"\` for those. An agent marked "draft only, not runnable" has no published version and the user does not author it — it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
+${tools(
+  "- If the request needs a connected integration's data or action, call it directly: find the tool with `search_integration_tools` in the space concerned, call it with `call_integration_tool`, and answer from its result. It lists only integrations connected in that space (one to reconnect comes back with a connect card): when the one needed is absent, offer to connect it with `initiateIntegrationConnect`, which shows the user a connect card. Never activate a package the user did not ask for: when connecting needs it activated in the space, ask first.\n",
+)}${runs(
+    `- If the request needs external information or context and names no source, use an available integration rather than answering from memory${connections(" — connected ones first (`get_me` lists them, per space)")}.
+${tools(
+  "- Run an agent instead when the task needs a runtime — a shell, a filesystem, code execution, files written to `outputs/`, long multi-step processing, a fan-out — or the integration tools cannot do it:",
+  "- If the request needs an integration, an MCP, or any external action, run an agent:",
+)}
+  1. Prefer an existing agent the user can run when one matches the intent — \`get_me\`, for the space concerned (naming its \`space_id\`), lists the agents of that space they can run, each with \`published\`, \`home_writable\` and \`takes_input\`; when its \`agents_truncated\` is true, look the rest up with \`invoke_operation\` — and call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent declares an input schema (it is validated against it); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent with no published version (\`published: false\`) runs only as \`version:"draft"\`, and only for a user who authors it (\`home_writable: true\`): for anyone else it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
 ${inline(
-  `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a \`manifest\` plus a top-level \`prompt\`. ${INLINE_MANIFEST_RULE} Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"); the platform derives the matching \`@inline/<kebab-case-slug>\` name. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. When your context does not show a name you need (a tool beyond the default, or a default shown as a count), read the integration with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` when the task means nothing without it, to refuse the launch instead.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
+  `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a \`manifest\` plus a top-level \`prompt\`. ${INLINE_MANIFEST_RULE} Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"); the platform derives the matching \`@inline/<kebab-case-slug>\` name. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version, looked up for the space concerned${connections(": `get_me` gives both, as `integration_package_id` and `version`, for each integration the user has connected there")}), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (read with \`getIntegration\`) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. To know which tools an integration offers, read it with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` when the task means nothing without it, to refuse the launch instead.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
 
 When a request chains several external actions (e.g. scrape a page THEN email the result), do NOT chain one run per action: compose ONE sub-agent that declares ALL the needed integrations under \`dependencies.integrations\` and describes the whole chain in its \`prompt\` — a single \`run_and_wait\` call. Split into separate runs only when you must decide something between the steps (the user has to confirm, or the next step depends on a result you need to inspect first).
 
@@ -218,82 +211,38 @@ Then read \`result.summary\` from the \`run_and_wait\` result and reply to the u
 )}
 You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`${inline('; for inline runs pass `{ kind:"inline", manifest, prompt, input?, context_files? }` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch')}. ${inline("Either kind also takes", "It also takes")} \`connection_overrides\` — a top-level \`{ "<integration id>": ["<connection id>", …] }\` map (always an array, even for one id), used to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\`, \`owned_by_actor\` and \`needs_reconnection\` — pick from those, don't go list connections; never pick one with \`needs_reconnection: true\`, the run fails on it — ask the user to reconnect it instead; and a candidate with \`owned_by_actor: false\` is a colleague's shared account, so use it only when the user named it, otherwise ask), and to bind several connections of one integration when the task needs them all; \`[]\` runs without that integration (refused for one the agent marks \`required\`, unless an admin imposes connections on it: \`[]\` then adds nothing); connections an admin imposes on an integration stay bound whatever you pass, so there the map only adds to them, and an addition the admin closed answers \`override_outranked\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
-After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in this space, which someone allowed to manage the space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
+After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: offer the activation described below for that code, and do not re-run unless the user asks.
 
 `,
-  "\n",
-)}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
+    "\n",
+  )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error or warning on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call acted in — the space its \`space_id\` named, as every call names one — so do NOT restart the connect flow (connecting is personal, activating is per space). Someone allowed to manage that space activates it: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`) with the path parameter \`id\` and the \`space_id\` both that space's id, and the body \`{ "packageId": "<that integration id>" }\`; after a failed call, then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
 ${runs(`Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
 
-`)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
+`)}Your context block below is DATA — the user's identity and role, the current date, the space a request naming none acts in${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run${
+    getMeReturns.length === 0
+      ? ""
+      : `: both differ per space, so call \`get_me\` for ${new Intl.ListFormat("en").format(getMeReturns)} in the space concerned, naming its \`space_id\``
+  }. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
 `)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
 `)}${skills(
     author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
-  )}${truncatedListBullet}${reads(`- The context carries NO run history. When the user asks about a recent or failed run${runs(", or wants to re-run something")}, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
+  )}${reads(`- The context carries NO run history. When the user asks about a recent or failed run${runs(", or wants to re-run something")}, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
 `)}
 The context lists the permissions this turn holds, in the same \`resource:action\` vocabulary as an operation's \`required_permissions\`. An operation that needs one outside that list is refused by the platform: say which permission is missing${invoke(" instead of attempting it")}, and never claim an ability the list does not carry.`;
 }
 
-/** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
-interface CallerContext {
-  user?: { name?: string | null; email?: string | null } | null;
-  org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
-  connections?:
-    | {
-        integration_package_id: string;
-        name: string;
-        source: string;
-        version?: string;
-        default_tools?: readonly string[] | "*" | null;
-        needs_reconnection?: boolean;
-      }[]
-    | null;
-  agents?:
-    | {
-        packageId: string;
-        display_name?: string | null;
-        description?: string | null;
-        takes_input?: boolean | null;
-        /** False = draft-only agent: no published version to run. */
-        published?: boolean | null;
-        /**
-         * Whether the CALLER may write the agent, i.e. whether its draft is
-         * theirs to run. Read together with `published`: unpublished and not
-         * writable is an agent nobody but its author can execute, and telling
-         * the model to "run with version=draft" there buys a 403 loop.
-         */
-        home_writable?: boolean | null;
-      }[]
-    | null;
-  agents_truncated?: boolean | null;
-}
-
-/** Longest `default_tools` list rendered by name; a longer one is rendered as its count. */
-const MAX_LISTED_DEFAULT_TOOLS = 12;
-
-/**
- * Render an integration's AFPS §4.4 `default_tools` for the caller-context
- * line. `"*"` → all tools; a non-empty array → the names, or their count past
- * {@link MAX_LISTED_DEFAULT_TOOLS} (the line is repeated per connection on
- * every turn); anything else (absent, empty, null) → an explicit "no default"
- * so the model knows it must select tools itself rather than relying on
- * inheritance.
- */
-function formatConnectionDefaultTools(d: readonly string[] | "*" | null | undefined): string {
-  if (d === "*") return "default: all tools";
-  if (Array.isArray(d) && d.length > MAX_LISTED_DEFAULT_TOOLS) {
-    return `default: ${d.length} tools (names: \`default_tools\` of \`getIntegration\`)`;
-  }
-  if (Array.isArray(d) && d.length > 0) return `default: ${d.join(", ")}`;
-  return "no default — you must select tools explicitly";
+/** The caller's identity, as the context block renders it. */
+interface CallerIdentity {
+  user: { name: string | null; email: string | null };
+  org: { role: string | null; name: string | null; slug: string | null };
 }
 
 /**
@@ -338,24 +287,6 @@ function skillBlock(skill: SkillContent): string {
   return `<skill id="${skill.packageId}" uri="${skill.uri}"${served}>\n${skill.content.trim()}\n</skill>`;
 }
 
-/**
- * `home_writable` follows the role preview (`/api/me/context` gets `x-view-as`)
- * but not the authoring toggle, which narrows only the minted token.
- */
-function draftOnlyHint(input: {
-  homeWritable: boolean;
-  author: boolean;
-  rolePreview: boolean;
-}): string {
-  if (!input.homeWritable) {
-    return input.rolePreview
-      ? "; draft only, not runnable under this role preview"
-      : "; draft only, not runnable — nothing published and you do not author it";
-  }
-  if (input.author) return "; draft only, yours to run — pass version=draft";
-  return "; draft, not runnable in this turn — this turn does not hold agent authoring";
-}
-
 /** A rendered block (or section) and the skills it injected, which the turn's MCP bearer names. */
 interface RenderedContext {
   text: string;
@@ -364,7 +295,7 @@ interface RenderedContext {
 
 /**
  * `## Skills`, or "". Kept apart so {@link buildCallerContextBlock} appends it on
- * every path: the space's skills never depend on `/api/me/context` answering.
+ * every path: the origin space's required skills never depend on anything else answering.
  */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
@@ -372,8 +303,14 @@ function formatSkillsSection(opts: {
   catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
   enforced: readonly EnforcedChatSkill[];
+  /** The origin space, which owns the enforced skills. */
+  origin?: { id: string; name: string };
 }): RenderedContext {
-  const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
+  const skills = resolveChatSkills(
+    opts.selection,
+    opts.contents,
+    opts.origin && { spaceId: opts.origin.id, skills: opts.enforced },
+  );
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
   const injected = new Set(skills.enforced.map((skill) => skill.packageId));
   // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
@@ -386,9 +323,9 @@ function formatSkillsSection(opts: {
   if (opts.selection.skillMode === "manual" && opts.capabilities.readsSkills) {
     groups.push([SKILLS_MANUAL_NOTE]);
   }
-  if (skills.enforced.length) {
+  if (skills.enforced.length && opts.origin) {
     groups.push([
-      `${SKILLS_ENFORCED_LEAD} ${files}`,
+      `${enforcedLead(opts.origin)} ${files}`,
       ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
     ]);
   }
@@ -412,8 +349,12 @@ type CallerContextOpts = {
   now?: Date;
   capabilities: TurnCapabilities;
   rolePreview: boolean;
-  spaceRole: string | null;
-  spaceId?: string;
+  /** The spaces the turn can act in (the origin alone when limited): the default is picked among them. */
+  spaces: readonly ReachableSpaceGrant[];
+  /** The conversation's origin space, when it can act there: the default of a request naming none. */
+  origin?: { id: string; name: string };
+  /** Limited to the origin space: the turn's spaces are that space alone. */
+  restricted: boolean;
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
@@ -421,42 +362,29 @@ type CallerContextOpts = {
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The `auto` catalogue, listed by {@link buildCallerContextBlock}. */
   skillCatalogue?: readonly CatalogueSkill[];
-  /** Required: a caller that forgot it would drop the space's skills silently. */
+  /** Required: a caller that forgot it would drop the origin space's required skills silently. */
   enforced: readonly EnforcedChatSkill[];
 };
 
-/**
- * Render the caller context into a system-prompt block, "" when the payload is
- * unusable so the caller can skip injection, with the skills it injected.
- */
-export function formatCallerContext(raw: unknown, opts: CallerContextOpts): RenderedContext {
-  const author = opts.capabilities.authors;
-  const runnable = reaches(opts.capabilities.runLevel, "run");
-  const ctx = (raw ?? {}) as CallerContext;
-  // Before the emptiness check: a payload holding only skills deserves a block.
+/** Render the caller context into a system-prompt block, with the skills it injected. */
+export function formatCallerContext(
+  identity: CallerIdentity,
+  opts: CallerContextOpts,
+): RenderedContext {
   const skills = formatSkillsSection({
     selection: opts.skills,
     capabilities: opts.capabilities,
     catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
     enforced: opts.enforced,
+    origin: opts.origin,
   });
   const skillSection = skills.text;
-  const name = ctx.user?.name?.trim();
-  const email = ctx.user?.email?.trim();
-  const role = ctx.org?.role?.trim();
-  const orgName = ctx.org?.name?.trim();
-  const orgSlug = ctx.org?.slug?.trim();
-  if (
-    !name &&
-    !email &&
-    !role &&
-    !orgName &&
-    !ctx.connections?.length &&
-    !ctx.agents?.length &&
-    !skillSection
-  )
-    return { text: "", injected: skills.injected };
+  const name = identity.user.name?.trim();
+  const email = identity.user.email?.trim();
+  const role = identity.org.role?.trim();
+  const orgName = identity.org.name?.trim();
+  const orgSlug = identity.org.slug?.trim();
 
   const who = name && email ? `${name} (${email})` : (name ?? email ?? "the user");
   const orgLabel = orgName
@@ -466,16 +394,29 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // Permissions in the vocabulary of `required_permissions` and the 403 hint, so
-  // the model joins the two; space-scoped operations take the space in their PATH.
-  if (opts.spaceId) lines.push(`Current space: \`${opts.spaceId}\``);
-  if (opts.spaceRole) {
-    lines.push(
-      `Role in this space: ${opts.spaceRole}${opts.rolePreview ? " — role preview active" : ""}`,
-    );
-  }
+  // The default of a request naming no space, never a pin: the origin space, else the caller's
+  // personal space, else the organization's default space, when the turn acts there (with
+  // none, the model asks); a limited conversation's origin alone. The spaces themselves, and
+  // that every space-acting tool takes a `space_id`, are the tools' schemas and the server's
+  // instructions (`NO_FALLBACK_HINT` included), not repeated here.
+  const fallback = opts.origin
+    ? undefined
+    : (opts.spaces.find((space) => space.personal) ?? opts.spaces.find((space) => space.isDefault));
   lines.push(
-    `Permissions this turn: ${
+    opts.restricted && opts.origin
+      ? `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`): pass \`${opts.origin.id}\` as the \`space_id\` of every call; no other space can be reached. The user lifts the limit in the composer.`
+      : opts.origin
+        ? `This conversation was started in ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`.`
+        : fallback
+          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`.`
+          : "Ask the user which space when the request does not say; never guess it.",
+  );
+  // The set is the union over the turn's spaces: it bounds what the turn may attempt, while
+  // each call is decided by the role held in the space it names. Permissions are in the
+  // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
+  const preview = opts.rolePreview ? " (role preview active)" : "";
+  lines.push(
+    `Permissions this turn${preview} (the union over the spaces you can act in; each call is decided in the space it names, by your role there): ${
       opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
     }`,
   );
@@ -503,59 +444,11 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
   lines.push(
     `Reply in the user's language (${normalizeChatLocale(opts.locale)}) unless they switch.`,
   );
-  if (ctx.connections?.length) {
-    // Render the exact package id (and version when known) so the model can use
-    // it verbatim in an inline run's `dependencies.integrations` without a
-    // discovery round-trip — the display name alone forced a lookup detour.
-    const list = ctx.connections
-      .map((c) => {
-        const ver = c.version ? `@${c.version}` : "";
-        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)}${c.needs_reconnection ? "; needs reconnection by its owner" : ""})`;
-      })
-      .join(", ");
-    // Render the connected integrations as data only — the `@scope/name` id (+
-    // version) the model uses verbatim. The preference order (connected >
-    // activated > inactive) and the default-vs-tool_catalog selection rule live
-    // once in the platform MCP server instructions (apps/api/src/modules/mcp/
-    // router.ts), which the engine already receives through its own MCP
-    // handshake; don't restate them here or the two drift. The "use the id
-    // verbatim" instruction lives in `buildSystemPrompt` for the same reason — see
-    // the block-wide rule below.
-    lines.push(
-      author
-        ? `Integrations the user has connected and could attach to an agent: ${list}.`
-        : `Integrations the user has connected: ${list}.`,
-    );
-  } else {
-    lines.push("The user has no connected integrations yet.");
-  }
-  // No launch, no section: better absent than every entry marked unreachable.
-  if (ctx.agents?.length && runnable) {
-    lines.push("", "## Existing agents you can run");
-    for (const a of ctx.agents) {
-      const desc = a.description?.trim();
-      const label = a.display_name?.trim() || a.packageId;
-      lines.push(
-        `- \`${a.packageId}\` — ${label}${desc ? `: ${desc}` : ""}` +
-          ` (takes input: ${a.takes_input ? "yes" : "no"}` +
-          `${
-            a.published === false
-              ? draftOnlyHint({
-                  homeWritable: a.home_writable === true,
-                  author,
-                  rolePreview: opts.rolePreview,
-                })
-              : ""
-          })`,
-      );
-    }
-    if (ctx.agents_truncated) lines.push("(list truncated)");
-  }
   // Rendered whatever the authoring grant: the chat uses skills for itself.
   if (skillSection) lines.push("", skillSection);
-  // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
-  // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
-  // `buildSystemPrompt` tells the model to call `listRuns` instead (when the turn reads runs).
+  // Neither the connected integrations, the runnable agents nor the recent runs are rendered: they
+  // differ per space, and the last rewrites itself on every launch, busting the system prompt's
+  // single cache breakpoint. The model reads them with the tools, for the space concerned.
   return { text: lines.join("\n"), injected: skills.injected };
 }
 
@@ -566,18 +459,24 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
  */
 export type ChatSkillsClient = Pick<AppstrateMcpClient, "listSkills" | "readResource" | "close">;
 
-/** The space's entries of a `skills/list`, by package id. */
+/**
+ * The entries of a `skills/list` that sit in one of `spaces`, one per package: the one in the
+ * first of `spaces` that lists it (the turn's spaces, in the order `GET /api/spaces` uses).
+ */
 function entriesByPackage(
   entries: readonly ListedSkillEntry[],
-  spaceId: string,
+  spaces: readonly string[],
 ): Map<string, ListedSkillEntry> {
-  const byPackage = new Map<string, ListedSkillEntry>();
+  const byPackage = new Map<string, { entry: ListedSkillEntry; rank: number }>();
   for (const entry of entries) {
-    if (!entry.uri.startsWith(`${SKILL_URI_PREFIX}${spaceId}/`)) continue;
+    const spaceId = parseSkillUri(entry.uri)?.spaceId;
+    const rank = spaceId === undefined ? -1 : spaces.indexOf(spaceId);
     const pkg = parseSkillUriPackage(entry.uri);
-    if (pkg) byPackage.set(pkg.packageId, entry);
+    if (rank === -1 || !pkg) continue;
+    const kept = byPackage.get(pkg.packageId);
+    if (!kept || rank < kept.rank) byPackage.set(pkg.packageId, { entry, rank });
   }
-  return byPackage;
+  return new Map([...byPackage].map(([packageId, { entry }]) => [packageId, entry]));
 }
 
 /**
@@ -598,7 +497,7 @@ interface ChatSkillsRead {
  * The skills of a turn, read over the MCP Skills extension (SEP-2640): a skill
  * is the caller's draft when `skills/list` lists it among the drafts the caller
  * may read, else its published version. With `catalogue`, every such skill of
- * the space is listed by its `uri`; each of `chosen` is injected as the text
+ * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `chosen` is injected as the text
  * `resources/read` serves at its entry's URI. Read with the caller's own
  * permissions, even in `strict`, whose turn holds no `skills:*`. A chosen skill
  * in neither list, or whose read is refused, is left out; a malformed answer (a
@@ -611,7 +510,7 @@ interface ChatSkillsRead {
  */
 async function readChatSkills(
   openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
-  spaceId: string,
+  spaces: readonly string[],
   opts: { catalogue: boolean; catalogueDrafts: boolean; chosen: readonly string[] },
 ): Promise<ChatSkillsRead> {
   const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
@@ -629,7 +528,7 @@ async function readChatSkills(
   try {
     const list = (meta?: Record<string, unknown>) =>
       client.listSkills(meta ? { meta, signal } : { signal }).then(
-        ({ skills }) => entriesByPackage(skills, spaceId),
+        ({ skills }) => entriesByPackage(skills, spaces),
         (err: unknown) => {
           logger.warn("skills/list failed — its skills left out of the turn", {
             definition: meta ? "draft" : "published",
@@ -713,66 +612,42 @@ function isListedSkillMd(entry: ListedSkillEntry, text: string): boolean {
  * draft entry without one.
  */
 function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served"] | null {
+  const spaceId = parseSkillUri(entry.uri)?.spaceId;
+  if (spaceId === undefined) return null;
   if (draft) {
     const lockVersion = entry._meta?.[SKILL_LOCK_VERSION_META_KEY];
     return Number.isSafeInteger(lockVersion)
-      ? { definition: "draft", lockVersion: lockVersion as number }
+      ? { definition: "draft", lockVersion: lockVersion as number, spaceId }
       : null;
   }
   const version = (entry.frontmatter.metadata as { version?: unknown } | undefined)?.version;
-  return { definition: "published", version: typeof version === "string" ? version : null };
-}
-
-/** The preset, or a custom bundle's name (its id when unnamed). */
-function spaceRoleLabel(ref: SpaceRoleRefLike | undefined | null): string | null {
-  if (!ref) return null;
-  if (ref.kind === "preset") return ref.preset;
-  return ref.role.name?.trim() || ref.role.id;
-}
-
-/** `GET /api/me/context`: the payload, `400` (the caller lost the space), or null. */
-async function readCallerContext(
-  deps: ChatPlatformDeps,
-  origin: string,
-  headers: Headers,
-): Promise<CallerContext | 400 | null> {
-  try {
-    const res = await deps.dispatch(
-      new Request(new URL("/api/me/context", origin).toString(), { headers }),
-    );
-    if (res.ok) return (await res.json()) as CallerContext;
-    return res.status === 400 ? 400 : null;
-  } catch (err) {
-    logger.warn("me/context unavailable — chat degrades without caller context", {
-      err: String(err),
-    });
-    return null;
-  }
+  return {
+    definition: "published",
+    version: typeof version === "string" ? version : null,
+    spaceId,
+  };
 }
 
 /**
- * Build the caller-context system-prompt block from `GET /api/me/context` — the
- * canonical assembler the platform MCP `get_me` tool also uses, so the chat
- * prompt and the MCP surface can never drift. Dispatched IN-PROCESS through the
- * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
- * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
- *
- * `spaceId` is the space the chat router entered, so it is always known here.
- * A 400 from the dispatch (the caller lost the space between the entry and this
- * read) degrades to an identity-only block built from the already-authenticated
- * request context (name/email/role/org); any other failure degrades to the
- * skills section alone. Identity survives the first so date/role grounding
- * holds; the space's skills survive both. A rejected `enforced` rejects the
- * block: the turn is refused rather than run without them.
+ * Build the caller-context system-prompt block: the identity, the spaces the turn can
+ * act in (the acting set, the origin space alone when the conversation is limited) with the
+ * origin space as the default, when there is one, and the turn's permissions. Built from the
+ * already-authenticated request context, with no read of the platform: the integrations and
+ * the agents differ per space, so the model looks them up with its tools. The skills are
+ * those of the turn's spaces, one per package (the first in reach order), each bound in the
+ * claim to the space its URI names; the enforced ones are the origin space's. A rejected
+ * `enforced` rejects the block: the turn is refused rather than run without them.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
   args: {
-    origin: string;
-    headers: Record<string, string>;
-    spaceId: string;
+    /** The spaces the turn can act in: the acting set, or the origin space alone when limited. */
+    spaces: readonly ReachableSpaceGrant[];
+    /** The conversation's origin space, when it is one of `spaces`. */
+    origin?: { id: string; name: string };
+    /** Limited to the origin space. */
+    restricted: boolean;
     user: { id: string; name?: string | null; email?: string | null };
-    deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
     capabilities: TurnCapabilities;
@@ -784,74 +659,46 @@ export async function buildCallerContextBlock(
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
 ): Promise<{ text: string; injected: InjectedSkills }> {
-  const { origin, headers, spaceId, user, deps, locale, capabilities, skills } = args;
-  // Bound to this space: `resources/read` honours the claim only for it.
-  const claimed = ({ text, injected }: RenderedContext) => ({
-    text,
-    injected: { spaceId, skills: injected },
-  });
+  const { user, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const persona = c.get("viewAs");
-  const ctxHeaders = new Headers(headers);
-  ctxHeaders.set("x-space-id", spaceId);
+  const identity: CallerIdentity = {
+    user: { name: user.name ?? null, email: user.email ?? null },
+    org: {
+      role: persona?.orgRole ?? c.get("orgRole") ?? null,
+      name: c.get("orgName") ?? null,
+      slug: c.get("orgSlug") ?? null,
+    },
+  };
   const injects = injectsSkills(skills.skillMode);
-  const [context, turnSkills, enforced] = await Promise.all([
-    readCallerContext(deps, origin, ctxHeaders),
-    readChatSkills(args.openSkillsClient, spaceId, {
-      catalogue: capabilities.readsSkills && !injects,
-      // The drafts the caller reads are the turn's only while the turn keeps the
-      // caller's `skills:write` (the authoring switch drops it).
-      catalogueDrafts: args.permissions.includes("skills:write"),
-      chosen: injects ? skills.pinnedSkills : [],
-    }),
+  const [turnSkills, enforced] = await Promise.all([
+    readChatSkills(
+      args.openSkillsClient,
+      args.spaces.map((space) => space.id),
+      {
+        catalogue: capabilities.readsSkills && !injects,
+        // The drafts the caller reads are the turn's only while the turn keeps the
+        // caller's `skills:write` (the authoring switch drops it).
+        catalogueDrafts: args.permissions.includes("skills:write"),
+        chosen: injects ? skills.pinnedSkills : [],
+      },
+    ),
     args.enforced,
   ]);
-  const opts = {
+  const { text, injected } = formatCallerContext(identity, {
     locale,
     capabilities,
     rolePreview: persona !== undefined,
-    spaceRole: spaceRoleLabel(c.get("spaceRole")),
-    spaceId,
     permissions: args.permissions,
+    spaces: args.spaces,
+    origin: args.origin,
+    restricted: args.restricted,
+    skills,
+    skillContents: turnSkills.contents,
+    skillCatalogue: turnSkills.catalogue,
     enforced,
-  };
-  if (context && context !== 400) {
-    return claimed(
-      formatCallerContext(context, {
-        ...opts,
-        skills,
-        skillContents: turnSkills.contents,
-        skillCatalogue: turnSkills.catalogue,
-      }),
-    );
-  }
-  // Degraded: nothing says which chosen skills are active here, so none is named,
-  // but the mode (strict's note) and the space's skills stay.
-  const unresolved: ChatSkillSelection = { skillMode: skills.skillMode, pinnedSkills: [] };
-  if (context === 400) {
-    // Identity/role straight off the request context.
-    return claimed(
-      formatCallerContext(
-        {
-          user: { name: user.name ?? null, email: user.email ?? null },
-          org: {
-            role: persona?.orgRole ?? c.get("orgRole") ?? null,
-            name: c.get("orgName") ?? null,
-            slug: c.get("orgSlug") ?? null,
-          },
-        },
-        { ...opts, skills: unresolved },
-      ),
-    );
-  }
-  return claimed(
-    formatSkillsSection({
-      selection: unresolved,
-      capabilities,
-      catalogue: [],
-      contents: new Map(),
-      enforced,
-    }),
-  );
+  });
+  // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
+  return { text, injected: { skills: injected } };
 }

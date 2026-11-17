@@ -11,7 +11,7 @@
  *   - the signing secret is generated in-memory at module init and never
  *     leaves the process (no persistence, no transmission);
  *   - tokens are short-lived and carry exactly the caller's identity
- *     (already authenticated by the platform pipeline on the /api/chat
+ *     (already authenticated by the platform pipeline on the chat turn
  *     request) — no privilege amplification; the strategy therefore declares
  *     `principalKind: "user"`, so personal spaces and per-principal grants reach
  *     the engine's turn exactly as they reach the caller's own request;
@@ -98,33 +98,30 @@ interface LoopbackClaims extends LoopbackIdentity {
   chatSessionId?: string | null;
   /** The skills the turn's prompt injected, as served; MCP bearer only (→ `skill://` reads). */
   injectedSkills?: InjectedSkills;
+  /**
+   * The turn's spaces, as a credential allowlist (`AuthResolution.spaceIds`): the only spaces
+   * the bearer reaches; MCP bearer only. Absent means unbound — the inference bearer.
+   */
+  spaceIds?: string[];
 }
 
 function sign(payload: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-/** Serialize + sign a claims payload into a `chatloop_` bearer. */
-function mint(
-  identity: LoopbackIdentity,
-  permissions: readonly string[],
-  firstPartyLoopback: boolean,
-  ttlMs: number,
-  chatSessionId?: string | null,
-  viewAs?: unknown,
-  injectedSkills?: InjectedSkills,
-): string {
+/** Serialize + sign a claims payload into a `chatloop_` bearer; `ttlMs` sets its `exp`. */
+function mint({ ttlMs, ...claims }: Omit<LoopbackClaims, "exp"> & { ttlMs: number }): string {
+  const { chatSessionId, injectedSkills } = claims;
   const payload = Buffer.from(
     JSON.stringify({
-      ...identity,
+      ...claims,
       exp: Date.now() + ttlMs,
-      permissions: [...permissions],
-      firstPartyLoopback,
-      ...(chatSessionId ? { chatSessionId } : {}),
-      ...(viewAs !== undefined ? { viewAs } : {}),
-      ...(injectedSkills && Object.keys(injectedSkills.skills).length > 0
-        ? { injectedSkills }
-        : {}),
+      // Absent rather than empty: a claim the verifier reads only when present.
+      chatSessionId: chatSessionId || undefined,
+      injectedSkills:
+        injectedSkills && Object.keys(injectedSkills.skills).length > 0
+          ? injectedSkills
+          : undefined,
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -148,21 +145,25 @@ export function mintLoopbackToken(
   identity: LoopbackIdentity,
   opts?: { ttlMs?: number; chatSessionId?: string | null },
 ): string {
-  return mint(
-    identity,
-    INFERENCE_PERMISSIONS,
-    true,
-    opts?.ttlMs ?? TOKEN_TTL_MS,
-    opts?.chatSessionId,
-  );
+  return mint({
+    ...identity,
+    permissions: [...INFERENCE_PERMISSIONS],
+    firstPartyLoopback: true,
+    ttlMs: opts?.ttlMs ?? TOKEN_TTL_MS,
+    chatSessionId: opts?.chatSessionId,
+  });
 }
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi engine for
- * its own `/api/mcp/o/:org/s/:space` connection.
+ * its own connection: the organization endpoint (`/api/mcp/o/:org`).
  *
- * `permissions` MUST be the caller's already-resolved permission set (from
- * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process
+ * `spaceIds` are the turn's spaces (a limited conversation's origin alone) and the ONLY ones
+ * the bearer reaches (the generic credential allowlist, `AuthResolution.spaceIds`); each
+ * request it makes acts in one of them.
+ *
+ * `permissions` MUST be the caller's already-resolved permission set (the union over
+ * the turn's spaces): the MCP meta-tools re-enter the platform in-process
  * and re-authorize each underlying operation against exactly this set, so
  * carrying the caller's own permissions (narrowed by `turnPermissions` when the
  * turn may not author agents) never amplifies beyond what the caller could
@@ -180,11 +181,19 @@ export function mintMcpLoopbackToken(
     permissions: readonly string[];
     viewAs?: unknown;
     injectedSkills?: InjectedSkills;
+    /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
+    spaceIds?: readonly string[];
   },
   opts?: { ttlMs?: number },
 ): string {
-  const { permissions, viewAs, injectedSkills, ...rest } = identity;
-  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS, null, viewAs, injectedSkills);
+  const { permissions, spaceIds, ...rest } = identity;
+  return mint({
+    ...rest,
+    permissions: [...permissions],
+    firstPartyLoopback: false,
+    ttlMs: opts?.ttlMs ?? TOKEN_TTL_MS,
+    spaceIds: spaceIds && [...spaceIds],
+  });
 }
 
 export const chatLoopbackStrategy: AuthStrategy = {
@@ -219,6 +228,13 @@ export const chatLoopbackStrategy: AuthStrategy = {
     // A malformed map widens nothing: dropped, `skill://` reads fall back to `skills:read`.
     const injected = injectedSkillsSchema.safeParse(claims.injectedSkills);
     const injectedSkills = injected.success ? injected.data : undefined;
+    // An allowlist narrows, so a malformed one is refused (fail closed) rather than dropped.
+    if (
+      claims.spaceIds !== undefined &&
+      (!Array.isArray(claims.spaceIds) || !claims.spaceIds.every((id) => typeof id === "string"))
+    ) {
+      return null;
+    }
 
     return {
       user: { id: claims.userId, email: claims.email, name: claims.name },
@@ -235,6 +251,7 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // is server-minted from a process-local secret (see top-of-file rationale).
       firstPartyLoopback: claims.firstPartyLoopback === true,
       permissions,
+      ...(claims.spaceIds !== undefined ? { spaceIds: claims.spaceIds } : {}),
       // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
       // the preview). `chatSessionId` is stamped on the usage row by the
       // llm-proxy; `viewAs` is re-published before any permission is resolved.

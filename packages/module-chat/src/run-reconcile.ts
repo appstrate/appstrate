@@ -110,8 +110,10 @@ export function runNoticeText(input: {
   packageId: string | null;
   status: string;
   files: readonly NoticedFile[];
+  /** The run's space: the link enters it. */
+  enterSpaceId: string;
 }): string {
-  const href = buildRunPageHref(input.packageId ?? undefined, input.runId);
+  const href = buildRunPageHref(input.packageId ?? undefined, input.runId, input.enterSpaceId);
   const lines = input.files.map(
     (file) => `- ${renderNoticeName(file.name)} (${file.size} o) — \`${fileUri(file.id)}\``,
   );
@@ -167,6 +169,7 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
       chatSessionId: runs.chatSessionId,
       packageId: runs.packageId,
       status: runs.status,
+      spaceId: runs.spaceId,
     })
     .from(runs)
     .where(and(eq(runs.id, input.runId), eq(runs.orgId, input.orgId)))
@@ -196,6 +199,7 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
       packageId: run.packageId,
       status: run.status,
       files: published,
+      enterSpaceId: run.spaceId,
     }),
   });
   if (posted) {

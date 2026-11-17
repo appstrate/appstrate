@@ -18,7 +18,7 @@ const content = (id: string, body = `# ${id}`): SkillContent => ({
   version: "1.0.0",
   uri: `skill://space-1/${id.slice(1)}/skill/SKILL.md`,
   content: body,
-  served: { definition: "published", version: "1.0.0" },
+  served: { definition: "published", version: "1.0.0", spaceId: "space-1" },
 });
 
 const enforcedSkill = (id: string, body: string | null = `# ${id}`): EnforcedChatSkill => ({
@@ -34,11 +34,10 @@ const resolve = (
   contents: SkillContent[] = [],
   enforced: EnforcedChatSkill[] = [],
 ) =>
-  resolveChatSkills(
-    selection,
-    new Map(contents.map((skill) => [skill.packageId, skill])),
-    enforced,
-  );
+  resolveChatSkills(selection, new Map(contents.map((skill) => [skill.packageId, skill])), {
+    spaceId: "space-1",
+    skills: enforced,
+  });
 
 describe("resolveChatSkills", () => {
   it("auto: injects nothing and notices nothing — the chosen skills are kept but unused", () => {
@@ -109,14 +108,14 @@ describe("resolveChatSkills — space-enforced skills", () => {
           version: "2.0.0",
           uri: "skill://space-1/b/house/skill/SKILL.md",
           content: "# @b/house",
-          served: { definition: "published", version: "2.0.0" },
+          served: { definition: "published", version: "2.0.0", spaceId: "space-1" },
         },
         {
           packageId: "@z/house",
           version: "2.0.0",
           uri: "skill://space-1/z/house/skill/SKILL.md",
           content: "# @z/house",
-          served: { definition: "published", version: "2.0.0" },
+          served: { definition: "published", version: "2.0.0", spaceId: "space-1" },
         },
       ]);
       expect(result.chosen.map((s) => s.packageId)).toEqual(
@@ -146,7 +145,7 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.enforced).toEqual([]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toEqual([
-      "The skill `@a/house` is required by this space but has no published version to follow.",
+      "The skill `@a/house` is required by this conversation's origin space but has no published version to follow.",
     ]);
   });
 
@@ -159,7 +158,9 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.enforced).toEqual([]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toHaveLength(1);
-    expect(result.notices[0]).toContain("is required by this space but does not fit");
+    expect(result.notices[0]).toContain(
+      "is required by this conversation's origin space but does not fit",
+    );
   });
 
   it("spends the shared budget on the space's skills first", () => {
@@ -188,7 +189,7 @@ describe("resolveChatSkills — space-enforced skills", () => {
     );
     expect(result.enforced.map((s) => s.packageId)).toEqual(["@a/a", "@a/c"]);
     expect(result.notices).toEqual([
-      `The skill \`@a/b\` is required by this space but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
+      `The skill \`@a/b\` is required by this conversation's origin space but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
     ]);
   });
 });
@@ -226,22 +227,35 @@ describe("injectedSkills", () => {
     const result = resolve(
       { skillMode: "strict", pinnedSkills: ["@a/big", "@a/gone", "@a/mine"] },
       [
-        { ...content("@a/mine"), served: { definition: "draft", lockVersion: 3 } },
+        {
+          ...content("@a/mine"),
+          served: { definition: "draft", lockVersion: 3, spaceId: "space-1" },
+        },
         content("@a/big", "x".repeat(BUDGET)),
       ],
       [enforcedSkill("@b/house"), enforcedSkill("@b/unpublished", null)],
     );
     expect(injectedSkills(result)).toEqual({
-      "@b/house": { definition: "published", version: "2.0.0" },
-      "@a/mine": { definition: "draft", lockVersion: 3 },
+      "@b/house": { definition: "published", version: "2.0.0", spaceId: "space-1" },
+      "@a/mine": { definition: "draft", lockVersion: 3, spaceId: "space-1" },
     });
+  });
+
+  it("names the origin space in the notices about a required skill", () => {
+    const result = resolve(
+      { skillMode: "auto", pinnedSkills: [] },
+      [],
+      [enforcedSkill("@a/house", null)],
+    );
+    expect(result.notices).toEqual([
+      "The skill `@a/house` is required by this conversation's origin space but has no published version to follow.",
+    ]);
   });
 
   it("notices a chosen skill the platform answered malformed, and names it nowhere", () => {
     const result = resolveChatSkills(
       { skillMode: "manual", pinnedSkills: ["@a/odd"] },
       new Map([["@a/odd", null]]),
-      [],
     );
     expect(result.notices).toEqual([
       "The skill `@a/odd` was chosen for this conversation but could not be read.",

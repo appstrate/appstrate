@@ -84,7 +84,6 @@ export type ChatModelResolution =
  */
 export interface ChatAttachmentRequest {
   orgId: string;
-  spaceId: string;
   /** The chat session owner (chat sessions are per dashboard user). */
   userId: string;
   /** Container the materialized file is anchored to (session-scoped ACL). */
@@ -94,13 +93,22 @@ export interface ChatAttachmentRequest {
    */
   uri: string;
   /**
-   * The caller's effective permission set in the space, as the platform auth
-   * pipeline resolved it. It decides how wide a container ACL reads: with
+   * The spaces the attachment may resolve in, each with the caller's effective
+   * permission set there: every space the caller may chat in (the acting set). The attachment resolves in the
+   * space its file (or upload) belongs to, which must be one of these; a
+   * permission set decides how wide a container ACL reads there — with
    * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,
    * which is what the file gallery the user picked it from already shows;
    * without it only the session owner's own runs.
    */
-  permissions: ReadonlySet<string>;
+  spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
+  /**
+   * Called with the space the attachment belongs to, once it is one of `spaces` and BEFORE
+   * anything is created or read in it: a rejection refuses the attachment, so an upload is
+   * never materialized into a space the caller was refused. The conversation records the
+   * space as touched here.
+   */
+  beforeResolve: (spaceId: string) => Promise<void>;
 }
 
 /**
@@ -115,6 +123,8 @@ export interface ResolvedChatAttachment {
   name: string;
   mime: string;
   size: number;
+  /** The space the file belongs to: where it resolved. */
+  spaceId: string;
 }
 
 /** One chat turn's metered usage — inserted as an `llm_usage` row (runId null). */
@@ -180,21 +190,53 @@ export interface EnforcedChatSkillRef {
   version: string | null;
 }
 
+/**
+ * What a conversation's turn needs in a space to act in it: the turn is the caller's to
+ * run (`chat:write`), the conversation stays openable once the space is touched (`chat:read`), and the
+ * tools can name the space (`mcp:read`). Read through {@link chatActsIn} alone.
+ */
+const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+
+/**
+ * Whether a space's effective permissions let a conversation act in it: the one definition behind
+ * the chat's acting set (`actingSpaces`) and the web shell's judgement.
+ */
+export function chatActsIn(permissions: readonly string[]): boolean {
+  return CHAT_ACTING_PERMISSIONS.every((permission) => permissions.includes(permission));
+}
+
 /** The chat loopback strategy's auth method — the only source `skill://` reads trust for an injected-skills claim. */
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
 
 /**
- * The skills a chat turn injected, as served, in the turn's space: a published
- * version, or the draft at the `lockVersion` it had. Parsed when the chat
- * strategy verifies the signed bearer, and again where the platform reads it.
+ * The web shell's query parameter that enters a space when an in-app link opens
+ * (`?enterSpace=<space id>`). One definition for the two writers of such links: the shell's own
+ * lists, and the chat, which persists run links into a conversation (the notice of a run that
+ * ended after its turn) where no host renders them.
+ */
+export const ENTER_SPACE_PARAM = "enterSpace";
+
+/**
+ * The skills a chat turn injected, as served: a published version, or the draft
+ * at the `lockVersion` it had. Each is bound to `spaceId`, the space its own
+ * `skill://<spaceId>/…` URI names, and `resources/read` honours it in that space
+ * only. Parsed when the chat strategy verifies the signed bearer, and again where
+ * the platform reads it.
  */
 export const injectedSkillsSchema = z.strictObject({
-  spaceId: z.string(),
   skills: z.record(
     z.string(),
     z.discriminatedUnion("definition", [
-      z.strictObject({ definition: z.literal("published"), version: z.string().nullable() }),
-      z.strictObject({ definition: z.literal("draft"), lockVersion: z.number().int() }),
+      z.strictObject({
+        definition: z.literal("published"),
+        version: z.string().nullable(),
+        spaceId: z.string(),
+      }),
+      z.strictObject({
+        definition: z.literal("draft"),
+        lockVersion: z.number().int(),
+        spaceId: z.string(),
+      }),
     ]),
   ),
 });

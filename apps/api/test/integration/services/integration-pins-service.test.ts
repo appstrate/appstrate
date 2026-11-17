@@ -121,6 +121,7 @@ async function sharesOf(id: string): Promise<string[]> {
 
 const person = (id: string): ConnectionPrincipal => ({
   kind: "person",
+  binding: null,
   actor: { type: "user", id },
 });
 
@@ -814,8 +815,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           {
             kind: "delegated",
             actor: { type: "end_user", id: endUser.id },
-            orgId: ctx.orgId,
-            spaceId: null,
+            binding: { orgId: ctx.orgId, spaceIds: null },
           },
           id,
         );
@@ -1626,8 +1626,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           principal: {
             kind: "delegated",
             actor: { type: "end_user", id: endUser.id },
-            orgId: ctx.orgId,
-            spaceId: null,
+            binding: { orgId: ctx.orgId, spaceIds: null },
           },
         }),
       ).rejects.toMatchObject({ status: 409, code: "end_user_connection_not_shareable" });
@@ -1716,13 +1715,11 @@ describe("integration-pins-service — DB access/ownership", () => {
       const boundPrincipal: ConnectionPrincipal = {
         kind: "delegated",
         actor: { type: "user", id: memberId },
-        orgId: ctx.orgId,
-        spaceId: scope.spaceId,
+        binding: { orgId: ctx.orgId, spaceIds: [scope.spaceId] },
       };
-      const bound: ConnectionCaller = {
-        ...ownerOn(),
-        principal: boundPrincipal,
-      };
+      // `testCaller` admits the bound space alone, the rule the door's `credentialAdmitsSpace`
+      // applies (`connectionCaller`, asserted in `test/unit/lib/connection-principal.test.ts`).
+      const bound = testCaller(boundPrincipal, { permissionsIn: async () => CONNECT });
       const orgRow = await seedConnection({
         spaceId: other,
         orgScope: true,

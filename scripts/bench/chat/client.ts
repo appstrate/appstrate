@@ -2,7 +2,7 @@
 
 /**
  * The bench's user: signs up, creates an organization, and sends chat turns
- * exactly as the SPA does — `POST /api/chat` with the conversation's UIMessage
+ * exactly as the SPA does — `POST /api/orgs/:orgId/chat` with the conversation's UIMessage
  * history, the session cookie and the org/space headers — then reads the AI SDK
  * UI message stream and timestamps what a user would see.
  */
@@ -128,17 +128,21 @@ export async function sendTurn(
   let messageId: string | null = null;
   let text = "";
   try {
-    const res = await fetch(`${origin}/api/chat`, {
+    const res = await fetch(`${origin}/api/orgs/${user.orgId}/chat`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         cookie: user.cookie,
         origin,
         "x-org-id": user.orgId,
-        "x-space-id": user.spaceId,
         "x-chat-locale": "fr",
       },
-      body: JSON.stringify({ id: sessionId, messages: history, ...extraBody }),
+      body: JSON.stringify({
+        id: sessionId,
+        messages: history,
+        spaceId: user.spaceId,
+        ...extraBody,
+      }),
       signal: AbortSignal.timeout(TURN_TIMEOUT_MS),
     });
     t.status = res.status;

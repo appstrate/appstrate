@@ -65,3 +65,19 @@ export function ConversationSkeleton({
     </div>
   );
 }
+
+/**
+ * A row's place while the list loads, with the space line's: the same height and the same two
+ * 16px lines as `ConversationRow`, so the list does not shift on load.
+ */
+export function ConversationRowSkeleton() {
+  return (
+    <div
+      data-sidebar="menu-skeleton"
+      className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
+    >
+      <Skeleton className="h-4 w-3/5" />
+      <Skeleton className="h-4 w-2/5" />
+    </div>
+  );
+}

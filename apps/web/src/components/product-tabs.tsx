@@ -7,19 +7,17 @@
  */
 
 import type { ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CountBadge } from "@/components/count-badge";
-import { useSpaceAction, useSpacesFor } from "@/hooks/use-space-action";
+import { useCanReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
-import { SHELL_CHAT_TRANSPORT } from "@/modules/chat/use-chat-runtime";
+import { useChatCan, useShellChatTransport } from "@/modules/chat/use-chat-runtime";
 import { isChatTabShown } from "@/lib/chat-tab";
-import { replacingNavigation, type SpaceChoiceMenu } from "@/lib/menu-action";
-import { SpaceChoiceDropdown } from "@/components/space-choice-menu";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
 interface Product {
@@ -31,31 +29,24 @@ interface Product {
   enabled: boolean;
   /** Unread conversations, on the tab that leads to them. */
   unread?: number;
-  /** Replaces the plain navigation (« Tous les espaces » acts in the space it takes). */
-  onSelect?: () => void;
-  /** The spaces to open it in, when the reader chooses: the tab opens their menu. */
-  inSpaces?: SpaceChoiceMenu;
 }
 
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  // The chat belongs to one space: in « Tous les espaces » it is offered where some space opens
-  // it, and opened in the space the reader picks in the tab's menu.
-  const chat = useSpaceAction({ route: "/chat" });
-  const navigate = useNavigate();
-  const { on: overview, offered: canWrite } = useSpacesFor({ permission: "chat:write" });
+  // The chat serves the organization in every mode (its sessions act across spaces): it is offered
+  // where some space opens it, and writable where it may act (the acting set), whatever the
+  // working space grants.
+  const canReach = useCanReach();
+  const chatReachable = canReach("/chat");
+  const canWrite = useChatCan()("chat:write");
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
-  const chatReachable = chat.offered;
-  // The chat has no entry in the Studio's navigation: its unread count rides on this tab. Both
-  // reads are the working space's, so « Tous les espaces » neither shows nor asks them (as
-  // `NavOrg`): there the tab is offered where some space grants writing, own sessions counting
-  // for none.
-  const workingChat = chatReachable && !overview;
-  const chatUnread = useChatUnreadCount(SHELL_CHAT_TRANSPORT, workingChat);
-  const workingSessions = useHasChatSessions(SHELL_CHAT_TRANSPORT, workingChat);
-  const hasChatSessions = overview ? false : workingSessions;
+  // The chat has no entry in the Studio's navigation: its unread count rides on this tab, the
+  // working space's, or in « Tous les espaces » the organization's.
+  const chatTransport = useShellChatTransport();
+  const chatUnread = useChatUnreadCount(chatTransport, chatReachable);
+  const hasChatSessions = useHasChatSessions(chatTransport, chatReachable);
   const chatShown = isChatTabShown({
     reachable: chatReachable,
     canWrite,
@@ -83,11 +74,10 @@ export function ProductTabs() {
       id: "chat",
       label: t("products.chat"),
       icon: <MessageSquare className="size-4" />,
-      ...chat.link("/chat"),
-      inSpaces: chat.choose(t("spaceChoice.open"), () => navigate("/chat")),
+      to: "/chat",
       active: inChat,
       enabled: chatShown,
-      unread: overview ? undefined : chatUnread,
+      unread: chatUnread,
     },
   ].filter((p) => p.enabled);
 
@@ -102,29 +92,27 @@ export function ProductTabs() {
         className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
       >
         {products.map((p) => (
-          <SpaceChoiceDropdown key={p.id} choice={p.inSpaces}>
-            <Link
-              to={p.to}
-              aria-current={p.active ? "page" : undefined}
-              onClick={replacingNavigation(p.onSelect)}
-              className={cn(
-                "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
-                p.active
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
-              <span className="truncate">{p.label}</span>
-              {!p.active && (
-                <CountBadge
-                  count={p.unread ?? 0}
-                  label={t("products.unread", { count: p.unread })}
-                  tone="primary"
-                />
-              )}
-            </Link>
-          </SpaceChoiceDropdown>
+          <Link
+            key={p.id}
+            to={p.to}
+            aria-current={p.active ? "page" : undefined}
+            className={cn(
+              "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
+              p.active
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
+            <span className="truncate">{p.label}</span>
+            {!p.active && (
+              <CountBadge
+                count={p.unread ?? 0}
+                label={t("products.unread", { count: p.unread })}
+                tone="primary"
+              />
+            )}
+          </Link>
         ))}
         {chatDeciding && <Skeleton className="h-7 flex-1 rounded-md" />}
       </nav>

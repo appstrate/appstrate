@@ -94,7 +94,3 @@ export function useSpaceGrant(spaceId: string | null | undefined): SpaceGrant | 
     access: space.access,
   };
 }
-
-export function useCurrentSpaceGrant(): SpaceGrant | undefined {
-  return useSpaceGrant(useCurrentSpaceId());
-}

@@ -19,6 +19,7 @@
  */
 
 import { z } from "zod";
+import type { ChatRequest } from "./runtime-context.ts";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import type { RunStatus } from "@appstrate/core/run-status";
 import {
@@ -31,6 +32,7 @@ import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 
 /** Operation ids whose result launches a run we can follow. */
 const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
@@ -640,13 +642,16 @@ export function mergeRunFiles(a: readonly ChatRunFile[], b: readonly ChatRunFile
  * carried along so the renderer can still resolve a local preview for it (the
  * staged-image cache is keyed by `upload://` URI).
  */
-type ResolvedAttachment = { kind: "file"; id: string } | { kind: "inert"; uri?: string };
+type ResolvedAttachment =
+  { kind: "file"; id: string; spaceId?: string } | { kind: "inert"; uri?: string };
 
 /** Minimal structural view of an assistant-ui attachment content part. */
 interface AttachmentContentPart {
   type: string;
   image?: string;
   data?: string;
+  /** The server's stamp on a materialized part (`appstrate.spaceId`: where the file lives). */
+  providerMetadata?: { appstrate?: { spaceId?: unknown } };
 }
 
 export function resolveAttachmentContent(
@@ -655,7 +660,10 @@ export function resolveAttachmentContent(
   const part = content?.[0];
   const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
   const id = typeof uri === "string" ? parseFileUri(uri) : null;
-  if (id) return { kind: "file", id };
+  if (id) {
+    const spaceId = part?.providerMetadata?.appstrate?.spaceId;
+    return { kind: "file", id, ...(typeof spaceId === "string" ? { spaceId } : {}) };
+  }
   return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 
@@ -682,12 +690,31 @@ export function extractRunPackageId(result: unknown): string | undefined {
 }
 
 /**
- * Build the in-app run-detail URL (`/agents/{packageId}/runs/{runId}`, the same
+ * Build the in-app run-detail path (`/agents/{packageId}/runs/{runId}`, the same
  * route the run table links to). `undefined` when the run has no package id
  * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
- * slashes literal to match the route; only the run id is encoded.
+ * slashes literal to match the route; only the run id is encoded. `spaceId` names the space it
+ * opens in (the host's `?enterSpace=` convention).
  */
-export function buildRunPageHref(packageId: string | undefined, runId: string): string | undefined {
+export function buildRunPageHref(
+  packageId: string | undefined,
+  runId: string,
+  spaceId?: string,
+): string | undefined {
   if (!packageId) return undefined;
-  return `/agents/${packageId}/runs/${encodeURIComponent(runId)}`;
+  const href = `/agents/${packageId}/runs/${encodeURIComponent(runId)}`;
+  return spaceId ? `${href}?${ENTER_SPACE_PARAM}=${encodeURIComponent(spaceId)}` : href;
+}
+
+/**
+ * `request` asking in `spaceId`: the run a conversation launched is read in the space
+ * its call named, not in the working space the host's headers carry. Unchanged without a space.
+ */
+export function requestInSpace(request: ChatRequest, spaceId: string | undefined): ChatRequest {
+  if (!spaceId) return request;
+  return (path, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("X-Space-Id", spaceId);
+    return request(path, { ...init, headers });
+  };
 }

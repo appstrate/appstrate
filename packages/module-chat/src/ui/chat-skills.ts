@@ -5,12 +5,31 @@
 import { z } from "zod";
 import { parseScopedName } from "@appstrate/core/naming";
 import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
-import type { ChatRequest } from "./runtime-context.ts";
+import type { ChatTransport } from "./runtime-context.ts";
+import { chatPath } from "./chat-route.ts";
 
-/** The space's active skills, the ones the picker chooses from. */
-export async function fetchSkills(request: ChatRequest): Promise<SkillHint[]> {
-  const res = await request("/api/packages/skills");
-  return parseSkillList(await res.json());
+/** A row of the organization index lists the spaces it is active in; the rest is `parseSkillList`'s. */
+const spacedRowSchema = z.looseObject({ space_ids: z.array(z.string()) });
+
+/**
+ * The active skills the picker chooses from: those active in a space the chat acts in
+ * (`actingSpaceIds`). The organization index lists each package once.
+ */
+export async function fetchSkills(
+  transport: ChatTransport,
+  actingSpaceIds: readonly string[],
+): Promise<SkillHint[]> {
+  const res = await transport.request(`/api/orgs/${transport.orgId}/packages/skills`);
+  const body: unknown = await res.json();
+  const acting = new Set(actingSpaceIds);
+  const rows = (body as { data?: unknown } | null)?.data;
+  const kept = (Array.isArray(rows) ? rows : []).flatMap((row: unknown) => {
+    const parsed = spacedRowSchema.safeParse(row);
+    return parsed.success && parsed.data.space_ids.some((id) => acting.has(id))
+      ? [parsed.data]
+      : [];
+  });
+  return parseSkillList({ data: kept });
 }
 
 const enforcedSkillsSchema = z.object({
@@ -18,9 +37,14 @@ const enforcedSkillsSchema = z.object({
   data: z.array(z.object({ id: z.string(), name: z.string(), version: z.string().nullable() })),
 });
 
-/** Through the chat module (`chat:write`): a member without `skills:read` sees them too. */
-export async function fetchEnforcedSkills(request: ChatRequest): Promise<SkillHint[]> {
-  const res = await request("/api/chat/enforced-skills");
+/** What `spaceId` imposes, through the chat module (`chat:write`): a member without `skills:read` sees them too. */
+export async function fetchEnforcedSkills(
+  transport: ChatTransport,
+  spaceId: string,
+): Promise<SkillHint[]> {
+  const res = await transport.request(
+    chatPath(transport, `/enforced-skills?${new URLSearchParams({ spaceId })}`),
+  );
   // Strict: a policy read that drifted must fail loudly, never read as "nothing imposed".
   const parsed = enforcedSkillsSchema.safeParse(await res.json());
   if (!parsed.success) throw new Error("Unexpected enforced skills response");

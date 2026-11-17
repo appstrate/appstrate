@@ -794,7 +794,7 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   //
   // Listed here rather than in the module because the coverage check reads one
   // map; the owning module is named in each reason.
-  "POST /api/chat":
+  "POST /api/orgs/{orgId}/chat":
     "@appstrate/module-chat streaming turn endpoint; the body is the AI-SDK UI message envelope, not a hand-written Zod object",
   "POST /api/billing/webhooks":
     "@appstrate/module-ee Stripe webhook receiver; the raw text is what the signature covers, so the handler never parses JSON and there is no Zod object to compare",

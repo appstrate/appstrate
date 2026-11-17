@@ -47,6 +47,11 @@ export function stripMcpToolPrefix(name: string): string {
   return name;
 }
 
+/** The space a platform tool call names (`space_id`), where it is dispatched; none when it names none. */
+export function dispatchSpace(args: Record<string, unknown>): string | undefined {
+  return typeof args.space_id === "string" ? args.space_id : undefined;
+}
+
 type OpenBlockKind = "text" | "reasoning" | "tool";
 interface OpenBlock {
   kind: OpenBlockKind;
@@ -100,6 +105,13 @@ interface PiChatUiStreamMapperOptions {
   onFirstModelEvent?: () => void;
   /** Rate card whose tiers band each model call's usage; none → no bands. */
   cost?: ModelCost | null;
+  /**
+   * The ids of the turn's spaces. A call naming one of them (`dispatchSpace`) is stamped with it
+   * as `providerMetadata.appstrate.spaceId`, the one record every card reads where the call
+   * acted, long after the conversation's limit has changed. A call naming another space is
+   * refused before dispatch and acted nowhere: it is not stamped. None: nothing is stamped.
+   */
+  turnSpaces?: ReadonlySet<string>;
 }
 
 /**
@@ -109,8 +121,10 @@ interface PiChatUiStreamMapperOptions {
 export class PiChatUiStreamMapper {
   private readonly onFirstModelEvent: (() => void) | undefined;
   private readonly cost: ModelCost | null;
+  private readonly turnSpaces: ReadonlySet<string>;
 
   constructor(options: PiChatUiStreamMapperOptions = {}) {
+    this.turnSpaces = options.turnSpaces ?? new Set();
     this.onFirstModelEvent = options.onFirstModelEvent;
     this.cost = options.cost ?? null;
   }
@@ -270,12 +284,16 @@ export class PiChatUiStreamMapper {
         const toolCallId = block?.toolCallId ?? ev.toolCall.id;
         const toolName = stripMcpToolPrefix(block?.toolName ?? ev.toolCall.name);
         this.lastTool = toolName;
+        const input = ev.toolCall.arguments ?? {};
+        const named = dispatchSpace(input);
+        const spaceId = named !== undefined && this.turnSpaces.has(named) ? named : undefined;
         return [
           {
             type: "tool-input-available",
             toolCallId,
             toolName,
-            input: ev.toolCall.arguments ?? {},
+            input,
+            ...(spaceId && { providerMetadata: { appstrate: { spaceId } } }),
           },
         ];
       }

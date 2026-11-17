@@ -2,7 +2,7 @@
 
 /**
  * The skills loaded in the conversation, as pills in the composer's tool row: ONE locked pill for
- * the ones the space imposes (also readable by a member without `skills:read`) and ONE for
+ * the ones the origin space imposes (also readable by a member without `skills:read`) and ONE for
  * the ones the user added. Each shows its count, or the name when there is a single skill; the
  * tooltip lists the names. Removal happens in the picker, which both pills open.
  */
@@ -15,7 +15,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, isDefaultSkillSelection, type ChatSkillSelection } from "../skills.ts";
 import { ownPins } from "./chat-skills.ts";
+import { useOriginSpaceLabel, useOriginSpaceNode } from "./conversation-scope.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillsChip } from "./skills-picker.tsx";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
@@ -26,7 +28,7 @@ interface LoadedSkill {
 }
 
 /**
- * What the conversation loads: the space's imposed skills and, for who can pick, the user's own
+ * What the conversation loads: the origin space's imposed skills and, for who can pick, the user's own
  * pins. Pins count only in a mode that injects them (`auto` keeps them but uses none); an enforced
  * skill is never listed twice. The catalogue is read only to name pins, so only when there are.
  */
@@ -42,7 +44,7 @@ function useLoadedSkills(
     pickable && injectsSkills(selection.skillMode)
       ? ownPins(selection.pinnedSkills, enforcedIds)
       : [];
-  const { catalogue } = useSkillCatalogue(transport, pinnedIds.length > 0);
+  const catalogue = useSkillCatalogue(transport, pinnedIds.length > 0);
   const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
   const enforced: LoadedSkill[] = enforcedSkills.map((s) => ({
     packageId: s.packageId,
@@ -53,7 +55,7 @@ function useLoadedSkills(
     packageId: id,
     name: names.get(id) ?? parseScopedName(id)?.name ?? id,
   }));
-  // `isLoading`: the read is off without a space, and would wait forever.
+  // `isLoading`: the read is off without an origin space the chat acts in, and would wait forever.
   return { enforced, pinned, loading: enforcedQuery.isLoading };
 }
 
@@ -87,6 +89,9 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
 /** The imposed skills, locked in one pill: it opens the picker for who can pick, else is a focusable note. */
 function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen?: () => void }) {
   const { t } = useChatHost();
+  const spaceNode = useOriginSpaceNode();
+  // The plain name: the node above carries a tile the accessible name must not.
+  const space = useOriginSpaceLabel();
   const summary = skillsSummary(skills, t);
   const body = (
     <>
@@ -101,7 +106,7 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
           <button
             type="button"
             data-testid="skill-pill-enforced"
-            aria-label={t("skills.enforcedPillAction", { skills: summary })}
+            aria-label={t("skills.enforcedPillAction", { space, skills: summary })}
             onClick={onOpen}
             className={PILL_CLASS}
           >
@@ -112,7 +117,7 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
             role="note"
             tabIndex={0}
             data-testid="skill-pill-enforced"
-            aria-label={t("skills.enforcedPillLabel", { skills: summary })}
+            aria-label={t("skills.enforcedPillLabel", { space, skills: summary })}
             className={PILL_CLASS}
           >
             {body}
@@ -120,7 +125,7 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
         )}
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
-        <p className="font-medium">{t("skills.enforcedTitle")}</p>
+        <p className="font-medium">{sentenceWithNode(t, "skills.enforcedBy", spaceNode)}</p>
         <SkillNameList skills={skills} />
       </TooltipContent>
     </Tooltip>

@@ -224,6 +224,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           c.set("spaceId", resolution.spaceId);
           c.set("credentialSpaceId", resolution.spaceId);
         }
+        if (resolution.spaceIds !== undefined) {
+          c.set("credentialSpaceIds", resolution.spaceIds);
+        }
         if (resolution.endUser) {
           c.set("endUser", resolution.endUser);
         }

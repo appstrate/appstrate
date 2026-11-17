@@ -5,6 +5,7 @@ import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import {
+  chatSessions,
   files,
   integrationConnections,
   integrationConnectionShares,
@@ -471,6 +472,15 @@ async function deleteSpaceInTx(
       { packages: homed.map((row) => row.id) },
     );
   }
+
+  // A conversation originating in this space outlives it: its origin is not an owner. It is
+  // detached here (the FK has no delete action), and its limit, which needs an origin
+  // (`chat_sessions_restricted_needs_space`), falls in the same statement. What it holds in
+  // this space leaves with the space, like any file here; what it holds elsewhere stays with it.
+  await tx
+    .update(chatSessions)
+    .set({ spaceId: null, restricted: false })
+    .where(and(eq(chatSessions.orgId, orgId), eq(chatSessions.spaceId, spaceId)));
 
   const docRows = await tx
     .select({ storageKey: files.storageKey, size: files.size })

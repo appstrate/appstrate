@@ -126,7 +126,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
       version: "draft",

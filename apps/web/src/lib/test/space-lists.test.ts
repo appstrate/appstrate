@@ -8,11 +8,14 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const {
+  actingSpaces,
+  grantedInSomeActingSpace,
+  grantsInRowSpace,
   holdsOverview,
   isListRow,
   isSpaceEnterable,
   listAdmits,
-  overviewListVerdict,
+  spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
   spacesWhere,
@@ -76,7 +79,7 @@ describe("listAdmits", () => {
 });
 
 describe("holdsOverview", () => {
-  it("holds on the lists and their rows, the dashboard, the routes of no space, an undeclared address", () => {
+  it("holds on the lists and their rows, the chat (it serves the organization there), the dashboard, the routes of no space, an undeclared address", () => {
     for (const path of [
       "/",
       "/runs",
@@ -93,6 +96,8 @@ describe("holdsOverview", () => {
       "/skills/:scope/:name/:version",
       "/integrations",
       "/integrations/:scope/:name",
+      "/chat",
+      "/chat/:conversationId",
       "/org-settings",
       "/org-settings/members",
       "/org-settings/billing",
@@ -106,11 +111,9 @@ describe("holdsOverview", () => {
     expect(holdsOverview(undefined)).toBe(true);
   });
 
-  it("is left by any route of one space: the chat, a creation, the workspace settings", () => {
+  it("is left by any route of one space: a creation, the workspace settings", () => {
     for (const path of [
       "/integrations/new/mcp",
-      "/chat",
-      "/chat/:conversationId",
       "/workspace-settings",
       "/workspace-settings/general",
       "/workspace-settings/webhooks",
@@ -146,16 +149,85 @@ describe("isListRow", () => {
   });
 });
 
-describe("overviewListVerdict", () => {
-  it("opens a list where some space admits it, and says nothing of other routes", () => {
-    expect(overviewListVerdict("/files", TWO)).toBe("granted");
-    expect(overviewListVerdict("/schedules", TWO)).toBe("denied");
-    expect(overviewListVerdict("/agents", TWO)).toBe("denied");
-    expect(overviewListVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])])).toBe(
+describe("spanningRouteVerdict", () => {
+  it("opens a list where some space admits it in the overview, and says nothing of other routes", () => {
+    expect(spanningRouteVerdict("/files", TWO, true)).toBe("granted");
+    expect(spanningRouteVerdict("/schedules", TWO, true)).toBe("denied");
+    expect(spanningRouteVerdict("/agents", TWO, true)).toBe("denied");
+    expect(spanningRouteVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])], true)).toBe(
       "granted",
     );
-    expect(overviewListVerdict("/", TWO)).toBeUndefined();
-    expect(overviewListVerdict("/agents/:scope/:name", TWO)).toBeUndefined();
+    expect(spanningRouteVerdict("/", TWO, true)).toBeUndefined();
+    expect(spanningRouteVerdict("/agents/:scope/:name", TWO, true)).toBeUndefined();
+  });
+
+  it("leaves a list to the working space outside the overview", () => {
+    expect(spanningRouteVerdict("/files", TWO, false)).toBeUndefined();
+  });
+
+  it("says nothing before the space listing has answered", () => {
+    expect(spanningRouteVerdict("/chat", undefined, false)).toBeUndefined();
+    expect(spanningRouteVerdict("/files", undefined, true)).toBeUndefined();
+  });
+});
+
+describe("spanningRouteVerdict on the chat", () => {
+  const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read"])];
+
+  it("opens the chat where some space admits it, whatever the working space grants", () => {
+    expect(spanningRouteVerdict("/chat", spaces, true)).toBe("granted");
+    expect(spanningRouteVerdict("/chat/:conversationId", spaces, true)).toBe("granted");
+  });
+
+  it("opens it the same way outside the overview", () => {
+    expect(spanningRouteVerdict("/chat", spaces, false)).toBe("granted");
+    expect(spanningRouteVerdict("/chat/:conversationId", spaces, false)).toBe("granted");
+  });
+
+  it("refuses it where no space admits it, in every mode", () => {
+    for (const overview of [true, false]) {
+      expect(spanningRouteVerdict("/chat", TWO, overview)).toBe("denied");
+      expect(
+        spanningRouteVerdict("/chat", [space("spc_closed", ["chat:read"], "none")], overview),
+      ).toBe("denied");
+    }
+  });
+});
+
+describe("grantedInSomeActingSpace", () => {
+  const acting = ["chat:write", "chat:read", "mcp:read"];
+  const spaces = [
+    // The working space may read files but is no place the chat acts.
+    space("spc_a", ["chat:read", "files:read"]),
+    space("spc_b", [...acting, "skills:read"]),
+  ];
+
+  it("judges a permission in the spaces where the chat may act, not in the others", () => {
+    expect(grantedInSomeActingSpace(spaces, [], "skills:read")).toBe(true);
+    expect(grantedInSomeActingSpace(spaces, [], "files:read")).toBe(false);
+    expect(grantedInSomeActingSpace(spaces, [], "chat:write")).toBe(true);
+  });
+
+  it("counts the org-level grants, and nothing before the listing answers", () => {
+    expect(grantedInSomeActingSpace(spaces, ["files:read"], "files:read")).toBe(true);
+    expect(grantedInSomeActingSpace(undefined, [], "chat:write")).toBe(false);
+  });
+
+  it("holds nothing where the acting set is incomplete", () => {
+    expect(
+      grantedInSomeActingSpace([space("spc_c", ["chat:write", "chat:read"])], [], "chat:read"),
+    ).toBe(false);
+  });
+});
+
+describe("actingSpaces", () => {
+  const spaces = [
+    space("spc_a", ["chat:read", "chat:write", "mcp:read"]),
+    space("spc_viewer", ["chat:read", "mcp:read"]),
+  ];
+
+  it("keeps the spaces holding the whole acting triple", () => {
+    expect(actingSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a"]);
   });
 });
 
@@ -194,5 +266,34 @@ describe("spaceChoice", () => {
     expect(spaceChoice(TWO, "spc_b")).toEqual({ kind: "one", spaceId: "spc_b" });
     expect(spaceChoice(TWO, "spc_other")).toEqual({ kind: "ask" });
     expect(spaceChoice([], "spc_a")).toEqual({ kind: "none" });
+  });
+});
+
+describe("grantsInRowSpace", () => {
+  const spaces = [
+    space("spc_a", ["files:read"]),
+    space("spc_b", ["agents:run"]),
+    space("spc_closed", ["agents:run"], "none"),
+  ];
+  const working = (permission: string) => permission === "files:read";
+  const grants = (rowSpaceId: string | undefined, orgPermissions: string[] = []) =>
+    grantsInRowSpace(rowSpaceId, "spc_a", working, spaces, orgPermissions, "agents:run");
+
+  it("judges a row of another space by that space's grants, not the working space's", () => {
+    expect(grants("spc_b")).toBe(true);
+  });
+
+  it("judges a row of the working space, or of no space, by the working space's gate", () => {
+    expect(grants("spc_a")).toBe(false);
+    expect(grants(undefined)).toBe(false);
+  });
+
+  it("grants nothing in a space held without a role, or not listed", () => {
+    expect(grants("spc_closed")).toBe(false);
+    expect(grants("spc_gone")).toBe(false);
+  });
+
+  it("counts the org-level grants in the row's space", () => {
+    expect(grantsInRowSpace("spc_b", "spc_a", working, spaces, ["x:y"], "x:y")).toBe(true);
   });
 });

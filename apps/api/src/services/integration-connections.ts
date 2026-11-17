@@ -93,7 +93,7 @@ import {
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
-import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { readReconnectTarget } from "./integration-scope-resolver.ts";
 import {
@@ -270,13 +270,13 @@ export async function assertConnectionBelongsToActor(
 ): Promise<ReconnectTarget> {
   const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
   if (!target) throw notFound("Connection not found");
-  assertDelegatedReconnect(principal.kind === "delegated", target.spaceId, input.spaceId);
+  assertDelegatedReconnect(principal.binding !== null, target.spaceId, input.spaceId);
   return target;
 }
 
 /**
- * A delegated credential (API key, third-party token) reconnects only a row scoped to the space it
- * acts in. Asked at the door and again under the write's row lock.
+ * A bound credential (API key, third-party token, a person's credential carrying a space allowlist)
+ * reconnects only a row scoped to the space it acts in. Asked at the door and again under the write's row lock.
  */
 function assertDelegatedReconnect(
   delegated: boolean | undefined,
@@ -285,7 +285,7 @@ function assertDelegatedReconnect(
 ): void {
   if (delegated && rowSpaceId !== spaceId) {
     throw forbidden(
-      "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
+      "A credential bound to spaces cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
     );
   }
 }
@@ -1978,7 +1978,7 @@ export type PersistTarget =
       kind: "insert";
       scope: SpaceScope;
       actor: Actor;
-      /** Written by a delegated credential (API key, third-party token): scoped to the space. */
+      /** Written by a bound credential (API key, third-party token, a space allowlist): scoped to the space. */
       delegated?: boolean;
     }
   | {
@@ -2177,7 +2177,7 @@ export async function widenConnectionsToOrgScope(tx: Tx, where: SQL): Promise<Wi
 
 /** The owner's view of a written row; a delegated write is scoped to its space. */
 function writerView(target: { scope: SpaceScope; delegated?: boolean }): ConnectionView["owner"] {
-  return { boundSpaceId: target.delegated ? target.scope.spaceId : null };
+  return { boundSpaceIds: target.delegated ? [target.scope.spaceId] : null };
 }
 
 /**
@@ -2675,8 +2675,7 @@ export async function listUsableIntegrationsForActor(
     acc.set(row.integrationId, entry);
   }
 
-  // Sorted on purpose: the chat renders this list into its system prompt, one cache block, and an
-  // unordered SELECT may permute it between identical calls, invalidating the cached prefix.
+  // Sorted on purpose: an unordered SELECT may permute it between identical calls.
   const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
   const ids = [...active].sort();
   if (ids.length === 0) return [];
@@ -2805,9 +2804,9 @@ export async function deleteOwnConnection(
       )
       .for("update");
     if (!row) return null;
-    if (principal.kind === "delegated" && principal.spaceId && row.spaceId === null) {
+    if (boundSpacesOf(principal) !== null && row.spaceId === null) {
       throw forbidden(
-        "A credential bound to a space cannot delete a connection serving the whole organization",
+        "A credential bound to spaces cannot delete a connection serving the whole organization",
       );
     }
     await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
@@ -3113,12 +3112,12 @@ export async function loadConnectionShares(
   return shares;
 }
 
-/** One reader's view of a row: the request space, the row's shares, and, for its owner, its bound space. */
+/** One reader's view of a row: the request space, the row's shares, and, for its owner, its bound spaces. */
 interface ConnectionView {
   here: string | null;
   shares: readonly string[];
-  /** Set for the row's owner only; `boundSpaceId` `null`: a credential bound to no space. */
-  owner: { boundSpaceId: string | null } | null;
+  /** Set for the row's owner only; `boundSpaceIds` `null`: a credential bound to no space. */
+  owner: { boundSpaceIds: readonly string[] | null } | null;
 }
 
 /** `principal`'s {@link ConnectionView} of `row`. */
@@ -3131,7 +3130,7 @@ export function connectionViewOf(
   return {
     here,
     shares,
-    owner: actorOwns(principal.actor, row) ? { boundSpaceId: boundSpaceOf(principal) } : null,
+    owner: actorOwns(principal.actor, row) ? { boundSpaceIds: boundSpacesOf(principal) } : null,
   };
 }
 
@@ -3143,9 +3142,9 @@ export function connectionReach(
   >,
   view: ConnectionView,
 ): ConnectionReach {
-  const bound = view.owner?.boundSpaceId ?? null;
+  const bound = view.owner?.boundSpaceIds ?? null;
   const seen = (ids: readonly (string | null)[]) =>
-    ids.filter((id): id is string => id !== null && (bound === null || id === bound));
+    ids.filter((id): id is string => id !== null && (bound === null || bound.includes(id)));
   return {
     scope: row.spaceId === null ? "org" : "space",
     spaceId: row.spaceId,

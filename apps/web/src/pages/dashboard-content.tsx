@@ -13,7 +13,6 @@ import { cn } from "@appstrate/ui/cn";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
-import { SpaceChoiceDropdown } from "../components/space-choice-menu";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -25,7 +24,8 @@ import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { spacesWhere } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
-import { useSpaceAction } from "../hooks/use-space-action";
+import { useChatCan } from "../modules/chat/use-chat-runtime";
+import { useCanReach } from "../hooks/use-can-reach";
 import { useSpaces } from "../hooks/use-spaces";
 import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
@@ -69,8 +69,8 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 /**
  * The greeting: drawn at once, its running count a placeholder until the runs answer. The
- * assistant names no space; its chat door opens in one, which « Tous les espaces » chooses in the
- * door's own menu.
+ * assistant names no space: its chat door opens as it is (in « Tous les espaces » a conversation
+ * acting across spaces), offered where some space opens the chat.
  */
 export function DashboardHeader({
   firstName,
@@ -80,7 +80,10 @@ export function DashboardHeader({
   runningCount?: number;
 }) {
   const { t, i18n } = useTranslation("agents");
-  const chat = useSpaceAction({ route: "/chat" });
+  const canReach = useCanReach();
+  const chatReachable = canReach("/chat");
+  // The chat acts across the caller's spaces: writing is judged over them, as the product tabs do.
+  const canChat = useChatCan()("chat:write");
   const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
   const [assistOpen, setAssistOpen] = useState(false);
@@ -90,16 +93,10 @@ export function DashboardHeader({
     month: "long",
   }).format(new Date());
 
-  const toChat = () =>
-    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
   const openChat = () => {
     setAssistOpen(false);
-    chat.run(toChat);
+    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
   };
-  const chatIn = chat.choose(t("common:spaceChoice.open"), () => {
-    setAssistOpen(false);
-    toChat();
-  });
 
   const copyCodingAgentSetup = async () => {
     if (await copy(CODING_AGENT_SETUP_PROMPT))
@@ -147,16 +144,14 @@ export function DashboardHeader({
         >
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="flex flex-col gap-2">
-            {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
-            {chat.offered && (
-              <SpaceChoiceDropdown choice={chatIn}>
-                <ChoiceCard
-                  icon={MessageSquareText}
-                  title={t("dashboard.askAi.chat")}
-                  description={t("dashboard.askAi.chatDescription")}
-                  onClick={chatIn ? undefined : openChat}
-                />
-              </SpaceChoiceDropdown>
+            {/* Offered where `/chat` opens (the module loaded AND the caller's grants) and the caller may write in it. */}
+            {chatReachable && canChat && (
+              <ChoiceCard
+                icon={MessageSquareText}
+                title={t("dashboard.askAi.chat")}
+                description={t("dashboard.askAi.chatDescription")}
+                onClick={openChat}
+              />
             )}
             <ChoiceCard
               icon={Bot}

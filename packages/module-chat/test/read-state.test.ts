@@ -61,7 +61,7 @@ describe("chat session read-state", () => {
   });
 
   async function createSession(): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -70,16 +70,18 @@ describe("chat session read-state", () => {
     return ((await res.json()) as { id: string }).id;
   }
 
-  async function getSession(id: string, headers = authHeaders(ctx)) {
-    const res = await app.request(`/api/chat/sessions/${id}`, { headers });
+  async function getSession(id: string, caller = ctx) {
+    const res = await app.request(`/api/orgs/${caller.orgId}/chat/sessions/${id}`, {
+      headers: authHeaders(caller),
+    });
     expect(res.status).toBe(200);
     return (await res.json()) as { unread: boolean; updatedAt: string };
   }
 
-  async function markRead(id: string, headers = authHeaders(ctx)): Promise<number> {
-    const res = await app.request(`/api/chat/sessions/${id}/read`, {
+  async function markRead(id: string, caller = ctx): Promise<number> {
+    const res = await app.request(`/api/orgs/${caller.orgId}/chat/sessions/${id}/read`, {
       method: "PUT",
-      headers,
+      headers: authHeaders(caller),
     });
     return res.status;
   }
@@ -93,7 +95,9 @@ describe("chat session read-state", () => {
 
     expect((await getSession(id)).unread).toBe(true);
 
-    const list = await app.request("/api/chat/sessions", { headers: authHeaders(ctx) });
+    const list = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
+      headers: authHeaders(ctx),
+    });
     const body = (await list.json()) as { data: { id: string; unread: boolean }[] };
     expect(body.data.find((s) => s.id === id)?.unread).toBe(true);
   });
@@ -123,7 +127,7 @@ describe("chat session read-state", () => {
     await persistUserMessage(id, uiMessage("u2", "user", "thanks"));
     expect((await getSession(id)).unread).toBe(false);
 
-    const rename = await app.request(`/api/chat/sessions/${id}`, {
+    const rename = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${id}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "renamed" }),
@@ -168,7 +172,7 @@ describe("chat session read-state", () => {
   it("cross-user and cross-org mark-read are 404", async () => {
     const id = await createSession();
     const other = await createTestContext({ orgSlug: "otherorg" });
-    expect(await markRead(id, authHeaders(other))).toBe(404);
+    expect(await markRead(id, other)).toBe(404);
   });
 
   /**
@@ -183,7 +187,9 @@ describe("chat session read-state", () => {
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "Quarante-deux."), "u1");
     await persistUserMessage(id, uiMessage("u2", "user", "Et le mois dernier ?"));
 
-    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${id}`, {
+      headers: authHeaders(ctx),
+    });
     expect(res.status).toBe(200);
     expect((await res.json()) as { title: string | null }).toMatchObject({
       title: "Combien de runs ce mois-ci ?",
@@ -200,14 +206,18 @@ describe("chat session read-state", () => {
     } as unknown as UIMessage);
     await persistUserMessage(id, uiMessage("u2", "user", "Résume ce fichier"));
 
-    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${id}`, {
+      headers: authHeaders(ctx),
+    });
     expect((await res.json()) as { title: string | null }).toMatchObject({
       title: "Résume ce fichier",
     });
   });
 
   async function titleOf(id: string): Promise<string | null> {
-    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${id}`, {
+      headers: authHeaders(ctx),
+    });
     expect(res.status).toBe(200);
     return ((await res.json()) as { title: string | null }).title;
   }
@@ -236,7 +246,7 @@ describe("chat session read-state", () => {
     await persistUserMessage(id, uiMessage("u3", "user", "Et maintenant traduis-le"));
     expect(await titleOf(id)).toBe("Résume ce fichier");
 
-    const rename = await app.request(`/api/chat/sessions/${id}`, {
+    const rename = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${id}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "renommée" }),
@@ -322,7 +332,7 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
   }
 
   async function createSessionAs(ctx: TestContext): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -336,7 +346,7 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
     // whose xmin never moves, and would be proving nothing.
     const id = await createSessionAs(owner);
     const before = await xminOf(id);
-    await ensureSession(id, owner.orgId, owner.user.id, owner.defaultSpaceId);
+    await ensureSession(id, owner.orgId, owner.user.id, [owner.defaultSpaceId]);
     expect(await xminOf(id)).not.toBe(before);
   });
 
@@ -345,7 +355,7 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
     const before = await xminOf(id);
 
     await expect(
-      ensureSession(id, stranger.orgId, stranger.user.id, stranger.defaultSpaceId),
+      ensureSession(id, stranger.orgId, stranger.user.id, [stranger.defaultSpaceId]),
     ).rejects.toThrow(/not found/i);
 
     expect(await xminOf(id)).toBe(before);

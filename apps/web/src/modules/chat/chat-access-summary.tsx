@@ -5,7 +5,9 @@
  * act, as a section of the conversation's Info tab. Lives in the SHELL
  * (everything it reads is host state). A role preview (`X-View-As`) needs no
  * logic here: `/api/orgs` and `/api/spaces` already answer AS the persona; the
- * summary only marks it.
+ * summary only marks it. The verdicts judge the spaces the conversation acts in, not the working
+ * space the shell happens to stand in: every space the chat acts in, or the origin space alone for
+ * a limited conversation, as the turn does. The role line names the working one.
  */
 
 import { useTranslation } from "react-i18next";
@@ -14,28 +16,56 @@ import { usePackageAuthoringEnabled } from "@appstrate/module-chat/package-autho
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { roleI18nKey, useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
+import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { spaceRoleLabel } from "../../hooks/use-roles";
+import { useOrg } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
+import type { SpaceGrant } from "../../lib/package-permissions";
+import { actingSpaces, grantedInSomeActingSpace } from "../../lib/space-lists";
 import { useViewAs } from "../../stores/view-as-store";
 import { resolveChatCapabilities, type ResolvedChatCapability } from "./chat-access";
 
-export function ChatAccessSummary() {
+/** The conversation's scope, as its stored row states it. */
+export interface ConversationScope {
+  spaceId: string | null;
+  restricted: boolean;
+}
+
+/**
+ * `conversation`: `null` for none stored yet (it acts in every space the chat acts in),
+ * `undefined` while it loads.
+ */
+export function ChatAccessSummary({
+  conversation,
+}: {
+  conversation: ConversationScope | null | undefined;
+}) {
   const { t } = useTranslation(["chat", "settings"]);
-  const { can, ready, orgRole } = usePermissions();
-  const spaceGrant = useCurrentSpaceGrant();
+  const { ready, orgRole } = usePermissions();
+  const orgPermissions = useOrg().currentOrg?.permissions;
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
   const authoring = usePackageAuthoringEnabled();
 
-  // `can` answers `false` while a set is in flight, which looks like a denial: hold the box.
-  if (!ready || orgRole === null) return <Skeleton className="h-24 w-full rounded-md" />;
+  // A verdict on a set still in flight reads as a denial: hold the box.
+  if (!ready || orgRole === null || conversation === undefined) {
+    return <Skeleton className="h-24 w-full rounded-md" />;
+  }
 
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
   const roleLabel = spaceRole ?? orgRoleLabel;
-  const capabilities = resolveChatCapabilities({ can, spaceGrant, authoring });
+  const acting = actingSpaces(spaces, orgPermissions);
+  const capabilities = resolveChatCapabilities({
+    ...(conversation?.restricted
+      ? limitedGrants(acting, conversation.spaceId)
+      : {
+          can: (permission) => grantedInSomeActingSpace(spaces, orgPermissions, permission),
+          spaceGrants: acting,
+        }),
+    authoring,
+  });
   const RoleIcon = persona ? EyeIcon : ShieldIcon;
 
   return (
@@ -55,6 +85,19 @@ export function ChatAccessSummary() {
       ) : null}
     </section>
   );
+}
+
+/**
+ * A limited conversation acts in its origin space alone, and in none once the caller cannot act
+ * there. Of the org-level half the turn keeps only a few reads (`limitedConversationPermissions`,
+ * module-chat), none of which a row reads: the origin space's own grants decide every row.
+ */
+function limitedGrants(acting: readonly (SpaceGrant & { id: string })[], originId: string | null) {
+  const origin = acting.find((space) => space.id === originId);
+  return {
+    can: (permission: string) => !!origin?.permissions.includes(permission),
+    spaceGrants: origin ? [origin] : [],
+  };
 }
 
 /** One item per capability with the verdict INSIDE it; the icon is `aria-hidden`, the spoken verdict follows the label. */

@@ -43,7 +43,8 @@ function handleConnectionUpdate(qc: QueryClient) {
 
 /**
  * Which queries a `chat_session_update` for `sessionId` must refetch: the session list always;
- * the session detail and file list only when keyed on this session. `sessionId` undefined
+ * the session detail and the organization's file list only when keyed on this session (a
+ * conversation's files span its spaces, so they are read on the organization route). `sessionId` undefined
  * (unparsable frame, reconnect) → all: a missed signal must never leave a stale sidebar.
  */
 export function matchesChatSessionQuery(
@@ -53,10 +54,10 @@ export function matchesChatSessionQuery(
   const [method, path, init] = queryKey;
   if (method === CHAT_SESSIONS_QUERY_KEY[0] && path === CHAT_SESSIONS_QUERY_KEY[1]) return true;
   if (method !== "get") return false;
-  if (path === "/api/chat/sessions/{id}") {
+  if (path === "/api/orgs/{orgId}/chat/sessions/{id}") {
     return sessionId === undefined || readPathId(init) === sessionId;
   }
-  if (path === "/api/files") {
+  if (path === "/api/orgs/{orgId}/files") {
     return sessionId === undefined || readContextChatSessionId(init) === sessionId;
   }
   return false;

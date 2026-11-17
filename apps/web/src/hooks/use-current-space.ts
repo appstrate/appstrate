@@ -4,8 +4,8 @@ import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 import {
-  ENTER_SPACE_PARAM,
   linkedSpaceEnterable,
   linkedSpacePath,
   linkedSpaceStep,
@@ -54,7 +54,7 @@ export function useSpaceLink(): (
 
 // Flat, space-less query-key prefixes dropped on space switch. A key that embeds
 // the space (typed-client domains via `useOrgScope`, chat's
-// `["chat", "sessions", spaceId]`) refetches by itself and must NOT be listed;
+// `["chat", "sessions", spaceFilter]`) refetches by itself and must NOT be listed;
 // a list across spaces (`spansSpaces`) does not depend on the current one and is kept.
 const SPACE_SCOPED_KEYS = new Set<string>(
   [

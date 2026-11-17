@@ -34,7 +34,8 @@ import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
-import { useChatHost } from "./runtime-context.ts";
+import { useChatHost, type ChatHost } from "./runtime-context.ts";
+import { CallSpace } from "./call-space.tsx";
 import {
   autoPresentFile,
   buildRunPageHref,
@@ -57,12 +58,15 @@ import type { ToolPhase } from "./tool-result.ts";
  * in-app preview; without one (embedded mounts) it falls back to the
  * authenticated download.
  */
-function FileChips({ files }: { files: ChatRunFile[] }) {
+function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string }) {
   if (files.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
       {files.map((file) => (
-        <FileAttachment key={file.id} file={{ id: file.id, name: file.name, mime: file.mime }} />
+        <FileAttachment
+          key={file.id}
+          file={{ id: file.id, name: file.name, mime: file.mime, spaceId }}
+        />
       ))}
     </div>
   );
@@ -100,6 +104,7 @@ export function ChatRunProgressCard({
   agentLabel,
   runHref,
   initialPackageId,
+  spaceId,
   initialFiles,
   phase,
   errorText,
@@ -111,6 +116,8 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
+  /** The space the call acted in (stamped on every call that acts in a space): the run is read and opened there. */
+  spaceId?: string;
   /**
    * Files from the persisted tool result — survive reload; merged with the live
    * and authoritative lists. MUST be referentially stable across renders: a
@@ -139,7 +146,7 @@ export function ChatRunProgressCard({
     producedFilesTruncated,
     sweepDone,
     runDenied,
-  } = useRunLogStream(runId, initialStatus, initialPackageId);
+  } = useRunLogStream(runId, initialStatus, initialPackageId, spaceId);
 
   // Files: the persisted tool-result list (reload-safe), the frames that arrive
   // live over the log stream (`file.published` — chips appear the moment an
@@ -171,7 +178,7 @@ export function ChatRunProgressCard({
   // every chunk, and the filter walked the whole log array each time.
   const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
   const current = useLogTicker(visible);
-  const { openFile, t } = useChatHost();
+  const { openFile, t, linkInSpace } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through
   // the exact same host opener as a direct file click.
@@ -196,8 +203,8 @@ export function ChatRunProgressCard({
     if (!autoPresentEligible || !openFile || !runId || !autoPresented) return;
     if (hasAutoPresented.current) return;
     hasAutoPresented.current = true;
-    openFile({ id: autoPresented.id, name: autoPresented.name });
-  }, [autoPresentEligible, openFile, autoPresented, runId]);
+    openFile({ id: autoPresented.id, name: autoPresented.name, ...(spaceId && { spaceId }) });
+  }, [autoPresentEligible, openFile, autoPresented, runId, spaceId]);
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
   // replaces it.
@@ -222,7 +229,7 @@ export function ChatRunProgressCard({
         : current;
   const effectiveRunHref = runDenied
     ? undefined
-    : (runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined));
+    : (runHref ?? (runId ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined));
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints
@@ -248,6 +255,7 @@ export function ChatRunProgressCard({
               {agentLabel ?? t("run.fallbackLabel")}
             </span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
+              <CallSpace spaceId={spaceId} />
               {elapsedMs !== undefined ? (
                 <span className="text-muted-foreground text-xs tabular-nums">
                   {formatDuration(elapsedMs)}
@@ -290,7 +298,7 @@ export function ChatRunProgressCard({
           page of at most 100 rows and this card does not page; a run that
           produced more says so rather than showing a silently short list. */}
       <div className="relative z-10">
-        <FileChips files={files} />
+        <FileChips files={files} spaceId={spaceId} />
         {producedFilesTruncated ? (
           <p className="text-muted-foreground px-3 pb-2 text-xs">{t("run.filesTruncated")}</p>
         ) : null}
@@ -303,4 +311,18 @@ export function ChatRunProgressCard({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The run's page in the space its call named, through the host's `linkInSpace` (which names the
+ * space only when it is not the working one); the server-side reconcile names it itself.
+ */
+function runPageHref(
+  linkInSpace: ChatHost["linkInSpace"],
+  packageId: string | undefined,
+  runId: string,
+  spaceId: string | undefined,
+): string | undefined {
+  const path = buildRunPageHref(packageId, runId);
+  return path && linkInSpace(path, spaceId);
 }

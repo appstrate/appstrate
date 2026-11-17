@@ -31,10 +31,10 @@ import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import { callerOrgRole, callerPersonalOwnerId } from "./view-as.ts";
+import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { callerReachableSpaces, type ReachableSpace } from "./reachable-spaces.ts";
+import { callerReachableSpaces, unnameableSpace, type ReachableSpace } from "./reachable-spaces.ts";
 import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -612,6 +612,9 @@ export async function assertPlacementRemovalAccess(
   pkg: PackageAccessRow;
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
 }> {
+  // The target is a space the credential may name, whichever side's authority acts: home
+  // authority reaches the package, not every space it could be placed in.
+  if (!credentialAdmitsSpace(c, targetSpaceId)) throw unnameableSpace(c, targetSpaceId);
   const { pkg, accessible } = await loadGovernedPackage(c, packageId, "share");
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's skill pills: what the conversation loads (the space's imposed skills in
+ * The composer's skill pills: what the conversation loads (the origin space's imposed skills in
  * ONE locked pill, the user's pins in ONE other), count or single name, the picker's chip while none
  * is, and a skeleton while the enforced read is on its way only where something is sure to be drawn.
  * SSR only; the tooltip bodies are closed, so the texts are asserted through the accessible names.
@@ -13,13 +13,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { SkillChips } from "../src/ui/skill-chips.tsx";
+import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider, type ChatTransport } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
-import { testHost } from "./test-host.ts";
+import { conversationScope, testHost } from "./test-host.ts";
 import type { ChatSkillSelection, SkillHint } from "../src/skills.ts";
 
 const host = testHost({
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
+  actingSpaceIds: ["spc_a"],
+  useSpaceLabelOf: () => (id) => (id === "spc_a" ? "Studio" : undefined),
 });
 
 const scoped = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
@@ -32,6 +35,7 @@ interface Options {
   enforced?: SkillHint[] | null;
   selection?: ChatSkillSelection;
   transport?: ChatTransport | null;
+  originSpaceId?: string | null;
   picker?: boolean;
   canReadSkills?: boolean;
 }
@@ -40,22 +44,25 @@ function render({
   enforced = [],
   selection = manual([]),
   transport = scoped,
+  originSpaceId = "spc_a",
   picker = true,
   canReadSkills = true,
 }: Options = {}): string {
   const qc = new QueryClient();
   // `null`: nothing seeded, the read is on its way.
-  if (enforced) qc.setQueryData(["chat", "enforced-skills", "spc_a"], enforced);
+  if (enforced) qc.setQueryData(["chat", "enforced-skills", originSpaceId], enforced);
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={{ ...host, can: () => canReadSkills }}>
-        <TooltipProvider>
-          <SkillChips
-            transport={transport === null ? undefined : transport}
-            selection={selection}
-            onOpenPicker={picker ? () => {} : undefined}
-          />
-        </TooltipProvider>
+        <ConversationScopeProvider value={conversationScope({ originSpaceId, restricted: false })}>
+          <TooltipProvider>
+            <SkillChips
+              transport={transport === null ? undefined : transport}
+              selection={selection}
+              onOpenPicker={picker ? () => {} : undefined}
+            />
+          </TooltipProvider>
+        </ConversationScopeProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
@@ -66,11 +73,11 @@ const tone: SkillHint = { packageId: "@acme/tone", display_name: "Tone", version
 const policy: SkillHint = { packageId: "@acme/policy", display_name: "Policy", version: null };
 
 describe("SkillChips", () => {
-  it("draws ONE locked pill for a single imposed skill, named, with the policy and action in its label", () => {
+  it("draws ONE locked pill for a single imposed skill, named, with the space and action in its label", () => {
     const html = render({ enforced: [tone] });
     expect(html.match(/skill-pill-enforced/g)).toHaveLength(1);
     expect(html).toContain(
-      'aria-label="skills.enforcedPillAction {&quot;skills&quot;:&quot;Tone&quot;}"',
+      'aria-label="skills.enforcedPillAction {&quot;space&quot;:&quot;Studio&quot;,&quot;skills&quot;:&quot;Tone&quot;}"',
     );
     expect(html).not.toContain("skills.enforcedCount");
   });
@@ -95,6 +102,7 @@ describe("SkillChips", () => {
     expect(html).toContain('role="note"');
     expect(html).toContain('tabindex="0"');
     expect(html).toContain("skills.enforcedPillLabel");
+    expect(html).toContain("Studio");
     expect(html).not.toContain("skills.enforcedPillAction");
     expect(html).not.toContain("skill-pill-pinned");
     expect(html).not.toContain("skills-picker-trigger");
@@ -149,13 +157,15 @@ describe("SkillChips", () => {
     expect(render({ selection: { skillMode: "auto", pinnedSkills: [] } })).toBe("");
   });
 
-  it("shows no imposed skill without a space: no read, no pill, no placeholder", () => {
-    const html = render({
-      enforced: null,
-      transport: transportOf(() => ({ "X-Org-Id": "org_1" })),
-    });
+  it("shows no imposed skill in « Tous les espaces »: no read, no pill, no placeholder", () => {
+    const html = render({ enforced: null, originSpaceId: null });
     expect(html).toContain('data-testid="skills-picker-trigger"');
     expect(html).not.toContain("animate-pulse");
+  });
+
+  it("shows none when the author can no longer act in the origin space", () => {
+    const html = render({ enforced: [tone], originSpaceId: "spc_gone" });
+    expect(html).not.toContain("skill-pill-enforced");
   });
 
   it("holds the place with a skeleton while the imposed skills load, off the default selection", () => {

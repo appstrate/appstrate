@@ -16,8 +16,16 @@ import type { ModelCost } from "@appstrate/core/module";
 import { createPiOAuthModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
+import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
-const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_metering/s/spc_1";
+/** The turn's one space; nothing here records a touched space. */
+const ORGANIZATION: TurnSpaces = {
+  spaces: [{ id: "spc_1", name: "One", role: "admin" }],
+  touch: async () => {},
+  spaceOfUri: async () => undefined,
+};
+
+const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_metering";
 
 /** Haiku-5.5-like card: every rate ×5 above 100k prompt tokens. */
 const COST: ModelCost = {
@@ -120,7 +128,7 @@ describe("inline-metered chat turn", () => {
       ] as UIMessage[],
       system: "You are a helpful assistant.",
       generation: {},
-      platformMcp: { url: MCP_URL, headers: {}, spaceId: "spc_1", fetch: mcpFetch },
+      platformMcp: { url: MCP_URL, headers: {}, organization: ORGANIZATION, fetch: mcpFetch },
       abortSignal: new AbortController().signal,
       onError: (error) => String(error),
       recordUsage: (record) => recorded.push(record),

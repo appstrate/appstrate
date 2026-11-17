@@ -104,7 +104,7 @@ import {
   resolvePackageHome,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
-import { callerPersonalOwnerId } from "../lib/view-as.ts";
+import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../lib/view-as.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
@@ -2093,11 +2093,18 @@ export function createPackagesRouter() {
     let spaceId: string;
     let recipientUserId: string | null = null;
     if (target.kind === "user") {
+      // A confined credential (a pin, an allowlist) reaches the spaces it names, never a person's
+      // personal space: refused before any lookup, so the answer is the same whether the person
+      // is a member of the organization or not.
+      if (credentialConfinedToSpaces(c)) {
+        throw forbidden("A credential confined to spaces cannot share with a person");
+      }
       // Naming a person reads the org directory (a `guest` lacks this).
       await makePermissionGuard("members:read")(c, async () => {});
       const membership = await getOrgMember(orgId, target.userId);
       if (!membership) throw notFound(`User '${target.userId}' not found in this organization`);
-      // A refused share provisions nothing: ask `package_has_no_version` before creating the space.
+      // A refused share provisions nothing: `package_has_no_version` is asked before the
+      // personal space is created.
       let space = await findPersonalSpace(orgId, target.userId);
       if (!space) {
         await assertHasPublishedVersion(packageId);
@@ -2206,6 +2213,10 @@ export function createPackagesRouter() {
       );
       if (own) recipientUserId = own.ownerUserId;
     } else {
+      // Refused before any lookup, as on the POST: the answer must not depend on the person.
+      if (credentialConfinedToSpaces(c)) {
+        throw forbidden("A credential confined to spaces cannot address a person");
+      }
       // Home authority is asked before the directory read: no membership leak.
       if (target !== ownerId) await assertPackageShareAccess(c, packageId);
       const membership = await getOrgMember(orgId, target);

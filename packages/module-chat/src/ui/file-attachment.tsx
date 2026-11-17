@@ -18,7 +18,7 @@ import { DownloadIcon, EyeIcon, FileIcon } from "lucide-react";
 import { isImageMime } from "@appstrate/core/mime";
 import { fileActivation } from "./file-activation.ts";
 import { UNNAMED_FILE } from "./run-events.ts";
-import { useChatHost } from "./runtime-context.ts";
+import { useCanIn, useChatHost } from "./runtime-context.ts";
 import type { OpenFile } from "./runtime-context.ts";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
@@ -98,12 +98,14 @@ function AttachmentChip({
 function FileImageThumbnail({
   id,
   name,
+  spaceId,
   label,
   opener,
   onActivate,
 }: {
   id: string;
   name: string;
+  spaceId?: string;
   label: string;
   opener: OpenFile | null;
   onActivate: () => void;
@@ -111,7 +113,7 @@ function FileImageThumbnail({
   // Destructured out of the host bag, then called at this component's top level
   // — a stable, unconditional hook call position.
   const { useFileImageSrc } = useChatHost();
-  const src = useFileImageSrc(id);
+  const src = useFileImageSrc(id, spaceId);
   // In flight: the thumbnail's box, so the message does not reflow when it lands.
   if (src === undefined) return <Skeleton className="size-16 shrink-0 rounded-lg" />;
   if (!src)
@@ -140,11 +142,13 @@ function FileImageThumbnail({
 export function FileAttachment({
   file,
 }: {
-  file: { id: string; name: string; mime?: string | null };
+  /** `spaceId`: the file's space when known (the space of the call that produced it). */
+  file: { id: string; name: string; mime?: string | null; spaceId?: string };
 }) {
-  const { openFile: opener, downloadFile, t, can } = useChatHost();
-  // Preview, download and thumbnail all read the file's content (`files:read`).
-  if (!can("files:read"))
+  const { openFile: opener, downloadFile, t } = useChatHost();
+  const canIn = useCanIn();
+  // Preview, download and thumbnail all read the file's content (`files:read`), in its space.
+  if (!canIn(file.spaceId, "files:read"))
     return <InertAttachmentChip name={file.name} title={t("file.noAccess")} />;
   const { onActivate, label } = fileActivation(file, opener, downloadFile, t);
   if (isImageMime(file.mime)) {
@@ -152,6 +156,7 @@ export function FileAttachment({
       <FileImageThumbnail
         id={file.id}
         name={file.name}
+        spaceId={file.spaceId}
         label={label}
         opener={opener}
         onActivate={onActivate}

@@ -21,6 +21,11 @@ type RouteAccess = {
   readonly feature?: string;
   /** Absent in a personal space: the server refuses its writes there (409 `personal_space_*`). */
   readonly teamSpaceOnly?: true;
+  /**
+   * In « Tous les espaces » the route serves the organization, not one space (the chat: sessions
+   * acting across spaces): rendering it keeps the mode, as a list spanning spaces does.
+   */
+  readonly spansSpaces?: true;
 } & (
   | {
       readonly anyOf: readonly Permission[];
@@ -90,9 +95,15 @@ export const ROUTE_ACCESS = {
     operations: ["listModelProviderCredentials"],
   },
 
-  "/chat": { feature: "chat", anyOf: ["chat:read"], operations: ["listChatSessions"] },
+  "/chat": {
+    feature: "chat",
+    spansSpaces: true,
+    anyOf: ["chat:read"],
+    operations: ["listChatSessions"],
+  },
   "/chat/:conversationId": {
     feature: "chat",
+    spansSpaces: true,
     anyOf: ["chat:read"],
     operations: ["getChatSession"],
   },

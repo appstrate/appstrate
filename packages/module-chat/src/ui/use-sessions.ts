@@ -11,20 +11,21 @@
  */
 
 import { useMemo } from "react";
-import { infiniteQueryOptions, useInfiniteQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import { useChatTransport, type ChatTransport } from "./runtime-context.ts";
 import {
   fetchSessionsPage,
   flattenSessions,
+  sessionQuery,
   sessionsQueryKey,
   sessionsSearchQueryKey,
-  spaceIdFromHeaders,
   type SessionsCache,
+  type SessionSummary,
 } from "./sessions.ts";
 
 // Re-exported for the app shell: the SSE dispatcher invalidates this PREFIX on
-// `chat_session_update` frames (the live keys carry the space id after it), and
+// `chat_session_update` frames (the live keys carry the space filter after it), and
 // this module's `"./unread"` entry is the shell's single import surface into
 // the chat UI.
 export { SESSIONS_QUERY_KEY } from "./sessions.ts";
@@ -58,16 +59,15 @@ export function sessionsRefetchInterval(query: {
 
 /** The session-list query, shared by the list and the nav badge (one key, one request). */
 function sessionsQuery(transport: ChatTransport | null | undefined, enabled: boolean, q = "") {
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const spaceId = transport?.spaceId ?? null;
   return infiniteQueryOptions({
     queryKey: q ? sessionsSearchQueryKey(spaceId, q) : sessionsQueryKey(spaceId),
-    queryFn: ({ pageParam }) => fetchSessionsPage(transport!.request, pageParam, q || undefined),
+    queryFn: ({ pageParam }) => fetchSessionsPage(transport!, pageParam, q || undefined),
     ...keysetPaging,
     select: flattenSessions,
-    // The route requires `X-Space-Id`. Firing before the host's space store
-    // resolves (first login, org switch) would be a guaranteed 400; the key
-    // carries the space, so it refetches the moment one arrives.
-    enabled: enabled && !!spaceId && !!transport,
+    // The host hands over a transport once it knows the filter; the key carries it, so a filter
+    // change reads its own list.
+    enabled: enabled && !!transport,
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
   });
@@ -82,6 +82,30 @@ export function useSessions(transport?: ChatTransport, q = "") {
   // ChatPage owns the provider below its render, so its own observer receives
   // the host transport directly. Descendants read the same one from context.
   return useInfiniteQuery(sessionsQuery(transport ?? contextTransport, true, q));
+}
+
+/**
+ * One conversation by id, whatever the list's filter (`null`: none): the same cache entry as the
+ * chat page's history, so the shell's title, spaces and info read what the thread holds.
+ */
+export function useSessionDetail(id: string | null) {
+  return useQuery(sessionQuery(useChatTransport(), id));
+}
+
+/**
+ * The server's view of the open conversation `id`: its row in the filtered list, else the
+ * conversation itself, which opens in place whatever the filter. One not yet created
+ * (`persisted` false) has only the list's local row.
+ */
+export function useActiveSession(
+  transport: ChatTransport | undefined,
+  id: string,
+  persisted: boolean,
+): SessionSummary | undefined {
+  const listed = useSessions(transport).data?.find((s) => s.id === id);
+  // The detail is only fetched when the list does not hold the row (filtered out, not loaded).
+  const detail = useQuery(sessionQuery(transport, persisted && !listed ? id : null));
+  return listed ?? detail.data ?? undefined;
 }
 
 /**

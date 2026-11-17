@@ -41,7 +41,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { files, fileLinks, organizations, chatSessions, runs } from "@appstrate/db/schema";
+import { files, fileLinks, organizations, chatSessions, runs, uploads } from "@appstrate/db/schema";
 import type { FilePurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -1311,34 +1311,76 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
  *    and echo it back; a foreign/missing file is a 404.
  *
  * Chat sessions are per dashboard user, so the actor is always a `user`.
- * The request carries the caller's permission set, so the ACL here answers the
- * same set the file gallery does: with `runs:read-all` a colleague's run output
- * attaches, without it only the session owner's own runs. The picker and the
- * attach must agree, or a file the user just chose from the gallery 404s.
+ * The attachment resolves in the space its file or upload belongs to (one of
+ * `request.spaces`), under the caller's permission set there, so the ACL here
+ * answers the same set the file gallery does: with `runs:read-all` a
+ * colleague's run output attaches, without it only the session owner's own
+ * runs. The picker and the attach must agree, or a file the user just chose
+ * from the gallery 404s.
  */
 export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
 ): Promise<ResolvedChatAttachment> {
-  const scope: SpaceScope = { orgId: request.orgId, spaceId: request.spaceId };
   const actor: Actor = { type: "user", id: request.userId };
-
+  let source: { fileId: string } | { uploadId: string };
   if (isFileUri(request.uri)) {
     const fileId = parseFileUri(request.uri);
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
-    const resolved = await getFileForActor(scope, actor, fileId, request.permissions);
-    if (!resolved) throw notFound(`File '${fileId}' not found`);
-    const { row } = resolved;
-    return { uri: fileUri(row.id), name: row.name, mime: row.mime, size: row.size };
+    source = { fileId };
+  } else {
+    const uploadId = parseUploadUri(request.uri);
+    if (!uploadId) {
+      throw invalidRequest(`Attachment URI must be an 'upload://' or 'appfile://' URI`);
+    }
+    source = { uploadId };
   }
 
-  const uploadId = parseUploadUri(request.uri);
-  if (!uploadId) {
-    throw invalidRequest(`Attachment URI must be an 'upload://' or 'appfile://' URI`);
+  // The attachment resolves in the space it belongs to, which must be one the
+  // caller may attach in: a file or upload of any other space is as absent as a
+  // missing one.
+  const [owner] =
+    "fileId" in source
+      ? await db
+          .select({ spaceId: files.spaceId })
+          .from(files)
+          .where(and(eq(files.id, source.fileId), eq(files.orgId, request.orgId)))
+          .limit(1)
+      : await db
+          .select({ spaceId: uploads.spaceId })
+          .from(uploads)
+          .where(and(eq(uploads.id, source.uploadId), eq(uploads.orgId, request.orgId)))
+          .limit(1);
+  const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
+  if (!space) {
+    throw notFound(
+      "fileId" in source
+        ? `File '${source.fileId}' not found`
+        : `Upload '${source.uploadId}' not found`,
+    );
   }
-  const row = await createFileFromUpload(scope, actor, uploadId, {
-    chatSessionId: request.chatSessionId,
-  });
-  return { uri: fileUri(row.id), name: row.name, mime: row.mime, size: row.size };
+  const scope: SpaceScope = { orgId: request.orgId, spaceId: space.id };
+  // `beforeResolve` records the space as touched: only once the attachment is readable (a
+  // refused file touches nothing), and before an upload is materialized (a caller the chat
+  // refuses in this space leaves no file behind).
+  let row: Awaited<ReturnType<typeof createFileFromUpload>>;
+  if ("fileId" in source) {
+    const resolved = await getFileForActor(scope, actor, source.fileId, space.permissions);
+    if (!resolved) throw notFound(`File '${source.fileId}' not found`);
+    await request.beforeResolve(space.id);
+    row = resolved.row;
+  } else {
+    await request.beforeResolve(space.id);
+    row = await createFileFromUpload(scope, actor, source.uploadId, {
+      chatSessionId: request.chatSessionId,
+    });
+  }
+  return {
+    uri: fileUri(row.id),
+    name: row.name,
+    mime: row.mime,
+    size: row.size,
+    spaceId: space.id,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,23 +1437,23 @@ async function chatContextFileFilter(
 ): Promise<SQL> {
   if (actor.type !== "user") return sql`false`;
 
-  // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
-  // ownership: only a session of a listed space resolves, and its runs are read
-  // in ITS space. Someone else's session resolves nothing rather than
-  // erroring, so this can never become a probe for which session ids exist.
+  // The owner is part of ownership: someone else's session resolves nothing
+  // rather than erroring, so this can never become a probe for which session ids
+  // exist. A conversation belongs to its author alone, and its runs are read in the
+  // listed spaces.
   const [session] = await db
-    .select({ spaceId: chatSessions.spaceId })
+    .select({ id: chatSessions.id })
     .from(chatSessions)
     .where(
       and(
         eq(chatSessions.id, chatSessionId),
         eq(chatSessions.orgId, orgId),
-        inArray(chatSessions.spaceId, spaceIds),
         eq(chatSessions.userId, actor.id),
       ),
     )
     .limit(1);
   if (!session) return sql`false`;
+  const runSpaces = inArray(runs.spaceId, spaceIds);
 
   return or(
     eq(files.chatSessionId, chatSessionId),
@@ -1423,7 +1465,7 @@ async function chatContextFileFilter(
           and(
             eq(files.runId, runs.id),
             eq(runs.orgId, orgId),
-            eq(runs.spaceId, session.spaceId),
+            runSpaces,
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1438,7 +1480,7 @@ async function chatContextFileFilter(
             eq(fileLinks.fileId, files.id),
             eq(fileLinks.orgId, orgId),
             eq(runs.orgId, orgId),
-            eq(runs.spaceId, session.spaceId),
+            runSpaces,
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1586,7 +1628,7 @@ export async function listFilesForActor(
 // ---------------------------------------------------------------------------
 
 /**
- * Container-teardown for a deleted run set, chat session, or end-user: decide,
+ * Container-teardown for a deleted run set, chat-session set, or end-user: decide,
  * per contained file, whether to DETACH it (a live consumer outside the
  * deleted set still references it — the "durable & chainable" promise) or DELETE
  * it (nothing else needs it). Replaces the blind FK cascade for these
@@ -1616,12 +1658,9 @@ export async function listFilesForActor(
  * (and delete it + enqueue its job), or the publish's insert fails the FK
  * against the by-then-deleted parent and drops its own object.
  *
- * The run and end-user variants carry their `orgId` explicitly: both callers
- * already resolved it (it is the space scope they are authorized against) and
- * already hold that very org lock, so re-deriving it from the container rows
- * would only be a second read of a value the caller had all along. The chat
- * variant crosses the module boundary with the session id alone, so its org is
- * looked up here.
+ * Every variant carries its `orgId`: each caller already resolved it (the scope
+ * it is authorized against, or the session row it holds), so re-deriving it
+ * from the container rows would only be a second read of a value it had all along.
  *
  * The caller MUST invoke this BEFORE deleting the runs/session/end-user, else
  * the FK cascade destroys the `files` rows (and their links) first.
@@ -1629,7 +1668,7 @@ export async function listFilesForActor(
 export async function detachOrDeleteContainedFiles(
   container:
     | { runIds: string[]; orgId: string }
-    | { chatSessionId: string }
+    | { chatSessionId: string; orgId: string }
     | { endUserId: string; orgId: string },
   tx?: DbOrTx,
 ): Promise<void> {
@@ -1646,25 +1685,13 @@ export async function detachOrDeleteContainedFiles(
       : eq(files.endUserId, endUserId!);
 
   const teardown = async (exec: DbOrTx): Promise<number> => {
-    // Org-first (see the doc comment). One container, one org: supplied by the
-    // caller, or read from the chat session for the module-boundary variant.
-    let orgId: string | null = "orgId" in container ? container.orgId : null;
-    if (orgId === null) {
-      const [session] = await exec
-        .select({ orgId: chatSessions.orgId })
-        .from(chatSessions)
-        .where(eq(chatSessions.id, chatSessionId!))
-        .limit(1);
-      orgId = session?.orgId ?? null;
-    }
-    if (orgId !== null) {
-      await exec
-        .select({ id: organizations.id })
-        .from(organizations)
-        .where(eq(organizations.id, orgId))
-        .for("update")
-        .limit(1);
-    }
+    // Org-first (see the doc comment).
+    await exec
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, container.orgId))
+      .for("update")
+      .limit(1);
 
     const contained = await exec
       .select({ id: files.id })

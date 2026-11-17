@@ -80,6 +80,8 @@ import { db } from "@appstrate/db/client";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
 import {
   callerPermissionsInSpace,
+  credentialAdmitsSpace,
+  credentialConfinedToSpaces,
   callerPersonalOwnerId,
   effectiveInSpace,
   orgHalfFor,
@@ -1224,7 +1226,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: principal.kind === "delegated",
+          delegated: principal.binding !== null,
           ...(body.variables ? { variables: body.variables } : {}),
         };
         const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1288,7 +1290,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: principal.kind === "delegated",
+          delegated: principal.binding !== null,
           ...(body.variables ? { variables: body.variables } : {}),
         },
         {
@@ -1339,7 +1341,7 @@ export function createIntegrationsRouter() {
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-          delegated: principal.kind === "delegated",
+          delegated: principal.binding !== null,
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
@@ -1911,11 +1913,11 @@ async function callerSpacesSeen(
     personaMemberships(persona),
   );
   const orgHalf = orgHalfFor(c, orgId, orgRole).orgPermissions;
-  return listed.map(({ space, role }) => ({
-    id: space.id,
-    name: space.name,
-    permissions: effectiveInSpace(c, role, orgHalf),
-  }));
+  return listed.flatMap(({ space, role }) =>
+    credentialAdmitsSpace(c, space.id)
+      ? [{ id: space.id, name: space.name, permissions: effectiveInSpace(c, role, orgHalf) }]
+      : [],
+  );
 }
 
 /** The caller of a connection door, from the request space or, on `/me`, from none (`null`). */
@@ -1929,8 +1931,12 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
         : (c.get("permissions")?.has("integrations:connect") ?? false),
     governs: spaceId !== null && canConfigureIntegrations(c),
     // `integrations:connect` is already `canConnect`, which `connectionActions` requires first.
+    // Consent to every space is not given by a credential confined to some of them.
     canShareAllSpaces: (orgId) =>
-      !personaFor(c, orgId) && ceilingAllows(c, "integrations:configure"),
+      !personaFor(c, orgId) &&
+      !credentialConfinedToSpaces(c) &&
+      ceilingAllows(c, "integrations:configure"),
+    admitsSpace: (target) => credentialAdmitsSpace(c, target),
     permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),
     spacesSeen: (orgId, orgRole) => callerSpacesSeen(c, orgId, orgRole),
   };

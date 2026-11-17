@@ -11,12 +11,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
-import { testHost } from "./test-host.ts";
+import { conversationScope, testHost } from "./test-host.ts";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 
-const host = testHost();
+const host = testHost({ actingSpaceIds: ["spc_a"] });
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
@@ -27,19 +28,23 @@ function render(skillMode: ChatSkillMode): string {
     [{ packageId: "@acme/tone", display_name: "Tone", version: "1.0.0" }],
   );
   qc.setQueryData(
-    ["packages", "skills", { consumer: "chat" }, "spc_a"],
+    ["packages", "skills", { consumer: "chat" }, ["spc_a"]],
     [{ packageId: "@acme/free", display_name: "Free", version: null }],
   );
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
-        <TooltipProvider>
-          <SkillsPickerPanel
-            transport={transport}
-            selection={{ skillMode, pinnedSkills: [] }}
-            onChange={() => {}}
-          />
-        </TooltipProvider>
+        <ConversationScopeProvider
+          value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+        >
+          <TooltipProvider>
+            <SkillsPickerPanel
+              transport={transport}
+              selection={{ skillMode, pinnedSkills: [] }}
+              onChange={() => {}}
+            />
+          </TooltipProvider>
+        </ConversationScopeProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );

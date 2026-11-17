@@ -181,7 +181,7 @@ export function buildServerInstructions(
   permissions: ReadonlySet<string>,
   ceiling: ReadonlySet<string> | undefined,
   surface: McpSurface,
-  contextInjected = false,
+  rendersCards = false,
   orgSpaces?: OrgWideSpaces,
 ): string {
   // A missing act is taught by ABSENCE (see `McpSurface`).
@@ -196,19 +196,13 @@ export function buildServerInstructions(
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
-  // A `contextInjected` caller (the chat module) already injects the get_me
-  // payload into its own system prompt and we drop the get_me tool for it, so
-  // pushing "call get_me first" would point the model at a tool that isn't
-  // there. Tell it the context is already provided instead.
-  const grounding = contextInjected
-    ? `Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent) — is already provided to you; there is no get_me tool, do not look for one.`
-    : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
+  const grounding = `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The
   // chat renders the offer as a card itself, so the model must not restate it;
   // an external MCP client has no card, so the model hands the URL over. One
   // string, emitted once, so the two branches cannot drift apart.
-  const connectDelivery = contextInjected
+  const connectDelivery = rendersCards
     ? "The client renders the connect button from this result on its own; your text must NOT duplicate it — do NOT paste the link, do not describe the button or where to click. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn."
     : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
   // Every inline-run span below follows `run_and_wait`'s own descriptor: a
@@ -248,7 +242,7 @@ export function buildServerInstructions(
     : "";
   // A `done:false` run is still going. An external client waits on it; the chat
   // gets `done:false` at the end of its turn budget, too late for a long-poll.
-  const doneFalseFollowUp = contextInjected
+  const doneFalseFollowUp = rendersCards
     ? RUN_AND_WAIT_RESUME_INSTRUCTION
     : RUN_AND_WAIT_LONG_POLL_RESUME;
   const runBullets = runs
@@ -277,7 +271,7 @@ export function buildServerInstructions(
     : "";
   // This server's `run_and_wait` strips the link from a started run's warnings for every caller
   // (tools.ts); only the chat's own launcher keeps it, for the connect card it renders.
-  const warningConnect = contextInjected
+  const warningConnect = rendersCards
     ? "; the chat client renders a connect button under the run itself when connecting would help). Report the result as lacking that integration and offer to connect it when that button appears — do NOT paste or promise a link"
     : `; a warning here never carries a \`connect_url\`). Report the result as lacking that integration and offer to connect it when the warning carries a connect target — ${connects ? "when the caller asks, start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`, as for an error item below" : "connecting it is for the user to do"}`;
   const connectBullets = runs
@@ -310,7 +304,7 @@ ${heavyListBullet}${concurrencyBullet}${
         }
 `
       : ""
-  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
+  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed by get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
 ${orgSpaces ? buildOrgWideOperationIndex(orgSpaces.reachable, ceiling) : buildOperationIndex(permissions, ceiling)}`;
@@ -320,7 +314,7 @@ const pinnedSpaceContext =
   "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
 
 const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
-- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: there is no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request; when it is ambiguous, ask.
+- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask.
 - Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
 - Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
@@ -524,13 +518,20 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
     const proxied = proxyAcceptsCredential(c);
+    // A credential bound to a set of spaces reaches those alone (`callerReachableSpaces`): the
+    // spaces its tools name, the skills it lists and the `space_id` it may send come from this
+    // one list.
     const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
       deriveMcpSurface(permissions, ceiling, actor, proxied, space),
     );
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
     if (!chosen) {
-      throw forbidden("You hold no role with MCP access in any space of this organization.");
+      throw forbidden(
+        c.get("credentialSpaceIds") === undefined
+          ? "You hold no role with MCP access in any space of this organization."
+          : "You hold no role with MCP access in any space this credential reaches.",
+      );
     }
     await enterSpaceById(c, chosen.id, orgId);
     // The admission's read is the one the guards apply: a role changed since
@@ -570,11 +571,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
 
     const reqUrl = new URL(c.req.url);
     const origin = getPublicAppOrigin();
-    // A consumer that injects the get_me payload (`/api/me/context`) into its
-    // own system prompt tags the session `?context=injected` so the redundant
-    // get_me tool — and its "call get_me first" instruction — are dropped. Only
-    // the in-process chat sets it; external MCP clients omit it and keep get_me.
-    const contextInjected = reqUrl.searchParams.get("context") === "injected";
+    // `?renders_cards=true` tags a client that renders connect offers and run cards
+    // itself and resumes an unfinished run on a later turn (the in-process chat):
+    // it changes the instructions' delivery wording, never the tools. External MCP
+    // clients omit it.
+    const rendersCards = reqUrl.searchParams.get("renders_cards") === "true";
     // Set by the space-entry middleware mounted on this exact path; absent
     // means the chain was rewired, not that the caller holds nothing.
     const permissions = c.get("permissions");
@@ -591,8 +592,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // endpoint pinned to it, stay confined to it whatever the credential pins:
     // the caller's reach is then that space only, for the lists spanning spaces
     // and for the package home authority alike.
+    // On the organization-wide endpoint, a credential bound to a set of spaces acts in ONE
+    // space per request, so its read reaches the entered space alone.
     authHeaders.set("x-space-id", scope.spaceId);
-    const dispatch: Dispatch = orgSpaces
+    const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
+    const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
       : (request) => dispatchInProcess(request, scope.spaceId);
     // The caller identity + space scope for tools that call a service directly (the
@@ -678,7 +682,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       authHeaders,
       dispatch,
       observe,
-      contextInjected,
       actor,
       scope,
       orgSpaces,
@@ -722,7 +725,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
           permissions,
           ceiling,
           surface,
-          contextInjected,
+          rendersCards,
           orgSpaces,
         ),
         resources,

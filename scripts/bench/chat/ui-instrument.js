@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Injected into the page before the SPA loads (ui.ts): wraps `fetch` to stamp
-// the moment the composer sends `POST /api/chat` and the moment its stream
+// the moment the composer sends `POST /api/orgs/:orgId/chat` and the moment its stream
 // ends, and watches the DOM for what the user sees. Plain JS because it runs in
 // the browser, outside the scripts' Bun types. Mock upstream text: answer
 // words are `lorem`.
@@ -24,7 +24,7 @@
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const method = (init && init.method) || (input instanceof Request ? input.method : "GET");
-    const isTurn = method.toUpperCase() === "POST" && /\/api\/chat$/.test(url);
+    const isTurn = method.toUpperCase() === "POST" && /\/api\/orgs\/[^/]+\/chat$/.test(url);
     if (isTurn) b.sendAt = performance.now();
     const res = await originalFetch(input, init);
     if (isTurn && res.body) {

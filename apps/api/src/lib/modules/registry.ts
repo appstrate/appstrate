@@ -33,6 +33,8 @@ import {
   listEnforcedChatSkills,
   loadEnforcedChatSkills,
 } from "../../services/chat-enforced-skills.ts";
+import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
+import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../view-as.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -78,17 +80,17 @@ function buildPlatformServices(): PlatformServices {
     checkUsageAllowed,
     // Chat attachments — materialize a composer upload into a chat-session-scoped
     // file (or validate an existing file) and hand back its stable
-    // `appfile://` URI. The module has no DB access, so it crosses here.
+    // `appfile://` URI. The files service (ACL, storage, quota) is the platform's.
     resolveChatAttachment,
     // Space-enforced chat skills — read with platform authority, since the
     // members they bind may hold no `skills:read`.
     loadEnforcedChatSkills,
     listEnforcedChatSkills,
     // Chat session teardown — detach-or-delete the session's contained files
-    // before the session row is removed (the module has no DB/storage access).
-    cleanupSessionFiles: (chatSessionId, tx) =>
+    // before the session row is removed (the module has no storage access).
+    cleanupSessionFiles: (chatSessionId, orgId, tx) =>
       detachOrDeleteContainedFiles(
-        { chatSessionId },
+        { chatSessionId, orgId },
         // `tx` is opaque in the core contract (no Drizzle dep there); it is the
         // chat module's own open transaction handle, so the teardown runs in the
         // same tx as the `chat_sessions` delete.
@@ -98,6 +100,20 @@ function buildPlatformServices(): PlatformServices {
     // the org's technical byte ceiling here; the platform enforces it on every
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
+    reachableSpaces: async (c, orgId) => {
+      // The caller's own personal space; none under a role preview, which acts as nobody's.
+      const personalOwner = callerPersonalOwnerId(c as Context<AppEnv>, orgId);
+      return {
+        spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
+          ...toReachableSpaceWire(space),
+          isDefault: space.isDefault,
+          personal: personalOwner !== null && space.ownerUserId === personalOwner,
+        })),
+        confined: credentialConfinedToSpaces(c as Context<AppEnv>),
+        // The half every space's set above was computed from (`effectiveInSpace`).
+        orgPermissions: [...((c as Context<AppEnv>).get("orgPermissions") ?? [])],
+      };
+    },
     // Module routes run behind the platform middleware chain, so the context
     // carries the same org / actor / request variables a core route audits from.
     audit: {

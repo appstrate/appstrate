@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spaces,
@@ -25,6 +25,7 @@ import {
   runs,
   organizations,
   storageDeletionJobs,
+  chatSessions,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -412,6 +413,44 @@ describe("storage-deletion outbox", () => {
       new Set([`${runId}.afps`, `${runId}/manifest.json`]),
     );
     expect(new Set(workspaceJobs.map((job) => job.reason))).toEqual(new Set(["space_deleted"]));
+  });
+
+  it("deleteSpace detaches a conversation from its origin: its file there leaves, its file elsewhere stays", async () => {
+    const origin = await createSpace(scope.orgId, { name: "Origin" }, ctx.user.id);
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: scope.orgId,
+      userId: ctx.user.id,
+      spaceId: origin.id,
+      restricted: true,
+    });
+    // One file the conversation holds in the default space, one in its origin.
+    const elsewhere = await publishDoc(scope, await seedRunRow(scope), "elsewhere.txt", "kept");
+    const originScope = { orgId: scope.orgId, spaceId: origin.id };
+    const here = await publishDoc(originScope, await seedRunRow(originScope), "here.txt", "gone");
+    await db
+      .update(files)
+      .set({ runId: null, chatSessionId: sessionId })
+      .where(inArray(files.id, [elsewhere.id, here.id]));
+
+    await deleteSpace(scope.orgId, origin.id);
+
+    const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(session).toMatchObject({ spaceId: null, restricted: false });
+    const [kept] = await db.select().from(files).where(eq(files.id, elsewhere.id));
+    expect(kept).toMatchObject({ chatSessionId: sessionId, spaceId: scope.spaceId });
+    expect(await db.select().from(files).where(eq(files.id, here.id))).toHaveLength(0);
+    const jobs = await db
+      .select({ reason: storageDeletionJobs.reason })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, split(here.storageKey).inKey));
+    expect(jobs).toEqual([{ reason: "space_deleted" }]);
+    const [after] = await db
+      .select({ used: organizations.filesBytesUsed })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId));
+    expect(after!.used).toBe(kept!.size);
   });
 
   it("deleteEndUser purges owned bytes but preserves its surviving run workspace", async () => {

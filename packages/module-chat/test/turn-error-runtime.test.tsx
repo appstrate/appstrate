@@ -23,6 +23,7 @@ import { APICallError } from "ai";
 import { conflict } from "@appstrate/core/api-errors";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { testHost } from "./test-host.ts";
 import { MessageError } from "../src/ui/thread.tsx";
 import { chatCapacityError } from "../src/pi-chat/concurrency.ts";
 
@@ -49,17 +50,7 @@ function failedChat(error: Error): ChatHelpers {
 }
 
 /** A member: no `billing:manage`, so billing refusals send them to an admin. */
-const member: ChatHost = {
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: () => null,
-  t: (key) => key,
-  can: () => false,
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-  onPackagesChanged: () => {},
-};
+const member = testHost({ can: () => false });
 
 /** Holds `billing:manage`: billing refusals link to the billing page instead. */
 const billingManager: ChatHost = { ...member, can: (p) => p === "billing:manage" };
@@ -88,7 +79,7 @@ function refused<P extends { status: number }>(problem: P): APICallError {
   const responseBody = JSON.stringify(problem);
   return new APICallError({
     message: responseBody,
-    url: "/api/chat",
+    url: "/api/orgs/org_1/chat",
     requestBodyValues: undefined,
     statusCode: problem.status,
     responseBody,

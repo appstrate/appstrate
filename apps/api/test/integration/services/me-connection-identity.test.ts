@@ -29,7 +29,11 @@ describe("listMeConnections — identity", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "identityorg" });
-    caller = testCaller({ kind: "person", actor: { type: "user", id: ctx.user.id } });
+    caller = testCaller({
+      kind: "person",
+      binding: null,
+      actor: { type: "user", id: ctx.user.id },
+    });
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,

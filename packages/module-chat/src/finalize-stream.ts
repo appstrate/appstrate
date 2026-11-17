@@ -140,8 +140,11 @@ interface FinalizeChatStreamOptions {
   onAssistant?: (message: UIMessage, precedingMessageId: string | null) => unknown;
   /** The message the assistant turn follows — the user turn's message id. */
   precedingMessageId?: string | null;
-  /** Best-effort teardown after persistence settles (close MCP, unregister stop, clear active stream). */
-  onSettled?: () => void;
+  /**
+   * Best-effort teardown after persistence settles (unregister stop, clear the active
+   * stream). The client's stream closes only once it has settled.
+   */
+  onSettled?: () => void | Promise<void>;
   /** Injection seam for tests — defaults to the process-wide resumable context. */
   resumableContext?: ResumableStreamContext;
   /** Record-branch batching knobs — tests only; production takes the defaults. */
@@ -160,7 +163,7 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
 
   const sourceBody = engineResponse.body;
   if (!sourceBody) {
-    onSettled?.();
+    await Promise.resolve(onSettled?.()).catch(() => {});
     return engineResponse;
   }
 
@@ -207,7 +210,7 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
       // Best-effort: release the branch so the tee buffer is not retained.
       await forPersist.cancel().catch(() => {});
     } finally {
-      onSettled?.();
+      await Promise.resolve(onSettled?.()).catch(() => {});
       // The turn is over: nothing will resume it once `onSettled` has cleared
       // the session's marker. Drop the recording after a grace rather than let
       // it sit in the store until the TTL backstop.
@@ -221,7 +224,7 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
   trackTurn(persistTask);
 
   // Split the recording branch once more: `forStore` feeds the resumable
-  // producer, `forClient` IS the response body. The connected client therefore
+  // producer, `forClient` is the response body. The connected client therefore
   // reads the engine bytes directly — no store round-trip, no poll loop — while
   // the producer keeps recording regardless of whether the client is still
   // there, which is what makes a mid-turn reload resumable.
@@ -244,7 +247,11 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
     recordingSettled();
   }
 
-  return new Response(forClient, {
+  // The client's stream ends once the turn has settled — its assistant message persisted,
+  // its marker cleared — so a client sending its next message as this one closes finds the
+  // conversation free: a conversation runs one turn at a time (`setActiveStream`).
+  const untilSettled = new TransformStream<Uint8Array, Uint8Array>({ flush: () => persistTask });
+  return new Response(forClient.pipeThrough(untilSettled), {
     status: engineResponse.status,
     statusText: engineResponse.statusText,
     headers: engineResponse.headers,

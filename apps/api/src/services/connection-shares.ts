@@ -24,7 +24,6 @@ import type { AppEnv } from "../types/index.ts";
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { isUniqueViolation, lockOrganizationRow, type Tx } from "../lib/db-helpers.ts";
 import { actorFilter, actorFromIds } from "../lib/actor.ts";
-import { boundSpaceOf } from "../lib/connection-principal.ts";
 import {
   connectionActions,
   meConnectionAuthorityFilter,
@@ -85,10 +84,15 @@ async function lockVisible(tx: Tx, input: EditInput): Promise<ConnectionRow> {
   return row;
 }
 
-function assertBoundTarget(caller: ConnectionCaller, spaceId: string): void {
-  const bound = boundSpaceOf(caller.principal);
-  if (bound !== null && spaceId !== bound) {
-    throw forbidden(`A credential bound to space '${bound}' can only share into it or withdraw it`);
+/**
+ * A share's target, shared into or withdrawn from, is a space the credential may name. Always a
+ * 403 here: the caller only knows whether the credential admits the space, not which confinement
+ * refused it, and a space-pinned key's 403 on this door is asserted (`me.test.ts`). The answer
+ * depends on the credential alone, so it confirms nothing about the id.
+ */
+function assertAdmittedTarget(caller: ConnectionCaller, spaceId: string): void {
+  if (!caller.admitsSpace(spaceId)) {
+    throw forbidden(`Credential scope does not include space '${spaceId}'`);
   }
 }
 
@@ -170,7 +174,7 @@ export async function shareConnection(
     .where(visibleTo(input))
     .limit(1);
   if (!read) throw connectionNotFound(connectionId);
-  assertBoundTarget(caller, spaceId);
+  assertAdmittedTarget(caller, spaceId);
   const permissions = await caller.permissionsIn(spaceId, read.orgId);
   let refusal: ApiError | null = null;
   if (!permissions.has("integrations:connect")) {
@@ -237,7 +241,7 @@ export async function unshareConnection(input: ShareInput): Promise<{
         "Only the connection owner, or a governor of this space withdrawing it from here, can withdraw it",
       );
     }
-    assertBoundTarget(caller, spaceId);
+    assertAdmittedTarget(caller, spaceId);
     if (!existing) return { connection: row, removed: false, disabledScheduleIds: [] };
     await assertConnectionsUnpinned(
       tx,
@@ -321,14 +325,14 @@ export async function setConnectionShareAllSpaces(input: EditInput & { enabled: 
 }
 
 /** A space by id and name, as the share targets name it. */
-interface NamedSpace {
+interface ShareTargetSpace {
   id: string;
   name: string;
 }
 
 /**
  * Per row the caller may share (`share` action), the spaces it may be shared into: those the
- * caller sees holding `integrations:connect` (a credential bound to a space: that one only) that
+ * caller sees holding `integrations:connect` (within what its credential may name) that
  * the row reaches and that do not block its integration's personal connections, unless the caller
  * also configures them there. One listing and one query per org, never one per row or space.
  */
@@ -336,21 +340,19 @@ export async function shareableSpaces(
   caller: ConnectionCaller,
   rows: readonly Pick<ConnectionRow, "id" | "orgId" | "userId" | "endUserId" | "spaceId">[],
   orgRoles: ReadonlyMap<string, OrgRole>,
-): Promise<Map<string, NamedSpace[]>> {
-  const out = new Map<string, NamedSpace[]>();
+): Promise<Map<string, ShareTargetSpace[]>> {
+  const out = new Map<string, ShareTargetSpace[]>();
   const byOrg = new Map<string, string[]>();
   for (const row of rows) {
     if (!connectionActions(row, caller, false).includes("share")) continue;
     byOrg.set(row.orgId, [...(byOrg.get(row.orgId) ?? []), row.id]);
   }
-  const bound = boundSpaceOf(caller.principal);
   await Promise.all(
     [...byOrg].map(async ([orgId, ids]) => {
       const orgRole = orgRoles.get(orgId);
       if (!orgRole) return;
       const targets = (await caller.spacesSeen(orgId, orgRole)).filter(
-        (space) =>
-          (bound === null || space.id === bound) && space.permissions.has("integrations:connect"),
+        (space) => caller.admitsSpace(space.id) && space.permissions.has("integrations:connect"),
       );
       if (targets.length === 0) return;
       const names = new Map(targets.map((space) => [space.id, space.name]));

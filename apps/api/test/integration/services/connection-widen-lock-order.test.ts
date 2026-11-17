@@ -152,7 +152,7 @@ describeRequiresPostgres("a write naming a space locks the space before its rows
           spaceId: space,
           integrationId: INTEGRATION,
           caller: testCaller(
-            { kind: "person", actor: { type: "user", id: ctx.user.id } },
+            { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
             { spaceId: space, governs: true, permissionsIn: async () => connectAndConfigure },
           ),
         }),

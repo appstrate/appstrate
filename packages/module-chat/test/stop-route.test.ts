@@ -4,7 +4,7 @@
  * The stop button, end to end on the server side.
  *
  * `stop-registry.test.ts` proves the registry aborts the controller it was
- * handed. Nothing proved the JOIN: that `POST /api/chat/sessions/:id/stop`
+ * handed. Nothing proved the JOIN: that `POST /api/orgs/:orgId/chat/sessions/:id/stop`
  * resolves the session's `active_stream_id` and hands THAT id to the registry.
  * The two halves can each be perfect while the route stops nothing — the
  * client gets its 204, the spinner clears, and generation runs on, billing
@@ -26,9 +26,12 @@ import {
 import { setActiveStream } from "../src/resumable.ts";
 import { registerStopController, unregisterStopController } from "../src/stop-registry.ts";
 
+/** The scope of a session created with no origin space and no limit. */
+const UNLIMITED = { spaceId: null, restricted: false };
+
 const app = getTestApp();
 
-describe("POST /api/chat/sessions/:id/stop", () => {
+describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
   let ctx: TestContext;
   const registered: string[] = [];
 
@@ -43,7 +46,7 @@ describe("POST /api/chat/sessions/:id/stop", () => {
   });
 
   async function createSession(): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -62,12 +65,12 @@ describe("POST /api/chat/sessions/:id/stop", () => {
     const controller = new AbortController();
     registerStopController(streamId, controller);
     registered.push(streamId);
-    await setActiveStream(sessionId, streamId);
+    await setActiveStream(sessionId, streamId, UNLIMITED);
     return { sessionId, controller };
   }
 
   function stop(sessionId: string) {
-    return app.request(`/api/chat/sessions/${sessionId}/stop`, {
+    return app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${sessionId}/stop`, {
       method: "POST",
       headers: authHeaders(ctx),
     });

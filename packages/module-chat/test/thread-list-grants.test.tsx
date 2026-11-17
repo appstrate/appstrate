@@ -28,8 +28,22 @@ function render(granted: string[], hasMore = false): string {
     pages: [
       {
         data: [
-          { id: "chs_1", title: "Budget", unread: false, generating: false, updatedAt: "" },
-          { id: "chs_2", title: null, unread: false, generating: false, updatedAt: "" },
+          {
+            id: "chs_1",
+            title: "Budget",
+            unread: false,
+            generating: false,
+            updatedAt: "",
+            space_ids: ["spc_a"],
+          },
+          {
+            id: "chs_2",
+            title: null,
+            unread: false,
+            generating: false,
+            updatedAt: "",
+            space_ids: ["spc_a"],
+          },
         ],
         hasMore,
       },
@@ -45,6 +59,7 @@ function render(granted: string[], hasMore = false): string {
               activeId={null}
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
+              renderSpaces={(ids) => ids.join(", ")}
             />
           </ChatTransportProvider>
         </SidebarProvider>

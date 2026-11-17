@@ -2,26 +2,29 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchSkills } from "./chat-skills.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
-import { spaceIdFromHeaders } from "./sessions.ts";
+import { limitedSpaceOf, useConversationScope } from "./conversation-scope.ts";
+import { useCanIn, useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 /**
  * The skills the picker chooses from, shared with the composer's chips (one cache entry, so a
- * pinned chip is named by what the picker lists). Read only when `wanted`, with `skills:read`, in
- * the space the transport is scoped to.
+ * pinned chip is named by what the picker lists). Read only when `wanted`, with `skills:read`: in
+ * the origin space for a limited conversation, in some space the chat acts in otherwise.
  */
 export function useSkillCatalogue(transport: ChatTransport | undefined, wanted: boolean) {
-  const { can } = useChatHost();
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
-  const enabled = wanted && !!spaceId && !!transport && can("skills:read");
-  const catalogue = useQuery({
+  const { actingSpaceIds } = useChatHost();
+  const canIn = useCanIn();
+  // A limited conversation reaches its origin space alone: its skills, not the acting set's.
+  const scope = useConversationScope();
+  const limitedSpaceId = limitedSpaceOf(scope);
+  const catalogueSpaceIds = limitedSpaceId ? [limitedSpaceId] : actingSpaceIds;
+  const readable = !!transport && canIn(limitedSpaceId, "skills:read");
+  return useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
-    // (a different projection of the same route), and the space scopes it.
-    queryKey: ["packages", "skills", { consumer: "chat" }, spaceId],
-    queryFn: () => fetchSkills(transport!.request),
-    enabled,
+    // (a different projection of the same route), and the acting set keys it.
+    queryKey: ["packages", "skills", { consumer: "chat" }, catalogueSpaceIds],
+    queryFn: () => fetchSkills(transport!, catalogueSpaceIds),
+    enabled: wanted && readable,
     staleTime: 60_000,
   });
-  return { catalogue };
 }

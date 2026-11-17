@@ -112,17 +112,16 @@ describe("inline run launched from the chat with an attached file", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const uploadId = await stageUpload("brief.txt", "the attached brief");
     const resolved = await resolveChatAttachment({
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       chatSessionId: sessionId,
       uri: `upload://${uploadId}`,
-      permissions: new Set(),
+      spaces: [{ id: ctx.defaultSpaceId, permissions: new Set() }],
+      beforeResolve: async () => {},
     });
     return { uri: resolved.uri, fileId: parseFileUri(resolved.uri)! };
   }

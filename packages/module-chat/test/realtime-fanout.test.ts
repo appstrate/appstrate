@@ -22,7 +22,7 @@ import {
 import { collectSSEEvents } from "../../../apps/api/test/helpers/sse.ts";
 import { initRealtime } from "../../../apps/api/src/services/realtime.ts";
 import { notifySessionUpdate } from "../src/realtime.ts";
-import { claimTurn } from "../src/chat-stream.ts";
+import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 
 const app = getTestApp();
 
@@ -39,7 +39,7 @@ async function openStream(ctx: TestContext): Promise<Response> {
 }
 
 async function createSession(ctx: TestContext): Promise<{ id: string; userId: string }> {
-  const res = await app.request("/api/chat/sessions", {
+  const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -87,7 +87,8 @@ describe("chat_session_update SSE fan-out", () => {
     const res = await openStream(ctx);
     await wait();
 
-    await claimTurn(session.id, "strm_1", {
+    await claimTurn(session.id, "strm_1", { spaceId: null, restricted: false });
+    await persistClaimedUserMessage(session.id, "strm_1", {
       id: "u1",
       role: "user",
       parts: [{ type: "text", text: "hello" }],

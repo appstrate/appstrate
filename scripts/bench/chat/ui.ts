@@ -16,7 +16,7 @@ import { join } from "node:path";
 import type { BenchUser } from "./client.ts";
 
 export interface UiTimings {
-  /** All `*Ms`: ms after the SPA issued `POST /api/chat`. */
+  /** All `*Ms`: ms after the SPA issued `POST /api/orgs/:orgId/chat`. */
   dotsMs: number | null;
   firstTextMs: number | null;
   lastTextMs: number | null;

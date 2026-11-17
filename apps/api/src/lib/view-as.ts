@@ -482,14 +482,39 @@ export async function callerSpaceAccessById(
 }
 
 /**
- * The caller's effective set in ANY space of `orgId` (empty outside it), not only the request's:
- * org role, space and membership read as one snapshot (RBAC spec §4.4), under the credential ceiling.
+ * Whether the request's credential may name `spaceId` at all: inside the space it pins and inside
+ * its allowlist, each when present. `null` is a space the request would create (a personal space
+ * not provisioned yet): no pin or allowlist names it, so only an unconfined credential may.
+ */
+export function credentialAdmitsSpace(c: Context<AppEnv>, spaceId: string | null): boolean {
+  const pinned = c.get("credentialSpaceId");
+  const allowed = c.get("credentialSpaceIds");
+  return (
+    (!pinned || pinned === spaceId) && (!allowed || (spaceId !== null && allowed.includes(spaceId)))
+  );
+}
+
+/**
+ * Whether the request's credential is confined to spaces: it pins one, or allowlists a set. Such a
+ * credential reaches no org-level resource spanning every space that the platform scopes by
+ * credential, and is bound on connections (`connectionPrincipal`). The list of what it is refused:
+ * `docs/architecture/SPACES.md` → "The chat's bearer is a credential bound to a set of spaces".
+ */
+export function credentialConfinedToSpaces(c: Context<AppEnv>): boolean {
+  return c.get("credentialSpaceId") !== undefined || c.get("credentialSpaceIds") !== undefined;
+}
+
+/**
+ * The caller's effective set in ANY space of `orgId` (empty outside it, or outside what the request
+ * may name), not only the request's: org role, space and membership read as one snapshot
+ * (RBAC spec §4.4), under the credential ceiling.
  */
 export async function callerPermissionsInSpace(
   c: Context<AppEnv>,
   spaceId: string,
   orgId: string,
 ): Promise<Set<Permission>> {
+  if (!credentialAdmitsSpace(c, spaceId)) return new Set<Permission>();
   const snapshot = isSpaceId(spaceId)
     ? await loadSpaceAccess(spaceId, orgId, c.get("user")?.id ?? null)
     : null;

@@ -105,10 +105,9 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
 
   it("carries the injected skills into `extra[INJECTED_SKILLS_AUTH_EXTRA]`, only on the MCP bearer", async () => {
     const injectedSkills = {
-      spaceId: "spc_1",
       skills: {
-        "@acme/house": { definition: "published" as const, version: "2.0.0" },
-        "@acme/mine": { definition: "draft" as const, lockVersion: 4 },
+        "@acme/house": { definition: "published" as const, version: "2.0.0", spaceId: "spc_1" },
+        "@acme/mine": { definition: "draft" as const, lockVersion: 4, spaceId: "spc_2" },
       },
     };
     const token = mintMcpLoopbackToken({
@@ -128,7 +127,7 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
         mintMcpLoopbackToken({
           ...claims,
           permissions: callerPermissions,
-          injectedSkills: { spaceId: "spc_1", skills: {} },
+          injectedSkills: { skills: {} },
         }),
       ),
     } as never);
@@ -136,14 +135,16 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
   });
 
   it("drops a malformed injected-skills claim and keeps the token", async () => {
-    const published = { definition: "published", version: "1.0.0" };
+    const published = { definition: "published", version: "1.0.0", spaceId: "spc_1" };
     for (const injectedSkills of [
-      { skills: { "@acme/x": published } },
-      { spaceId: "spc_1", skills: { "@acme/x": { definition: "latest", version: "1.0.0" } } },
-      { spaceId: "spc_1", skills: { "@acme/x": { definition: "draft", version: "1.0.0" } } },
-      { spaceId: "spc_1", skills: { "@acme/x": { definition: "draft", lockVersion: 1.5 } } },
-      { spaceId: "spc_1", skills: { "@acme/x": { ...published, content: "leak" } } },
-      { spaceId: "spc_1", skills: { "@acme/x": published }, orgId: "org_2" },
+      // Each entry is bound to a space; the claim as a whole is not.
+      { skills: { "@acme/x": { definition: "published", version: "1.0.0" } } },
+      { spaceId: "spc_1", skills: { "@acme/x": published } },
+      { skills: { "@acme/x": { ...published, definition: "latest" } } },
+      { skills: { "@acme/x": { definition: "draft", version: "1.0.0", spaceId: "spc_1" } } },
+      { skills: { "@acme/x": { definition: "draft", lockVersion: 1.5, spaceId: "spc_1" } } },
+      { skills: { "@acme/x": { ...published, content: "leak" } } },
+      { skills: { "@acme/x": published }, orgId: "org_2" },
     ]) {
       const token = mintMcpLoopbackToken({
         ...claims,
@@ -226,5 +227,26 @@ describe("chatLoopbackStrategy rejection paths", () => {
       headers: authHeaders("chatloop_garbage"),
     } as never);
     expect(res).toBeNull();
+  });
+});
+
+describe("the spaces a bearer is bound to", () => {
+  const resolve = (token: string) =>
+    chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+
+  it("carries the turn's spaces as the credential allowlist, and the inference bearer none", async () => {
+    const bound = await resolve(
+      mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"], spaceIds: ["spc_a", "spc_b"] }),
+    );
+    expect(bound!.spaceIds).toEqual(["spc_a", "spc_b"]);
+    // An empty list is a bound credential that reaches nothing, not an unbound one.
+    const empty = await resolve(
+      mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"], spaceIds: [] }),
+    );
+    expect(empty!.spaceIds).toEqual([]);
+    expect((await resolve(mintLoopbackToken(claims)))!.spaceIds).toBeUndefined();
+    expect(
+      (await resolve(mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"] })))!.spaceIds,
+    ).toBeUndefined();
   });
 });

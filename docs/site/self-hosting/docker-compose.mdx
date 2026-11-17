@@ -196,7 +196,7 @@ appstrate.example.com {
 }
 ```
 
-Caddy obtains certificates automatically, has no body limit by default and supports SSE natively. Traefik buffers nothing unless you add its `buffering` middleware, in which case exempt `/api/chat`, `/api/realtime` and the run-log endpoints and set `maxRequestBodyBytes` to at least 104857600.
+Caddy obtains certificates automatically, has no body limit by default and supports SSE natively. Traefik buffers nothing unless you add its `buffering` middleware, in which case exempt the chat routes (`/api/orgs/*/chat`), `/api/realtime` and the run-log endpoints and set `maxRequestBodyBytes` to at least 104857600.
 
 ### Separate origin for agent HTML
 

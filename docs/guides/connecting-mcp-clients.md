@@ -279,7 +279,7 @@ the `resources` capability. Results carry no cache attributes.
 - **A skill the chat turn injected.** Outside `skills:read`, the chat turn's
   own bearer reads a skill its prompt injected, at the definition injected (a
   draft only at the `lock_version` injected, else `-32600` with
-  `data.code: "injected_draft_changed"`), in the turn's space and while the
+  `data.code: "injected_draft_changed"`), in the space its URI names, among the turn's spaces, and while the
   caller holds `chat:write` there — even if the skill is switched off or
   `skills:read` is withdrawn mid-turn, since its `SKILL.md` is already in
   context.

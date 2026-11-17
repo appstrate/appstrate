@@ -1266,7 +1266,7 @@ describeRequiresRedis("scheduler service", () => {
       // What `DELETE /api/me/connections/:id` does: the service prunes, the route drops the jobs
       // of the schedules it disabled.
       const { disabledScheduleIds } = (await deleteOwnConnection(
-        { kind: "delegated", actor, orgId, spaceId: defaultSpaceId },
+        { kind: "delegated", actor, binding: { orgId, spaceIds: [defaultSpaceId] } },
         gone!,
       ))!;
       expect(disabledScheduleIds).toEqual([]);
@@ -1316,7 +1316,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       const { disabledScheduleIds } = (await deleteOwnConnection(
-        { kind: "delegated", actor, orgId, spaceId: defaultSpaceId },
+        { kind: "delegated", actor, binding: { orgId, spaceIds: [defaultSpaceId] } },
         row!.id,
       ))!;
       expect(disabledScheduleIds).toEqual([schedule.id]);
@@ -1488,7 +1488,10 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
       .returning({ id: integrationConnections.id });
     const created = await read(actor, { [integrationId]: [kept!.id, gone!.id] });
 
-    await deleteOwnConnection({ kind: "delegated", actor, ...scope }, gone!.id);
+    await deleteOwnConnection(
+      { kind: "delegated", actor, binding: { orgId: scope.orgId, spaceIds: [scope.spaceId] } },
+      gone!.id,
+    );
 
     await expect(
       updateJudgedSchedule(scope, created, { name: "renamed" }, null, undefined),
@@ -1523,12 +1526,22 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     ];
 
     const owner: Actor = { type: "user", id: member.user.id };
-    await deleteOwnConnection({ kind: "delegated", actor: owner, ...scope }, deleted!.id);
+    await deleteOwnConnection(
+      {
+        kind: "delegated",
+        actor: owner,
+        binding: { orgId: scope.orgId, spaceIds: [scope.spaceId] },
+      },
+      deleted!.id,
+    );
     await unshareConnection({
       connectionId: unshared!.id,
       spaceId: scope.spaceId,
       integrationId: null,
-      caller: testCaller({ kind: "person", actor: owner }, { spaceId: scope.spaceId }),
+      caller: testCaller(
+        { kind: "person", binding: null, actor: owner },
+        { spaceId: scope.spaceId },
+      ),
     });
 
     for (const created of reads) {
@@ -1622,7 +1635,10 @@ describe("schedule disabled_reason", () => {
       connectionOverrides: { [integrationId]: [gone!.id] },
     });
 
-    await deleteOwnConnection({ kind: "delegated", actor, ...scope }, gone!.id);
+    await deleteOwnConnection(
+      { kind: "delegated", actor, binding: { orgId: scope.orgId, spaceIds: [scope.spaceId] } },
+      gone!.id,
+    );
 
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
     expect(row).toMatchObject({ enabled: false, disabledReason: "connection_deleted" });
@@ -1655,7 +1671,7 @@ describe("schedule disabled_reason", () => {
       .where(eq(schedules.id, created.id));
 
     const { disabledScheduleIds } = (await deleteOwnConnection(
-      { kind: "delegated", actor, ...scope },
+      { kind: "delegated", actor, binding: { orgId: scope.orgId, spaceIds: [scope.spaceId] } },
       gone!.id,
     ))!;
 

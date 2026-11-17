@@ -24,6 +24,11 @@ import { bindPackageAuthoringUser } from "@appstrate/module-chat/package-authori
 import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { useRowSpaceGrants } from "../../hooks/use-space-action";
+import { otherSpaceFileContext } from "../../lib/file-link";
+import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
@@ -32,9 +37,17 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
-import { useChatTransport, useChatTranslate } from "./use-chat-runtime";
+import { ConversationSpaces } from "./conversation-spaces";
+import { renderSpaces } from "./render-spaces";
+import {
+  useChatActingSpaceIds,
+  useChatCan,
+  useChatFilter,
+  useChatTransport,
+  useChatTranslate,
+} from "./use-chat-runtime";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
-import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
   useModelProviderCredentials,
@@ -87,7 +100,12 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
-  const { can } = usePermissions();
+  const { known } = useChatFilter();
+  // What the chat may do is judged over the spaces it acts in, not the working one.
+  const can = useChatCan();
+  // A call's grant is judged in the space the call acted in.
+  const canIn = useRowSpaceGrants();
+  const actingSpaceIds = useChatActingSpaceIds();
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -118,9 +136,15 @@ export function ChatModulePage() {
   // File services the module consumes instead of reimplementing: the typed
   // download (reports failures with a toast) and the typed image preview.
   const downloadFile = useFileDownload();
+  // A file of another space (a call of a conversation) is read in its own.
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
+  // A run a conversation launched opens in its space, entering it when it is not this one.
+  const linkInSpace = useSpaceLink();
   const onDownloadFile = useCallback(
-    (id: string, name: string) => void downloadFile(id, name),
-    [downloadFile],
+    (id: string, name: string, spaceId?: string) =>
+      void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
+    [downloadFile, orgId, currentSpaceId],
   );
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge. The chat composer stages files through
@@ -129,6 +153,8 @@ export function ChatModulePage() {
   const queryClient = useQueryClient();
   // The assistant creates and imports packages: the lists show them as the editor's would.
   const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
+  // The mode decides which conversations the list holds: until it is known the page holds its shape.
+  if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -140,9 +166,10 @@ export function ChatModulePage() {
   // One toggle sits in the shell's header, portaled there for the page's lifetime;
   // the tabs live in the panel's own header.
   return (
-    <ChatTransportProvider value={transport}>
+    <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
+          <ConversationSpaces conversationId={conversationId ?? null} transport={transport} />
           <ChatConversationSettingsButton
             activeId={conversationId ?? null}
             t={translate}
@@ -164,11 +191,17 @@ export function ChatModulePage() {
               uploadFile={uploadFile}
               t={translate}
               can={can}
+              canIn={canIn}
+              workingSpaceId={currentSpaceId}
+              actingSpaceIds={actingSpaceIds}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
+              renderSpaces={renderSpaces}
+              linkInSpace={linkInSpace}
+              useSpaceLabelOf={useSpaceLabelOf}
             />
           </div>
           <ConversationSidebar

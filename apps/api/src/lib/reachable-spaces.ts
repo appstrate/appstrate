@@ -5,12 +5,13 @@ import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/
 import type { AppEnv } from "../types/index.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
-import type { SpaceRoleRef } from "./space-role.ts";
-import { forbidden } from "./errors.ts";
+import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
+import { forbidden, notFound, type ApiError } from "./errors.ts";
 import { dispatchSpacePin } from "./internal-dispatch.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
+  credentialAdmitsSpace,
   effectiveInSpace,
   personaFor,
   personaMemberships,
@@ -33,7 +34,9 @@ export interface ReachableSpace {
 /**
  * The spaces where the caller holds a role (persona overlay included): the reach of every read
  * spanning spaces and of `packageAccessSpaces`. A request pinned to a space (its credential or
- * `dispatchSpacePin`) reaches that space only.
+ * `dispatchSpacePin`) reaches that space only; a credential bound to a SET of spaces
+ * (`credentialSpaceIds`) reaches those alone. A read crossing into another organization names
+ * `orgRole`.
  */
 export function callerReachableSpaces(
   c: Context<AppEnv>,
@@ -67,9 +70,9 @@ async function resolveReachableSpaces(
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
   );
-  const pinned = c.get("credentialSpaceId") ?? dispatchSpacePin(c);
+  const dispatchPin = dispatchSpacePin(c);
   return entries.flatMap(({ space, role }) =>
-    role && (!pinned || space.id === pinned)
+    role && credentialAdmitsSpace(c, space.id) && (!dispatchPin || space.id === dispatchPin)
       ? [
           {
             id: space.id,
@@ -87,6 +90,33 @@ async function resolveReachableSpaces(
   );
 }
 
+/** A reachable space as the wire names it: the role by its wire name, the set as an array. */
+export function toReachableSpaceWire(space: ReachableSpace) {
+  return {
+    id: space.id,
+    name: space.name,
+    role: toSpaceRoleWire(space.role)!.name,
+    permissions: [...space.permissions],
+    credentialProxyOpen: space.credentialProxyOpen,
+  };
+}
+
+/**
+ * The caller's reach for a route that serves the organization as a whole: the
+ * spaces of {@link callerReachableSpaces}, after refusing an end-user — it acts
+ * in its own space only (RBAC spec §7.2), so it is refused before the route
+ * reads any query parameter.
+ */
+export async function reachAcrossSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
+  if (c.get("principalKind") === "end_user") {
+    throw forbidden("An end-user cannot list across spaces");
+  }
+  return callerReachableSpaces(c, orgId);
+}
+
 /**
  * The preamble of every list spanning the spaces of `orgId`: one grant per reached space whose
  * effective set grants one of `permissions`. An end-user acts in its own space only, so it is
@@ -97,13 +127,27 @@ export async function readableSpacesAcross(
   orgId: string,
   permissions: readonly Permission[],
 ): Promise<SpaceGrant[]> {
-  if (c.get("principalKind") === "end_user") {
-    throw forbidden("An end-user cannot list across spaces");
-  }
-  const reachable = await callerReachableSpaces(c, orgId);
+  const reachable = await reachAcrossSpaces(c, orgId);
   return reachable.flatMap((space) =>
     permissions.some((permission) => space.permissions.has(permission))
       ? [{ spaceId: space.id, permissions: space.permissions }]
       : [],
+  );
+}
+
+/**
+ * The refusal for a space the request's credential may not name (`credentialAdmitsSpace`). It
+ * depends on the credential alone, never on the space, so it confirms nothing about an id. A
+ * credential pinned to one space is told what it already knows, a 403 (the contract of API keys
+ * and space-bound tokens); a credential bound to a SET of spaces gets the 404 a space
+ * outside its reach gets everywhere else (`enterSpaceById`), so the set is not probed by status.
+ * `spaceId` is `null` for a personal space the request would create.
+ */
+export function unnameableSpace(c: Context<AppEnv>, spaceId: string | null): ApiError {
+  if (c.get("credentialSpaceId") !== undefined) {
+    return forbidden("Credential scope does not include this space");
+  }
+  return notFound(
+    spaceId ? `Space '${spaceId}' not found in this organization` : "Space not found",
   );
 }

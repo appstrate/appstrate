@@ -32,6 +32,23 @@ export function requestAnswering(
 }
 
 /** The transport a static render is given: headers as the host scopes them, requests never answered. */
-export function transportOf(getHeaders: () => Record<string, string>): ChatTransport {
-  return { getHeaders, request: () => Promise.reject(new Error("no request in a static render")) };
+export function transportOf(
+  getHeaders: () => Record<string, string>,
+  spaceId: string | null = "spc_a",
+): ChatTransport {
+  return {
+    getHeaders,
+    orgId: "org_1",
+    spaceId,
+    request: () => Promise.reject(new Error("no request in a static render")),
+  };
+}
+
+/** A transport over `request`, to assert the routes the module's calls take. */
+export function transportOver(
+  request: ChatRequest,
+  spaceId: string | null = null,
+  getHeaders: () => Record<string, string> = () => ({}),
+): ChatTransport {
+  return { getHeaders, request, orgId: "org_1", spaceId };
 }

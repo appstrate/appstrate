@@ -5,6 +5,7 @@
  * where the permission of the list's route holds.
  */
 
+import { chatActsIn } from "@appstrate/core/chat-contract";
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
 import { isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
 
@@ -33,11 +34,18 @@ const SPACE_LISTS = Object.keys(LIST_ROUTE) as SpaceList[];
 /** What the caller may do in one space: its effective set there, the org-level grants included. */
 export type SpaceGate = (permission: string) => boolean;
 
-/** A space admits a list where its gate opens the list's route. */
-export const listAdmits =
-  (list: SpaceList) =>
+/** A route's declaration, read uniformly: the permissions that open it, if any. */
+const accessOf = (path: RoutePath) =>
+  ROUTE_ACCESS[path] as { anyOf?: readonly string[]; spansSpaces?: boolean };
+
+/** A space admits a route where its gate opens it. */
+const routeAdmits =
+  (path: RoutePath) =>
   (can: SpaceGate): boolean =>
-    ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
+    accessOf(path).anyOf?.some(can) ?? false;
+
+/** A space admits a list where its gate opens the list's route. */
+export const listAdmits = (list: SpaceList) => routeAdmits(LIST_ROUTE[list]);
 
 interface ListedSpace {
   id: string;
@@ -65,6 +73,20 @@ export function spacesWhere<S extends ListedSpace>(
   return (spaces ?? []).filter(
     (space) => isSpaceEnterable(space) && admits(gateIn(space, orgPermissions), space),
   );
+}
+
+/** Whether `permission` holds in a row's space: the working space's gate, or the row's own. */
+export function grantsInRowSpace(
+  rowSpaceId: string | undefined,
+  workingSpaceId: string | null,
+  can: SpaceGate,
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+  permission: string,
+): boolean {
+  if (!rowSpaceId || rowSpaceId === workingSpaceId) return can(permission);
+  const space = spaces?.find((s) => s.id === rowSpaceId);
+  return !!space && isSpaceEnterable(space) && gateIn(space, orgPermissions)(permission);
 }
 
 /** An action naming no space: none eligible, one taken without asking, or the reader chooses. */
@@ -114,24 +136,62 @@ function belongsToSpace(path: RoutePath): boolean {
   if (isUnder(path, SETTINGS_INDEX.organization) || isUnder(path, SETTINGS_INDEX.account)) {
     return false;
   }
-  const access = ROUTE_ACCESS[path] as { anyOf?: readonly string[] };
-  return access.anyOf?.some((permission) => !isOrgLevel(permission)) ?? false;
+  return accessOf(path).anyOf?.some((permission) => !isOrgLevel(permission)) ?? false;
+}
+
+/** A route that serves the organization in the mode (`spansSpaces`: the chat). */
+const spansSpaces = (path: RoutePath) => accessOf(path).spansSpaces === true;
+
+/**
+ * Whether rendering `path` keeps the mode: the lists and their rows, the routes serving the
+ * organization (`spansSpaces`), any route of no space, and an undeclared address. Any other route
+ * leaves it, into the working space.
+ */
+export function holdsOverview(path: RoutePath | undefined): boolean {
+  return path === undefined || ofList(path) || spansSpaces(path) || !belongsToSpace(path);
 }
 
 /**
- * Whether rendering `path` keeps the mode: the lists and their rows, any route of no space, and an
- * undeclared address. Any other route leaves it, into the working space.
+ * A route that spans spaces opens where some space admits it, whatever the working space grants:
+ * a route serving the organization (`spansSpaces`: the chat) in every mode, a list's route (its
+ * rows are every space's) in « Tous les espaces » only. `undefined` for any other route, which the
+ * working space decides, as does every route before the space listing has answered.
  */
-export function holdsOverview(path: RoutePath | undefined): boolean {
-  return path === undefined || ofList(path) || !belongsToSpace(path);
-}
-
-/** In the mode, a list's route opens where a space admits the list, whatever the working space grants. */
-export function overviewListVerdict(
+export function spanningRouteVerdict(
   path: RoutePath,
   spaces: readonly ListedSpace[] | undefined,
+  overview: boolean,
 ): "granted" | "denied" | undefined {
-  const list = listOf(path);
-  if (!list) return undefined;
-  return spacesWhere(spaces, undefined, listAdmits(list)).length > 0 ? "granted" : "denied";
+  const list = overview ? listOf(path) : undefined;
+  const admits = list ? listAdmits(list) : spansSpaces(path) ? routeAdmits(path) : undefined;
+  if (!admits || !spaces) return undefined;
+  return spacesWhere(spaces, undefined, admits).length > 0 ? "granted" : "denied";
+}
+
+/**
+ * The spaces the chat acts in, as the backend's acting set judges them: held with
+ * a role, the caller's gate granting the chat's acting permissions there.
+ */
+export function actingSpaces<S extends ListedSpace>(
+  spaces: readonly S[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+): S[] {
+  return spacesWhere(spaces, orgPermissions, (_can, space) =>
+    chatActsIn([...(orgPermissions ?? []), ...space.permissions]),
+  );
+}
+
+/**
+ * What the chat may do, as the module's `can` reads it: `permission` holds in some space where the
+ * chat may act. The working space's grants do not decide: a conversation acts in the spaces the
+ * caller names.
+ */
+export function grantedInSomeActingSpace(
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+  permission: string,
+): boolean {
+  return actingSpaces(spaces, orgPermissions).some((space) =>
+    gateIn(space, orgPermissions)(permission),
+  );
 }

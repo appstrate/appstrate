@@ -38,12 +38,13 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
+import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { CallSpace } from "./call-space.tsx";
 import {
-  buildRunPageHref,
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
@@ -182,6 +183,7 @@ export function ToolCallCard({
   isError,
   toolCallId,
   timing,
+  spaceId,
   footer,
 }: {
   phase: ToolPhase;
@@ -195,6 +197,8 @@ export function ToolCallCard({
   isError?: boolean;
   toolCallId: string;
   timing?: unknown;
+  /** Where the call acted: the space stamped on it. */
+  spaceId?: string;
   /** Under the header, e.g. the link to the package the call created. */
   footer?: React.ReactNode;
 }) {
@@ -232,6 +236,7 @@ export function ToolCallCard({
           <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
         </span>
+        <CallSpace spaceId={spaceId} />
         <Meta phase={phase} status={status} durationMs={durationMs} />
       </button>
       {errorMsg ? (
@@ -335,13 +340,15 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
+  // The call names the space the run ran in: the card reads and links there.
+  const spaceId = callSpaceOf(props);
   return (
     <ChatRunProgressCard
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
-      runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
       initialPackageId={packageId}
+      spaceId={spaceId}
       initialFiles={initialFiles}
       phase={phase}
       errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
@@ -373,6 +380,8 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       if (offer || phase !== "success") {
         return (
           <OAuthConnectCard
+            // It reads the integration where the call acted.
+            spaceId={callSpaceOf(props)}
             authUrl={offer?.authUrl}
             state={offer?.state}
             // The session route returns no `packageId`; the call's own path
@@ -412,6 +421,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
+        spaceId={callSpaceOf(props)}
         footer={
           created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
         }
@@ -469,6 +479,7 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
+        spaceId={callSpaceOf(props)}
         footer={
           created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
         }
@@ -495,6 +506,7 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
       isError={props.isError}
       toolCallId={props.toolCallId}
       timing={props.timing}
+      spaceId={callSpaceOf(props)}
     />
   ),
 });
@@ -512,6 +524,7 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
       isError={props.isError}
       toolCallId={props.toolCallId}
       timing={props.timing}
+      spaceId={callSpaceOf(props)}
     />
   ),
 });
@@ -538,6 +551,7 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}
+          spaceId={callSpaceOf(props)}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}

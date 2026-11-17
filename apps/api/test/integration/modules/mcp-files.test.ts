@@ -240,7 +240,6 @@ describe("mcp list_files", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: memberB.id,
     });
     const up = await stageUpload(

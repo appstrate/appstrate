@@ -39,6 +39,9 @@ import {
 } from "../src/resumable.ts";
 import { logger } from "../src/logger.ts";
 
+/** The scope of a session created with no origin space and no limit. */
+const UNLIMITED = { spaceId: null, restricted: false };
+
 const app = getTestApp();
 
 /** Nothing listens here — a Redis tier that must never be reached. */
@@ -46,7 +49,7 @@ const DEAD_REDIS = "redis://127.0.0.1:1";
 
 const STALE_MARKER_LOG = "chat resume: cleared stale active stream marker";
 
-describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
+describe("GET /api/orgs/:orgId/chat/sessions/:id/stream — stale marker", () => {
   let ctx: TestContext;
   let infoSpy: ReturnType<typeof mock>;
   const originalInfo = logger.info;
@@ -63,7 +66,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
   });
 
   async function createSession(): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -82,7 +85,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
   }
 
   function resume(sessionId: string) {
-    return app.request(`/api/chat/sessions/${sessionId}/stream`, {
+    return app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${sessionId}/stream`, {
       method: "GET",
       headers: authHeaders(ctx),
     });
@@ -102,7 +105,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
   it("clears a marker whose producer is gone, once, and answers 204", async () => {
     const sessionId = await createSession();
     // A stream id no producer ever recorded under, old enough to be stale.
-    await setActiveStream(sessionId, "dead");
+    await setActiveStream(sessionId, "dead", UNLIMITED);
     await ageMarker(sessionId);
     expect(await markerOf(sessionId)).toBe("dead");
 
@@ -126,7 +129,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
     // is written (with a fresh `updated_at`) but `context.run()` has not landed
     // yet, so the store has no recording either. Indistinguishable from a
     // crash except by age — and this one is young.
-    await setActiveStream(sessionId, "just-claimed");
+    await setActiveStream(sessionId, "just-claimed", UNLIMITED);
 
     const res = await resume(sessionId);
     expect(res.status).toBe(204);
@@ -146,8 +149,8 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
     const a = await createSession();
     const b = await createSession();
     const idle = await createSession();
-    await setActiveStream(a, "dead-a");
-    await setActiveStream(b, "dead-b");
+    await setActiveStream(a, "dead-a", UNLIMITED);
+    await setActiveStream(b, "dead-b", UNLIMITED);
 
     expect(await sweepStaleActiveStreams()).toBe(2);
     expect(await markerOf(a)).toBeNull();
@@ -159,7 +162,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
 
   it("init() sweeps on the in-memory tier and NOT on the Redis tier", async () => {
     const sessionId = await createSession();
-    await setActiveStream(sessionId, "dead-boot");
+    await setActiveStream(sessionId, "dead-boot", UNLIMITED);
     const base = buildModuleInitContext();
     try {
       // Redis configured: another replica may own this turn. Hands off.

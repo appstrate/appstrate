@@ -3,22 +3,26 @@
 import { eq } from "drizzle-orm";
 import { integrationConnections, integrationConnectionShares } from "@appstrate/db/schema";
 import type { ConnectionCaller } from "../../src/services/connection-reach.ts";
-import type { ConnectionPrincipal } from "../../src/lib/connection-principal.ts";
+import { boundSpacesOf, type ConnectionPrincipal } from "../../src/lib/connection-principal.ts";
 import { db } from "./db.ts";
 
 /**
- * A connection caller acting from no space, holding `integrations:connect`, permissions nowhere
- * and seeing no space, unless `overrides` say otherwise.
+ * A connection caller acting from no space, holding `integrations:connect`, permissions nowhere,
+ * seeing no space and naming any space but outside the one its principal is bound to, unless
+ * `overrides` say otherwise.
  */
 export function testCaller(
   principal: ConnectionPrincipal,
   overrides: Partial<ConnectionCaller> = {},
 ): ConnectionCaller {
+  const bound = boundSpacesOf(principal);
   return {
     principal,
     spaceId: null,
     canConnect: true,
     governs: false,
+    // A stand-in for the door's `credentialAdmitsSpace`, which reads a request context.
+    admitsSpace: (spaceId) => bound === null || bound.includes(spaceId),
     permissionsIn: async () => new Set(),
     spacesSeen: async () => [],
     ...overrides,

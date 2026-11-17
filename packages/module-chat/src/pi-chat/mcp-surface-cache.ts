@@ -2,13 +2,16 @@
 
 /**
  * Keyed completely: the server derives `instructions` and `tools/list` from `permissions`,
- * `ceiling`, `actor.type`, `contextInjected`, the space's `credential_proxy_open` (which
- * withholds the integration tools) and the boot-time catalog alone, which for the chat's
- * bearer reduce to the minted list, the URL's `context` and that setting (enforced by
- * `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a narrower surface a mid-handshake
- * role change stored under the wider key; tool calls are authorized live regardless.
+ * `ceiling`, `actor.type`, `rendersCards`, the boot-time catalog and, on the organization
+ * endpoint, the spaces the credential reaches (every space-acting tool lists them in its
+ * `space_id`, and a space's `credentialProxyOpen` decides which tools it declares). For the
+ * chat's bearer those are the turn's spaces, which it allowlists, so the key reduces to the
+ * minted permission list, the URL's `renders_cards`, and those spaces (enforced by
+ * `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a narrower surface a mid-handshake role
+ * change stored under the wider key; tool calls are authorized live regardless.
  */
 
+import type { ReachableSpaceGrant } from "@appstrate/core/module";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 
 export interface PlatformMcpSurface {
@@ -19,20 +22,29 @@ export interface PlatformMcpSurface {
 export const MCP_SURFACE_CACHE_MAX_ENTRIES = 64;
 
 /**
- * `permissions` MUST be the list minted into the bearer, `credentialProxyOpen` the setting of the
- * space the URL pins. The org and space path segments reach no descriptor.
+ * `permissions` and `spaces` MUST be the lists minted into the bearer (its permissions and its
+ * space allowlist). The org id of the path reaches no descriptor; `spaces` (ids, names, roles,
+ * sets and direct-access switches, in reach order) are written into every one.
  */
 export function platformMcpSurfaceKey(
   url: string,
   permissions: readonly string[],
-  credentialProxyOpen: boolean,
+  spaces: readonly ReachableSpaceGrant[],
 ): string {
   const parsed = new URL(url);
   return JSON.stringify([
     parsed.origin,
-    parsed.searchParams.get("context"),
+    parsed.searchParams.get("renders_cards"),
     [...new Set(permissions)].sort(),
-    credentialProxyOpen,
+    // In reach order, unsorted: the descriptors list the spaces in that order, so two orders are
+    // two surfaces.
+    spaces.map((space) => [
+      space.id,
+      space.name,
+      space.role,
+      [...space.permissions].sort(),
+      space.credentialProxyOpen,
+    ]),
   ]);
 }
 

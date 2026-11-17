@@ -147,7 +147,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
       // The selector is the ROUTER's decision now, and the service takes it as
@@ -197,7 +197,11 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } } as const,
+      principal: {
+        kind: "person",
+        binding: null,
+        actor: { type: "user", id: ctx.user.id },
+      } as const,
       canConnect: true,
       canConfigureIntegrations: true,
     };
@@ -254,7 +258,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      principal: { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
       version: "draft",

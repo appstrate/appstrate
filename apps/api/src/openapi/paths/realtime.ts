@@ -43,7 +43,7 @@ const SSE_RUN_VISIBILITY_DESCRIPTION =
 const SSE_CHANNEL_ACCESS_DESCRIPTION =
   "\n\nChannel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` " +
   "in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, " +
-  "as every `/api/chat` route does; an API key never holds it. `connection_update` carries only the " +
+  "as every chat route does; an API key never holds it. `connection_update` carries only the " +
   "caller's own rows — those of the stream's space, and the org-scoped ones of its org (`spaceId: null`) — " +
   "a session always receives it, an API key needs `integrations:read`. A channel the " +
   "caller may not receive is dropped from the subscription; the stream is refused with 403 only when " +

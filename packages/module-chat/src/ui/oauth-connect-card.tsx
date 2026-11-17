@@ -50,9 +50,9 @@ import {
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useCanIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
-import { orgSpaceFromHeaders } from "./run-events.ts";
+import { orgSpaceFromHeaders, requestInSpace } from "./run-events.ts";
 import {
   claimResume,
   encodeResume,
@@ -80,9 +80,11 @@ function watchConnectionSse(
   getHeaders: (() => Record<string, string>) | undefined,
   packageId: string | undefined,
   onHit: () => void,
+  callSpaceId?: string,
 ): () => void {
   if (typeof EventSource === "undefined") return () => {};
-  const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(getHeaders?.() ?? {});
+  const { orgId, spaceId: workingSpaceId, viewAs } = orgSpaceFromHeaders(getHeaders?.() ?? {});
+  const spaceId = callSpaceId ?? workingSpaceId;
   if (!orgId || !spaceId) return () => {};
 
   let es: EventSource | null = null;
@@ -123,6 +125,7 @@ export function OAuthConnectCard({
   errorText,
   runStarted = false,
   expiresAt,
+  spaceId: callSpaceId,
 }: {
   /** Absent while the initiate call is still streaming — renders the preparing state. */
   authUrl?: string;
@@ -140,12 +143,17 @@ export function OAuthConnectCard({
   runStarted?: boolean;
   /** RFC 3339 expiry of the connect session behind `authUrl`. */
   expiresAt?: string;
+  /** The space the call acted in (the call names one): the card reads there. */
+  spaceId?: string;
 }) {
   const aui = useAui();
   const transport = useChatTransport();
-  const { can, t } = useChatHost();
-  // Without `integrations:read` the chip keeps the bare package id.
-  const readsIntegration = can("integrations:read");
+  // The scoping headers alone: the host keeps this function across a list-filter change, which
+  // rebuilds the transport around it, so the completion listener does not reconnect then.
+  const getHeaders = transport?.getHeaders;
+  const { t } = useChatHost();
+  // Without `integrations:read` (in the call's space) the chip keeps the bare package id.
+  const readsIntegration = useCanIn()(callSpaceId, "integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
@@ -156,7 +164,8 @@ export function OAuthConnectCard({
   // brand instead of the bare `@scope/name` id. Under the shell's typed key for
   // `GET /api/integrations/{packageId}`: its detail reads and this one are one cache entry. A
   // failed read is not fatal: the chip falls back to the package id, no brand icon.
-  const { orgId, spaceId } = orgSpaceFromHeaders(transport?.getHeaders());
+  const { orgId, spaceId: workingSpaceId } = orgSpaceFromHeaders(getHeaders?.());
+  const spaceId = callSpaceId ?? workingSpaceId;
   const integration = useQuery({
     queryKey: [
       "get",
@@ -169,7 +178,12 @@ export function OAuthConnectCard({
       },
     ],
     queryFn: async (): Promise<IntegrationRead> =>
-      (await transport!.request(`/api/integrations/${encodePackageIdPath(packageId!)}`)).json(),
+      (
+        await requestInSpace(
+          transport!.request,
+          callSpaceId,
+        )(`/api/integrations/${encodePackageIdPath(packageId!)}`)
+      ).json(),
     enabled: !!packageId && readsIntegration && !!transport && !!orgId && !!spaceId,
   });
   const meta = useMemo<ResumeMeta | null>(() => {
@@ -262,13 +276,18 @@ export function OAuthConnectCard({
 
     const stopListening = listenConnectCompletion(card, onCompletion, window);
 
-    const closeSse = watchConnectionSse(transport?.getHeaders, packageId, () => waiter.connected());
+    const closeSse = watchConnectionSse(
+      getHeaders,
+      packageId,
+      () => waiter.connected(),
+      callSpaceId,
+    );
 
     return () => {
       stopListening();
       closeSse();
     };
-  }, [phase, state, packageId, transport, waiter, complete]);
+  }, [phase, state, packageId, getHeaders, waiter, complete, callSpaceId]);
 
   // Flip to the expired state when the session lapses, so the button never
   // outlives its link; `start` re-checks for anything the timer misses.

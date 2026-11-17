@@ -13,9 +13,10 @@ import {
   ChatTransportProvider,
   SelectConversationProvider,
 } from "@appstrate/module-chat/ui";
-import { usePermissions } from "../../hooks/use-permissions";
+import { ChatSidebarSkeleton } from "../../components/loading-skeletons";
 import { ChatTitleCrumb } from "./chat-title-crumb";
-import { useChatTransport, useChatTranslate } from "./use-chat-runtime";
+import { renderSpaces } from "./render-spaces";
+import { useChatCan, useChatFilter, useChatTransport, useChatTranslate } from "./use-chat-runtime";
 
 export function ChatSidebar() {
   // Layout sits above the chat's routes, so match here instead of `useParams`.
@@ -23,18 +24,34 @@ export function ChatSidebar() {
   const navigate = useNavigate();
   const transport = useChatTransport();
   const t = useChatTranslate();
-  const { can } = usePermissions();
-  // `replace` keeps conversation switches out of the back-history.
+  const can = useChatCan();
+  const { known } = useChatFilter();
+  // A conversation opens in place, whatever the list's filter; `replace` keeps conversation
+  // switches out of the back-history.
   const select = useCallback(
     (id: string | null) => navigate(id ? `/chat/${id}` : "/chat", { replace: true }),
     [navigate],
   );
 
+  // The list waits for the mode like the page: its shape, and the trail's slot, hold meanwhile.
+  if (!known) {
+    return (
+      <>
+        <ChatTitleCrumb conversationId={conversationId} pending />
+        <ChatSidebarSkeleton />
+      </>
+    );
+  }
   return (
-    <ChatTransportProvider value={transport}>
+    <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={select}>
-        <ChatTitleCrumb conversationId={conversationId} />
-        <ChatConversationList activeId={conversationId} t={t} can={can} />
+        <ChatTitleCrumb conversationId={conversationId} transport={transport} />
+        <ChatConversationList
+          activeId={conversationId}
+          t={t}
+          can={can}
+          renderSpaces={renderSpaces}
+        />
       </SelectConversationProvider>
     </ChatTransportProvider>
   );

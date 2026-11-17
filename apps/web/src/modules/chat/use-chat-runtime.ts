@@ -4,10 +4,14 @@
 
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { fetchOrThrow } from "../../api/client";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { useSpaces } from "../../hooks/use-spaces";
+import { actingSpaces, grantedInSomeActingSpace } from "../../lib/space-lists";
+import { chatTransport } from "./chat-transport";
 
 /**
  * Scoping headers + the UI language (server defaults to fr without it), read at
@@ -25,27 +29,39 @@ function useChatGetHeaders() {
 }
 
 /**
- * The chat's `ChatTransport` over `getHeaders`: its REST calls go through {@link fetchOrThrow}, so
- * a refusal carries the server's code and reaches the shell's global error handling.
+ * The space the chat is filtered to: the selected space, none in « Tous les espaces » (the chat holds
+ * the mode). `known` once the space listing has answered: before, the mode cannot be told, and a
+ * chat page would read the wrong list. `ready` once the filter itself is settled: known, and a
+ * space resolved when one is selected.
  */
-function chatTransport(getHeaders: () => Record<string, string>) {
-  return {
-    getHeaders,
-    request: (path: string, init?: RequestInit) => {
-      const headers = new Headers(getHeaders());
-      new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-      return fetchOrThrow(path, { ...init, headers });
-    },
-  };
+export function useChatFilter(): { spaceId: string | null; known: boolean; ready: boolean } {
+  const { on, known } = useOverviewMode();
+  const currentSpaceId = useCurrentSpaceId();
+  const spaceId = on ? null : currentSpaceId;
+  return { spaceId, known, ready: known && (on || spaceId !== null) };
+}
+
+/**
+ * {@link chatTransport} over `getHeaders`, for the filter in force; its identity moves with it.
+ * Undefined until the organization and the filter are settled: the chat's queries wait for it.
+ */
+function useTransportOver(getHeaders: () => Record<string, string>) {
+  const orgId = useCurrentOrgId();
+  const { spaceId, ready } = useChatFilter();
+  return useMemo(
+    () => (orgId && ready ? chatTransport(getHeaders, orgId, spaceId) : undefined),
+    [getHeaders, orgId, ready, spaceId],
+  );
 }
 
 /** The shell's own transport (nav badge, outside a chat page): scoping headers only, no chat locale. */
-export const SHELL_CHAT_TRANSPORT = chatTransport(buildScopingHeaders);
+export function useShellChatTransport() {
+  return useTransportOver(buildScopingHeaders);
+}
 
-/** {@link chatTransport} over the page's headers; its identity moves with them. */
+/** {@link chatTransport} over the page's headers (scoping and chat locale). */
 export function useChatTransport() {
-  const getHeaders = useChatGetHeaders();
-  return useMemo(() => chatTransport(getHeaders), [getHeaders]);
+  return useTransportOver(useChatGetHeaders());
 }
 
 /** The `chat` namespace's `t`, in the shape the module takes. */
@@ -54,5 +70,33 @@ export function useChatTranslate() {
   return useCallback(
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
     [t],
+  );
+}
+
+/**
+ * The grants the chat module reads as its own: "some space where the chat may act grants it" (a
+ * conversation acts in the spaces the caller names, never in the working one the host merely
+ * stands in).
+ */
+export function useChatCan() {
+  const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  return useCallback(
+    (permission: string) => grantedInSomeActingSpace(spaces, orgPermissions, permission),
+    [spaces, orgPermissions],
+  );
+}
+
+/**
+ * The ids of the spaces the chat acts in (the backend's acting set). The module lists the skills
+ * of these, and a new conversation takes the selected space as its origin only when it is one of
+ * them.
+ */
+export function useChatActingSpaceIds(): string[] {
+  const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  return useMemo(
+    () => actingSpaces(spaces, orgPermissions).map((space) => space.id),
+    [spaces, orgPermissions],
   );
 }

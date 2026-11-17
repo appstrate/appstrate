@@ -574,7 +574,7 @@ jobs:
           #    parallel pairing-lifecycle e2e (`providerId: "claude-code"`)
           #    passes the same checks for the Anthropic OAuth surface.
           #  - @appstrate/module-chat: the chat surface (`tests/chat/*.ui.spec.ts`);
-          #    without it `/api/chat/*` does not exist and the shell grants no
+          #    without it `/api/orgs/:orgId/chat/*` does not exist and the shell grants no
           #    `chat:*`, so the composer's controls never render.
           # oidc is kept in lockstep with .env.example / packages/env defaults so
           # the suite stays representative of a default self-host install.

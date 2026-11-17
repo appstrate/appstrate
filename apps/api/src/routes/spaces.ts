@@ -48,6 +48,7 @@ import {
   callerOrgRole,
   callerPersonalOwnerId,
   callerSpaceAccess,
+  credentialAdmitsSpace,
   effectiveInSpace,
   personaFor,
   personaMemberships,
@@ -408,13 +409,9 @@ export function createSpacesRouter() {
       personalOwnerId,
       personaMemberships(personaFor(c, orgId)),
     );
-    // A credential PINNED to a space never enumerates its siblings: it sees the
-    // one space it is bound to, whatever its subject reaches. Keyed on the
-    // pinned space rather than on `authMethod === "api_key"`, for the reason
-    // `pinnedSpaceScopeGuard` is — any strategy that pins a space
-    // is confined, not just the one auth method that did when this was written.
-    const pinnedSpaceId = c.get("spaceId");
-    const scoped = pinnedSpaceId ? entries.filter((e) => e.space.id === pinnedSpaceId) : entries;
+    // A confined credential never enumerates the spaces it may not name, whatever
+    // its subject reaches — the rule `pinnedSpaceScopeGuard` applies to the path.
+    const scoped = entries.filter((e) => credentialAdmitsSpace(c, e.space.id));
     return c.json(
       listResponse(scoped.map(({ space, role }) => spaceWireForCaller(c, space, role))),
     );

@@ -36,6 +36,9 @@ export const chatComponentSchemas = {
       "unread",
       "skill_mode",
       "pinned_skills",
+      "spaceId",
+      "restricted",
+      "space_ids",
       "createdAt",
       "updatedAt",
     ],
@@ -50,19 +53,35 @@ export const chatComponentSchemas = {
       unread: {
         type: "boolean",
         description:
-          "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
+          "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read.",
       },
       skill_mode: {
         type: "string",
         enum: [...chatSkillModeValues],
         description:
-          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the space enforces (GET /api/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/chat).",
+          "How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the origin space enforces (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
       },
       pinned_skills: {
         type: "array",
         items: { type: "string" },
         description:
           "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
+      },
+      spaceId: {
+        type: ["string", "null"],
+        description:
+          "The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the enforced skills, the default space of a request naming none, and the space a limited conversation is confined to.",
+      },
+      restricted: {
+        type: "boolean",
+        description:
+          "Whether the conversation is limited to its origin space: its tools act there alone. Always false without an origin space.",
+      },
+      space_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The touched spaces: the origin space (first), then those a tool call named by `space_id`, a `skill://` or `appfile://` read or an attachment touched, by touch time. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -94,21 +113,27 @@ export const chatComponentSchemas = {
 } as const;
 
 export const chatPaths = {
-  "/api/chat/sessions": {
+  "/api/orgs/{orgId}/chat/sessions": {
     get: {
       operationId: "listChatSessions",
       tags: ["Chat"],
       summary: "List chat sessions",
       description:
-        "List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
+        'List every conversation the caller can open in the organization, most recent activity (`updatedAt`) first: their own whose touched spaces they all reach with `chat:read`; with `?spaceId=`, those whose touched spaces include that space, or that touched none yet (a conversation that has acted nowhere holds no space data). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Keyset-paginated: when `hasMore` is `true`, pass the last session\'s `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.',
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         {
           name: "limit",
           in: "query",
           description: "Page size. Out-of-range or non-numeric values fall back to 100.",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
+        {
+          name: "spaceId",
+          in: "query",
+          description:
+            "Keep the conversations that touched this space or no space yet; the space is one the caller must read with `chat:read` (else a 400 naming `spaceId`). The cursor and the page size apply within the filtered list.",
+          schema: { type: "string" },
         },
         {
           name: "q",
@@ -121,7 +146,7 @@ export const chatPaths = {
           name: "startingAfter",
           in: "query",
           description:
-            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400.",
+            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this (filtered) list is a 400.",
           schema: { type: "string" },
         },
       ],
@@ -154,17 +179,28 @@ export const chatPaths = {
       operationId: "createChatSession",
       tags: ["Chat"],
       summary: "Create a chat session",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
+      description:
+        "Starts a conversation of the organization and its author. `spaceId` is its origin space — the space selected when it is created, which must be one of the spaces the conversation can act in (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together; else a 400 naming the field) — and it is touched by definition, so the conversation is listed in that space before anything else. `restricted: true` limits it to that space and needs `spaceId` (else a 400 naming the field). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403).",
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       requestBody: {
         required: false,
         content: {
           "application/json": {
             schema: {
               type: "object",
-              properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              properties: {
+                title: { type: "string", minLength: 1, maxLength: 200 },
+                spaceId: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "The origin space: the space selected when the conversation is created. Absent from the overview.",
+                },
+                restricted: {
+                  type: "boolean",
+                  description: "Limit the conversation to its origin space; needs `spaceId`.",
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -187,14 +223,13 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}": {
+  "/api/orgs/{orgId}/chat/sessions/{id}": {
     get: {
       operationId: "getChatSession",
       tags: ["Chat"],
       summary: "Get a chat session with its messages",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -226,12 +261,13 @@ export const chatPaths = {
       },
     },
     patch: {
-      operationId: "renameChatSession",
+      operationId: "updateChatSession",
       tags: ["Chat"],
-      summary: "Rename a chat session",
+      summary: "Rename a chat session or change its limit",
+      description:
+        "`title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with. At least one field is required.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -240,18 +276,26 @@ export const chatPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["title"],
-              properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              properties: {
+                title: { type: "string", minLength: 1, maxLength: 200 },
+                restricted: { type: "boolean" },
+              },
+              minProperties: 1,
               additionalProperties: false,
             },
           },
         },
       },
       responses: {
-        "204": { description: "Session renamed" },
+        "204": { description: "Session updated" },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`chat_turn_in_flight` — `restricted` would change while a turn is running. RFC 9457 problem+json.",
+          content: problem,
+        },
       },
     },
     delete: {
@@ -259,8 +303,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Delete a chat session",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -270,7 +313,7 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}/read": {
+  "/api/orgs/{orgId}/chat/sessions/{id}/read": {
     put: {
       operationId: "markChatSessionRead",
       tags: ["Chat"],
@@ -278,8 +321,7 @@ export const chatPaths = {
       description:
         "Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -293,7 +335,7 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}/stream": {
+  "/api/orgs/{orgId}/chat/sessions/{id}/stream": {
     get: {
       operationId: "resumeChatStream",
       tags: ["Chat"],
@@ -301,8 +343,7 @@ export const chatPaths = {
       description:
         "Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -320,16 +361,22 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/enforced-skills": {
+  "/api/orgs/{orgId}/chat/enforced-skills": {
     get: {
       operationId: "listChatEnforcedSkills",
       tags: ["Chat"],
-      summary: "List the skills the space enforces in chat",
+      summary: "List the skills a space enforces in chat",
       description:
-        "The skills the current space imposes on every chat conversation, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. Names only — the content is never returned here. Sorted by id.",
+        "The skills `spaceId` imposes on the conversations started in it, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. The composer shows them for a new conversation in the selected space, or for an existing conversation's origin space. Names only — the content is never returned here. Sorted by id. `spaceId` is required and must be a space the caller reads chats in (`chat:read`); else a 400 naming the field. Ignores `X-Space-Id`; admitted when some reachable space grants `chat:read`. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403).",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
+        {
+          name: "spaceId",
+          in: "query",
+          required: true,
+          schema: { type: "string", minLength: 1 },
+          description: "The space whose enforced skills are listed.",
+        },
       ],
       responses: {
         "200": {
@@ -363,27 +410,27 @@ export const chatPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": {
           $ref: "#/components/responses/RateLimited",
           description: "Rate limited (120/min per caller)",
         },
         "503": enforcedSkillsUnavailableResponse(
-          "the space's enforced skills could not be loaded.",
+          "the skills the space enforces could not be loaded.",
         ),
       },
     },
   },
-  "/api/chat": {
+  "/api/orgs/{orgId}/chat": {
     post: {
       operationId: "streamChat",
       tags: ["Chat"],
       summary: "Run a conversational turn (streaming)",
       description:
-        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The default space of a request that names none (never a pin) is the conversation's origin space; without one, the caller's personal space, else the organization's default space, when the turn acts there; the assistant asks only when none of them is. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         {
           name: "X-Model-Id",
           in: "header",
@@ -406,6 +453,17 @@ export const chatPaths = {
                   minItems: 1,
                 },
                 modelId: { type: "string" },
+                spaceId: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "The origin space of a conversation this turn creates, one of the spaces it can act in (else a 400 naming the field). Ignored for an existing conversation. Absent from the overview.",
+                },
+                restricted: {
+                  type: "boolean",
+                  description:
+                    "Limits a conversation this turn creates to its origin space; needs `spaceId` (else a 400 naming the field). Ignored for an existing conversation.",
+                },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
                 package_authoring: {
                   type: "boolean",
@@ -456,7 +514,7 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit (or its origin space) changed while the turn was starting; nothing was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends.",
           content: problem,
         },
         "429": {
@@ -466,13 +524,13 @@ export const chatPaths = {
         },
         "503": {
           description:
-            "`enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
+            "`enforced_skills_unavailable` — the skills the origin space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
           content: problem,
         },
       },
     },
   },
-  "/api/chat/sessions/{id}/stop": {
+  "/api/orgs/{orgId}/chat/sessions/{id}/stop": {
     post: {
       operationId: "stopChatStream",
       tags: ["Chat"],
@@ -480,8 +538,7 @@ export const chatPaths = {
       description:
         "Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

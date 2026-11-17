@@ -73,9 +73,9 @@ export function messagesWithAttachmentsAsText(messages: UIMessage[]): UIMessage[
 /**
  * Materialize the `upload://`/`appfile://` file parts of one user message into
  * durable files, rewriting each part's URI to the stable `appfile://` form
- * and stamping the authoritative size (from the file row) into
- * `providerMetadata.appstrate.size` so downstream rendering and the model-facing
- * block can show it. Non-file parts pass through untouched; a message with no
+ * and stamping the authoritative size (from the file row) and the space it
+ * lives in into `providerMetadata.appstrate` (`size`, `spaceId`) so downstream
+ * rendering, the file's download and the model-facing block can use them. Non-file parts pass through untouched; a message with no
  * file parts is returned as-is (the `resolve` seam is never called).
  *
  * `resolve` is injected (the platform file service) so this stays free of
@@ -102,7 +102,10 @@ export async function materializeUserAttachments(
       url: resolved.uri,
       mediaType: resolved.mime,
       filename: resolved.name,
-      providerMetadata: { ...part.providerMetadata, appstrate: { size: resolved.size } },
+      providerMetadata: {
+        ...part.providerMetadata,
+        appstrate: { size: resolved.size, spaceId: resolved.spaceId },
+      },
     } satisfies FileUIPart);
   }
   return { ...message, parts: rewritten };

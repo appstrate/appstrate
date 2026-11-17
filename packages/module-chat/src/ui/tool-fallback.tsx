@@ -9,6 +9,7 @@
 import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { WrenchIcon } from "lucide-react";
 import { ToolCallCard } from "./tool-uis.tsx";
+import { callSpaceOf } from "./conversation-scope.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 
 export const ToolFallback: ToolCallMessagePartComponent = (props) => (
@@ -21,5 +22,6 @@ export const ToolFallback: ToolCallMessagePartComponent = (props) => (
     isError={props.isError}
     toolCallId={props.toolCallId}
     timing={props.timing}
+    spaceId={callSpaceOf(props)}
   />
 );

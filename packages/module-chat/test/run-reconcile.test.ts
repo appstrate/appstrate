@@ -52,7 +52,6 @@ describe("orphaned chat run reconciliation", () => {
     await db.insert(chatSessions).values({
       id,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       title: null,
       activeStreamId: overrides.activeStreamId ?? null,
@@ -130,6 +129,17 @@ describe("orphaned chat run reconciliation", () => {
       .limit(1);
     expect(row?.chatSessionId).toBe(sessionId);
     expect(row?.metadata).toEqual({ degraded_integrations: ["@acme/gmail"] });
+  });
+
+  it("links the notice into the run's space", async () => {
+    const session = await createSession();
+    const run = await createRun(session);
+    await publishFile(run, "report.html");
+    await reconcileChatRun({ runId: run, orgId: ctx.orgId });
+    const [notice] = await messages(session);
+    expect(JSON.stringify(notice!.content)).toContain(
+      `/agents/${packageId}/runs/${run}?enterSpace=${ctx.defaultSpaceId}`,
+    );
   });
 
   it("detaches the relationship when its conversation is deleted", async () => {

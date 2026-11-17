@@ -44,7 +44,7 @@ import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
-import { buildPlatformMcpTools } from "./mcp-tools.ts";
+import { buildPlatformMcpTools, type TurnSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
@@ -90,9 +90,9 @@ export interface PiChatInput {
    */
   platformMcp: {
     url: string;
+    /** The spaces a call may name, and the record of those the conversation touched. */
+    organization: TurnSpaces;
     headers: Record<string, string>;
-    /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
-    spaceId: string;
     fetch?: typeof fetch;
     surfaceKey?: string;
     /** Registers the `list_skills` tool (`manual` skill mode with `skills:read`). */
@@ -231,6 +231,8 @@ export function runPiChat(input: PiChatInput): Response {
     },
     // Bands each call by its tier for the platform to price; a proxy-metered turn needs none.
     cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
+    // Every call records the space it was dispatched in, for the cards that show it later.
+    turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
 
   const stream = createUIMessageStream({

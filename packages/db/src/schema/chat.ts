@@ -12,6 +12,10 @@ import {
   bigint,
   unique,
   uniqueIndex,
+  primaryKey,
+  foreignKey,
+  boolean,
+  check,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -41,14 +45,20 @@ export const chatSessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /** Space the session belongs to (RBAC spec §5): sessions are space-scoped. */
-    spaceId: text("space_id")
-      .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+    /**
+     * The conversation's ORIGIN space: the space selected when it was created, NULL when it
+     * was created from the overview. It is not an owner: lists, filters and opening do not
+     * depend on it. It gives the enforced skills, the default space of a request naming none,
+     * and the space a limited conversation is confined to. Deleting the space detaches the
+     * conversation (NULL, and `restricted` false: `deleteSpace` writes both in its transaction).
+     */
+    spaceId: text("space_id"),
+    /** Confined to its origin space (its turns' allowlist is that space alone); needs an origin space. */
+    restricted: boolean("restricted").notNull().default(false),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no
-    // turn is generating. Set when a `POST /api/chat` turn starts, cleared when
-    // it finalizes. The resume endpoint (`GET /sessions/:id/stream`) reconnects
+    // turn is generating. Set when a `POST /api/orgs/:orgId/chat` turn starts, cleared when
+    // it finalizes. The resume endpoint (`GET …/sessions/:id/stream`) reconnects
     // a reloaded client to the live stream by this id; a stale/orphaned id (no
     // live producer in the store) is treated as "no active stream" (204).
     activeStreamId: text("active_stream_id"),
@@ -74,11 +84,55 @@ export const chatSessions = pgTable(
   (table) => [
     index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
     index("idx_chat_sessions_space_user").on(table.spaceId, table.userId),
+    check("chat_sessions_restricted_needs_space", sql`restricted = false OR space_id IS NOT NULL`),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(chat_session_id, org_id)`: Postgres needs a unique index
     // covering exactly these columns for the FK to attach. Trivially valid —
     // `id` alone is the PK, so `(id, org_id)` can never collide.
     uniqueIndex("uq_chat_sessions_id_org_id").on(table.id, table.orgId),
+    // Tenant-integrity FK: the origin space is inseparable from the session's org. A NULL
+    // `space_id` passes (MATCH SIMPLE). No delete action: `deleteSpace` detaches the
+    // conversations first, lifting their limit (`chat_sessions_restricted_needs_space`) in the
+    // same write; an organization delete removes them in the same statement as its spaces.
+    foreignKey({
+      name: "chat_sessions_space_id_org_id_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }),
+  ],
+);
+
+/**
+ * The spaces a conversation touched besides its origin space (`chat_sessions.space_id`,
+ * which is touched by definition and recorded here never): tool calls naming a `space_id`,
+ * `skill://` / `appfile://` reads, attachments. A conversation belongs to the organization
+ * and its author; spaces are filters over the touched set. It is opened only while its
+ * reader reaches every space of that set with `chat:read`; a deleted space drops out of the
+ * record by cascade.
+ */
+export const chatSessionSpaces = pgTable(
+  "chat_session_spaces",
+  {
+    sessionId: text("session_id").notNull(),
+    spaceId: text("space_id").notNull(),
+    /** The session's org, and so the space's: both composite FKs below pin it. */
+    orgId: uuid("org_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.spaceId] }),
+    // Scanned by the space FK's cascade.
+    index("idx_chat_session_spaces_space").on(table.spaceId),
+    foreignKey({
+      name: "chat_session_spaces_session_org_fk",
+      columns: [table.sessionId, table.orgId],
+      foreignColumns: [chatSessions.id, chatSessions.orgId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "chat_session_spaces_space_org_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("cascade"),
   ],
 );
 

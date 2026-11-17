@@ -9,7 +9,7 @@
  *     (`ctx.redisUrl`), not from a second, independent read of `process.env`;
  *   - its client fails commands on a finite retry budget, like every other
  *     request-path client (`apps/api/src/lib/redis.ts`) — `GET
- *     /api/chat/sessions/:id/stream` reads through it, and "retry forever"
+ *     /api/orgs/:orgId/chat/sessions/:id/stream` reads through it, and "retry forever"
  *     turns a Redis outage into a hung request instead of an error;
  *   - `chatModule.shutdown()` closes it. It used to only drain in-flight turns,
  *     so the connection (and its reconnect loop) outlived the module.

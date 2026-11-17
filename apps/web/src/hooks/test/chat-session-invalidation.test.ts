@@ -2,9 +2,9 @@
 
 /**
  * `matchesChatSessionQuery` — the scoping rule behind the `chat_session_update`
- * invalidation. A turn emits ≥5 frames; before scoping every one of them
- * refetched EVERY `/api/files` page in the cache (a run's file tab, the
- * gallery, other conversations' sidebars) and every session detail.
+ * invalidation. A turn emits ≥5 frames: each refetches the list, and only the
+ * detail and the file list of its own conversation, never a run's file tab,
+ * the gallery or another conversation's sidebar.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -15,14 +15,15 @@ const HEADER = { "X-Org-Id": "org_1" };
 const SESSIONS_LIST_KEY = ["chat", "sessions"];
 const detailKey = (id: string) => [
   "get",
-  "/api/chat/sessions/{id}",
-  { params: { path: { id }, header: HEADER } },
+  "/api/orgs/{orgId}/chat/sessions/{id}",
+  { params: { path: { orgId: "org_1", id } } },
 ];
 const filesForSessionKey = (id: string) => [
   "get",
-  "/api/files",
-  { params: { query: { context_chat_session_id: id, limit: 100 }, header: HEADER } },
+  "/api/orgs/{orgId}/files",
+  { params: { path: { orgId: "org_1" }, query: { context_chat_session_id: id, limit: 100 } } },
 ];
+const ORG_FILES_KEY = ["get", "/api/orgs/{orgId}/files", { params: { path: { orgId: "org_1" } } }];
 const FILES_FOR_RUN_KEY = [
   "get",
   "/api/files",
@@ -49,10 +50,20 @@ describe("matchesChatSessionQuery", () => {
     expect(matchesChatSessionQuery(FILES_GALLERY_KEY, "chs_a")).toBe(false);
   });
 
+  it("leaves the space file route alone, whatever its filter", () => {
+    const spaceFiles = [
+      "get",
+      "/api/files",
+      { params: { query: { context_chat_session_id: "chs_a" }, header: HEADER } },
+    ];
+    expect(matchesChatSessionQuery(spaceFiles, "chs_a")).toBe(false);
+    expect(matchesChatSessionQuery(spaceFiles, undefined)).toBe(false);
+  });
+
   it("falls back to the whole family when the session id is unknown (reconnect)", () => {
     expect(matchesChatSessionQuery(detailKey("chs_b"), undefined)).toBe(true);
     expect(matchesChatSessionQuery(filesForSessionKey("chs_b"), undefined)).toBe(true);
-    expect(matchesChatSessionQuery(FILES_FOR_RUN_KEY, undefined)).toBe(true);
+    expect(matchesChatSessionQuery(ORG_FILES_KEY, undefined)).toBe(true);
   });
 
   it("never touches queries outside the three chat families", () => {

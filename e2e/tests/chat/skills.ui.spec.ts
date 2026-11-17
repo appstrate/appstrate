@@ -27,10 +27,13 @@ test("carries the chosen mode and skills with the first message, and writes noth
   const name = `e2e-skill-${Date.now()}`;
   await createSkill(apiClient, scope, name);
   const packageId = `${scope}/${name}`;
+  // Every chat call goes to the organization's routes (`chatRoute` for the API client, which adds `/api`).
+  const chatRoute = `/orgs/${browserCtx.org.orgId}/chat`;
+  const chat = `/api${chatRoute}`;
 
   const writes: string[] = [];
   page.on("request", (req) => {
-    if (req.method() !== "GET" && req.url().includes("/api/chat")) writes.push(req.url());
+    if (req.method() !== "GET" && req.url().includes(chat)) writes.push(req.url());
   });
 
   await page.goto("/chat");
@@ -61,15 +64,17 @@ test("carries the chosen mode and skills with the first message, and writes noth
 
   // Choosing created nothing: same page, no conversation, no write.
   await expect(page).toHaveURL(/\/chat$/);
-  const sessions = (await (await apiClient.get("/chat/sessions")).json()) as { data: unknown[] };
+  const sessions = (await (await apiClient.get(`${chatRoute}/sessions`)).json()) as {
+    data: unknown[];
+  };
   expect(sessions.data).toEqual([]);
   expect(writes).toEqual([]);
 
   // The first message carries the selection; the turn itself is not the subject.
   const sent = page.waitForRequest(
-    (req) => req.method() === "POST" && new URL(req.url()).pathname === "/api/chat",
+    (req) => req.method() === "POST" && new URL(req.url()).pathname === chat,
   );
-  await page.route("**/api/chat", (route) => route.fulfill({ status: 503, body: "" }));
+  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
   await page.getByPlaceholder("Message Appstrate…").fill("bonjour");
   await page.keyboard.press("Enter");
   const body = (await sent).postDataJSON() as { skill_mode?: string; pinned_skills?: string[] };

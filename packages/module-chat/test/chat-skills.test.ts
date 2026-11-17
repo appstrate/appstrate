@@ -12,27 +12,76 @@ import {
   togglePinned,
 } from "../src/ui/chat-skills.ts";
 import { MAX_PINNED_SKILLS } from "../src/skills.ts";
-import { requestAnswering } from "./fake-request.ts";
+import { requestAnswering, transportOver } from "./fake-request.ts";
 
 describe("fetchSkills", () => {
-  it("GETs the space listing and parses its rows", async () => {
+  it("GETs the organization listing and parses its rows", async () => {
     const request = requestAnswering(() =>
       Response.json({
-        data: [{ id: "@acme/tone", name: "Tone", description: null, version: "1.2.0" }],
+        data: [
+          {
+            id: "@acme/tone",
+            name: "Tone",
+            description: null,
+            version: "1.2.0",
+            space_ids: ["spc_a"],
+          },
+        ],
       }),
     );
 
-    const got = await fetchSkills(request);
+    const got = await fetchSkills(transportOver(request), ["spc_a"]);
 
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/packages/skills"]);
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", description: null, version: "1.2.0" },
     ]);
   });
 
+  it("keeps the skills active in a space the chat acts in", async () => {
+    const row = (id: string, ...space_ids: string[]) => ({
+      id,
+      name: id,
+      description: null,
+      version: "1.0.0",
+      space_ids,
+    });
+    const request = requestAnswering(() =>
+      Response.json({
+        data: [
+          row("@acme/a", "spc_view"),
+          row("@acme/b", "spc_other", "spc_act"),
+          row("@acme/c", "spc_act"),
+        ],
+      }),
+    );
+    const transport = transportOver(request);
+
+    const got = await fetchSkills(transport, ["spc_act"]);
+
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
+    expect(got.map((skill) => skill.packageId)).toEqual(["@acme/b", "@acme/c"]);
+    // No acting space: nothing is offered.
+    expect(await fetchSkills(transport, [])).toEqual([]);
+  });
+
+  it("drops a row that lists no spaces", async () => {
+    const request = requestAnswering(() =>
+      Response.json({
+        data: [
+          { id: "@acme/a", name: "A", description: null, version: "1.0.0" },
+          { id: "@acme/b", name: "B", description: null, version: "1.0.0", space_ids: "spc_a" },
+          { id: "@acme/c", name: "C", description: null, version: "1.0.0", space_ids: ["spc_a"] },
+        ],
+      }),
+    );
+    const got = await fetchSkills(transportOver(request), ["spc_a"]);
+    expect(got.map((skill) => skill.packageId)).toEqual(["@acme/c"]);
+  });
+
   it("throws on a refusal, as the host raised it", async () => {
     const request = requestAnswering(() => new Response(null, { status: 403 }));
-    await expect(fetchSkills(request)).rejects.toMatchObject({ status: 403 });
+    await expect(fetchSkills(transportOver(request), [])).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -48,9 +97,11 @@ describe("fetchEnforcedSkills", () => {
       }),
     );
 
-    const got = await fetchEnforcedSkills(request);
+    const got = await fetchEnforcedSkills(transportOver(request), "spc_a");
 
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/chat/enforced-skills"]);
+    expect(request.calls.map((c) => c.path)).toEqual([
+      "/api/orgs/org_1/chat/enforced-skills?spaceId=spc_a",
+    ]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", version: "1.2.0" },
       { packageId: "@acme/gone", display_name: "Gone", version: null },
@@ -59,7 +110,9 @@ describe("fetchEnforcedSkills", () => {
 
   it("throws on a refusal", async () => {
     const request = requestAnswering(() => new Response(null, { status: 503 }));
-    await expect(fetchEnforcedSkills(request)).rejects.toMatchObject({ status: 503 });
+    await expect(fetchEnforcedSkills(transportOver(request), "spc_a")).rejects.toMatchObject({
+      status: 503,
+    });
   });
 
   // Fail closed: a drifted policy read is an error, never "nothing imposed".
@@ -70,7 +123,9 @@ describe("fetchEnforcedSkills", () => {
   ] as const) {
     it(`throws on ${label}`, async () => {
       const request = requestAnswering(() => Response.json(body));
-      await expect(fetchEnforcedSkills(request)).rejects.toThrow("Unexpected");
+      await expect(fetchEnforcedSkills(transportOver(request), "spc_a")).rejects.toThrow(
+        "Unexpected",
+      );
     });
   }
 });

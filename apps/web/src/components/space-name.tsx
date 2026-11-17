@@ -5,14 +5,14 @@ import { useTranslation } from "react-i18next";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
 import { useViewer } from "../hooks/use-viewer";
-import { useSpaces } from "../hooks/use-spaces";
+import { useSpaces, useSpacesOf } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { spaceTile } from "../lib/identity-tile-props";
-import { spaceLabel } from "../lib/space-label";
+import { spaceLabel, spaceLabels } from "../lib/space-label";
 
 /** What naming a space reads of it. */
-type SpaceListed = Parameters<typeof spaceTile>[0];
+export type SpaceListed = Parameters<typeof spaceTile>[0];
 
 /** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row, `lg` heading a table row. */
 const SIZES = {
@@ -21,11 +21,75 @@ const SIZES = {
   lg: { box: "gap-3 text-sm", tile: "size-7 rounded-md" },
 } as const;
 
+/** A space's tile at one of the {@link SIZES}: the one tile every space listing draws. */
+function SpaceTile({
+  space,
+  size = "sm",
+  className,
+}: {
+  space: SpaceListed;
+  size?: keyof typeof SIZES;
+  className?: string;
+}) {
+  const viewer = useViewer();
+  return (
+    <IdentityTile
+      {...spaceTile(space, viewer)}
+      className={cn("shrink-0", SIZES[size].tile, className)}
+    />
+  );
+}
+
+/** The ring of a stacked tile: the container's `--space-tile-ring`, else the page background. */
+const RING = "ring-(--space-tile-ring,var(--background))";
+
+/**
+ * Several spaces' tiles stacked, the first in front and each next one behind it, ringed in `--space-tile-ring`
+ * (the colour of the surface they sit on, which the container sets for each of its states: a
+ * conversation row or the chat's top-bar trigger; `--background` when none does) so the edges
+ * stay readable. Past `max`, the rest is counted.
+ */
+export function SpaceTileStack({
+  spaces,
+  size = "sm",
+  max,
+}: {
+  spaces: readonly (SpaceListed & { id: string })[];
+  size?: keyof typeof SIZES;
+  max?: number;
+}) {
+  const shown = max === undefined ? spaces : spaces.slice(0, max);
+  const hidden = spaces.length - shown.length;
+  // Reversed in the DOM, read in order on screen: the first space is painted last, in front.
+  return (
+    <span className="flex shrink-0 flex-row-reverse items-center" data-testid="space-tile-stack">
+      {hidden > 0 && (
+        <span
+          className={cn(
+            "bg-muted text-muted-foreground -ml-1 flex shrink-0 items-center justify-center text-[10px] leading-none font-medium tabular-nums ring-2",
+            SIZES[size].tile,
+            RING,
+          )}
+        >
+          +{hidden}
+        </span>
+      )}
+      {shown
+        .map((space, index) => (
+          <SpaceTile
+            key={space.id}
+            space={space}
+            size={size}
+            className={cn("ring-2", RING, index > 0 && "-ml-1")}
+          />
+        ))
+        .reverse()}
+    </span>
+  );
+}
+
 /** No tile stacked behind a space's own. */
 const NO_SPACES: readonly SpaceListed[] = [];
-
-/** Front to back, for the tiles a {@link SpaceName} stacks (static classes, for Tailwind). */
-const STACK_ORDER = ["z-[3]", "z-[2]", "z-[1]"] as const;
 
 /**
  * A space as the app names it everywhere: its tile, then its name in the reader's words
@@ -51,28 +115,14 @@ export function SpaceName({
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const viewer = useViewer();
   const label = spaceLabel(space, t);
   return (
     <span className={cn("flex min-w-0 items-center", SIZES[size].box, className)}>
-      <span className="flex shrink-0">
-        {[space, ...stacked].map((tile, index) => (
-          // The home tile in front: each one behind is drawn under the one before it.
-          <span
-            key={tile.id}
-            className={cn("relative flex", STACK_ORDER[index], index > 0 && "-ml-1.5")}
-          >
-            <IdentityTile
-              {...spaceTile(tile, viewer)}
-              className={cn(
-                "shrink-0",
-                SIZES[size].tile,
-                index > 0 && "ring-background ring-[1.5px]",
-              )}
-            />
-          </span>
-        ))}
-      </span>
+      {stacked.length > 0 ? (
+        <SpaceTileStack spaces={[space, ...stacked]} size={size} />
+      ) : (
+        <SpaceTile space={space} size={size} />
+      )}
       <span className="relative z-10 truncate" title={title ?? label}>
         {label}
       </span>
@@ -89,6 +139,39 @@ export function SpaceNameOf({
   const { data: spaces } = useSpaces();
   const space = spaces?.find((s) => s.id === spaceId);
   return space ? <SpaceName space={space} {...props} /> : null;
+}
+
+/**
+ * Every space a row touched, none counted away: all the tiles in a row, then the names joined
+ * (« Studio, Coffre »), truncated with the full names in `title`. One space reads as
+ * {@link SpaceName}. The line of a conversation's spaces.
+ */
+export function SpaceTilesOf({
+  spaceIds,
+  size = "sm",
+  className,
+}: {
+  spaceIds: readonly string[];
+  size?: keyof typeof SIZES;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  const spaces = useSpacesOf(spaceIds);
+  if (spaces.length === 0) return null;
+  if (spaces.length === 1)
+    return <SpaceName space={spaces[0]!} size={size} className={className} />;
+  const names = spaceLabels(spaces, t);
+  return (
+    <span
+      className={cn("flex min-w-0 items-center", SIZES[size].box, className)}
+      data-testid="space-tiles"
+    >
+      <SpaceTileStack spaces={spaces} size={size} />
+      <span className="truncate" title={names}>
+        {names}
+      </span>
+    </span>
+  );
 }
 
 /**

@@ -31,6 +31,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
+import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -57,7 +58,6 @@ import {
   SidebarGroupLabel,
   SidebarInput,
   SidebarMenu,
-  SidebarMenuSkeleton,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
@@ -66,17 +66,17 @@ import {
   useSelectConversation,
   type ChatCan,
   type ChatTranslate,
+  type RenderSpaces,
 } from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
-  patchSessionsCache,
-  sessionsQueryKey,
-  spaceIdFromHeaders,
+  dropSessionFromLists,
+  sessionQueryKey,
   SESSIONS_QUERY_KEY,
-  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
+import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import { useSessions } from "./use-sessions.ts";
 
@@ -157,10 +157,13 @@ export function ChatConversationList({
   activeId,
   t,
   can,
+  renderSpaces,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  /** Names spaces: every row shows the spaces its conversation touched. */
+  renderSpaces: RenderSpaces;
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
@@ -182,7 +185,7 @@ export function ChatConversationList({
   const now = useNowTick();
   const list = sessions ?? [];
   const groups = searching ? [] : groupSessionsByDate(list, new Date(now));
-  // Rename and delete are writes; a reader also gets its own empty copy.
+  // Starting a conversation is a write, as are rename and delete; a reader also gets its own empty copy.
   const canWrite = can("chat:write");
   const hasAny = (base.data?.length ?? 0) > 0;
   const showSearch = hasAny || input !== "";
@@ -196,6 +199,7 @@ export function ChatConversationList({
       now={now}
       t={t}
       canWrite={canWrite}
+      renderSpaces={renderSpaces}
     />
   );
   return (
@@ -258,7 +262,7 @@ export function ChatConversationList({
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
-                <SidebarMenuSkeleton />
+                <ConversationRowSkeleton />
               </SidebarMenuItem>
             ))}
           {searching
@@ -313,6 +317,13 @@ export function ChatConversationList({
   );
 }
 
+/** The spaces a conversation touched, named by the host; « Tous les espaces » when it touched none. */
+function sessionSpaces(session: SessionSummary, renderSpaces: RenderSpaces, t: ChatTranslate) {
+  return session.space_ids.length > 0
+    ? renderSpaces(session.space_ids)
+    : t("common:overview.title");
+}
+
 function ConversationRow({
   session,
   active,
@@ -320,6 +331,7 @@ function ConversationRow({
   now,
   t,
   canWrite,
+  renderSpaces,
 }: {
   session: SessionSummary;
   active: boolean;
@@ -327,6 +339,7 @@ function ConversationRow({
   now: number;
   t: ChatTranslate;
   canWrite: boolean;
+  renderSpaces: RenderSpaces;
 }) {
   const transport = useChatTransport();
   const select = useSelectConversation();
@@ -343,7 +356,7 @@ function ConversationRow({
     setDeleting(true);
     setDeleteFailed(false);
     try {
-      await deleteSession(transport.request, session.id);
+      await deleteSession(transport, session.id);
     } catch {
       // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
       setDeleteFailed(true);
@@ -352,16 +365,7 @@ function ConversationRow({
     }
     setConfirmingDelete(false);
     setDeleting(false);
-    // Reflect the delete in the cached list. Cancel any in-flight poll first so
-    // its stale (pre-delete) response can't land afterwards and resurrect the
-    // row; then drop the row. The server is already updated and the periodic
-    // poll reconciles any later drift.
-    await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
-    // The prefix reaches the filtered (search) lists as well as the plain one.
-    queryClient.setQueriesData<SessionsCache>(
-      { queryKey: sessionsQueryKey(spaceIdFromHeaders(transport.getHeaders)) },
-      (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
-    );
+    await dropSessionFromLists(queryClient, session.id);
     if (active) select?.(null);
   };
 
@@ -370,12 +374,22 @@ function ConversationRow({
       <SidebarMenuButton
         isActive={active}
         onClick={() => select?.(session.id)}
+        size="lg"
         // Room for the fixed-width right slot below, which is absolutely
-        // positioned and would otherwise sit on top of a long title.
-        className="pr-16"
+        // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
+        // ring themselves in `--space-tile-ring`: the row's background in each of its states.
+        className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]"
       >
-        <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
-          {session.title ?? t("threads.new")}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className={cn("block truncate text-left leading-4", unread && "font-semibold")}>
+            {session.title ?? t("threads.new")}
+          </span>
+          <span
+            data-testid="chat-session-spaces"
+            className="text-sidebar-foreground/70 flex h-4 min-w-0 items-center text-xs"
+          >
+            {sessionSpaces(session, renderSpaces, t)}
+          </span>
         </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
@@ -548,8 +562,11 @@ function ConversationSettingsDialog({
     setSaving(true);
     setFailed(false);
     try {
-      await renameSession(transport.request, session.id, next);
-      await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      await renameSession(transport, session.id, next);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: sessionQueryKey(transport.orgId, session.id) }),
+      ]);
       onClose();
     } catch {
       setFailed(true);

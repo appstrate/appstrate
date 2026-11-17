@@ -214,9 +214,11 @@ test("browser Back can be cancelled without unmounting the edited form", async (
 test("the trail shows a conversation's name, and its settings dialog renames it: Annuler writes nothing, Enregistrer writes to its own target", async ({
   authedPage: page,
   apiClient,
+  browserCtx,
 }) => {
+  const chat = `/orgs/${browserCtx.org.orgId}/chat`;
   const create = async (title: string) => {
-    const response = await apiClient.post("/chat/sessions", { title });
+    const response = await apiClient.post(`${chat}/sessions`, { title });
     expect(response.status()).toBe(201);
     return ((await response.json()) as { id: string }).id;
   };
@@ -224,7 +226,7 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   const b = await create("Rename B");
   const writes: { id: string; title: string }[] = [];
   page.on("request", (request) => {
-    if (request.method() === "PATCH" && request.url().includes("/api/chat/sessions/")) {
+    if (request.method() === "PATCH" && request.url().includes(`/api${chat}/sessions/`)) {
       writes.push({
         id: new URL(request.url()).pathname.split("/").at(-1)!,
         title: request.postDataJSON().title,
@@ -249,7 +251,8 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   await expect(dialog).toHaveCount(0);
   await expect(trail).toContainText("Rename A");
 
-  await page.getByRole("button", { name: "Rename B", exact: true }).click();
+  // A row reads its title, then the spaces it touched.
+  await page.getByRole("button", { name: /^Rename B\b/ }).click();
   await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
   await openSettings();
   await expect(name).toHaveValue("Rename B");
@@ -260,7 +263,7 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   await expect(dialog).toHaveCount(0);
   await expect(trail).toContainText("Saved B");
   expect(writes).toEqual([{ id: b, title: "Saved B" }]);
-  const original = await apiClient.get(`/chat/sessions/${a}`);
+  const original = await apiClient.get(`${chat}/sessions/${a}`);
   expect((await original.json()).title).toBe("Rename A");
 });
 

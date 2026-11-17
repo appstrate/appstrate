@@ -38,7 +38,7 @@ describe("chat session skills", () => {
   }
 
   async function getSession(sessionId: string): Promise<SessionDto> {
-    const res = await app.request(`/api/chat/sessions/${sessionId}`, json());
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${sessionId}`, json());
     expect(res.status).toBe(200);
     return (await res.json()) as SessionDto;
   }
@@ -73,7 +73,7 @@ describe("chat session skills", () => {
 
   it("carries the stored selection on the create, list and detail routes", async () => {
     const created = await app.request(
-      "/api/chat/sessions",
+      `/api/orgs/${ctx.orgId}/chat/sessions`,
       json({ method: "POST", body: JSON.stringify({}) }),
     );
     expect(created.status).toBe(201);
@@ -87,7 +87,9 @@ describe("chat session skills", () => {
       .set({ skillMode: "manual", pinnedSkills: ["@acme/a"] })
       .where(eq(chatSessions.id, fresh.id));
 
-    const list = (await (await app.request("/api/chat/sessions", json())).json()) as {
+    const list = (await (
+      await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, json())
+    ).json()) as {
       data: SessionDto[];
     };
     const row = list.data.find((s) => s.id === fresh.id);

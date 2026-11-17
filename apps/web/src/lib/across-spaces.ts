@@ -6,9 +6,8 @@
  * route's gate then drops with `replace`, so Back returns to the list.
  */
 
+import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 import { isSpaceEnterable } from "./space-lists";
-
-export const ENTER_SPACE_PARAM = "enterSpace";
 
 /**
  * The space a row listed in several spaces (a package index) opens in: the current one when it is

@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
-import {
-  ActivityIcon,
-  CheckIcon,
-  CopyIcon,
-  FilesIcon,
-  InfoIcon,
-  PanelRightCloseIcon,
-  PanelRightIcon,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, CopyIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { relativeAge } from "@appstrate/core/format";
-import { canReadRuns } from "@appstrate/core/permissions";
+import { useSessionDetail } from "@appstrate/module-chat/unread";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
@@ -28,9 +19,13 @@ import { RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
-import { useOrgScope } from "../../hooks/use-org-scope";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
+import { useConversationTabs } from "./use-conversation-tabs";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
+import { useListScope } from "../../hooks/use-org-scope";
+import { otherSpaceFileContext } from "../../lib/file-link";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import type {
@@ -45,35 +40,6 @@ import { usePanelWidth } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
-
-/**
- * `chat:read` opens the page, not the runs and files two tabs list. A stored
- * tab the caller can no longer see resolves to Info, which always stays.
- */
-function useConversationTabs(selected: ConversationSidebarTab) {
-  const { t } = useTranslation("chat");
-  const { can } = usePermissions();
-  const readable: Record<ConversationSidebarTab, boolean> = {
-    runs: canReadRuns(can),
-    files: can("files:read"),
-    info: true,
-  };
-  const tabs = (
-    [
-      { id: "runs", Icon: ActivityIcon, label: t("common:nav.runs") },
-      { id: "files", Icon: FilesIcon, label: t("common:nav.files") },
-      { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
-    ] as const satisfies readonly {
-      id: ConversationSidebarTab;
-      Icon: typeof InfoIcon;
-      label: string;
-    }[]
-  ).filter(({ id }) => readable[id]);
-  return {
-    tabs,
-    activeTab: tabs.find(({ id }) => id === selected) ?? tabs.find(({ id }) => id === "info")!,
-  };
-}
 
 /** The shell header's one control for the context panel, wherever it is drawn. */
 export function ConversationContextToggle({
@@ -119,7 +85,7 @@ function PanelState({ children }: { children: ReactNode }) {
  * The file's frame IS the panel: its header replaces the panel's. Its X closes
  * the panel, or goes back to the file list the file was opened from.
  */
-function ShownFile({
+export function ShownFile({
   file,
   backToList,
   onClose,
@@ -129,11 +95,14 @@ function ShownFile({
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const { data, isLoading, error } = useFile(file.id);
+  // A file of another space (a conversation's) is read, copied and downloaded there.
+  const context = otherSpaceFileContext(file.spaceId, useCurrentOrgId(), useCurrentSpaceId());
+  const { data, isLoading, error } = useFile(file.id, context);
 
   return (
     <FileArtifact
       fileId={file.id}
+      context={context}
       file={data}
       isLoading={isLoading}
       error={error}
@@ -147,7 +116,7 @@ function ShownFile({
   );
 }
 
-function ConversationRuns({
+export function ConversationRuns({
   conversationId,
   active,
 }: {
@@ -155,21 +124,22 @@ function ConversationRuns({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const scope = useOrgScope();
-  const { can } = usePermissions();
+  const canRead = useAdmittingSpaces("runs").length > 0;
+  // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
+  const scope = useListScope(true, canRead);
   const agentName = useRunAgentName();
   const { data: agents } = useAgents();
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
+  const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
+  // A conversation belongs to the organization: the runs it launched, in every space.
   const query = $api.useQuery(
     "get",
-    "/api/runs",
+    "/api/orgs/{orgId}/runs",
+    { params: { path: { orgId: scope.orgId ?? "" }, query: filters } },
     {
-      params: {
-        query: { chat_session_id: conversationId ?? undefined, limit: 100 },
-        header: scope.header,
-      },
+      enabled: scope.enabled && canRead && active && !!conversationId,
+      refetchInterval: scope.refetchInterval,
     },
-    { enabled: canReadRuns(can) && scope.enabled && active && !!conversationId },
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
@@ -205,6 +175,7 @@ function ConversationFiles({
 }) {
   const { t } = useTranslation("chat");
   const query = useFiles({
+    spanning: true,
     contextChatSessionId: conversationId ?? undefined,
     limit: 100,
     enabled: active && !!conversationId,
@@ -223,7 +194,7 @@ function ConversationFiles({
           key={file.id}
           type="button"
           className="hover:bg-muted/40 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
-          onClick={() => onSelect({ id: file.id, name: file.name })}
+          onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
         >
           <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
             <MimeIcon mime={file.mime} className="text-muted-foreground size-4" />
@@ -292,13 +263,7 @@ function ConversationDetails({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const scope = useOrgScope();
-  const query = $api.useQuery(
-    "get",
-    "/api/chat/sessions/{id}",
-    { params: { path: { id: conversationId ?? "" }, header: scope.header } },
-    { enabled: scope.enabled && active && !!conversationId },
-  );
+  const query = useSessionDetail(active ? conversationId : null);
 
   if (!conversationId) {
     return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;
@@ -343,10 +308,17 @@ function ConversationInfo({
   conversationId: string | null;
   active: boolean;
 }) {
+  // The same query as the details': the access judges the conversation's own scope.
+  const detail = useSessionDetail(active ? conversationId : null);
+  const conversation = !conversationId
+    ? null
+    : detail.isLoading
+      ? undefined
+      : (detail.data ?? null);
   return (
     <div className="flex flex-col gap-5 p-4">
       <ConversationDetails conversationId={conversationId} active={active} />
-      <ChatAccessSummary />
+      <ChatAccessSummary conversation={conversation} />
       {conversationId ? <ConversationId id={conversationId} /> : null}
     </div>
   );

@@ -89,6 +89,10 @@ export async function enterSpaceById(
   spaceId: string,
   orgId: string,
 ): Promise<void> {
+  // A credential bound to a set of spaces enters none outside it, and the answer is the one a
+  // missing space gets.
+  const allowed = c.get("credentialSpaceIds");
+  if (allowed && !allowed.includes(spaceId)) throw spaceNotFound(spaceId);
   if (!c.get("orgRole")) {
     const space = await validateSpaceInOrg(spaceId, orgId);
     if (!space) throw spaceNotFound(spaceId);

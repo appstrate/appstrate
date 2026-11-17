@@ -28,8 +28,9 @@
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useCanIn, useChatTransport } from "./runtime-context.ts";
 import {
+  requestInSpace,
   buildRunSseUrl,
   isTerminalStatus,
   mergeLogs,
@@ -122,17 +123,22 @@ interface RunLogStream {
  *                      `run_and_wait` returns a terminal run) — seeds the badge
  *                      and skips the SSE tail when already terminal
  *                      (`shouldOpenLiveTail`).
+ * @param spaceId      the space the run ran in (the space of the conversation's call
+ *                      that launched it): its reads and its stream name that
+ *                      space, whether or not it is the working one.
  */
 export function useRunLogStream(
   runId: string | undefined,
   initialStatus?: string,
   initialPackageId?: string,
+  spaceId?: string,
 ): RunLogStream {
   const transport = useChatTransport();
-  // `chat:read` implies neither the run reads nor the file read below.
-  const { can } = useChatHost();
-  const readsRuns = canReadRuns(can);
-  const readsFiles = can("files:read");
+  // `chat:read` implies neither the run reads nor the file read below, and they are judged where
+  // the run ran: the call's space, not the working one.
+  const canIn = useCanIn();
+  const readsRuns = canReadRuns((permission) => canIn(spaceId, permission));
+  const readsFiles = canIn(spaceId, "files:read");
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,
@@ -171,8 +177,8 @@ export function useRunLogStream(
   useEffect(() => {
     if (!runId || !readsRuns || !transport) return;
     let cancelled = false;
-    const { request } = transport;
-    const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(transport.getHeaders());
+    const request = requestInSpace(transport.request, spaceId);
+    const { orgId, spaceId: workingSpaceId, viewAs } = orgSpaceFromHeaders(transport.getHeaders());
 
     // Decided up front (not after the fetches) because the one-shot run read
     // below needs to know whether anything else will ever report on this run.
@@ -180,7 +186,12 @@ export function useRunLogStream(
     // `es.onerror` fallback for the case where the connection never lands.
     // A terminal `initialStatus` opts out: nothing more will be emitted, and
     // the one-shot read below then owns the completion signal.
-    const sseUrl = buildRunSseUrl({ runId, orgId, spaceId, viewAs });
+    const sseUrl = buildRunSseUrl({
+      runId,
+      orgId,
+      spaceId: spaceId ?? workingSpaceId,
+      viewAs,
+    });
     const willTail = shouldOpenLiveTail({
       initialStatus,
       hasSseContext: !!sseUrl && typeof EventSource !== "undefined",
@@ -365,12 +376,13 @@ export function useRunLogStream(
       es.close();
     };
     // initialStatus is read once at subscribe time; runId is the real identity.
-    // `transport` is a dependency, not a convenience: its identity moves with
-    // the host's scoping context (organization, space, role preview), and this
+    // `transport` is a dependency, not a convenience: the host rebuilds it when
+    // its scoping context (organization, space, role preview) changes, and this
     // stream reads its URL once at connect. Without it a preview entered while
-    // a run card is open keeps tailing under the previous authority.
+    // a run card is open keeps tailing under the previous authority. The host
+    // also rebuilds it on a list-filter change, which reconnects the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, transport, readsRuns, readsFiles]);
+  }, [runId, transport, readsRuns, readsFiles, spaceId]);
 
   return {
     logs,

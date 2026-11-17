@@ -40,7 +40,6 @@ describe("chat session list pagination", () => {
     const rows = Array.from({ length: count }, (_, i) => ({
       id: `chs_${String(i).padStart(32, "0")}`,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       updatedAt: new Date(base + Math.floor(i / 2) * 1000),
     }));
@@ -59,7 +58,7 @@ describe("chat session list pagination", () => {
 
     const pages = await walkLinkPages<SessionPage>(
       app,
-      "/api/chat/sessions?limit=3",
+      `/api/orgs/${ctx.orgId}/chat/sessions?limit=3`,
       authHeaders(ctx),
     );
     expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
@@ -69,7 +68,9 @@ describe("chat session list pagination", () => {
     let cursor: string | undefined;
     for (;;) {
       const q = cursor ? `&startingAfter=${cursor}` : "";
-      const body = (await (await get(`/api/chat/sessions?limit=3${q}`)).json()) as SessionPage;
+      const body = (await (
+        await get(`/api/orgs/${ctx.orgId}/chat/sessions?limit=3${q}`)
+      ).json()) as SessionPage;
       viaBody.push(...body.data.map((s) => s.id));
       if (!body.hasMore) break;
       cursor = body.data.at(-1)!.id;
@@ -83,7 +84,9 @@ describe("chat session list pagination", () => {
 
   it("never skips a row when the cursor session is bumped mid-walk", async () => {
     const ids = await seedSessions(6);
-    const first = (await (await get("/api/chat/sessions?limit=3")).json()) as SessionPage;
+    const first = (await (
+      await get(`/api/orgs/${ctx.orgId}/chat/sessions?limit=3`)
+    ).json()) as SessionPage;
     const cursor = first.data.at(-1)!.id;
     await db
       .update(chatSessions)
@@ -93,7 +96,7 @@ describe("chat session list pagination", () => {
     const rest = (
       await walkLinkPages<SessionPage>(
         app,
-        `/api/chat/sessions?limit=3&startingAfter=${cursor}`,
+        `/api/orgs/${ctx.orgId}/chat/sessions?limit=3&startingAfter=${cursor}`,
         authHeaders(ctx),
       )
     ).flatMap((p) => p.data.map((s) => s.id));
@@ -103,7 +106,7 @@ describe("chat session list pagination", () => {
 
   it("rejects a cursor that is not one of the caller's sessions", async () => {
     await seedSessions(1);
-    const res = await app.request("/api/chat/sessions?startingAfter=chs_nope", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions?startingAfter=chs_nope`, {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(400);
@@ -112,7 +115,7 @@ describe("chat session list pagination", () => {
 
   it("refuses an invalid limit with a 400 naming it", async () => {
     for (const limit of ["0", "101", "abc"]) {
-      const res = await app.request(`/api/chat/sessions?limit=${limit}`, {
+      const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions?limit=${limit}`, {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(400);
@@ -122,7 +125,7 @@ describe("chat session list pagination", () => {
 
   it("caps the session page at 100", async () => {
     await seedSessions(101);
-    const body = (await (await get("/api/chat/sessions")).json()) as SessionPage;
+    const body = (await (await get(`/api/orgs/${ctx.orgId}/chat/sessions`)).json()) as SessionPage;
     expect(body.data).toHaveLength(100);
     expect(body.hasMore).toBe(true);
   });
@@ -133,7 +136,6 @@ describe("chat session list pagination", () => {
       const rows = titles.map((title, i) => ({
         id: `chs_${String(i).padStart(32, "0")}`,
         orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         title,
         updatedAt: new Date(base + i * 1000),
@@ -143,7 +145,7 @@ describe("chat session list pagination", () => {
     }
 
     async function titles(query: string): Promise<(string | null)[]> {
-      const body = (await (await get(`/api/chat/sessions${query}`)).json()) as {
+      const body = (await (await get(`/api/orgs/${ctx.orgId}/chat/sessions${query}`)).json()) as {
         data: { title: string | null }[];
       };
       return body.data.map((s) => s.title);
@@ -177,7 +179,7 @@ describe("chat session list pagination", () => {
       await seedTitled(Array.from({ length: 5 }, (_, i) => `match ${i}`).concat(["other"]));
       const pages = await walkLinkPages<SessionPage>(
         app,
-        "/api/chat/sessions?limit=2&q=match",
+        `/api/orgs/${ctx.orgId}/chat/sessions?limit=2&q=match`,
         authHeaders(ctx),
       );
       expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
@@ -185,7 +187,7 @@ describe("chat session list pagination", () => {
     });
 
     it("rejects a q longer than 200 characters", async () => {
-      const res = await app.request(`/api/chat/sessions?q=${"a".repeat(201)}`, {
+      const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions?q=${"a".repeat(201)}`, {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(400);

@@ -13,7 +13,9 @@ import {
 import { canReadRuns } from "@appstrate/core/permissions";
 import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
+import { unnameableSpace } from "../lib/reachable-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
+import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 import { PERMISSION_GUARD } from "./require-permission.ts";
 
@@ -219,27 +221,22 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/** Middleware: reject with 403 when the `:id`/`:spaceId` route param names a
- *  space other than the one the CREDENTIAL is pinned to. Callers that pin no
- *  space (sessions, OIDC instance tokens) pass through unchanged — any member
- *  reaches any space in their org, subject to the per-space permission gates.
+/** Middleware: reject when the `:id` route param names a space the
+ *  credential may not name (`credentialAdmitsSpace`): outside the space it pins
+ *  (403, the contract of a pinned key), or outside its allowlist (404, as
+ *  `enterSpaceById`; see `unnameableSpace`). A credential with neither (a session, an OIDC
+ *  instance token) passes, subject to the per-space permission gates.
  *
  *  Why: `/api/spaces` is org-scoped, not space-scoped, so `requireSpaceContext`
- *  never runs on it and the same orgId-only filtering that lets a credential
- *  escape its org also lets it escape its space within the same org.
- *
- *  Keyed on the pinned space, NOT on `authMethod === "api_key"`: an OIDC
- *  end-user token pins a space too, and carries no `orgRole`, so
- *  `applySpacePermissions` returns early for it (RBAC spec §7.2) and nothing
- *  downstream compares the path space to the pinned one — an end-user of space
- *  A read space B's `run-config`, private spaces included. Both
- *  pinned kinds are confined here, once, instead of per route. */
+ *  never runs on it, and its org-permission routes (detail, delete, convert,
+ *  sweep) never enter the path space. Keyed on the credential's confinement, NOT
+ *  on `authMethod === "api_key"`: an OIDC end-user token pins a space too and
+ *  carries no `orgRole`, so nothing downstream compares the path space to its
+ *  pin (RBAC spec §7.2). Every confined kind is refused here, once. */
 export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
-  const pinnedSpaceId = c.get("spaceId");
-  if (!pinnedSpaceId) return next();
   const paramSpaceId = c.req.param("id");
-  if (paramSpaceId && paramSpaceId !== pinnedSpaceId) {
-    throw forbidden("Credential scope does not include this space");
+  if (paramSpaceId && !credentialAdmitsSpace(c, paramSpaceId)) {
+    throw unnameableSpace(c, paramSpaceId);
   }
   return next();
 }

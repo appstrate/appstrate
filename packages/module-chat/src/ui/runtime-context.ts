@@ -12,10 +12,10 @@
  * reimplemented here — one implementation, one set of error semantics.
  *
  * THREE contexts, no more:
- *  - `ChatTransport` — `getHeaders` (the scoping headers: the space keys every
- *    query, and the card-local SSE stream to `/api/realtime` needs the caller's
- *    `X-Org-Id` / `X-Space-Id`, which only the host knows) and `request`, the ONE
- *    function every REST call of the chat goes through.
+ *  - `ChatTransport` — `getHeaders` (the scoping headers: the card-local SSE stream
+ *    to `/api/realtime` needs the caller's `X-Org-Id` / `X-Space-Id`, which only the
+ *    host knows), `request`, the ONE function every REST call of the chat goes
+ *    through, and the organization and space filter the chat's routes are read through.
  *  - `selectConversation` — navigation, see below.
  *  - `ChatHost` — ONE bag of host services, memoized by `ChatPage` from its
  *    props. Deliberately not one context per service: every member is
@@ -29,7 +29,7 @@
  * hop for a value that never leaves the file would be pure ceremony.
  */
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 
 export type GetHeaders = () => Record<string, string>;
@@ -42,10 +42,24 @@ export type GetHeaders = () => Record<string, string>;
  */
 export type ChatRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
+/**
+ * What the chat page reads. A conversation belongs to the organization and its author, so every
+ * chat call goes to `/api/orgs/{orgId}/chat/*`; `spaceId` is the conversation list's filter
+ * (`?spaceId=`): the space the host is looking at, `null` in « Tous les espaces », where the list
+ * holds every conversation. It is also the origin of a new conversation, when the chat acts there.
+ */
 export interface ChatTransport {
   getHeaders: GetHeaders;
   request: ChatRequest;
+  orgId: string;
+  spaceId: string | null;
 }
+
+/**
+ * The host's rendering of spaces by id (its tile and name, every space shown). The module
+ * names the spaces a conversation touched, and the space of a tool call, through it.
+ */
+export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
 
 const ChatTransportContext = createContext<ChatTransport | null>(null);
 
@@ -71,6 +85,8 @@ export function jsonInit(method: string, body: unknown): RequestInit {
  * The list (`thread-list.tsx`) calls this on click; the host navigates and the
  * keyed `<Conversation>` remounts on the new id. `null` means "new conversation"
  * (`/chat`). Carried through context so module-chat never imports a router.
+ *
+ * A conversation opens in place, whatever the list's filter.
  */
 export type SelectConversation = (id: string | null) => void;
 
@@ -92,15 +108,19 @@ export function useSelectConversation(): SelectConversation | null {
  * module-chat, so the host injects an opener and the chat delegates to it.
  * `null` means no opener was provided (embedded mounts): direct clicks then fall
  * back to the authenticated download, while automatic presentation is a no-op.
+ *
+ * `spaceId` names the file's space when known (the space of the call of the conversation that
+ * produced it): the host reads it there, and reads in the working space when it is the same one.
+ * The download and the image hook below take it the same way.
  */
-export type OpenFile = (file: { id: string; name: string }) => void;
+export type OpenFile = (file: { id: string; name: string; spaceId?: string }) => void;
 
 /**
  * The host's authenticated file download (typed API client + user-facing
  * error toast). Injected, never reimplemented: a second raw-`fetch` copy here
  * would swallow failures the shell's implementation reports.
  */
-export type DownloadFile = (id: string, name: string) => void;
+export type DownloadFile = (id: string, name: string, spaceId?: string) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
@@ -111,7 +131,7 @@ export type DownloadFile = (id: string, name: string) => void;
  * Call it like any hook: unconditionally, at the top of a component (see
  * `FileImageThumbnail`, which exists precisely so the call site is stable).
  */
-export type UseFileImageSrc = (id: string) => string | null | undefined;
+export type UseFileImageSrc = (id: string, spaceId?: string) => string | null | undefined;
 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
@@ -150,6 +170,24 @@ export interface ChatHost {
   t: ChatTranslate;
   can: ChatCan;
   /**
+   * The caller's grant in one NAMED space, for what a call of a conversation did there (its run,
+   * its files): `can` answers for the chat as a whole.
+   */
+  canIn: ChatCanIn;
+  /**
+   * The spaces the chat acts in (the host's acting set). The skills picker lists them, and a new
+   * conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it is
+   * one of them.
+   */
+  actingSpaceIds: readonly string[];
+  /**
+   * The host's working space, where an upload lands, `null` when it has none. Distinct from
+   * `ChatTransport.spaceId`, the list filter, which is `null` in « Tous les espaces » while the
+   * working space stays the one entered. A limited conversation takes a file only while this is
+   * its origin space.
+   */
+  workingSpaceId: string | null;
+  /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
    * credential would fix names no link to add one. `undefined` until the
@@ -171,13 +209,37 @@ export interface ChatHost {
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
+  /** Names spaces. */
+  renderSpaces: RenderSpaces;
+  /**
+   * Where an in-app `path` opens for a row of `spaceId`: the host names the space in the link when
+   * it is not the working one (its `?enterSpace=` convention), else returns `path` unchanged.
+   */
+  linkInSpace: (path: string, spaceId: string | undefined) => string;
+  /**
+   * A hook returning a space's plain name by id (`undefined` for one the caller does not reach),
+   * for the accessible names that carry a space's name where `renderSpaces`' node would not.
+   */
+  useSpaceLabelOf: () => (spaceId: string | null | undefined) => string | undefined;
+}
+
+/** Whether the chat acts in `spaceId` (one of the host's acting set). */
+export function actsIn(
+  actingSpaceIds: readonly string[],
+  spaceId: string | null | undefined,
+): boolean {
+  return !!spaceId && actingSpaceIds.includes(spaceId);
 }
 
 /**
  * The caller's grants, resolved by the shell. The chat asks for the exact
- * permission each endpoint it calls guards on and holds no RBAC of its own.
+ * permission each endpoint it calls guards on and holds no RBAC of its own. The shell answers
+ * "some space where the chat may act grants it".
  */
 export type ChatCan = (permission: string) => boolean;
+
+/** {@link ChatCan} in one named space. */
+export type ChatCanIn = (spaceId: string, permission: string) => boolean;
 
 const ChatHostContext = createContext<ChatHost | null>(null);
 
@@ -194,4 +256,14 @@ export function useChatHost(): ChatHost {
     throw new Error("module-chat: no host services injected (render inside <ChatPage>)");
   }
   return host;
+}
+
+/**
+ * The grant a card judges where its call acted: in `spaceId` when the call named one, else the
+ * chat's own. Judging a run or a file read in the working space would refuse what the call's
+ * space grants, and grant what it refuses.
+ */
+export function useCanIn(): (spaceId: string | undefined, permission: string) => boolean {
+  const { can, canIn } = useChatHost();
+  return (spaceId, permission) => (spaceId ? canIn(spaceId, permission) : can(permission));
 }

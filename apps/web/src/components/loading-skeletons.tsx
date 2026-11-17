@@ -10,7 +10,10 @@
  * draws while loading, so the chunk and the data wait under one shape.
  */
 
-import { ConversationSkeleton } from "@appstrate/module-chat/conversation-skeleton";
+import {
+  ConversationRowSkeleton,
+  ConversationSkeleton,
+} from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
 import { CardList } from "./card-list";
 import { PackageCardSkeleton } from "./package-card";
@@ -27,7 +30,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { canReadRuns } from "@appstrate/core/permissions";
+import { Plus } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import {
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
@@ -861,6 +872,40 @@ export function ChatConversationSkeleton() {
         label={t("loading")}
         placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
       />
+    </>
+  );
+}
+
+/**
+ * The conversation list's shape, drawn while its permissions and chunk load:
+ * the "new conversation" row (the chat's primary action, so it is real, not
+ * grey) above a group of row skeletons — what `ChatConversationList` draws: a title line and the
+ * space line under it, drawn by the module's own `ConversationRowSkeleton`.
+ */
+export function ChatSidebarSkeleton() {
+  const { t } = useTranslation("chat");
+  return (
+    <>
+      <SidebarGroup className="pb-0">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton disabled tooltip={t("threads.new")}>
+              <Plus />
+              <span>{t("threads.new")}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
+        <SidebarMenu>
+          {Array.from({ length: 5 }, (_, i) => (
+            <SidebarMenuItem key={i}>
+              <ConversationRowSkeleton />
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
     </>
   );
 }

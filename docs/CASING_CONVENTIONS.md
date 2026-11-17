@@ -440,7 +440,7 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 - `PUT /api/proxies/default` (`proxyId`)
 - the space package (`space_package` on `/api/spaces/{id}/packages*`, and its `PATCH` body): `modelId`, `proxyId` — beside the snake_case `generation_config`
 - `ResolvedRunConfig` (`GET /api/spaces/{id}/packages/{scope}/{name}/run-config`): `modelId`, `proxyId`, beside `generation` and `input`
-- the run-launch bodies (`POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline` and `/inline/validate`): `modelId`, `proxyId`; the chat body (`POST /api/chat`): `modelId`
+- the run-launch bodies (`POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline` and `/inline/validate`): `modelId`, `proxyId`; the chat body (`POST /api/orgs/{orgId}/chat`): `modelId`
 - the model-provider family (4e table): `credentialId` on the inline-test, discover and pairing bodies, the pairing status and the redeem response
 
 **Same name, different fact**: on `OrgModel`, its create/`PATCH` bodies and the `POST /api/models/test` body, `modelId` is the UPSTREAM provider model id (`gpt-4o`, …) that an org model binds — not the org model id (`OrgModel.id`) that `PUT /api/models/default`, the run-launch and chat bodies, `space_package` and `/api/agents/{scope}/{name}/model` call `modelId`. Only the spelling is shared.

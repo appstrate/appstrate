@@ -19,7 +19,16 @@ import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/
 import { render } from "../../test/render.tsx";
 
 function conversation(id: string, title: string, unread: boolean): SessionSummary {
-  return { id, title, unread, generating: false, updatedAt: "2026-09-05T10:00:00Z" };
+  return {
+    id,
+    title,
+    unread,
+    generating: false,
+    updatedAt: "2026-09-05T10:00:00Z",
+    spaceId: "spc_a",
+    restricted: false,
+    space_ids: ["spc_a"],
+  };
 }
 
 /** One loaded page, as the session-list infinite query caches it. */
@@ -27,9 +36,11 @@ function cache(data: SessionSummary[]): SessionsCache {
   return { pages: [{ data, hasMore: false }], pageParams: [undefined] };
 }
 
-/** Scoped to one space; a static render reads the cache and never requests. */
+/** Filtered to one space; a static render reads the cache and never requests. */
 const TRANSPORT: ChatTransport = {
   getHeaders: () => ({ "X-Space-Id": "spc_a" }),
+  orgId: "org_1",
+  spaceId: "spc_a",
   request: () => Promise.reject(new Error("no request in a static render")),
 };
 
@@ -49,7 +60,12 @@ function renderConversationList(qc: QueryClient, can: (permission: string) => bo
     return render(
       <SidebarProvider>
         <ChatTransportProvider value={TRANSPORT}>
-          <ChatConversationList activeId="chat_active" t={(key) => key} can={can} />
+          <ChatConversationList
+            activeId="chat_active"
+            t={(key) => key}
+            can={can}
+            renderSpaces={() => null}
+          />
         </ChatTransportProvider>
       </SidebarProvider>,
       { queryClient: qc },
@@ -67,10 +83,16 @@ function hostWith(granted: string[]): ChatHost {
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
+    canIn: (_spaceId, permission) => granted.includes(permission),
+    actingSpaceIds: ["spc_a"],
+    workingSpaceId: "spc_a",
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
     onPackagesChanged: () => {},
+    renderSpaces: () => null,
+    linkInSpace: (path) => path,
+    useSpaceLabelOf: () => () => undefined,
   };
 }
 

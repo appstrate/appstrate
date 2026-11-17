@@ -12,15 +12,14 @@
  */
 
 /**
- * URL of the platform's MCP endpoint pinned to the session's space
- * (`/api/mcp/o/:org/s/:space`, the endpoint's one client-side pin), tagged
- * `?context=injected`.
+ * URL of the organization's MCP endpoint (`/api/mcp/o/:org`, where every space-acting tool
+ * names its `space_id`; the turn's bearer allowlists the spaces it may name — a limited
+ * conversation's origin alone), tagged `?renders_cards=true`.
  *
- * The chat injects the get_me payload (`/api/me/context`) straight into its own
- * system prompt, so the server's get_me tool would only re-fetch what the model
- * already has. The tag tells the server to drop that redundant tool (and its
- * "call get_me first" instruction).
+ * The tag tells the server this client renders connect offers and run cards itself and resumes an
+ * unfinished run on a later turn, so its instructions say so; the tools are the same as any
+ * client's.
  */
-export function platformMcpUrl(origin: string, orgId: string, spaceId: string): string {
-  return `${origin}/api/mcp/o/${encodeURIComponent(orgId)}/s/${encodeURIComponent(spaceId)}?context=injected`;
+export function platformMcpUrl(origin: string, orgId: string): string {
+  return `${origin}/api/mcp/o/${encodeURIComponent(orgId)}?renders_cards=true`;
 }

@@ -62,6 +62,7 @@ describe("the overview rules", () => {
       "/agents/@acme/triage",
       "/",
       "/org-settings/members",
+      "/chat",
       "/preferences/connections",
     ]) {
       withdrawOnPage(KEY, pathname);
@@ -87,7 +88,7 @@ describe("the overview rules", () => {
     withdrawOnPage(KEY, "/workspace-settings/general");
     expect(chosen()).toBe(false);
     overviewStore.getState().set(KEY, true);
-    withdrawOnPage(KEY, "/chat");
+    withdrawOnPage(KEY, "/integrations/new/mcp");
     expect(chosen()).toBe(false);
   });
 });

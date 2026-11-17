@@ -50,9 +50,10 @@ const SOURCES = [
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
 ];
-// The MCP module's `code` literals are tool-result refusals read by the model, never a problem body.
+// The MCP module's `code` literals, and `core`'s MCP tool-result helpers (`mcp-result.ts`,
+// `mcp-spaces.ts`: `missing_argument`, `unknown_space`), are tool-result refusals read by the model, never a problem body.
 const NOT_A_SOURCE =
-  /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\/|^apps\/api\/src\/modules\/mcp\//;
+  /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\/|^apps\/api\/src\/modules\/mcp\/|^packages\/core\/src\/mcp-(?:result|spaces)\.ts$/;
 
 /** Literal codes, wherever a problem can be raised. */
 const CODE_PATTERNS = [
@@ -212,6 +213,8 @@ const NOT_SURFACED = new Set([
   "authorization_server_blocked",
   "tools_truncated",
   "instructions_truncated",
+  // A refusal of a chat turn, worded by the chat's turn errors (`chat:turn.error.*`).
+  "chat_turn_scope_changed",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",

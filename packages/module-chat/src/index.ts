@@ -7,10 +7,10 @@
  *   - `chat_sessions` / `chat_messages` persistence (tables live in the core
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
- *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume,
- *     stop and the space's enforced-skill names — none of which writes a message. Persistence is server-authoritative
+ *   - REST surface under `/api/orgs/:orgId/chat/*`: session CRUD, history READ, resume,
+ *     stop and the enforced-skill names — none of which writes a message. Persistence is server-authoritative
  *     and its two writers both live in `persistence.ts`; exactly ONE route
- *     reaches them, `POST /api/chat` (the conversational loop below), which
+ *     reaches them, `POST /api/orgs/:orgId/chat` (the conversational loop below), which
  *     stores the user turn before inference and the assistant turn when the
  *     stream finalizes. The second writer, `persistNotice`, has no route at all
  *     — it is driven by the `onRunStatusChange` event. See routes.ts.
@@ -19,7 +19,7 @@
  *   - Full-page React UI exported from `@appstrate/module-chat/ui`
  *     (`ChatPage`) — the app shell lazy-loads it behind `features.chat`.
  *
- * The conversational loop (`POST /api/chat`) is the transplant of the
+ * The conversational loop (`POST /api/orgs/:orgId/chat`) is the transplant of the
  * appstrate-chat satellite: one in-process Pi engine over the org's configured
  * models (llm-proxy for API-key models, native provider call for OAuth
  * subscriptions — no long-lived key held here either way) + the `/api/mcp` meta-tools
@@ -27,7 +27,7 @@
  */
 
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
-import { createChatRouter, createSessionSchema, renameSessionSchema } from "./routes.ts";
+import { createChatRouter, createSessionSchema, updateSessionSchema } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
@@ -69,7 +69,7 @@ const chatModule: AppstrateModule = {
     // Tables are centralized in the core schema — nothing to migrate. No
     // workers: chat is request-driven. Capture the platform deps once: the
     // rate limiter, the in-process dispatcher (re-enters the platform app for
-    // /api/models, /api/spaces, /api/me/context and the MCP hops —
+    // /api/models and the MCP hops —
     // loopback fetch fallback inside; inference does NOT ride it, pi-ai opens a
     // real socket to the llm-proxy at `CHAT_SELF_ORIGIN`), and the chat-model
     // resolution + usage metering.
@@ -144,18 +144,19 @@ const chatModule: AppstrateModule = {
   },
 
   openApiSchemas() {
+    const base = "/api/orgs/{orgId}/chat";
     return [
       {
         method: "POST",
-        path: "/api/chat/sessions",
+        path: `${base}/sessions`,
         jsonSchema: z.toJSONSchema(createSessionSchema) as Record<string, unknown>,
         description: "Create chat session",
       },
       {
         method: "PATCH",
-        path: "/api/chat/sessions/{id}",
-        jsonSchema: z.toJSONSchema(renameSessionSchema) as Record<string, unknown>,
-        description: "Rename chat session",
+        path: `${base}/sessions/{id}`,
+        jsonSchema: z.toJSONSchema(updateSessionSchema) as Record<string, unknown>,
+        description: "Update chat session",
       },
     ];
   },

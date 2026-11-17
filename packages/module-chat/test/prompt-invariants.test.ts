@@ -14,6 +14,8 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
+import { callerIdentity } from "./caller-identity.ts";
+import { reachableSpace } from "./reachable-space.ts";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -21,7 +23,7 @@ const contextText = (...args: Parameters<typeof formatCallerContext>) =>
 
 /** The turn's capabilities, from a permission set a role can actually hold. */
 function caps(permissions: readonly string[]) {
-  return turnCapabilities((permission) => permissions.includes(permission));
+  return turnCapabilities((permission) => permissions.includes(permission), []);
 }
 
 /** Build a persona from a permission set, so every one below is reachable. */
@@ -41,11 +43,18 @@ const REDUCED = promptFor(BUILDER.filter((permission) => permission !== "agents:
 /** May author an agent, may not launch one. */
 const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write", "skills:read"]);
 
+/** The spaces a conversation can act in. */
+const SPACES = [
+  reachableSpace({ id: "spc_a", name: "Alpha", role: "operator", credentialProxyOpen: true }),
+  reachableSpace({ id: "spc_b", name: "Beta", role: "admin", credentialProxyOpen: true }),
+];
+
 /** `formatCallerContext` options for a builder turn with the default skill selection. */
 const CONTEXT_OPTS = {
   capabilities: caps(BUILDER),
   rolePreview: false,
-  spaceRole: "builder",
+  spaces: SPACES,
+  restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
   enforced: [],
@@ -62,9 +71,10 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("duration, cost, token usage");
   });
 
-  it("keeps the available-integrations-by-default rule for context research", () => {
-    expect(FULL).toContain("default to the integrations already available");
-    expect(FULL).toContain("connected ones first");
+  it("keeps the integrations-over-memory rule for context research, the order being the server's", () => {
+    expect(FULL).toContain("use an available integration rather than answering from memory");
+    // The preference order (connected, then activated) is the MCP server's instructions'.
+    expect(FULL).not.toContain("connected ones first");
   });
 
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
@@ -80,7 +90,6 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("manifest.display_name");
     expect(FULL).toContain("describes the exact action or outcome of THIS run");
     expect(FULL).toContain('"display_name": "Analyse des 3 derniers e-mails"');
-    expect(FULL).not.toContain('"name": "@inline/one-shot"');
   });
 
   it("keeps inline manifests concise while allowing exact complete overrides", () => {
@@ -139,7 +148,8 @@ describe("full persona invariants", () => {
     // its path names, so its 403 carries the route's own error, never the
     // caller-space `required_permissions` enrichment; claiming it would be false.
     expect(FULL).toContain("integration_not_active");
-    expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(FULL).toMatch(/so do NOT restart the connect flow/);
+    expect(FULL).toContain("after a failed call, then re-run once");
     expect(FULL).toContain("`activatePackage`");
     expect(FULL).toContain("`POST /api/spaces/{id}/packages`");
     expect(FULL).toContain('{ "packageId": "<that integration id>" }');
@@ -172,7 +182,7 @@ describe("full persona invariants", () => {
   it("tells an inline composer to select the tools the task needs, whatever the default's size", () => {
     expect(FULL).toContain("list the exact tool names the task needs");
     expect(FULL).toContain(
-      "omit the entry to inherit the integration's `default_tools` (shown per integration in your context) only when the task needs that whole default",
+      "omit the entry to inherit the integration's `default_tools` (read with `getIntegration`) only when the task needs that whole default",
     );
     expect(FULL).toContain("never give it more than the task needs");
     expect(REDUCED).not.toContain("list the exact tool names the task needs");
@@ -181,7 +191,7 @@ describe("full persona invariants", () => {
   // `describe_operation` answers with the operation's definition; the integration comes from the call.
   it("reads an integration's tool names with invoke_operation, naming the field that holds each", () => {
     expect(FULL).toContain(
-      'read the integration with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
+      'read it with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
     );
     expect(FULL).toContain(
       "its `default_tools` holds the default's names, its `tool_catalog` every tool you may select",
@@ -191,8 +201,8 @@ describe("full persona invariants", () => {
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {
-      expect(persona).toMatch(
-        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in this space/,
+      expect(persona).toContain(
+        "For `integration_not_active`, connecting is not the remedy: offer the activation described below for that code",
       );
       expect(persona).toContain(
         "For `not_connected` or `auth_key_mismatch`, offer to connect it when a connect card appears",
@@ -218,20 +228,17 @@ describe("full persona invariants", () => {
   });
 
   it("names the same heading the context block renders", () => {
-    const block = contextText(
-      { user: { name: "Ada" } },
-      {
-        ...CONTEXT_OPTS,
-        skillCatalogue: [
-          {
-            packageId: "@acme/mine",
-            description: "Mine",
-            version: null,
-            uri: "skill://spc_1/acme/mine/mine/SKILL.md",
-          },
-        ],
-      },
-    );
+    const block = contextText(callerIdentity({ user: { name: "Ada" } }), {
+      ...CONTEXT_OPTS,
+      skillCatalogue: [
+        {
+          packageId: "@acme/mine",
+          description: "Mine",
+          version: null,
+          uri: "skill://spc_1/acme/mine/mine/SKILL.md",
+        },
+      ],
+    });
     expect(block).toContain("## Skills");
     expect(FULL).toContain("`## Skills`");
   });
@@ -246,7 +253,7 @@ describe("full persona invariants", () => {
     // `read_resource` is registered on every platform MCP connection.
     const noDispatch = promptFor(["mcp:read", "skills:read"]);
     expect(noDispatch).toContain("call `read_resource` with that URI verbatim");
-    expect(noDispatch).toContain("and the skills available");
+    expect(noDispatch).toContain("the skills available");
   });
 
   it("names no skills listing in the persona: `manual` turns learn `list_skills` from their context", () => {
@@ -264,13 +271,12 @@ describe("full persona invariants", () => {
       "## Skills",
       "Skills are not run on their own",
       "attach it under `dependencies.skills`",
-      "and the skills available",
+      "the skills available",
       "in `dependencies.skills`",
     ]) {
       expect(FULL).toContain(skillRule);
       expect(noSkills).not.toContain(skillRule);
     }
-    expect(noSkills).toContain('`operation_id: "listAgents"` for the full one');
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
@@ -297,7 +303,7 @@ describe("normalizeChatLocale", () => {
 });
 
 describe("caller-context prompt hygiene", () => {
-  const identity = { user: { name: "Ada" }, org: { role: "member" } };
+  const identity = callerIdentity({ user: { name: "Ada" }, org: { role: "member" } });
 
   it("renders the forwarded locale in the reply-language line", () => {
     const out = contextText(identity, { ...CONTEXT_OPTS, locale: "en-US" });
@@ -308,48 +314,22 @@ describe("caller-context prompt hygiene", () => {
     expect(contextText(identity, CONTEXT_OPTS)).toContain("Reply in the user's language (fr)");
   });
 
-  it("renders a needs_reconnection connection as needing its owner's reconnection", () => {
-    const out = contextText(
-      {
-        connections: [
-          {
-            integration_package_id: "@appstrate/gmail",
-            name: "Gmail",
-            source: "own",
-            needs_reconnection: true,
-          },
-          { integration_package_id: "@appstrate/clickup", name: "ClickUp", source: "own" },
-        ],
-      },
-      CONTEXT_OPTS,
-    );
-    expect(out).toMatch(/Gmail[^,]*needs reconnection by its owner/);
-    expect(out).not.toMatch(/ClickUp[^,]*needs reconnection/);
-  });
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
-    // (`buildSystemPrompt`). The block renders data only; the sole exception is the
-    // reply-language line, which is parameterised by the `X-Chat-Locale` header.
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
-        agents_truncated: true,
-      },
-      {
-        ...CONTEXT_OPTS,
-        skillCatalogue: [
-          {
-            packageId: "@appstrate/web-research",
-            description: "Research the web",
-            version: "1.2.0",
-            uri: "skill://spc_1/appstrate/web-research/web-research/SKILL.md",
-          },
-        ],
-      },
-    );
+    // (`buildSystemPrompt`). The block renders data only; the sole exceptions are the
+    // reply-language line, parameterised by the `X-Chat-Locale` header, and the rule on
+    // the spaces it lists.
+    const out = contextText(identity, {
+      ...CONTEXT_OPTS,
+      skillCatalogue: [
+        {
+          packageId: "@appstrate/web-research",
+          description: "Research the web",
+          version: "1.2.0",
+          uri: "skill://spc_1/appstrate/web-research/web-research/SKILL.md",
+        },
+      ],
+    });
     // Gone from the block…
     for (const imperative of [
       "Use the `@scope/name` id verbatim",
@@ -369,11 +349,17 @@ describe("caller-context prompt hygiene", () => {
       "Use every `@scope/name` id verbatim",
       "Prefer running an existing agent over doing the work inline",
       "declare it under the agent manifest's `dependencies.skills`",
-      '`operation_id: "listAgents"` for the full one',
       "call `listRuns` (newest first)",
     ]) {
       expect(FULL).toContain(imperative);
     }
+  });
+
+  it("renders neither integrations nor agents: they differ per space and are looked up with the tools", () => {
+    const out = contextText(identity, CONTEXT_OPTS);
+    expect(out).not.toContain("Integrations the user has connected");
+    expect(out).not.toContain("## Existing agents you can run");
+    expect(out).not.toContain("The user has no connected integrations yet");
   });
 });
 
@@ -391,7 +377,7 @@ describe("the persona without inline composition", () => {
   it("keeps every rule that is not about composing one", () => {
     expect(REDUCED).toContain("You are Appstrate's assistant");
     expect(REDUCED).toContain("Never quote run metrics");
-    expect(REDUCED).toContain("default to the integrations already available");
+    expect(REDUCED).toContain("use an available integration rather than answering from memory");
     expect(REDUCED).toContain("call `read_file` first");
     expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
     expect(REDUCED).toContain("The context lists the permissions this turn holds");
@@ -453,6 +439,49 @@ describe("the persona without inline composition", () => {
     expect(REDUCED).toContain("run_and_wait");
     expect(REDUCED).toContain('kind:"agent"');
     expect(REDUCED).not.toContain('kind:"inline"');
+  });
+});
+
+describe("the integration tools", () => {
+  const PROXY = [...BUILDER, "credential-proxy:call-own"];
+  const space = (permissions: string[], credentialProxyOpen: boolean) => ({
+    permissions,
+    credentialProxyOpen,
+  });
+  const withTools = buildSystemPrompt(
+    turnCapabilities((p) => PROXY.includes(p), [space(PROXY, true)]),
+  );
+
+  it("are offered only where a turn space holds `mcp:invoke` and a proxy grant and leaves the proxy open", () => {
+    const offered = (turn: string[], spaces: ReturnType<typeof space>[]) =>
+      turnCapabilities((p) => turn.includes(p), spaces).callsIntegrationTools;
+    expect(offered(PROXY, [space(PROXY, true)])).toBe(true);
+    expect(offered(PROXY, [space(PROXY, false)])).toBe(false);
+    expect(offered(PROXY, [space(BUILDER, true)])).toBe(false);
+    // The turn's set is a ceiling over each space's.
+    expect(offered(BUILDER, [space(PROXY, true)])).toBe(false);
+    expect(offered(PROXY, [space(BUILDER, true), space(PROXY, true)])).toBe(true);
+    expect(offered(PROXY, [])).toBe(false);
+  });
+
+  it("are preferred over a run when offered, the inline guidance kept for a run", () => {
+    expect(withTools).toContain("`search_integration_tools`");
+    expect(withTools).toContain("call it with `call_integration_tool`, and answer from its result");
+    expect(withTools).toContain("Run an agent instead when the task needs a runtime");
+    expect(withTools).not.toContain("MUST be carried out by running an agent");
+    expect(withTools).not.toContain("use any integration or MCP directly");
+    expect(withTools).toContain('kind:"inline"');
+    expect(withTools).toContain(INLINE_MANIFEST_RULE);
+  });
+
+  it("are absent when not offered, the run rule unchanged", () => {
+    expect(FULL).not.toContain("search_integration_tools");
+    expect(FULL).not.toContain("call_integration_tool");
+    expect(FULL).toContain("MUST be carried out by running an agent");
+    expect(FULL).toContain(
+      "- If the request needs an integration, an MCP, or any external action, run an agent:",
+    );
+    expect(FULL).toContain('kind:"inline"');
   });
 });
 
@@ -535,43 +564,6 @@ describe("the persona without agent runs", () => {
     expect(NO_RUNS_AUTHOR).not.toContain("(list truncated)");
   });
 
-  it("names the full-list operation only for a list the context renders", () => {
-    // Agents are listed on running them; the skills list is never truncated.
-    expect(NO_RUNS_AUTHOR).not.toContain("listAgents");
-    const runsNoSkills = promptFor(BUILDER.filter((permission) => permission !== "skills:read"));
-    expect(runsNoSkills).toContain('`operation_id: "listAgents"`');
-  });
-
-  it("lists no agent as runnable in the caller-context block", () => {
-    const raw = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      agents: [{ packageId: "@acme/triage", takes_input: false }],
-    };
-    expect(
-      contextText(raw, {
-        capabilities: caps(BUILDER),
-        rolePreview: false,
-        spaceRole: "builder",
-        permissions: ["agents:read", "mcp:invoke"],
-        skills: DEFAULT_SKILL_SELECTION,
-        enforced: [],
-      }),
-    ).toContain("## Existing agents you can run");
-    const off = contextText(raw, {
-      capabilities: caps([...MCP, "agents:write"]),
-      rolePreview: false,
-      spaceRole: "builder",
-      permissions: ["agents:read", "mcp:invoke"],
-      skills: DEFAULT_SKILL_SELECTION,
-      enforced: [],
-    });
-    expect(off).not.toContain("## Existing agents you can run");
-    expect(off).not.toContain("@acme/triage");
-    // The identity half survives — date and role grounding do not depend on runs.
-    expect(off).toContain("You are assisting Ada");
-  });
-
   it("keeps the run-reading rules for a turn that may inspect runs but not launch", () => {
     // Reading runs is its own grant (`mcp:invoke` ∧ run-read): the history
     // bullet and the metrics rule presuppose it, not the launch.
@@ -648,5 +640,168 @@ describe("the persona and package authoring", () => {
     const prompt = promptFor(["mcp:read", "agents:write"]);
     expect(prompt).not.toContain(CREATES);
     expect(prompt).not.toContain(FORBIDS);
+  });
+});
+
+describe("the persona and the spaces", () => {
+  it("tells the model to activate in the space the failed call acted in", () => {
+    expect(FULL).toContain("with the path parameter `id` and the `space_id` both that space's id");
+    // Every call names its space, a limited conversation's included: no call carries none.
+    expect(FULL).toContain("the space its `space_id` named, as every call names one");
+    // Stated once: the warnings paragraph refers to it.
+    expect(FULL.split("`activatePackage`").length - 1).toBe(1);
+    expect(FULL).toMatch(/the space the failed call acted in/);
+  });
+
+  it("claims the context lists neither integrations nor agents, which are looked up per space", () => {
+    expect(FULL).toContain(
+      "It lists neither the integrations they have connected nor the agents they can run",
+    );
+    expect(FULL).toContain("in the space concerned, naming its `space_id`.");
+  });
+
+  it("words the permissions as the union, each call decided where it is named", () => {
+    const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
+    expect(out).toContain(
+      "Permissions this turn (the union over the spaces you can act in; each call is decided in the space it names, by your role there): agents:read, mcp:invoke",
+    );
+  });
+
+  it("marks the permissions of a role preview, and names an empty set", () => {
+    const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+      ...CONTEXT_OPTS,
+      rolePreview: true,
+      permissions: [],
+    });
+    expect(out).toContain(
+      "Permissions this turn (role preview active) (the union over the spaces you can act in; each call is decided in the space it names, by your role there): none",
+    );
+  });
+
+  describe("the origin space", () => {
+    const sentence = (space: string, id: string) =>
+      `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
+
+    it("is a default for a request naming no space, never a pin", () => {
+      const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+        ...CONTEXT_OPTS,
+        origin: { id: "spc_b", name: "Beta" },
+      });
+      expect(out).toContain(sentence("Beta", "spc_b"));
+      // The spaces themselves are the tools' schemas: the block names the default alone.
+      expect(out).not.toContain("spc_a");
+      expect(out).not.toContain("Ask the user which space");
+    });
+
+    it("is absent from the overview, where the model asks when the request does not say", () => {
+      const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
+      expect(out).not.toContain("This conversation was started in");
+      expect(out).toContain(
+        "Ask the user which space when the request does not say; never guess it.",
+      );
+      // Never moving a refused action is the server instructions' (`NO_FALLBACK_HINT`): one copy.
+      expect(out).not.toContain("refused action");
+    });
+
+    describe("without an origin space (the overview)", () => {
+      const fallback = (id: string, label: string) =>
+        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`.`;
+      const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };
+      const DEFAULT = { ...SPACES[1]!, isDefault: true };
+
+      it("defaults to the caller's personal space, ahead of the organization's default space", () => {
+        const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+          ...CONTEXT_OPTS,
+          spaces: [DEFAULT, PERSONAL],
+        });
+        expect(out).toContain(fallback("spc_p", "Mine, your personal space"));
+        expect(out).not.toContain("Ask the user which space");
+      });
+
+      it("falls back to the organization's default space when the turn has no personal space", () => {
+        const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+          ...CONTEXT_OPTS,
+          spaces: [SPACES[0]!, DEFAULT],
+        });
+        expect(out).toContain(fallback("spc_b", "Beta, the organization's default space"));
+        expect(out).not.toContain("Ask the user which space");
+      });
+
+      it("gives way to the origin space", () => {
+        const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+          ...CONTEXT_OPTS,
+          spaces: [DEFAULT, PERSONAL],
+          origin: { id: "spc_b", name: "Beta" },
+        });
+        expect(out).toContain(sentence("Beta", "spc_b"));
+        expect(out).not.toContain("When the user names no space, pass");
+      });
+    });
+
+    it("names the one space a limited conversation acts in, and that the user lifts the limit", () => {
+      const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
+        ...CONTEXT_OPTS,
+        spaces: SPACES.slice(1, 2),
+        origin: { id: "spc_b", name: "Beta" },
+        restricted: true,
+      });
+      expect(out).toContain(
+        "This conversation is limited to Beta (`spc_b`): pass `spc_b` as the `space_id` of every call",
+      );
+      expect(out).toContain("The user lifts the limit in the composer");
+      expect(out).not.toContain("spc_a");
+      expect(out).not.toContain("Ask the user which space");
+    });
+  });
+});
+
+describe("the persona and the caller context", () => {
+  /** The sentence that sends the model to `get_me`, or undefined when there is none. */
+  const getMeSentence = (prompt: string) =>
+    prompt
+      .split("\n")
+      .find((line) => line.startsWith("Your context block below is DATA"))
+      ?.match(/It lists neither[^.]*\./)?.[0];
+  const LEAD = "It lists neither the integrations they have connected nor the agents they can run";
+  const PER_SPACE = "in the space concerned, naming its `space_id`.";
+
+  it("sends the model to get_me, per space, for both when the turn reads both", () => {
+    expect(getMeSentence(promptFor([...BUILDER, "integrations:read"]))).toBe(
+      `${LEAD}: both differ per space, so call \`get_me\` for the integrations they have connected (\`connections\`) and the agents they can run (\`agents\`) ${PER_SPACE}`,
+    );
+  });
+
+  it("names in the get_me sentence only what the turn's grants make it return", () => {
+    // `GET /api/me/context` lists connections under `integrations:read` and agents under `agents:run`.
+    expect(getMeSentence(FULL)).toBe(
+      `${LEAD}: both differ per space, so call \`get_me\` for the agents they can run (\`agents\`) ${PER_SPACE}`,
+    );
+    expect(getMeSentence(promptFor([...MCP, "integrations:read"]))).toBe(
+      `${LEAD}: both differ per space, so call \`get_me\` for the integrations they have connected (\`connections\`) ${PER_SPACE}`,
+    );
+    // `get_me` exists only over the transport; without it the sentence names no tool.
+    expect(getMeSentence(promptFor(["integrations:read"]))).toBe(`${LEAD}.`);
+  });
+
+  it("finds runnable agents with get_me, reading their published/home_writable/takes_input", () => {
+    expect(FULL).toContain(
+      "lists the agents of that space they can run, each with `published`, `home_writable` and `takes_input`; when its `agents_truncated` is true, look the rest up with `invoke_operation`",
+    );
+    expect(FULL).toContain("(`published: false`)");
+    expect(FULL).toContain("(`home_writable: true`)");
+  });
+
+  it("takes connected integration ids from get_me only when the turn reads connections", () => {
+    const connections = promptFor([...BUILDER, "integrations:read"]);
+    expect(connections).toContain("connected ones first (`get_me` lists them, per space)");
+    expect(connections).toContain(
+      "`get_me` gives both, as `integration_package_id` and `version`, for each integration the user has connected there",
+    );
+    expect(FULL).not.toContain("`get_me` lists them");
+    expect(FULL).not.toContain("integration_package_id");
+    // The tool catalogue still comes from `getIntegration`, whatever the grant.
+    for (const prompt of [FULL, connections]) {
+      expect(prompt).toContain('`operation_id: "getIntegration"`');
+    }
   });
 });

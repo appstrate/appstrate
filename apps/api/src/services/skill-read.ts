@@ -42,10 +42,11 @@ export interface SkillReadSpace extends SpaceScope {
 }
 
 /**
- * The skills this request's chat turn injected, or `null`. The claim is a
- * chat-turn grant: it holds in the turn's space only, and lapses with the
- * caller's LIVE `chat:write` there — revoking chat access revokes it. A
- * malformed claim is ignored.
+ * The entry of `packageId` in the skills this request's chat turn injected, or `null`. The claim
+ * is a chat-turn grant: each skill of it holds in its own space only, the space of its URI (the
+ * one the read enters, so a skill entered in another space is an ordinary read), and lapses with
+ * the caller's LIVE `chat:write` there — revoking chat access revokes it (see
+ * `resolveSkillReadAccess`). A malformed claim is ignored.
  *
  * This IS a hard-coded auth method, the chat module's: core names it (in
  * `@appstrate/core/chat-contract`) because a claim any loaded strategy could
@@ -53,11 +54,17 @@ export interface SkillReadSpace extends SpaceScope {
  * therefore a deliberate core change, not a module capability — the same
  * stance as the bearer allowlist in `lib/bearer-only.ts`.
  */
-function turnClaim(c: Context<AppEnv>, space: SkillReadSpace): InjectedSkills["skills"] | null {
+function claimedHere(
+  c: Context<AppEnv>,
+  space: SkillReadSpace,
+  packageId: string,
+): InjectedSkills["skills"][string] | null {
   if (c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD) return null;
   if (!space.permissions.has(CHAT_TURN)) return null;
   const claim = injectedSkillsSchema.safeParse(c.get("authExtra")?.[INJECTED_SKILLS_AUTH_EXTRA]);
-  return claim.success && claim.data.spaceId === space.spaceId ? claim.data.skills : null;
+  if (!claim.success || !Object.hasOwn(claim.data.skills, packageId)) return null;
+  const served = claim.data.skills[packageId]!;
+  return served.spaceId === space.spaceId ? served : null;
 }
 
 /** What a read serves: `spec` `undefined` = the stored tree; `draftLock` pins that tree. */
@@ -69,7 +76,7 @@ interface SkillReadAccess {
 
 /**
  * Which definition this caller may read, `null` when refused. A skill the turn
- * injected answers from the claim alone, without `skills:*` — the chat already
+ * injected in this space answers from the claim alone, without `skills:*` — the chat already
  * put its SKILL.md in context — and never falls through: the published version
  * it was served at (a system skill's shipped tree), or its draft pinned to the
  * `lock_version` injected; a `definition` other than the one injected is
@@ -83,9 +90,8 @@ async function resolveSkillReadAccess(
   packageId: string,
   definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
-  const claim = turnClaim(c, space);
-  if (claim && Object.hasOwn(claim, packageId)) {
-    const served = claim[packageId]!;
+  const served = claimedHere(c, space, packageId);
+  if (served) {
     const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type !== "skill") return null;
     if (pkg.source === "system") return definition === "draft" ? null : { pkg, spec: undefined };

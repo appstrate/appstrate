@@ -16,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 const { render } = await import("../../test/render.tsx");
 const { useRuns } = await import("../use-paginated-runs.ts");
 const { useAllSchedules } = await import("../use-schedules.ts");
-const { useFilesPaged } = await import("../use-files.ts");
+const { useFiles, useFilesPaged } = await import("../use-files.ts");
 const { useAgents, usePackageList } = await import("../use-packages.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
 
@@ -59,5 +59,12 @@ describe("polling a list spanning spaces", () => {
       intervalOf(() => useFilesPaged({ spanning: true }), "get", "/api/orgs/{orgId}/files"),
     ).toBe(ACROSS_SPACES_POLL_MS);
     expect(intervalOf(() => useFilesPaged(), "get", "/api/files")).toBeUndefined();
+  });
+
+  it("polls a conversation's files across spaces, not the current space's", () => {
+    expect(intervalOf(() => useFiles({ spanning: true }), "get", "/api/orgs/{orgId}/files")).toBe(
+      ACROSS_SPACES_POLL_MS,
+    );
+    expect(intervalOf(() => useFiles(), "get", "/api/files")).toBeUndefined();
   });
 });

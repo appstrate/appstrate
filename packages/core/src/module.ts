@@ -953,6 +953,15 @@ interface AuthResolutionBase {
    * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
   spaceId?: string;
+  /**
+   * Optional space ALLOWLIST: the credential is bound to this SET of spaces and reaches only
+   * those (a list spanning spaces is cut to them, entering any other space is a 404), and each
+   * request it makes acts in ONE space of the set (the MCP endpoint dispatches it pinned to the
+   * space it entered). Unlike {@link spaceId} it never pins `X-Space-Id`: the request still
+   * names its space, from within the set. An empty list reaches nothing. Propagated to
+   * `c.get("credentialSpaceIds")`.
+   */
+  spaceIds?: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
@@ -1384,6 +1393,38 @@ export interface LlmUsageLedgerRow {
  */
 export type AuditPayload = { [key: string]: unknown; [key: `${string}_${string}`]: never };
 
+/** A space the caller reaches, as {@link PlatformServices.reachableSpaces} lists it. */
+export interface ReachableSpaceGrant {
+  id: string;
+  name: string;
+  /** The caller's role there, as `GET /api/spaces` names it. */
+  role: string;
+  /** The caller's effective permissions there (`resource:action`). */
+  permissions: string[];
+  /** The space's direct-access switch (`spaces.credential_proxy_open`): the MCP surface depends on it. */
+  credentialProxyOpen: boolean;
+  /** The organization's default space (`spaces.is_default`). */
+  isDefault: boolean;
+  /** The caller's own personal space in this organization (`spaces.owner_user_id` is the caller). */
+  personal: boolean;
+}
+
+/** What {@link PlatformServices.reachableSpaces} answers: the reach, and whether the credential confines it. */
+export interface ReachedSpaces {
+  spaces: ReachableSpaceGrant[];
+  /**
+   * The credential itself is confined to spaces: pinned to one (a space API key, a space-bound
+   * token) or carrying a space allowlist (the chat's own bearer). `spaces` holds those alone.
+   */
+  confined: boolean;
+  /**
+   * The org-level half of the caller's grants (org role, principal grants, role preview): the part
+   * every space's `permissions` shares. A permission is org-level or space-level, never both, so a
+   * space's set minus this half is what the caller's role grants in that space.
+   */
+  orgPermissions: string[];
+}
+
 export interface PlatformServices {
   /**
    * Structured JSON logger — the platform's OWN pino instance, so module output
@@ -1516,7 +1557,7 @@ export interface PlatformServices {
    * materialize an `upload://` staged upload into a chat-session-scoped file
    * (purpose `user_upload`), or validate that an existing `appfile://` is
    * readable by the session owner under the permissions the request carries.
-   * The chat module has no DB access, so materialization + the
+   * The files service is the platform's, so materialization + the
    * container-inherited ACL check cross through here.
    * Rejections (over-cap, over-limit, not-found/foreign file) are thrown as
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
@@ -1553,7 +1594,7 @@ export interface PlatformServices {
    * platform opens its own transaction, which is correct whenever the caller
    * has no wider unit of work to join.
    */
-  cleanupSessionFiles(chatSessionId: string, tx?: unknown): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, orgId: string, tx?: unknown): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this before starting ANY turn, and the platform
@@ -1596,6 +1637,15 @@ export interface PlatformServices {
    * 400 for a negative / non-integer `bytes`.
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  /**
+   * The spaces the caller reaches, each with their role (as `GET /api/spaces`
+   * names it) and their effective permission set there, for a route that
+   * serves the organization as a whole and so enters no space. The same reach
+   * every cross-space list reads, persona and credential ceiling included; an
+   * end-user is refused with a 403. Memoized per request. `confined` tells a route that
+   * must not serve a credential confined to spaces to refuse it itself.
+   */
+  reachableSpaces(c: Context, orgId: string): Promise<ReachedSpaces>;
   /**
    * Append one `audit_events` row for a module route's state change; org, space,
    * actor and request metadata come from `c`. `action` e.g. `billing.plan_changed`;

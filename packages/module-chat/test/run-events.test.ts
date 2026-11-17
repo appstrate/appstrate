@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   autoPresentFile,
   buildRunPageHref,
+  requestInSpace,
   buildRunSseUrl,
   extractAgentLabel,
   extractRunFiles,
@@ -111,6 +112,9 @@ describe("run-events helpers", () => {
     expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBeUndefined();
     expect(buildRunPageHref("@acme/writer", "run_42")).toBe("/agents/@acme/writer/runs/run_42");
     expect(buildRunPageHref(undefined, "run_42")).toBeUndefined();
+    expect(buildRunPageHref("@acme/writer", "run_42", "spc_b")).toBe(
+      "/agents/@acme/writer/runs/run_42?enterSpace=spc_b",
+    );
   });
 
   it("parses JSON, logs, and run updates", () => {
@@ -280,6 +284,17 @@ describe("run-events helpers", () => {
       kind: "file",
       id: "file_efgh5678",
     });
+
+    // The server's stamp names the space the file lives in: its download reads there.
+    expect(
+      resolveAttachmentContent([
+        {
+          type: "file",
+          data: "appfile://file_abcd1234",
+          providerMetadata: { appstrate: { size: 3, spaceId: "spc_b" } },
+        },
+      ]),
+    ).toEqual({ kind: "file", id: "file_abcd1234", spaceId: "spc_b" });
 
     // Just-sent optimistic upload:// (not yet materialized to appfile://) →
     // inert, but the raw URI is kept so the staged-image cache can be probed.
@@ -831,5 +846,24 @@ describe("readRunLogPages", () => {
       () => {},
     );
     expect(calls).toBe(RUN_LOG_PAGE_CAP);
+  });
+});
+
+describe("requestInSpace", () => {
+  const seen: { path: string; space: string | null }[] = [];
+  const request = async (path: string, init?: RequestInit) => {
+    seen.push({ path, space: new Headers(init?.headers).get("X-Space-Id") });
+    return Response.json({});
+  };
+
+  it("asks in the space a run ran in, over the working space's headers", async () => {
+    await requestInSpace(request, "spc_b")("/api/runs/run_1", {
+      headers: { "X-Space-Id": "spc_a", Accept: "application/json" },
+    });
+    expect(seen.at(-1)).toEqual({ path: "/api/runs/run_1", space: "spc_b" });
+  });
+
+  it("leaves a call without a space as it was", async () => {
+    expect(requestInSpace(request, undefined)).toBe(request);
   });
 });

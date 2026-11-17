@@ -9,8 +9,6 @@
  * deterministically:
  *
  *   - `/api/models`       → one openai-completions model (llm-proxy-routed)
- *   - `/api/me/context`   → a small caller-context payload
- *   - `/api/spaces` → the default space id
  *
  * The engine itself is injected. Production always gets `runPiChat`, which would
  * open a real Pi session against a real provider; here a scripted engine returns
@@ -29,9 +27,10 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSpaces, files } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
+import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
 import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
 import {
   CHAT_MESSAGE_MAX_BYTES,
@@ -49,7 +48,7 @@ import {
   type ChatAttachmentRequest,
   type ChatUsageRecord,
 } from "@appstrate/core/chat-contract";
-import type { ModuleInitContext, PrincipalKind } from "@appstrate/core/module";
+import type { ModuleInitContext, PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
@@ -60,6 +59,9 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
+import { ensureSession } from "../src/persistence.ts";
+import { reachableSpace } from "./reachable-space.ts";
+import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -92,11 +94,10 @@ async function waitForAssistantPersist(sessionId: string, timeoutMs = 8_000): Pr
   }
 }
 
-// A distinctive marker in the scripted caller context so we can prove
-// `/api/me/context` was fetched and rendered into the system prompt.
+// A distinctive marker in the request context's organization name, so we can prove the
+// caller-context block was rendered into the system prompt.
 const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
-const SPACE_ID = "spc_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
 const TEST_REQUEST_ID = "req_chat_handler_test";
 
@@ -124,22 +125,9 @@ function modelsResponse(apiShape = "openai-completions"): Response {
   });
 }
 
-/** A minimal but non-empty `/api/me/context` payload. */
-function contextResponse(recentRuns: unknown[] = []): Response {
-  return Response.json({
-    user: { name: "Chat Tester", email: "chat-tester@test.com" },
-    org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
-    connections: [],
-    agents: [],
-    skills: [],
-    recent_runs: recentRuns,
-  });
-}
-
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
 function scriptedDispatch(
   apiShape?: string,
-  context: () => Response = () => contextResponse(),
   listedSkill?: SkillEntry,
 ): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
@@ -148,10 +136,6 @@ function scriptedDispatch(
       return answerSkillsMcp(await req.json(), { entry: listedSkill, text: "", onRead: () => {} });
     }
     if (path === "/api/models") return modelsResponse(apiShape);
-    if (path === "/api/me/context") return context();
-    if (path === "/api/spaces") {
-      return Response.json({ data: [{ id: SPACE_ID, isDefault: true }] });
-    }
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
 }
@@ -265,6 +249,16 @@ async function tokenPermissions(input: PiChatInput): Promise<string[]> {
   return [...(resolved!.permissions ?? [])].sort();
 }
 
+/** The spaces the turn's bearer allowlists, as the loopback strategy resolves them. */
+async function tokenSpaceIds(input: PiChatInput): Promise<readonly string[] | undefined> {
+  const authorization = input.platformMcp?.headers?.Authorization;
+  const resolved = await chatLoopbackStrategy.authenticate({
+    headers: new Headers({ authorization: authorization as string }),
+  } as never);
+  expect(resolved).not.toBeNull();
+  return resolved!.spaceIds;
+}
+
 // A turn persists in a background task that outlives its response, and the registry of those
 // tasks is a process-wide singleton: a test that returns while one is still settling hands it
 // to whichever file runs next (`inflight.test.ts` then counts a turn it never tracked).
@@ -283,12 +277,23 @@ describe("handleChatStream", () => {
     ctx = await createTestContext({ orgSlug: "chat-handler-org" });
   });
 
+  /** The test context's one space, holding `permissions` on top of what makes it an acting space. */
+  function defaultReach(permissions: ReadonlySet<string> = new Set()): ReachableSpaceGrant {
+    return reachableSpace({
+      id: ctx.defaultSpaceId,
+      name: "Default",
+      role: "owner",
+      permissions: [...new Set(["chat:read", "chat:write", "mcp:read", ...permissions])],
+    });
+  }
+
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
   function buildApp(
     deps: ReturnType<typeof buildChatPlatformDeps>,
     engine?: ChatEngine,
-    permissions: Set<string> = new Set<string>(),
+    reachable: ReachableSpaceGrant[],
     principalKind: PrincipalKind = "user",
+    orgHalf: ReadonlySet<string> = new Set(),
   ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
@@ -298,18 +303,18 @@ describe("handleChatStream", () => {
       handlerError = error;
       return errorHandler(error, context as never);
     });
-    app.post("/api/chat", (c) => {
+    app.post("/api/orgs/:orgId/chat", (c) => {
       c.set("requestId", TEST_REQUEST_ID);
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
-      // What `enterSpaceContext` writes on every `/api/chat/*` route in
-      // production — the session's space and the scope of the turn's reads.
-      c.set("space", { id: ctx.defaultSpaceId, credentialProxyOpen: true });
+      // What the router's middleware writes on every chat route in production: the spaces the
+      // caller reaches.
+      c.set("reachable", reachable);
+      c.set("reachableOrgHalf", orgHalf);
       c.set("principalKind", principalKind);
       c.set("orgRole", "owner");
-      c.set("orgName", ctx.org.name);
+      c.set("orgName", CONTEXT_ORG_MARKER);
       c.set("orgSlug", ctx.org.slug);
-      c.set("permissions", permissions);
       return handleChatStream(c, deps, engine);
     });
     return app;
@@ -326,15 +331,13 @@ describe("handleChatStream", () => {
       resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
       /** Stand in for the platform's usage writer. */
       recordChatUsage?: ChatPlatformDeps["recordChatUsage"];
-      /** Scripted `/api/me/context` body, to vary the payload between turns. */
-      context?: () => Response;
       /** The one skill the scripted platform MCP server lists. */
       listedSkill?: SkillEntry;
       /** Replace the whole scripted dispatch (to observe request timing). */
       dispatch?: (req: Request) => Promise<Response>;
       /** Stand in for the platform's composer-attachment resolution. */
       resolveChatAttachment?: ChatPlatformDeps["resolveChatAttachment"];
-      /** The caller's resolved RBAC set, as the auth pipeline would write it. */
+      /** The caller's grants in the test context's one space, besides the ones that make it an acting space. */
       permissions?: Set<string>;
       /** Replace the single user message (to carry a composer attachment). */
       parts?: unknown[];
@@ -342,6 +345,10 @@ describe("handleChatStream", () => {
       principalKind?: PrincipalKind;
       /** The composer's package-authoring switch for this turn; omitted = on. */
       packageAuthoring?: boolean;
+      /** The spaces the caller reaches; omitted = the test context's default space, with `permissions`. */
+      reachable?: ReachableSpaceGrant[];
+      /** The org-level half of the caller's grants (`ReachedSpaces.orgPermissions`); omitted = none. */
+      orgHalf?: ReadonlySet<string>;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
       /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
@@ -366,20 +373,24 @@ describe("handleChatStream", () => {
           : initCtx,
       ),
       dispatch:
-        overrides?.dispatch ??
-        scriptedDispatch(overrides?.apiShape, overrides?.context, overrides?.listedSkill),
+        overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.listedSkill),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
       ...(overrides?.recordChatUsage ? { recordChatUsage: overrides.recordChatUsage } : {}),
       ...(overrides?.resolveChatAttachment
         ? { resolveChatAttachment: overrides.resolveChatAttachment }
         : {}),
     };
-    const app = buildApp(deps, engine, overrides?.permissions, overrides?.principalKind);
-    const res = await app.request("/api/chat", {
+    const app = buildApp(
+      deps,
+      engine,
+      overrides?.reachable ?? [defaultReach(overrides?.permissions)],
+      overrides?.principalKind,
+      overrides?.orgHalf,
+    );
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-space-id": SPACE_ID,
         "x-org-id": ctx.orgId,
       },
       body: JSON.stringify({
@@ -442,15 +453,107 @@ describe("handleChatStream", () => {
       ],
       resolveChatAttachment: async (request) => {
         requests.push(request);
-        return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+        return {
+          uri: request.uri,
+          name: "r.txt",
+          mime: "text/plain",
+          size: 12,
+          spaceId: request.spaces[0]!.id,
+        };
       },
     });
 
     expect(res.status).toBe(200);
     await collectUiChunks(res);
     expect(requests).toHaveLength(1);
-    expect([...requests[0]!.permissions]).toEqual(["runs:read-all"]);
+    expect(requests[0]!.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
+    expect([...requests[0]!.spaces[0]!.permissions].sort()).toEqual([
+      "chat:read",
+      "chat:write",
+      "mcp:read",
+      "runs:read-all",
+    ]);
     await waitForAssistantPersist(sessionId);
+  });
+
+  describe("a turn its claim refuses", () => {
+    const attachment = {
+      type: "file",
+      url: "upload://upl_refused",
+      mediaType: "text/plain",
+      filename: "r.txt",
+    };
+    async function refusedTurn(sessionId: string, beforeClaim: () => Promise<void>) {
+      const requests: ChatAttachmentRequest[] = [];
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        parts: [{ type: "text", text: "lis ceci" }, attachment],
+        // Runs after the turn read the conversation, before it claims it.
+        resolveChatModel: async () => {
+          await beforeClaim();
+          return { subscription: false };
+        },
+        resolveChatAttachment: async (request) => {
+          requests.push(request);
+          await request.beforeResolve?.(ctx.defaultSpaceId);
+          return {
+            uri: "appfile://file_refused0",
+            name: "r.txt",
+            mime: "text/plain",
+            size: 1,
+            spaceId: ctx.defaultSpaceId,
+          };
+        },
+      });
+      return { res, requests, calls };
+    }
+    const rowOf = async (sessionId: string) =>
+      (await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)))[0]!;
+
+    it("on a scope change materializes nothing, records no space and writes no message", async () => {
+      const sessionId = mintSessionId();
+      await ensureSession(
+        sessionId,
+        ctx.orgId,
+        ctx.user.id,
+        [ctx.defaultSpaceId],
+        undefined,
+        () => ({
+          spaceId: ctx.defaultSpaceId,
+          restricted: false,
+        }),
+      );
+      const { res, requests, calls } = await refusedTurn(sessionId, async () => {
+        await db
+          .update(chatSessions)
+          .set({ restricted: true })
+          .where(eq(chatSessions.id, sessionId));
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("chat_turn_scope_changed");
+      expect(requests).toEqual([]);
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatSessionSpaces)).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      expect((await rowOf(sessionId)).activeStreamId).toBeNull();
+    });
+
+    it("while another turn is live answers chat_turn_in_flight and leaves that turn's marker", async () => {
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+      const { res, requests, calls } = await refusedTurn(sessionId, async () => {
+        await db
+          .update(chatSessions)
+          .set({ activeStreamId: "strm_live" })
+          .where(eq(chatSessions.id, sessionId));
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+      expect(requests).toEqual([]);
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      expect((await rowOf(sessionId)).activeStreamId).toBe("strm_live");
+    });
   });
 
   it("rejects generation settings unsupported by the selected model", async () => {
@@ -674,7 +777,6 @@ describe("handleChatStream", () => {
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      spaceId: ctx.defaultSpaceId,
       title: null,
       skillMode: "strict",
       pinnedSkills: [PIN],
@@ -701,13 +803,7 @@ describe("handleChatStream", () => {
           onRead: (readUri) => read.push(readUri),
         });
       }
-      if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
-      return Response.json({
-        user: { name: "Chat Tester", email: "chat-tester@test.com" },
-        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
-        connections: [],
-        agents: [],
-      });
+      return scriptedDispatch()(req);
     };
 
     const { engine, calls } = scriptedEngine();
@@ -747,11 +843,15 @@ describe("handleChatStream", () => {
     expect(input.system).not.toContain("LOAD IT BEFORE acting");
     expect(input.system).not.toContain("listSkills");
     expect(input.system).toContain("This conversation is restricted to the skills shown here");
-    expect(await tokenPermissions(input)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
+    expect(await tokenPermissions(input)).toEqual([
+      "chat:read",
+      "chat:write",
+      "mcp:invoke",
+      "mcp:read",
+    ]);
     // The bearer names what was injected, so `resources/read` serves it without `skills:read`.
     expect(await tokenInjectedSkills(input)).toEqual({
-      spaceId: ctx.defaultSpaceId,
-      skills: { [PIN]: { definition: "published", version: "1.0.0" } },
+      skills: { [PIN]: { definition: "published", version: "1.0.0", spaceId: ctx.defaultSpaceId } },
     });
 
     await waitForAssistantPersist(sessionId);
@@ -770,7 +870,12 @@ describe("handleChatStream", () => {
     const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
     expect(row?.skillMode).toBe("strict");
     expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
-    expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read"]);
+    expect(await tokenPermissions(calls[0]!)).toEqual([
+      "chat:read",
+      "chat:write",
+      "mcp:invoke",
+      "mcp:read",
+    ]);
     // `strict` lists no skill: `list_skills` is not registered.
     expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
@@ -783,7 +888,6 @@ describe("handleChatStream", () => {
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      spaceId: ctx.defaultSpaceId,
       title: null,
       skillMode: "strict",
       pinnedSkills: ["@acme/a"],
@@ -819,7 +923,6 @@ describe("handleChatStream", () => {
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      spaceId: ctx.defaultSpaceId,
       title: null,
       skillMode: "manual",
       pinnedSkills: [],
@@ -830,7 +933,13 @@ describe("handleChatStream", () => {
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
-    expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read", "skills:read"]);
+    expect(await tokenPermissions(calls[0]!)).toEqual([
+      "chat:read",
+      "chat:write",
+      "mcp:invoke",
+      "mcp:read",
+      "skills:read",
+    ]);
     expect(calls[0]!.system).toContain("call `read_resource` with that URI verbatim");
     // The model finds a skill the user asks for with `list_skills`, registered on this turn alone.
     expect(calls[0]!.platformMcp.listsSkills).toBe(true);
@@ -849,7 +958,6 @@ describe("handleChatStream", () => {
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
-      spaceId: ctx.defaultSpaceId,
       title: null,
       pinnedSkills: [PIN],
     });
@@ -863,7 +971,7 @@ describe("handleChatStream", () => {
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       if (url.pathname.startsWith("/api/mcp/")) skillReads.push(url.pathname);
-      return scriptedDispatch(undefined, undefined, catalogued)(req);
+      return scriptedDispatch(undefined, catalogued)(req);
     };
 
     const { engine, calls } = scriptedEngine();
@@ -893,19 +1001,21 @@ describe("handleChatStream", () => {
   });
 
   describe("space-enforced skills", () => {
-    const HOUSE = {
+    /** The origin space's enforced skill, served in that space. */
+    const house = () => ({
       packageId: "@acme/house",
       name: "House rules",
       version: "2.0.0",
-      uri: "skill://space-1/acme/house/house/SKILL.md",
+      uri: `skill://${ctx.defaultSpaceId}/acme/house/house/SKILL.md`,
       content: "Always sign with the house motto.",
-    };
+    });
 
     it("refuses the turn with a 503 when they cannot be loaded: no message, no marker, no engine", async () => {
       const sessionId = mintSessionId();
       const { engine, calls } = scriptedEngine();
       const res = await postChat(sessionId, undefined, engine, {
         permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+        body: { spaceId: ctx.defaultSpaceId },
         loadEnforcedChatSkills: async () => {
           throw new Error("storage outage");
         },
@@ -934,6 +1044,7 @@ describe("handleChatStream", () => {
       const resolved: string[] = [];
       const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
         permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+        body: { spaceId: ctx.defaultSpaceId },
         parts: [
           { type: "text", text: "résume ce fichier" },
           {
@@ -945,7 +1056,13 @@ describe("handleChatStream", () => {
         ],
         resolveChatAttachment: async (request) => {
           resolved.push(request.uri);
-          return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+          return {
+            uri: request.uri,
+            name: "r.txt",
+            mime: "text/plain",
+            size: 12,
+            spaceId: request.spaces[0]!.id,
+          };
         },
         loadEnforcedChatSkills: async () => {
           throw new Error("storage outage");
@@ -962,57 +1079,50 @@ describe("handleChatStream", () => {
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, {
           permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
-          body: { skill_mode: skillMode, pinned_skills: [] },
+          body: { spaceId: ctx.defaultSpaceId, skill_mode: skillMode, pinned_skills: [] },
           loadEnforcedChatSkills: async (orgId, spaceId) => {
             loaded.push([orgId, spaceId]);
-            return [HOUSE];
+            return [house()];
           },
         });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
 
-        // Keyed on the space the router entered, not on a header.
+        // Keyed on the conversation's origin space, not on a header.
         expect(loaded).toEqual([[ctx.orgId, ctx.defaultSpaceId]]);
         const system = calls[0]!.system;
-        expect(system).toContain("This space requires these skills in every conversation.");
         expect(system).toContain(
-          '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
+          `This space — Default (\`${ctx.defaultSpaceId}\`), where this conversation was started — requires these skills in every conversation.`,
         );
+        expect(system).toContain(
+          `<skill id="@acme/house" uri="skill://${ctx.defaultSpaceId}/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>`,
+        );
+        if (skillMode === "strict") {
+          expect(system).toContain(
+            "those this conversation's origin space requires and those the user chose",
+          );
+          expect(system).toContain("whatever the spaces hold");
+        }
         // The turn's token still reaches no skill: the content needed none, and
         // `read_resource` is named for the injected files only (no loading rule is taught).
         expect(system).not.toContain("LOAD IT BEFORE acting");
         expect(system).toContain("it wins. Only each SKILL.md is shown: read a file");
-        expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
+        expect(await tokenPermissions(calls[0]!)).toEqual([
+          "chat:read",
+          "chat:write",
+          "mcp:invoke",
+          "mcp:read",
+        ]);
         // Readable through `resources/read` all the same: the bearer names it, bound to the space.
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
-          spaceId: ctx.defaultSpaceId,
-          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
-        });
-
-        await waitForAssistantPersist(sessionId);
-      }
-    });
-
-    it("keeps them, and their claim, when the caller-context read fails or 400s", async () => {
-      for (const status of [500, 400]) {
-        const sessionId = mintSessionId();
-        const { engine, calls } = scriptedEngine();
-        const res = await postChat(sessionId, undefined, engine, {
-          permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
-          context: () => new Response(null, { status }),
-          loadEnforcedChatSkills: async () => [HOUSE],
-        });
-        expect(res.status).toBe(200);
-        await collectUiChunks(res);
-
-        const system = calls[0]!.system;
-        expect(system).not.toContain(CONTEXT_ORG_MARKER);
-        expect(system).toContain(
-          '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">',
-        );
-        expect(await tokenInjectedSkills(calls[0]!)).toEqual({
-          spaceId: ctx.defaultSpaceId,
-          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
+          skills: {
+            "@acme/house": {
+              definition: "published",
+              version: "2.0.0",
+              // The origin space, which enforces it.
+              spaceId: ctx.defaultSpaceId,
+            },
+          },
         });
 
         await waitForAssistantPersist(sessionId);
@@ -1065,14 +1175,16 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(buildSystemPrompt(turnCapabilities(() => false)).slice(0, 64));
+    expect(input.system).toContain(
+      buildSystemPrompt(turnCapabilities(() => false, [])).slice(0, 64),
+    );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
     // The cached MCP surface is keyed on exactly what the bearer carries: a key
     // cut from any other list would hand this turn another caller's descriptors.
     expect(input.platformMcp.surfaceKey).toBe(
-      platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input), true),
+      platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input), [defaultReach()]),
     );
     // The MCP transport is the platform's in-process dispatch, not global
     // `fetch` — JSON-RPC hops that used to open real loopback sockets back
@@ -1097,7 +1209,7 @@ describe("handleChatStream", () => {
     expect(roles).toContain("assistant");
 
     const assistant = rows.find((r) => (r.content as { role?: string }).role === "assistant");
-    expect(assistant).toBeDefined();
+    expect(assistant).toMatchObject({ sessionId, content: { role: "assistant" } });
     const content = assistant!.content as {
       parts?: Array<{ type: string; text?: string }>;
       metadata?: { appstrate?: { turn?: { finishReason?: string; stepCount?: number } } };
@@ -1199,99 +1311,16 @@ describe("handleChatStream", () => {
     });
   });
 
-  /**
-   * The preamble overlap.
-   *
-   * The caller-context read (`/api/me/context`) depends on the space id and the
-   * caller's headers only — never on the chosen model or the admission gate —
-   * so the handler starts it the moment the space id is known, under the model
-   * list. Pinned here: the context request is dispatched BEFORE the model list
-   * has answered. With the reads back in series (context after models → pick →
-   * resolve → gate) it can only start after `models:end`, and this fails.
-   */
-  it("dispatches the caller-context read before the model list has answered", async () => {
-    const events: string[] = [];
-    const base = scriptedDispatch();
-    const dispatch = async (req: Request): Promise<Response> => {
-      const path = new URL(req.url).pathname;
-      if (path === "/api/models") {
-        events.push("models:start");
-        // Long enough that a serial context read is unambiguously later.
-        await new Promise((r) => setTimeout(r, 50));
-        events.push("models:end");
-      } else if (path === "/api/me/context") {
-        events.push("context:start");
-      }
-      return base(req);
-    };
-
-    const sessionId = mintSessionId();
-    const { engine, calls } = scriptedEngine();
-    const res = await postChat(sessionId, undefined, engine, {
-      dispatch,
-      // Scripted so the ordering is observable in isolation — the platform's
-      // own resolution needs the boot-time system-model registry, which is
-      // beside the point here.
-      resolveChatModel: async () => ({ subscription: false }),
-    });
-    expect(res.status).toBe(200);
-    await res.text();
-
-    const contextStart = events.indexOf("context:start");
-    const modelsEnd = events.indexOf("models:end");
-    expect(contextStart).toBeGreaterThanOrEqual(0);
-    expect(modelsEnd).toBeGreaterThanOrEqual(0);
-    expect(contextStart).toBeLessThan(modelsEnd);
-    // The overlapped block still reached the prompt — it was joined, not lost.
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
-
-    await waitForAssistantPersist(sessionId);
-  }, 20_000);
-
-  /**
-   * The prompt-cache guard.
-   *
-   * pi-ai emits the system prompt as ONE text block carrying ONE `cache_control`
-   * breakpoint, and caching is prefix-based — so any per-turn difference in that
-   * block invalidates it AND the conversation-history breakpoint downstream of
-   * it. The prompt must therefore be byte-identical between turns for a given
-   * caller, whatever the platform reports about their runs in the meantime.
-   *
-   * This asserts the property at the seam the handler owns, so it fails whatever
-   * route a regression takes back in: a re-rendered `recent_runs`, a finer clock,
-   * a newly interpolated per-request value.
-   */
   it("hands the engine a byte-identical system prompt across turns", async () => {
     const first = scriptedEngine();
-    await postChat(mintSessionId(), undefined, first.engine, {
-      context: () => contextResponse([]),
-    });
-
-    // Same caller, same org — but the platform now reports runs that did not
-    // exist a moment ago, each with its own timestamp and error text.
+    await postChat(mintSessionId(), undefined, first.engine);
     const second = scriptedEngine();
-    await postChat(mintSessionId(), undefined, second.engine, {
-      context: () =>
-        contextResponse([
-          {
-            packageId: "@acme/report",
-            status: "failed",
-            runNumber: 41,
-            started_at: new Date().toISOString(),
-            error: "provider timed out",
-          },
-          { packageId: "@acme/triage", status: "success", runNumber: 42 },
-        ]),
-    });
+    await postChat(mintSessionId(), undefined, second.engine);
 
     expect(first.calls).toHaveLength(1);
     expect(second.calls).toHaveLength(1);
     expect(second.calls[0]!.system).toBe(first.calls[0]!.system);
-    // And the volatile payload really was delivered — otherwise the assertion
-    // above would pass for the wrong reason (a dispatch that never ran).
-    expect(second.calls[0]!.system).not.toContain("provider timed out");
-    expect(second.calls[0]!.system).not.toContain("@acme/report");
+    expect(first.calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
   }, 20_000);
 
   describe("the composer's package-authoring switch", () => {
@@ -1340,6 +1369,8 @@ describe("handleChatStream", () => {
         "agents:read",
         "agents:run",
         "agents:write",
+        "chat:read",
+        "chat:write",
         "mcp:invoke",
         "mcp:read",
         "runs:read",
@@ -1350,7 +1381,15 @@ describe("handleChatStream", () => {
 
     it("drops only `agents:write` from the token and the inline teaching when off", async () => {
       const { token, system } = await turn(BUILDER, false);
-      expect(token).toEqual(["agents:read", "agents:run", "mcp:invoke", "mcp:read", "runs:read"]);
+      expect(token).toEqual([
+        "agents:read",
+        "agents:run",
+        "chat:read",
+        "chat:write",
+        "mcp:invoke",
+        "mcp:read",
+        "runs:read",
+      ]);
       expect(system).not.toContain(INLINE_MARKER);
       expect(system).toContain(REDUCED_MARKER);
       // Running an EXISTING agent survives the switch — it needs no authoring.
@@ -1365,13 +1404,13 @@ describe("handleChatStream", () => {
 
     it("never grants `agents:write` to a caller who lacks it", async () => {
       const { token, system } = await turn(new Set(["agents:run"]), true);
-      expect(token).toEqual(["agents:run"]);
+      expect(token).toEqual(["agents:run", "chat:read", "chat:write", "mcp:read"]);
       expect(system).not.toContain(INLINE_MARKER);
     });
 
     it("teaches inline composition only with `agents:run` as well", async () => {
       const { token, system } = await turn(new Set(["agents:write"]), true);
-      expect(token).toEqual(["agents:write"]);
+      expect(token).toEqual(["agents:write", "chat:read", "chat:write", "mcp:read"]);
       expect(system).not.toContain(INLINE_MARKER);
       // It may still create agents: nothing tells it otherwise.
       expect(system).not.toContain(REDUCED_MARKER);
@@ -1393,18 +1432,6 @@ describe("handleChatStream", () => {
       expect(system).toContain(RUN_MARKER);
       // `runs:read-all` is a superset of `runs:read`, never a literal test.
       expect(system).toContain('kind:"agent"');
-    });
-
-    it("teaches no run without `mcp:read` — the MCP transport admits nobody", async () => {
-      // `mcp:invoke` alone is not enough: the endpoint the chat's own MCP client
-      // talks to is guarded by `requireModulePermission("mcp", "read")`, so the
-      // turn could never list the tool it was taught. Same discriminator as the
-      // `mcp:invoke` case below — no `agents:write`, so REDUCED_MARKER would
-      // render if the run branch were still there.
-      const { system } = await turn(new Set(["mcp:invoke", "agents:run", "runs:read"]), true);
-      expect(system).not.toContain(RUN_MARKER);
-      expect(system).not.toContain(INLINE_MARKER);
-      expect(system).not.toContain(REDUCED_MARKER);
     });
 
     it("teaches no run without `mcp:invoke` — no tool call reaches a route", async () => {
@@ -1457,6 +1484,806 @@ describe("handleChatStream", () => {
       const { system: blind } = await turn(new Set(["agents:read"]), true);
       expect(blind).not.toContain("listRuns");
       expect(blind).not.toContain("Never quote run metrics");
+    });
+  });
+
+  describe("a turn across the acting set", () => {
+    let spaceB: string;
+    /** Reached for reading the chat and the tools, but never chatted in: outside the acting set. */
+    let spaceC: string;
+    let reach: ReachableSpaceGrant[];
+
+    beforeEach(async () => {
+      spaceB = (await seedSpace({ orgId: ctx.orgId, name: "Beta" })).id;
+      spaceC = (await seedSpace({ orgId: ctx.orgId, name: "Gamma" })).id;
+      reach = [
+        reachableSpace({
+          id: ctx.defaultSpaceId,
+          name: "Alpha",
+          role: "operator",
+          permissions: ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "agents:run"],
+        }),
+        reachableSpace({
+          id: spaceB,
+          name: "Beta",
+          role: "builder",
+          permissions: [
+            "chat:read",
+            "chat:write",
+            "mcp:read",
+            "mcp:invoke",
+            "agents:write",
+            "skills:write",
+          ],
+        }),
+        reachableSpace({
+          id: spaceC,
+          name: "Gamma",
+          role: "viewer",
+          permissions: ["chat:read", "mcp:read", "runs:read-all"],
+        }),
+      ];
+    });
+
+    /** The turn `postChat` runs over `reachable`. */
+    async function turn(
+      sessionId: string,
+      overrides: Parameters<typeof postChat>[3] = {},
+      reachable: ReachableSpaceGrant[] = reach,
+    ) {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, { ...overrides, reachable });
+      return { res, calls };
+    }
+
+    it("hands the engine the organization endpoint and a ceiling over the acting set, not the whole reach", async () => {
+      const sessionId = mintSessionId();
+      const { res, calls } = await turn(sessionId);
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+
+      const input = calls[0]!;
+      const url = new URL(input.platformMcp.url);
+      expect(url.pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
+      expect(url.searchParams.get("renders_cards")).toBe("true");
+      // A permission held in Beta alone is in the ceiling: each call is decided in the space it
+      // names, which recomputes `(org ∪ role) ∩ ceiling` there. Gamma is outside the acting set:
+      // its `runs:read-all` is not lent to the others.
+      expect(await tokenPermissions(input)).toEqual(
+        [
+          "agents:run",
+          "agents:write",
+          "chat:read",
+          "chat:write",
+          "mcp:invoke",
+          "mcp:read",
+          "skills:write",
+        ].sort(),
+      );
+      // The bearer allowlists the turn's spaces (not the whole reach), keyed with the surface
+      // they list, and the session is persisted.
+      expect(await tokenSpaceIds(input)).toEqual([ctx.defaultSpaceId, spaceB]);
+      expect(input.platformMcp.surfaceKey).toBe(
+        platformMcpSurfaceKey(
+          input.platformMcp.url,
+          await tokenPermissions(input),
+          input.platformMcp.organization.spaces,
+        ),
+      );
+      const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      // Started from the overview: no origin space, no limit.
+      expect(row).toMatchObject({
+        id: sessionId,
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        spaceId: null,
+        restricted: false,
+      });
+    });
+
+    it("narrows the union by the authoring switch", async () => {
+      const { res, calls } = await turn(mintSessionId(), { packageAuthoring: false });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const granted = await tokenPermissions(calls[0]!);
+      expect(granted).not.toContain("agents:write");
+      expect(granted).not.toContain("skills:write");
+      expect(granted).toContain("agents:run");
+    });
+
+    describe("the origin space (`spaceId`)", () => {
+      const touchedBy = async (sessionId: string) =>
+        (
+          await db
+            .select({ spaceId: chatSessionSpaces.spaceId })
+            .from(chatSessionSpaces)
+            .where(eq(chatSessionSpaces.sessionId, sessionId))
+        )
+          .map((row) => row.spaceId)
+          .sort();
+      const rowOf = async (sessionId: string) =>
+        (await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)))[0]!;
+
+      it("is the default of a request naming no space, in the prompt, and is stored as the origin of a new conversation", async () => {
+        const sessionId = mintSessionId();
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable: reach,
+          body: { spaceId: spaceB },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+
+        expect(calls[0]!.system).toContain(
+          `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
+        );
+        // The default pins nothing: the turn acts on the organization endpoint.
+        expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
+        expect(await rowOf(sessionId)).toMatchObject({ spaceId: spaceB, restricted: false });
+        // The origin space is touched by definition, recorded nowhere else.
+        expect(await touchedBy(sessionId)).toEqual([]);
+      });
+
+      it("defaults the overview to the organization's default space, storing no origin", async () => {
+        const sessionId = mintSessionId();
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable: reach.map((space) =>
+            space.id === spaceB ? { ...space, isDefault: true } : space,
+          ),
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(calls[0]!.system).toContain(
+          `When the user names no space, pass \`${spaceB}\` (Beta, the organization's default space) as the \`space_id\``,
+        );
+        expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
+      });
+
+      it("has no default from the overview without a personal or default space: nothing stored, the assistant asks", async () => {
+        const sessionId = mintSessionId();
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, { reachable: reach });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(calls[0]!.system).toContain(
+          "Ask the user which space when the request does not say",
+        );
+        expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
+        expect(await touchedBy(sessionId)).toEqual([]);
+      });
+
+      it("is read from the turn body only when the turn creates the conversation", async () => {
+        const sessionId = mintSessionId();
+        await ensureSession(
+          sessionId,
+          ctx.orgId,
+          ctx.user.id,
+          [ctx.defaultSpaceId, spaceB],
+          undefined,
+          () => ({
+            spaceId: ctx.defaultSpaceId,
+            restricted: false,
+          }),
+        );
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable: reach,
+          body: { spaceId: spaceB, restricted: true },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        // The stable origin is the default, and the body's space touched and limited nothing.
+        expect(calls[0]!.system).toContain(
+          `This conversation was started in Alpha (\`${ctx.defaultSpaceId}\`)`,
+        );
+        expect([...(await tokenSpaceIds(calls[0]!))!].sort()).toEqual(
+          [ctx.defaultSpaceId, spaceB].sort(),
+        );
+        expect(await rowOf(sessionId)).toMatchObject({
+          spaceId: ctx.defaultSpaceId,
+          restricted: false,
+        });
+        expect(await touchedBy(sessionId)).toEqual([]);
+      });
+
+      it("does not validate them on a turn of an existing conversation", async () => {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+        const { engine } = scriptedEngine();
+        // Outside the acting set and a limit without a space: refused when creating, ignored here.
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable: reach,
+          body: { spaceId: spaceC, restricted: true },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
+      });
+
+      it("refuses an invalid origin with a 400 naming the field, before anything is written", async () => {
+        // The rule is `conversationOrigin`'s (chat-sessions.test.ts); this is the turn's door to it.
+        for (const [body, param] of [
+          [{ spaceId: spaceC }, "spaceId"],
+          [{ restricted: true }, "restricted"],
+        ] as const) {
+          const sessionId = mintSessionId();
+          const { engine, calls } = scriptedEngine();
+          const res = await postChat(sessionId, undefined, engine, { reachable: reach, body });
+          expect(res.status).toBe(400);
+          expect(((await res.json()) as { param?: string }).param).toBe(param);
+          expect(calls).toEqual([]);
+          expect(
+            await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)),
+          ).toEqual([]);
+        }
+      });
+    });
+
+    describe("a limited conversation (`restricted`)", () => {
+      const limitedTurn = async (
+        sessionId: string,
+        overrides: Parameters<typeof postChat>[3] = {},
+        reachable: ReachableSpaceGrant[] = reach,
+      ) => {
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable,
+          body: { spaceId: spaceB, restricted: true },
+          ...overrides,
+        });
+        return { res, calls };
+      };
+
+      it("acts on the organization endpoint in its origin space alone, under that space's set", async () => {
+        const sessionId = mintSessionId();
+        const { res, calls } = await limitedTurn(sessionId);
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+
+        const input = calls[0]!;
+        expect(new URL(input.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
+        // Beta's set, narrowed by the turn: nothing of Alpha (`agents:run`) is lent to it.
+        expect(await tokenPermissions(input)).toEqual(
+          [
+            "agents:write",
+            "chat:read",
+            "chat:write",
+            "mcp:invoke",
+            "mcp:read",
+            "skills:write",
+          ].sort(),
+        );
+        expect(input.platformMcp.organization.spaces.map((space) => space.id)).toEqual([spaceB]);
+        // The bearer allowlists the origin space alone, so the surface is keyed on it alone.
+        expect(await tokenSpaceIds(input)).toEqual([spaceB]);
+        expect(input.platformMcp.surfaceKey).toBe(
+          platformMcpSurfaceKey(
+            input.platformMcp.url,
+            await tokenPermissions(input),
+            input.platformMcp.organization.spaces,
+          ),
+        );
+        const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+        expect(row).toMatchObject({ spaceId: spaceB, restricted: true });
+      });
+
+      it("keeps of the org-level half only the reads it needs; an unlimited turn keeps it all", async () => {
+        const orgHalf = new Set(["org:read", "models:read", "proxies:write", "members:invite"]);
+        const withOrg = reach.map((space) => ({
+          ...space,
+          permissions: [...space.permissions, ...orgHalf],
+        }));
+        const limited = await limitedTurn(mintSessionId(), { orgHalf }, withOrg);
+        expect(limited.res.status).toBe(200);
+        await collectUiChunks(limited.res);
+        const limitedSet = await tokenPermissions(limited.calls[0]!);
+        expect(limitedSet).toEqual(
+          [
+            "agents:write",
+            "chat:read",
+            "chat:write",
+            "mcp:invoke",
+            "mcp:read",
+            "models:read",
+            "org:read",
+            "skills:write",
+          ].sort(),
+        );
+        // The prompt lists the turn's set: no org-level write is offered to the model either.
+        expect(limited.calls[0]!.system).not.toContain("proxies:write");
+
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(mintSessionId(), undefined, engine, {
+          reachable: withOrg,
+          orgHalf,
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect(await tokenPermissions(calls[0]!)).toEqual(
+          expect.arrayContaining(["proxies:write", "members:invite", "org:read"]),
+        );
+      });
+
+      it("tells the model it is limited to that space", async () => {
+        const { res, calls } = await limitedTurn(mintSessionId());
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect(calls[0]!.system).toContain(
+          `This conversation is limited to Beta (\`${spaceB}\`): pass \`${spaceB}\` as the \`space_id\` of every call`,
+        );
+      });
+
+      it("touches its origin space with nothing recorded, the only space its tools may name", async () => {
+        const sessionId = mintSessionId();
+        const { res, calls } = await limitedTurn(sessionId);
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        const { organization } = calls[0]!.platformMcp;
+        await organization.touch(spaceB);
+        expect(organization.spaces.map((space) => space.id)).toEqual([spaceB]);
+        expect(await db.select().from(chatSessionSpaces)).toEqual([]);
+      });
+
+      it("hands an attachment its origin space alone", async () => {
+        const requests: ChatAttachmentRequest[] = [];
+        const { res } = await limitedTurn(mintSessionId(), {
+          parts: [
+            { type: "text", text: "lis ceci" },
+            { type: "file", url: "upload://upl_x", mediaType: "text/plain", filename: "b.txt" },
+          ],
+          resolveChatAttachment: async (request) => {
+            requests.push(request);
+            return {
+              uri: "appfile://file_abcdefgh",
+              name: "b.txt",
+              mime: "text/plain",
+              size: 3,
+              spaceId: spaceB,
+            };
+          },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect(requests[0]!.spaces.map((space) => space.id)).toEqual([spaceB]);
+      });
+
+      it("is refused with a 403, before anything runs, once the author can no longer act in the origin space", async () => {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [spaceB], undefined, () => ({
+          spaceId: spaceB,
+          restricted: true,
+        }));
+        // Still read in Beta (the conversation opens), but no longer chatted in.
+        const readOnlyBeta = [
+          { ...reach[0]! },
+          { ...reach[1]!, permissions: ["chat:read", "mcp:read"] },
+        ];
+        const refused = await limitedTurn(sessionId, { body: {} }, readOnlyBeta);
+        expect(refused.res.status).toBe(403);
+        expect(refused.calls).toEqual([]);
+        // Unlimited, the same conversation still answers over the acting set that remains.
+        await db
+          .update(chatSessions)
+          .set({ restricted: false })
+          .where(eq(chatSessions.id, sessionId));
+        const open = await limitedTurn(sessionId, { body: {} }, readOnlyBeta);
+        expect(open.res.status).toBe(200);
+        await collectUiChunks(open.res);
+      });
+    });
+
+    it("refuses a turn on a conversation that touched a space its author no longer reads", async () => {
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, []);
+      await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB, orgId: ctx.orgId });
+
+      const lostBeta = [{ ...reach[0]! }, { ...reach[1]!, permissions: ["mcp:read"] }];
+      const refused = await turn(sessionId, {}, lostBeta);
+      expect(refused.res.status).toBe(404);
+      expect(refused.calls).toEqual([]);
+      // Still reading Beta: the same session answers.
+      const open = await turn(sessionId);
+      expect(open.res.status).toBe(200);
+      await collectUiChunks(open.res);
+    });
+
+    describe("recording the spaces it touches", () => {
+      const touched = async (sessionId: string) =>
+        (
+          await db
+            .select({ spaceId: chatSessionSpaces.spaceId })
+            .from(chatSessionSpaces)
+            .where(eq(chatSessionSpaces.sessionId, sessionId))
+        ).map((row) => row.spaceId);
+
+      async function organizationOf(sessionId: string, reachable: ReachableSpaceGrant[] = reach) {
+        const { res, calls } = await turn(sessionId, {}, reachable);
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        const input = calls[0]!;
+        return input.platformMcp.organization;
+      }
+
+      it("records a named space once, notifies on growth only, and reads the space of a URI", async () => {
+        const sessionId = mintSessionId();
+        const organization = await organizationOf(sessionId);
+        expect(organization.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId, spaceB]);
+
+        const notified = spyOn(db, "execute");
+        try {
+          await organization.touch(spaceB);
+          await organization.touch(spaceB);
+          const signals = notified.mock.calls.filter((call) =>
+            JSON.stringify(call[0]).includes("chat_session_update"),
+          );
+          expect(signals).toHaveLength(1);
+        } finally {
+          notified.mockRestore();
+        }
+        expect(await touched(sessionId)).toEqual([spaceB]);
+
+        expect(await organization.spaceOfUri(`skill://${spaceB}/acme/tone/tone/SKILL.md`)).toBe(
+          spaceB,
+        );
+        expect(await organization.spaceOfUri("appfile://file_missing00")).toBeUndefined();
+        expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
+      });
+
+      it("places an existing file in its space, which `read_resource` refuses outside the turn's", async () => {
+        const fileId = "file_gammareport0";
+        await db.insert(files).values({
+          id: fileId,
+          orgId: ctx.orgId,
+          spaceId: spaceC,
+          purpose: "user_upload",
+          userId: ctx.user.id,
+          storageKey: `files/${spaceC}/${fileId}/report.txt`,
+          name: "report.txt",
+          mime: "text/plain",
+          size: 1,
+          sha256: "deadbeef",
+        });
+        const organization = await organizationOf(mintSessionId());
+        // Gamma is reached but outside the acting set: the space `read_resource` checks.
+        expect(await organization.spaceOfUri(`appfile://${fileId}`)).toBe(spaceC);
+        expect(spaceIdRefusal(organization.spaces, spaceC)).toMatchObject({
+          code: "unknown_space",
+        });
+      });
+
+      it("leaves a space outside the acting set out of the turn's spaces and of its bearer: unknown, reached without the grants, or unreadable", async () => {
+        const turned = async (reachable: ReachableSpaceGrant[]) => {
+          const { res, calls } = await turn(mintSessionId(), {}, reachable);
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          return calls[0]!;
+        };
+        // Gamma is reached with `chat:read` and `mcp:read` but cannot chat in it.
+        const input = await turned(reach);
+        expect(input.platformMcp.organization.spaces.map((space) => space.id)).toEqual([
+          ctx.defaultSpaceId,
+          spaceB,
+        ]);
+        expect(await tokenSpaceIds(input)).toEqual([ctx.defaultSpaceId, spaceB]);
+        expect(await tokenSpaceIds(input)).not.toContain(spaceC);
+
+        // Reached with `mcp:read` and `chat:write` alone: acting there would hide the session
+        // from its author, so it is no place the turn acts.
+        const unreadable = await turned([
+          reach[0]!,
+          { ...reach[1]!, permissions: ["mcp:read", "chat:write"] },
+        ]);
+        expect(await tokenSpaceIds(unreadable)).toEqual([ctx.defaultSpaceId]);
+      });
+
+      describe("skills across spaces", () => {
+        const TONE = "@acme/tone";
+        const ONLY_B = "@acme/only-b";
+        const uriIn = (space: string, id: string) =>
+          `skill://${space}/${id.slice(1)}/${id.split("/")[1]}/SKILL.md`;
+        const bodyOf = (space: string, id: string) => `${id} as read in ${space}`;
+
+        /** The skills the organization endpoint lists, in the order it lists them. */
+        function skillsDispatch(listed: Array<[space: string, id: string]>, read: string[] = []) {
+          return async (req: Request): Promise<Response> => {
+            if (!new URL(req.url).pathname.startsWith("/api/mcp/")) return scriptedDispatch()(req);
+            const message = (await req.json()) as {
+              id?: number;
+              method: string;
+              params?: Record<string, unknown>;
+            };
+            const result = (value: unknown) =>
+              Response.json({ jsonrpc: "2.0", id: message.id, result: value });
+            switch (message.method) {
+              case "initialize":
+                return result({
+                  protocolVersion: message.params?.protocolVersion,
+                  capabilities: {
+                    resources: {},
+                    extensions: { "io.modelcontextprotocol/skills": {} },
+                  },
+                  serverInfo: { name: "fake-platform", version: "1.0.0" },
+                });
+              case "skills/list": {
+                const meta = message.params?._meta as Record<string, unknown> | undefined;
+                return result({
+                  skills:
+                    meta?.[SKILL_DEFINITION_META_KEY] === "draft"
+                      ? []
+                      : listed.map(([space, id]) => ({
+                          uri: uriIn(space, id),
+                          frontmatter: {
+                            name: id.split("/")[1],
+                            description: `${id} in ${space}`,
+                            metadata: { version: "1.0.0" },
+                          },
+                          resources: [
+                            {
+                              uri: uriIn(space, id),
+                              digest: sha256(bodyOf(space, id)),
+                              size: bodyOf(space, id).length,
+                            },
+                          ],
+                        })),
+                });
+              }
+              case "resources/read": {
+                const uri = message.params?.uri as string;
+                read.push(uri);
+                const [space, id] = listed.find(([s, i]) => uriIn(s, i) === uri)!;
+                return result({
+                  contents: [{ uri, mimeType: "text/markdown", text: bodyOf(space, id) }],
+                });
+              }
+              default:
+                return new Response(null, { status: 202 });
+            }
+          };
+        }
+
+        /** The reach with `skills:read` on both spaces, and `chat:write` where `chatIn` names it. */
+        const reachWith = (chatIn: string[]): ReachableSpaceGrant[] =>
+          reach.map((space) => ({
+            ...space,
+            permissions: [
+              ...new Set([
+                ...space.permissions.filter((permission) => permission !== "chat:write"),
+                "skills:read",
+                ...(chatIn.includes(space.id) ? ["chat:write"] : []),
+              ]),
+            ],
+          }));
+        const enforced = (space: string, id: string) => ({
+          packageId: id,
+          name: id,
+          version: "2.0.0",
+          uri: uriIn(space, id),
+          content: `${id} required, from ${space}`,
+        });
+
+        it("lists one skill per package in auto, the first space in reach order winning, each with its own URI", async () => {
+          // The server lists Beta's copy first: only the reach order decides.
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([
+                [spaceB, TONE],
+                [spaceB, ONLY_B],
+                [ctx.defaultSpaceId, TONE],
+              ]),
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          const system = calls[0]!.system;
+          expect(system).toContain(
+            `- \`${ONLY_B}\` (v1.0.0) \`${uriIn(spaceB, ONLY_B)}\` — ${ONLY_B} in ${spaceB}\n` +
+              `- \`${TONE}\` (v1.0.0) \`${uriIn(ctx.defaultSpaceId, TONE)}\``,
+          );
+          expect(system).not.toContain(uriIn(spaceB, TONE));
+          expect(system).not.toContain("<skill id=");
+        });
+
+        it("reads no skill of a space outside the acting set, listed or chosen", async () => {
+          const read: string[] = [];
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch(
+                [
+                  [ctx.defaultSpaceId, TONE],
+                  [spaceB, ONLY_B],
+                ],
+                read,
+              ),
+            },
+            // Beta is reached with `skills:read` but never chatted in.
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(calls[0]!.system).toContain(`\`${TONE}\``);
+          expect(calls[0]!.system).not.toContain(ONLY_B);
+
+          const pinned = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([[spaceB, ONLY_B]], read),
+              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          await collectUiChunks(pinned.res);
+          expect(read).toEqual([]);
+          expect(pinned.calls[0]!.system).toContain("is not available here");
+        });
+
+        it("injects a pinned skill of another space and binds its claim to that space", async () => {
+          const read: string[] = [];
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch(
+                [
+                  [ctx.defaultSpaceId, TONE],
+                  [spaceB, ONLY_B],
+                ],
+                read,
+              ),
+              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(read).toEqual([uriIn(spaceB, ONLY_B)]);
+          expect(calls[0]!.system).toContain(
+            `<skill id="${ONLY_B}" uri="${uriIn(spaceB, ONLY_B)}" version="1.0.0">\n${bodyOf(spaceB, ONLY_B)}\n</skill>`,
+          );
+          expect(await tokenInjectedSkills(calls[0]!)).toEqual({
+            skills: { [ONLY_B]: { definition: "published", version: "1.0.0", spaceId: spaceB } },
+          });
+        });
+
+        it("injects the origin space's enforced skills only, even when it acts in another space too", async () => {
+          const loaded: string[] = [];
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              body: { spaceId: ctx.defaultSpaceId },
+              loadEnforcedChatSkills: async (_orgId, space) => {
+                loaded.push(space);
+                return space === ctx.defaultSpaceId
+                  ? [enforced(space, TONE)]
+                  : [enforced(space, TONE), enforced(space, ONLY_B)];
+              },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(loaded).toEqual([ctx.defaultSpaceId]);
+          const system = calls[0]!.system;
+          expect(system.match(new RegExp(`<skill id="${TONE}"`, "g"))).toHaveLength(1);
+          expect(system).toContain(`uri="${uriIn(ctx.defaultSpaceId, TONE)}"`);
+          expect(system).not.toContain(ONLY_B);
+          expect(await tokenInjectedSkills(calls[0]!)).toEqual({
+            skills: {
+              [TONE]: {
+                definition: "published",
+                version: "2.0.0",
+                spaceId: ctx.defaultSpaceId,
+              },
+            },
+          });
+        });
+
+        it("injects none without an origin space (the overview), whatever the spaces enforce", async () => {
+          const loaded: string[] = [];
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              loadEnforcedChatSkills: async (_orgId, space) => {
+                loaded.push(space);
+                return [enforced(space, TONE)];
+              },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(loaded).toEqual([]);
+          expect(calls[0]!.system).not.toContain("requires these skills");
+          expect(calls[0]!.system).not.toContain("<skill id=");
+        });
+
+        it("reads no enforced skill of an origin space where the caller cannot chat", async () => {
+          const loaded: string[] = [];
+          const sessionId = mintSessionId();
+          await ensureSession(
+            sessionId,
+            ctx.orgId,
+            ctx.user.id,
+            [ctx.defaultSpaceId, spaceB],
+            undefined,
+            () => ({ spaceId: spaceB, restricted: false }),
+          );
+          const { res } = await turn(
+            sessionId,
+            {
+              dispatch: skillsDispatch([]),
+              loadEnforcedChatSkills: async (_orgId, space) => {
+                loaded.push(space);
+                return [];
+              },
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(loaded).toEqual([]);
+        });
+
+        it("lists a limited conversation's origin space's skills alone", async () => {
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([
+                [spaceB, ONLY_B],
+                [ctx.defaultSpaceId, TONE],
+              ]),
+              body: { spaceId: spaceB, restricted: true },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(calls[0]!.system).toContain(`\`${ONLY_B}\``);
+          expect(calls[0]!.system).not.toContain(TONE);
+        });
+      });
+
+      it("hands an attachment the acting set, and records the space it resolves in before materializing", async () => {
+        const sessionId = mintSessionId();
+        const requests: ChatAttachmentRequest[] = [];
+        const { res } = await turn(sessionId, {
+          parts: [
+            { type: "text", text: "lis ceci" },
+            { type: "file", url: "upload://upl_x", mediaType: "text/plain", filename: "b.txt" },
+          ],
+          resolveChatAttachment: async (request) => {
+            requests.push(request);
+            await request.beforeResolve(spaceB);
+            return {
+              uri: "appfile://file_abcdefgh",
+              name: "b.txt",
+              mime: "text/plain",
+              size: 3,
+              spaceId: spaceB,
+            };
+          },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+
+        expect(requests[0]!.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId, spaceB]);
+        expect([...requests[0]!.spaces[1]!.permissions]).toContain("agents:write");
+        expect(await touched(sessionId)).toEqual([spaceB]);
+      });
     });
   });
 });

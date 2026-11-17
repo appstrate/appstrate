@@ -133,6 +133,7 @@ describe("org-scope connections across spaces", () => {
     (
       await listAccessibleConnections({ orgId: ctx.orgId, spaceId }, INTEGRATION, {
         kind: "person",
+        binding: null,
         actor,
       })
     )

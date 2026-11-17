@@ -86,7 +86,7 @@ export function NavOrg() {
   // Every entry, Runs included, is shown exactly when its route's declaration
   // (`lib/route-access.ts`) opens the page it lands on — a custom space role
   // may hold none of them, so no entry is assumed reachable. In « Tous les espaces » the
-  // same entries, each opened where some space admits it (`overviewListVerdict`).
+  // same entries, each opened where some space admits it (`spanningRouteVerdict`).
   const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
 
   const activityItems = reachable([

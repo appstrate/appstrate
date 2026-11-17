@@ -121,9 +121,9 @@ describe("GET /api/orgs/{orgId}/files", () => {
     return id;
   }
 
-  async function seedChatSession(spaceId: string, userId: string) {
+  async function seedChatSession(userId: string) {
     const id = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({ id, orgId: owner.orgId, spaceId, userId });
+    await db.insert(chatSessions).values({ id, orgId: owner.orgId, userId });
     return id;
   }
 
@@ -163,8 +163,8 @@ describe("GET /api/orgs/{orgId}/files", () => {
       ferme: await seedSpaceRun(s.ferme, owner.user.id),
       prive: await seedSpaceRun(s.prive, owner.user.id),
     };
-    ownerChatSession = await seedChatSession(s.un, owner.user.id);
-    memberChatSession = await seedChatSession(s.deux, member.user.id);
+    ownerChatSession = await seedChatSession(owner.user.id);
+    memberChatSession = await seedChatSession(member.user.id);
     f = {
       unOwnerOutput: await seedFile(s.un, owner.user.id, { runId: runs.unOwner }),
       unOwnerUpload: await seedFile(s.un, owner.user.id, { runId: runs.unOwner }, "user_upload"),

@@ -86,30 +86,35 @@ interface ResolvedChatSkills {
 }
 
 /**
- * The skills to inject: the space's first, in the platform's id order, then the
+ * The skills to inject: the required ones first, in the platform's id order, then the
  * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
  * one budget. A pin naming an injected enforced skill is dropped silently; one
  * whose enforced copy was left out stands as an ordinary pin. `contents` holds
  * the chosen skills active here and read (`null`: answered malformed); any
- * other becomes a notice.
+ * other becomes a notice. `enforced`: the skills the origin space enforces, served
+ * in that space (none without an origin space).
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
-  enforced: readonly EnforcedChatSkill[],
+  enforced?: { spaceId: string; skills: readonly EnforcedChatSkill[] },
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { enforced: [], chosen: [], notices: [] };
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  for (const { packageId, version, uri, content } of enforced) {
+  const requiredBy = "this conversation's origin space";
+  const required = enforced
+    ? enforced.skills.map((skill) => ({ ...skill, spaceId: enforced.spaceId }))
+    : [];
+  for (const { packageId, version, uri, content, spaceId } of required) {
     if (content === null || uri === null) {
       resolved.notices.push(
-        `The skill \`${packageId}\` is required by this space but has no published version to follow.`,
+        `The skill \`${packageId}\` is required by ${requiredBy} but has no published version to follow.`,
       );
     } else if (content.length > left) {
       resolved.notices.push(
-        `The skill \`${packageId}\` is required by this space but does not fit ${tooLong(content.length)}`,
+        `The skill \`${packageId}\` is required by ${requiredBy} but does not fit ${tooLong(content.length)}`,
       );
     } else {
       left -= content.length;
@@ -118,7 +123,7 @@ export function resolveChatSkills(
         version,
         uri,
         content,
-        served: { definition: "published", version },
+        served: { definition: "published", version, spaceId },
       });
     }
   }

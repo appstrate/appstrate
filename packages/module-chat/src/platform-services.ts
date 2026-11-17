@@ -23,22 +23,84 @@
  *     never a module-to-module import.
  */
 
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { db } from "@appstrate/db/client";
-import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
-import { ApiError } from "@appstrate/core/api-errors";
+import type {
+  ModuleInitContext,
+  ReachableSpaceGrant,
+  ReachedSpaces,
+  UsageRejection,
+} from "@appstrate/core/module";
+import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-import type {
-  ChatAttachmentRequest,
-  ChatUsageRecord,
-  ResolvedChatAttachment,
-  ChatModelResolution,
-  EnforcedChatSkill,
-  EnforcedChatSkillRef,
+import {
+  chatActsIn,
+  type ChatAttachmentRequest,
+  type ChatUsageRecord,
+  type ResolvedChatAttachment,
+  type ChatModelResolution,
+  type EnforcedChatSkill,
+  type EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
+
+/** The permissions the chat's session routes ask. */
+export type ChatPermission = "chat:read" | "chat:write";
+
+/** The spaces of `spaces` whose effective set grants `permission`. */
+export function spacesHolding(
+  spaces: readonly ReachableSpaceGrant[],
+  permission: string,
+): ReachableSpaceGrant[] {
+  return spaces.filter((space) => space.permissions.includes(permission));
+}
+
+/** The ids of the spaces whose set grants `chat:read`: the spaces a conversation is opened in. */
+export function readableSpaceIds(reachable: readonly ReachableSpaceGrant[]): string[] {
+  return spacesHolding(reachable, "chat:read").map((space) => space.id);
+}
+
+/**
+ * The spaces a conversation's turn may act in: those of the caller's reach where
+ * they hold `chat:write` (the turn is theirs to run), `chat:read` (the conversation must stay
+ * openable for them once the space is touched) and `mcp:read` (the tools can name it). The
+ * one set behind the spaces the prompt and the tools advertise, the spaces a call may touch,
+ * the bearer's ceiling and space allowlist, the attachments and the skills read; a space
+ * outside it is neither listed nor acted in. A conversation's enforced skills are its origin
+ * space's alone, not the set's. Visibility of a conversation stays `chat:read`.
+ */
+export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableSpaceGrant[] {
+  return spaces.filter((space) => chatActsIn(space.permissions));
+}
+
+/** Whether `spaceId` is one of the acting set: the single test behind every "can still act there". */
+export function canActIn(
+  reachable: readonly ReachableSpaceGrant[],
+  spaceId: string | null | undefined,
+): boolean {
+  return spaceId != null && actingSpaces(reachable).some((space) => space.id === spaceId);
+}
+
+/**
+ * The origin space and limit a conversation is created with (`spaceId`, `restricted` of the
+ * session creation or of the turn that lazily creates it). The space must be one of the
+ * acting set, and the limit needs a space: a 400 naming the field otherwise.
+ */
+export function conversationOrigin(
+  reachable: readonly ReachableSpaceGrant[],
+  input: { spaceId?: string; restricted?: boolean },
+): { spaceId: string; restricted: boolean } | undefined {
+  if (input.spaceId === undefined) {
+    if (input.restricted) throw invalidRequest("restricted needs a spaceId", "restricted");
+    return undefined;
+  }
+  if (!canActIn(reachable, input.spaceId)) {
+    throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+  }
+  return { spaceId: input.spaceId, restricted: input.restricted === true };
+}
 
 export interface ChatPlatformDeps {
   /**
@@ -65,21 +127,21 @@ export interface ChatPlatformDeps {
   /**
    * Resolve a chat composer file attachment (`upload://` or `appfile://`) to a
    * durable `appfile://` URI, materializing the upload into a chat-session-scoped
-   * file server-side (the module has no DB access). Throws the platform's
+   * file server-side (the files service — ACL, storage, quota — is the platform's). Throws the platform's
    * quota/cap/not-found errors, which the stream route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (kept, container NULLed);
-   * an unconsumed one is deleted (row + counter + storage). The module has no DB
-   * or storage access, so this crosses through `ctx.services`. Called before the
+   * an unconsumed one is deleted (row + counter + storage). The module has no
+   * storage access, so this crosses through `ctx.services`. Called before the
    * session row is removed so the FK cascade cannot destroy the evidence first.
    *
    * Pass the SAME transaction that deletes the `chat_sessions` row so the two
    * commit atomically (closes the materialize-in-the-gap orphan window).
    */
-  cleanupSessionFiles(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, orgId: string, tx?: ChatDbTx): Promise<void>;
   /**
    * Admission gate for a turn — EVERY turn, on either binding (llm-proxy or
    * native OAuth subscription). The platform resolves the chosen model for the
@@ -100,17 +162,23 @@ export interface ChatPlatformDeps {
     userId: string;
   }): Promise<UsageRejection | null>;
   /**
-   * The space's enforced skills, read with the platform's authority: a member
+   * A space's enforced skills, read with the platform's authority: a member
    * without `skills:read` still gets them. A failure rejects with a 503 so the
    * turn is refused rather than run without them.
    */
   loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
+  /**
+   * The spaces the caller reaches, with their role and effective permissions
+   * there, for the routes that serve the organization as a whole (no space
+   * entered). A 403 for an end-user.
+   */
+  reachableSpaces(c: Context, orgId: string): Promise<ReachedSpaces>;
   /** Their names only, from the database (no archive read); same 503 on failure. */
   listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
 }
 
 /**
- * A failed read of the space's enforced skills, as a 503. An `ApiError` cause
+ * A failed read of a space's enforced skills, as a 503. An `ApiError` cause
  * (a lost archive) names the skill, so its detail is kept: that fault does not
  * pass with a retry, and an admin must know which skill to release.
  */
@@ -148,8 +216,10 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
       ctx.services.resolveChatModel(orgId, presetId, userId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
-    cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
+    cleanupSessionFiles: (chatSessionId, orgId, tx) =>
+      ctx.services.cleanupSessionFiles(chatSessionId, orgId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
+    reachableSpaces: (c, orgId) => ctx.services.reachableSpaces(c, orgId),
     loadEnforcedSkills: (orgId, spaceId) =>
       enforcedSkillsRead(ctx.services.loadEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
     listEnforcedSkills: (orgId, spaceId) =>

@@ -52,7 +52,8 @@ import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
-import { useChatHost } from "./runtime-context.ts";
+import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useAttachAvailability } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
@@ -84,12 +85,13 @@ export function Thread({
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
+  const attach = useAttachAvailability();
   return (
     // The whole thread is the drop target, welcome screen and transcript alike;
     // dropped files take the same adapter path as the picker. A reader gets no
     // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write")}
+      disabled={!can("chat:write") || !attach.available}
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -175,8 +177,12 @@ function ThreadWelcome({
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t, firstName: name } = useChatHost();
+  const { can, t, firstName: name, actingSpaceIds } = useChatHost();
   const canWrite = can("chat:write");
+  // The host is looking at a space where the chat does not act (a viewer there): the conversation
+  // still runs, in the caller's other spaces, and touches none of this one.
+  const spaceId = useChatTransport()?.spaceId;
+  const outsideActingSet = canWrite && !!spaceId && !actsIn(actingSpaceIds, spaceId);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
@@ -188,6 +194,9 @@ function ThreadWelcome({
             {/* A reader asks nothing: what there is to do is reread. */}
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
           </p>
+          {outsideActingSet && (
+            <p className="text-muted-foreground mt-1 text-sm">{t("welcome.spaceNotActing")}</p>
+          )}
         </div>
         <Composer
           tools={composerTools}
@@ -351,7 +360,11 @@ function SentAttachmentChip() {
 
   // A resolved `appfile://` is interactive: the unified renderer shows an image
   // thumbnail or a download/preview chip, resolving the opener-vs-download action.
-  return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
+  return (
+    <FileAttachment
+      file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
+    />
+  );
 }
 
 /** Why a picked file did not become a chip: a refused file has no attachment to carry the error. */
