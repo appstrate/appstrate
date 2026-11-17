@@ -22,7 +22,7 @@
  * run probe is rendered instead, and read off the query cache it fills.
  */
 
-import { afterEach, describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,11 +38,7 @@ installFakeStorage({
 
 const { broadRunKeys, trackStreamGaps } = await import("../../hooks/use-global-run-sync.ts");
 const { ACROSS_SPACES, removeOrgScopedQueries } = await import("../../lib/query-keys.ts");
-const { render } = await import("../../test/render.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const { packageDetailQueryOptions } = await import("../../hooks/use-packages.ts");
 const { useAgentActions } = await import("../package-detail/use-agent-actions.tsx");
 
@@ -132,35 +128,11 @@ const agentSpace = (id: string, isDefault = false) => ({
   role: null,
 });
 
-let storeStubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of storeStubs) stub.mockRestore();
-  storeStubs = [];
-});
-
 /**
  * Renders the agent page's actions hook over a detail read in `spc_a` (where the agent last ran
  * when `lastRun`), and returns the cache it filled plus the « Supprimer les runs » verdict.
  */
 function agentPage({ overview, lastRun }: { overview: boolean; lastRun: boolean }) {
-  storeStubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { "u_1:org_1": true } : {},
-    }),
-  ];
   const qc = new QueryClient();
   qc.setQueryData(
     ["orgs"],
@@ -198,7 +170,7 @@ function agentPage({ overview, lastRun }: { overview: boolean; lastRun: boolean 
     clearRunsOffered = dropdown?.agent?.clearRuns.offered;
     return null;
   }
-  render(createElement(Probe), { queryClient: qc });
+  renderInSpace(createElement(Probe), { overview, queryClient: qc });
   /** The run queries the hook built: each key, and whether it may fetch. */
   const runQueries = qc
     .getQueryCache()

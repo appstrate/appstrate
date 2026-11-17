@@ -13,41 +13,14 @@ export function isUnreadableHere(error: unknown): boolean {
   return !error || (error instanceof ApiError && (error.status === 403 || error.status === 404));
 }
 
-/** A resource the read spanning spaces found, with the spaces it sits in, in the order tried. */
-export interface ElsewhereRow {
-  id: string;
-  spaceIds: readonly string[];
-}
-
-/**
- * The space to try next among a row's: the first enterable one listed AFTER the working space,
- * or the first enterable one when the working space is not listed. Never one before it: each
- * refusal moves forward, so a chain of refusals ends instead of bouncing between two spaces.
- */
-export function nextSpaceToTry(
-  spaceIds: readonly string[],
-  currentSpaceId: string,
-  enterable: (spaceId: string) => boolean,
-): string | undefined {
-  const at = spaceIds.indexOf(currentSpaceId);
-  return spaceIds.slice(at + 1).find(enterable);
-}
-
-/**
- * Where the detail of `id` opens instead: `target` (path, search and hash) in {@link nextSpaceToTry},
- * with `?enterSpace=`. `undefined` while the read has not answered; `null` when no row names it,
- * no space is left to try, or no space is resolved yet (nothing to move from).
- */
+/** Try only placements after the one that refused, so repeated refusals cannot loop. */
 export function detailElsewhere(
-  rows: readonly ElsewhereRow[] | undefined,
-  id: string,
+  spaceIds: readonly string[],
   target: string,
   currentSpaceId: string | null,
   enterable: (spaceId: string) => boolean,
-): string | null | undefined {
-  if (rows === undefined) return undefined;
+): string | null {
   if (!currentSpaceId) return null;
-  const spaceIds = rows.find((row) => row.id === id)?.spaceIds ?? [];
-  const spaceId = nextSpaceToTry(spaceIds, currentSpaceId, enterable);
-  return spaceId ? linkedSpacePath(target, spaceId, currentSpaceId) : null;
+  const next = spaceIds.slice(spaceIds.indexOf(currentSpaceId) + 1).find(enterable);
+  return next ? linkedSpacePath(target, next, currentSpaceId) : null;
 }

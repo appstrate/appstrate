@@ -10,7 +10,7 @@ import { useOverviewMode, useWorkingSpaceWording } from "../../hooks/use-overvie
 import { useSpaceLink } from "../../hooks/use-current-space";
 import { useMyConnections } from "../../hooks/use-me-connections";
 import { useCurrentOrgId } from "../../hooks/use-org";
-import { connectionsAcross } from "../integration-detail/connections-across";
+import { connectionsInSpaces } from "../../lib/connection-count";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { packageDetailPath } from "../../lib/package-paths";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
@@ -48,12 +48,16 @@ export function IntegrationOverview({
   const previewAgent = agents?.[0];
   // In « Tous les espaces » the figures are the reader's own connections across the
   // integration's spaces, as its index card counts them; otherwise the working space's.
-  const { data: myConnections } = useMyConnections();
+  const { data: myConnections } = useMyConnections(on);
   const orgId = useCurrentOrgId();
   const spaceWording = useWorkingSpaceWording("settings");
   const across =
     on && myConnections && spaceIds
-      ? connectionsAcross(myConnections, orgId, packageId, spaceIds)
+      ? connectionsInSpaces(
+          myConnections.find((group) => group.source_id === packageId)?.connections ?? [],
+          orgId,
+          spaceIds,
+        )
       : undefined;
   const hereConnections = [
     ...new Map(
@@ -62,14 +66,14 @@ export function IntegrationOverview({
         .map((connection) => [connection.id, connection]),
     ).values(),
   ];
-  const connectionCount = on ? across?.total : hereConnections.length;
-  const reconnect = on
-    ? across?.reconnect
-    : hereConnections.filter((connection) => connection.needs_reconnection).length;
+  const connections = on ? across : hereConnections;
+  const connectionCount = connections?.length;
+  const reconnect = connections?.filter((connection) => connection.needs_reconnection).length;
   const reconnectOf = (auth: IntegrationAuthStatus) =>
-    on
-      ? (across?.reconnectOf(auth.auth_key) ?? 0)
-      : auth.connections.filter((connection) => connection.needs_reconnection).length;
+    (on
+      ? across?.filter((connection) => connection.auth_key === auth.auth_key)
+      : auth.connections
+    )?.filter((connection) => connection.needs_reconnection).length ?? 0;
   const figure = (value: number | undefined) =>
     value === undefined ? <SkeletonLine className="w-10" /> : value;
   const available = detail.tool_catalog?.length ?? 0;

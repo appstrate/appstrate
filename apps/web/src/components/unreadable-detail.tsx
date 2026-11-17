@@ -22,7 +22,7 @@ import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaces } from "../hooks/use-spaces";
 import { useRowSpaceGrants } from "../hooks/use-permissions";
 import { ACROSS_SPACES, scheduleKeys } from "../lib/query-keys";
-import { detailElsewhere, isUnreadableHere, type ElsewhereRow } from "../lib/detail-elsewhere";
+import { detailElsewhere, isUnreadableHere } from "../lib/detail-elsewhere";
 import { isSpaceEnterable } from "../lib/space-lists";
 import { ResourceErrorState } from "./page-states";
 
@@ -41,12 +41,6 @@ interface UnreadableDetailProps {
   children?: ReactNode;
 }
 
-/** What a look-up across spaces answered: its rows once read, whether it failed. */
-interface Found {
-  rows: ElsewhereRow[] | undefined;
-  failed: boolean;
-}
-
 export function UnreadableDetail(props: UnreadableDetailProps) {
   const { on } = useOverviewMode();
   if (!on || !isUnreadableHere(props.error)) {
@@ -57,15 +51,12 @@ export function UnreadableDetail(props: UnreadableDetailProps) {
     );
   }
   if (props.kind === "schedule") return <ScheduleElsewhere {...props} />;
-  if (props.kind === "run") return <RunElsewhere {...props} />;
-  if (props.kind === "notification") return <NotificationElsewhere {...props} />;
-  return <PackageElsewhere {...props} type={props.kind} />;
+  if (props.kind === "run" || props.kind === "notification") return <RowElsewhere {...props} />;
+  return <PackageElsewhere {...props} />;
 }
 
 /** The home lookup shares the detail's sight and placement rules, including inactive homes. */
-function PackageElsewhere(
-  props: UnreadableDetailProps & { type: "agent" | "skill" | "integration" },
-) {
+function PackageElsewhere(props: UnreadableDetailProps) {
   const scope = useOrgScope();
   const grants = useRowSpaceGrants();
   const { data, isError } = $api.useQuery(
@@ -76,19 +67,11 @@ function PackageElsewhere(
     },
     { enabled: scope.enabled },
   );
-  const rows =
-    data &&
-    (data.type === props.type
-      ? [
-          {
-            id: props.id,
-            spaceIds: data.read_space_ids.filter(
-              (id) => !props.version || grants(id, `${props.type}s:read`),
-            ),
-          },
-        ]
-      : []);
-  return <Elsewhere {...props} found={{ rows, failed: isError }} />;
+  const spaceIds =
+    !isError && data?.type === props.kind
+      ? data.read_space_ids.filter((id) => !props.version || grants(id, `${data.type}s:read`))
+      : [];
+  return <Elsewhere {...props} loading={!data && !isError} spaceIds={spaceIds} />;
 }
 
 function ScheduleElsewhere(props: UnreadableDetailProps) {
@@ -99,56 +82,42 @@ function ScheduleElsewhere(props: UnreadableDetailProps) {
     queryFn: () => fetchSchedules(orgId),
     enabled: !!orgId,
   });
-  const rows = data?.map((row) => ({ id: row.id, spaceIds: [row.spaceId] }));
-  return <Elsewhere {...props} found={{ rows, failed: isError }} />;
+  const row = data?.find((schedule) => schedule.id === props.id);
+  return (
+    <Elsewhere
+      {...props}
+      loading={!data && !isError}
+      spaceIds={!isError && row ? [row.spaceId] : []}
+    />
+  );
 }
 
-/** A single resource read by id in any reached space: a 404 there is « nowhere ». */
-function byIdFound(id: string, query: { data?: { spaceId: string }; isError: boolean }): Found {
-  if (query.data) return { rows: [{ id, spaceIds: [query.data.spaceId] }], failed: false };
-  if (query.isError) return { rows: [], failed: true };
-  return { rows: undefined, failed: false };
-}
-
-function RunElsewhere(props: UnreadableDetailProps) {
+function RowElsewhere(props: UnreadableDetailProps) {
   const orgId = useCurrentOrgId();
-  const query = $api.useQuery(
+  const { data, isPending } = $api.useQuery(
     "get",
-    "/api/orgs/{orgId}/runs/{id}",
+    props.kind === "run" ? "/api/orgs/{orgId}/runs/{id}" : "/api/orgs/{orgId}/notifications/{id}",
     { params: { path: { orgId: orgId ?? "", id: props.id } } },
     { enabled: !!orgId && !!props.id },
   );
-  return <Elsewhere {...props} found={byIdFound(props.id, query)} />;
-}
-
-function NotificationElsewhere(props: UnreadableDetailProps) {
-  const orgId = useCurrentOrgId();
-  const query = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}/notifications/{id}",
-    { params: { path: { orgId: orgId ?? "", id: props.id } } },
-    { enabled: !!orgId && !!props.id },
-  );
-  return <Elsewhere {...props} found={byIdFound(props.id, query)} />;
+  return <Elsewhere {...props} loading={isPending} spaceIds={data ? [data.spaceId] : []} />;
 }
 
 function Elsewhere({
-  id,
   error,
   pending,
   children,
-  found,
-}: UnreadableDetailProps & { found: Found }) {
+  loading,
+  spaceIds,
+}: UnreadableDetailProps & { loading: boolean; spaceIds: readonly string[] }) {
   const { t } = useTranslation();
   const { pathname, search, hash } = useLocation();
   const currentSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const enterable = (spaceId: string) =>
     !!spaces?.some((space) => space.id === spaceId && isSpaceEnterable(space));
-  // A read that failed proves nothing: the page says what it read.
-  const rows = found.failed ? [] : found.rows;
-  const to = detailElsewhere(rows, id, `${pathname}${search}${hash}`, currentSpaceId, enterable);
-  if (to === undefined) return <>{pending}</>;
+  if (loading) return <>{pending}</>;
+  const to = detailElsewhere(spaceIds, `${pathname}${search}${hash}`, currentSpaceId, enterable);
   if (to !== null) return <Navigate to={to} replace />;
   return (
     <ResourceErrorState error={error} hint={t("error.resourceUnavailableHintAcross")}>

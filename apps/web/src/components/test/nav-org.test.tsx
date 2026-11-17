@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { $api, type components } from "../../api/client.ts";
 import { NavOrg } from "../nav-org.tsx";
-import { orgStore } from "../../stores/org-store.ts";
-import { spaceStore } from "../../stores/space-store.ts";
-import { authStore } from "../../stores/auth-store.ts";
-import { overviewStore } from "../../stores/overview-store.ts";
-import { render } from "../../test/render.tsx";
+import { renderInSpace } from "../../test/space-context.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -39,26 +35,6 @@ function navFor(
     permissions,
     createdAt: "2026-09-05T00:00:00Z",
   };
-  const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
-    ...orgStore.getInitialState(),
-    id: org.id,
-  });
-  // « Tous les espaces » chosen by this reader in this org, or not.
-  const chosen = [
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_nav", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { [`u_nav:${org.id}`]: true } : {},
-    }),
-  ];
-  // Standing in the first space listed, as the resolver would.
-  const current = spyOn(spaceStore, "getInitialState").mockReturnValue({
-    ...spaceStore.getInitialState(),
-    id: (spaces[0] as { id?: string } | undefined)?.id ?? null,
-  });
   queryClient.setQueryData(["orgs"], [org]);
   // No space to enter: the permission set is the org's, and the navigation answers at once.
   queryClient.setQueryData(
@@ -66,18 +42,18 @@ function navFor(
       .queryKey,
     { object: "list", hasMore: false, data: spaces },
   );
-  try {
-    return render(
-      <SidebarProvider>
-        <NavOrg />
-      </SidebarProvider>,
-      { queryClient, initialEntries: [url] },
-    );
-  } finally {
-    snapshot.mockRestore();
-    current.mockRestore();
-    for (const stub of chosen) stub.mockRestore();
-  }
+  return renderInSpace(
+    <SidebarProvider>
+      <NavOrg />
+    </SidebarProvider>,
+    {
+      overview,
+      orgId: org.id,
+      spaceId: (spaces[0] as { id?: string } | undefined)?.id ?? null,
+      queryClient,
+      initialEntries: [url],
+    },
+  );
 }
 
 describe("the main navigation", () => {

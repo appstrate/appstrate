@@ -8,16 +8,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
+import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { render } = await import("../../test/render.tsx");
 const { client } = await import("../../api/client.ts");
-const { orgStore } = await import("../../stores/org-store.ts");
+const { renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
 const { useAgentSpaceAction } = await import("../use-agent-run-space.ts");
 const { packageDetailQueryOptions } = await import("../use-packages.ts");
 const { useDeleteAgentRuns } = await import("../use-mutations.ts");
@@ -32,50 +30,20 @@ const { useRowSpaceGrants } = await import("../use-permissions.ts");
 
 const PACKAGE_ID = "@acme/reporter";
 
-const space = (id: string, permissions: string[]) => ({
-  id,
-  object: "space",
-  orgId: "org_1",
-  access: "member",
-  permissions,
-  personal: false,
-  isDefault: id === "spc_a",
-  name: id,
-  icon: null,
-  color: null,
-  role: null,
-});
-
 /** Atelier is the working space, hidden in the mode; Studio and Coffre run the agent. */
 const SPACES = [
-  space("spc_a", ["agents:read"]),
-  space("spc_b", [
+  testSpace("spc_a", ["agents:read"]),
+  testSpace("spc_b", [
     "agents:read",
     "agents:run",
     "persistence:delete",
     "integrations:read",
     "runs:read",
   ]),
-  space("spc_c", ["agents:read", "agents:run"]),
+  testSpace("spc_c", ["agents:read", "agents:run"]),
 ];
 
-const WIRE_DETAIL = {
-  id: PACKAGE_ID,
-  source: "local",
-  display_name: "Rapporteur",
-  dependencies: { skills: [], integrations: [] },
-  input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
-  running_runs: 0,
-  manifest: { name: PACKAGE_ID },
-  definition: "published",
-  home_space_id: "spc_b",
-  home_writable: false,
-  home_deletable: false,
-  home_shareable: false,
-  effective_timeout_seconds: 300,
-  active: true,
-  space_ids: ["spc_b", "spc_c"],
-};
+const WIRE_DETAIL = reporter({ active: true });
 
 let stubs: { mockRestore: () => void }[] = [];
 afterEach(() => {
@@ -86,24 +54,6 @@ afterEach(() => {
 
 /** Renders `node` in Atelier, « Tous les espaces » on, with the space listing seeded. */
 function renderInMode(node: React.ReactElement): QueryClient {
-  stubs.push(
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: { "u_1:org_1": true },
-    }),
-  );
   spaceStore.getState().setId("spc_a");
   const qc = new QueryClient();
   qc.setQueryData(["orgs"], [{ id: "org_1", permissions: [] }]);
@@ -112,7 +62,7 @@ function renderInMode(node: React.ReactElement): QueryClient {
     hasMore: false,
     data: SPACES,
   });
-  render(node, { queryClient: qc });
+  renderInSpace(node, { overview: true, queryClient: qc });
   return qc;
 }
 

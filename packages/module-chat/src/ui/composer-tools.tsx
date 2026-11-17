@@ -31,8 +31,6 @@ import {
   limitAvailability,
   useAttachTarget,
   useConversationScope,
-  useOriginSpaceLabel,
-  useOriginSpaceNode,
   useSpaceLabel,
   useSpaceNode,
   type AttachUnavailableReason,
@@ -84,8 +82,8 @@ export function ComposerTools({
   const scope = useConversationScope();
   // The origin's plain name, for the accessible names: the node below carries a tile the name
   // does not. Without an origin, the sentence stays generic.
-  const spaceLabel = useOriginSpaceLabel();
-  const spaceNode = useOriginSpaceNode();
+  const spaceLabel = useSpaceLabel(scope.originSpaceId);
+  const spaceNode = useSpaceNode(scope.originSpaceId);
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
   const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
@@ -258,31 +256,12 @@ export function LimitMenuEntry() {
   ) : (
     // A turn generating, no space to act in, an origin the chat no longer acts in, or the
     // acting set not known yet (no reason then).
-    <UnavailableItem
-      icon={<MapPinIcon />}
-      label={t("composer.limit.generic")}
-      reason={limit.reason && t(LIMIT_REASON_KEY[limit.reason])}
-      testId="composer-limit-item"
-    />
-  );
-}
-
-/** A menu item that cannot be chosen here, with the reason under its label when there is one. */
-function UnavailableItem({
-  icon,
-  label,
-  reason,
-  testId,
-}: {
-  icon: ReactNode;
-  label: ReactNode;
-  reason: ReactNode;
-  testId: string;
-}) {
-  return (
-    <DropdownMenuItem disabled data-testid={testId}>
-      {icon}
-      <LabelWithHint label={label} hint={reason} />
+    <DropdownMenuItem disabled data-testid="composer-limit-item">
+      <MapPinIcon />
+      <LabelWithHint
+        label={t("composer.limit.generic")}
+        hint={limit.reason && t(LIMIT_REASON_KEY[limit.reason])}
+      />
     </DropdownMenuItem>
   );
 }

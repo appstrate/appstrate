@@ -8,19 +8,15 @@
  * connection figures are the reader's own across the integration's spaces, as its index card counts.
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { IntegrationOverview } = await import("../integration-overview.tsx");
-const { orgStore } = await import("../../../stores/org-store.ts");
-const { spaceStore } = await import("../../../stores/space-store.ts");
-const { authStore } = await import("../../../stores/auth-store.ts");
-const { overviewStore } = await import("../../../stores/overview-store.ts");
 const { agentsKeys } = await import("../../../lib/query-keys.ts");
-const { render } = await import("../../../test/render.tsx");
+const { renderInSpace } = await import("../../../test/space-context.ts");
 const i18nModule = await import("../../../i18n.ts");
 type IntegrationDetailWire = import("../../../hooks/use-integrations.ts").IntegrationDetailWire;
 
@@ -91,39 +87,22 @@ function renderOverview(
     { id: "@acme/here", display_name: "Ici" },
     { id: "@acme/unrelated", display_name: "Sans rapport" },
   ]);
-  const org = spyOn(orgStore, "getInitialState").mockReturnValue({
-    ...orgStore.getInitialState(),
-    id: ORG_ID,
-  });
-  const space = spyOn(spaceStore, "getInitialState").mockReturnValue({
-    ...spaceStore.getInitialState(),
-    id: SPACE_ID,
-  });
-  const auth = spyOn(authStore, "getInitialState").mockReturnValue({
-    ...authStore.getInitialState(),
-    user: { id: "u_1", email: "u@example.test", emailVerified: true },
-  });
-  const mode = spyOn(overviewStore, "getInitialState").mockReturnValue({
-    ...overviewStore.getInitialState(),
-    chosen: overview ? { [`u_1:${ORG_ID}`]: true } : {},
-  });
-  try {
-    return render(
-      <IntegrationOverview
-        packageId="@acme/gmail"
-        detail={DETAIL}
-        spaceIds={spaceIds}
-        dependentIds={dependentIds}
-        onOpenConnections={() => {}}
-      />,
-      { queryClient, initialEntries: ["/integrations/@acme/gmail?other=1"] },
-    );
-  } finally {
-    org.mockRestore();
-    space.mockRestore();
-    auth.mockRestore();
-    mode.mockRestore();
-  }
+  return renderInSpace(
+    <IntegrationOverview
+      packageId="@acme/gmail"
+      detail={DETAIL}
+      spaceIds={spaceIds}
+      dependentIds={dependentIds}
+      onOpenConnections={() => {}}
+    />,
+    {
+      overview,
+      orgId: ORG_ID,
+      spaceId: SPACE_ID,
+      queryClient,
+      initialEntries: ["/integrations/@acme/gmail?other=1"],
+    },
+  );
 }
 
 /** The value of the stat labelled `label`. */

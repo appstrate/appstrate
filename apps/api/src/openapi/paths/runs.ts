@@ -1112,9 +1112,7 @@ const canonicalRunsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         runWaitParameter,
       ],
-      responses: {
-        ...runReadResponses,
-      },
+      responses: runReadResponses,
     },
   },
   "/api/orgs/{orgId}/runs/{id}": {

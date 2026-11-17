@@ -844,11 +844,11 @@ describe("POST /api/runs/:id/events/finalize — complete result persistence", (
 
     // The run DTO exposes `artifacts` snake_case (field + inner keys).
     const dto = await getRunFull(
-      { orgId: ctx.orgId, spaceIds: [ctx.defaultSpaceId] },
+      ctx.orgId,
+      [{ spaceId: ctx.defaultSpaceId, permissions: new Set() }],
       runId,
       null,
       undefined,
-      () => false,
     );
     expect(dto?.artifacts).toEqual(artifacts);
   });

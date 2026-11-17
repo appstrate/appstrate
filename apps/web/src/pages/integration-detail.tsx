@@ -70,10 +70,7 @@ import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/u
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
-import {
-  useConfiguresIntegration,
-  useIntegrationSpaceAction,
-} from "../components/integration-detail/use-integration-space";
+import { useIntegrationSpaceAction } from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
 import { useOverviewMode, useWorkingSpaceWording } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
@@ -132,8 +129,8 @@ export function IntegrationSettings({
   const { can } = usePermissions();
   const { on: overview } = useOverviewMode();
   const workingSpace = useSpaceLabelOf()(useCurrentSpaceId());
-  const canConfigure = useConfiguresIntegration(spaceIds);
   const configureIn = useIntegrationSpaceAction(packageId, "integrations:configure", spaceIds);
+  const canConfigure = configureIn.offered;
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
@@ -411,7 +408,7 @@ export function IntegrationDetailPage() {
   const spaceIds = pkg?.space_ids ?? [];
   // The working space's verdict, for what acts in it.
   const canConfigure = can("integrations:configure");
-  const configures = useConfiguresIntegration(spaceIds);
+  const configures = useSpacesFor({ permission: "integrations:configure" }, spaceIds).offered;
   const connectionsIn = useIntegrationSpaceAction(packageId, "integrations:read", spaceIds);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if

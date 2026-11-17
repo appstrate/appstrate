@@ -57,20 +57,17 @@ export function createChatAttachmentAdapter(deps: {
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
-  // Each pending attachment's space, by attachment id.
-  const spaces = new Map<string, string>();
   return {
     // Any file type — the composer accepts arbitrary files (the agent's
     // input schema, not the composer, decides what a run will accept).
     accept: "*",
-    add({ file }): Promise<PendingAttachment> {
+    add({ file }): Promise<PendingAttachment & { spaceId: string }> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
       const spaceId = spaceOf();
       if (spaceId === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
-      const id = crypto.randomUUID();
-      spaces.set(id, spaceId);
       return Promise.resolve({
-        id,
+        id: crypto.randomUUID(),
+        spaceId,
         type: "file",
         name: file.name,
         contentType: file.type || "application/octet-stream",
@@ -80,8 +77,9 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
-      const spaceId = spaces.get(attachment.id);
-      if (spaceId === undefined) throw new Error(t("upload.failed"));
+      if (!("spaceId" in attachment) || typeof attachment.spaceId !== "string")
+        throw new Error(t("upload.failed"));
+      const { spaceId, ...pending } = attachment;
       let uri: string;
       try {
         uri = await stageComposerFile(upload, attachment.file, spaceId);
@@ -96,9 +94,8 @@ export function createChatAttachmentAdapter(deps: {
         // browser console instead of gone.
         throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
-      spaces.delete(attachment.id);
       return {
-        ...attachment,
+        ...pending,
         status: { type: "complete" },
         content: [
           {
@@ -110,8 +107,7 @@ export function createChatAttachmentAdapter(deps: {
         ],
       };
     },
-    remove(attachment): Promise<void> {
-      spaces.delete(attachment.id);
+    remove(): Promise<void> {
       return Promise.resolve();
     },
   };

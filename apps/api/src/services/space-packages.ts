@@ -384,38 +384,29 @@ export function activeInSpaces<Q extends PgSelect>(
     .groupBy(packages.id, ...groupBy);
 }
 
-/** Detail reads include switched-off placements; execution and the header use only active ones. */
-export async function packageDetailSpaces(
+/** Readable placements, including switched-off ones, in home-first space listing order. */
+export async function packagePlacementsInSpaces(
   orgId: string,
   packageId: string,
-  type: PackageType,
   spaceIds: readonly string[],
+  type?: PackageType,
 ) {
-  const rows =
-    spaceIds.length === 0
-      ? []
-      : await db
-          .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
-          .from(packages)
-          .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-          .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-          .where(
-            and(
-              eq(packages.id, packageId),
-              eq(packages.type, type),
-              orgOrSystemFilter(orgId),
-              notEphemeralFilter(),
-              placementReadFilter(spaces.id),
-            ),
-          )
-          .orderBy(
-            sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`,
-            ...spaceListingOrder(),
-          );
-  return {
-    read_space_ids: rows.map((row) => row.id),
-    space_ids: rows.filter((row) => row.active).map((row) => row.id),
-  };
+  if (!spaceIds.length) return [];
+  return db
+    .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
+    .from(packages)
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+    .where(
+      and(
+        eq(packages.id, packageId),
+        type && eq(packages.type, type),
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        placementReadFilter(spaces.id),
+      ),
+    )
+    .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
 }
 
 /**

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useSpacesOf } from "./use-spaces";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
@@ -228,11 +229,12 @@ export function usePackageActivationInSpaces(
       : workingSpaceId
         ? [workingSpaceId]
         : [];
+  const targets = useSpacesOf(spaceIds);
   const runsIn = (spaceId: string) => placementIn(row!, spaceId)?.state === "active";
   return {
-    activateIn: spaceIds.filter((id) => !runsIn(id) && activationGate(row!, id, true).allowed),
-    deactivateIn: spaceIds.filter((id) => runsIn(id) && activationGate(row!, id, false).allowed),
-    removeFrom: spaceIds.filter((id) => mayRemoveFromSpace(row!, id)),
+    activateIn: targets.filter(({ id }) => !runsIn(id) && activationGate(row!, id, true).allowed),
+    deactivateIn: targets.filter(({ id }) => runsIn(id) && activationGate(row!, id, false).allowed),
+    removeFrom: targets.filter(({ id }) => mayRemoveFromSpace(row!, id)),
     setActive: (spaceId: string, active: boolean, options?: { onSuccess?: () => void }) =>
       setActive.mutate({ spaceId, packageId, active }, options),
     pending: setActive.isPending,

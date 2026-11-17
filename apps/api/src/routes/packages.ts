@@ -24,7 +24,6 @@ import {
   activatePackage,
   activatePackageWithin,
   assertHasPublishedVersion,
-  packageDetailSpaces,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
@@ -100,6 +99,7 @@ import {
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
+  packageDetailSpaces,
   holdsHomeAuthority,
   requireAgentRead,
   resolvePackageHome,
@@ -107,8 +107,6 @@ import {
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../lib/view-as.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
-import type { PackageWriteGuard } from "../services/package-locks.ts";
-import { lockIdleAgent } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
@@ -792,7 +790,6 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
-  const read = packagePermission(rcfg.cfg.type, "read");
   const [spec, packageSpaces] = await Promise.all([
     resolveFileExplorerVersion(
       c,
@@ -800,12 +797,7 @@ async function buildPackageDetailDto(
       opts.version?.trim() || undefined,
     ),
     // Every readable placement, including its activation state.
-    packageDetailSpaces(
-      orgId,
-      item.id,
-      rcfg.cfg.type,
-      accessible.filter((space) => space.permissions.has(read)).map((space) => space.id),
-    ),
+    packageDetailSpaces(orgId, item.id, rcfg.cfg.type, accessible),
   ]);
   // The answer comes back in the version-SPEC vocabulary, where the stored tree
   // has two spellings — an omitted selector and the literal `draft` — and
@@ -1062,18 +1054,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
   };
 }
 
-/** Package and version deletion affect every space. Publish and restore check the working space. */
-function idleAgentGuard(
-  c: Context<AppEnv>,
-  rcfg: PackageRouteConfig,
-  itemId: string,
-  reach: "org" | "space",
-): PackageWriteGuard | undefined {
-  if (rcfg.cfg.type !== "agent") return undefined;
-  const scope = reach === "org" ? { orgId: c.get("orgId") } : getSpaceScope(c);
-  return (tx) => lockIdleAgent(tx, scope, itemId);
-}
-
 function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
@@ -1085,12 +1065,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    const result = await deleteOrgItem(
-      orgId,
-      itemId,
-      rcfg.cfg,
-      idleAgentGuard(c, rcfg, itemId, "org"),
-    );
+    const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
     if (!result.ok) {
       throw conflict(
         "in_use",
@@ -1204,7 +1179,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const result = await createVersionFromDraft({
-      beforeWrite: idleAgentGuard(c, rcfg, itemId, "space"),
+      requireIdleInSpace: getSpaceScope(c).spaceId,
       packageId: itemId,
       orgId,
       userId: user.id,
@@ -1315,7 +1290,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
         precondition: { assertVersion: (current) => assertIfMatch(c, current) },
-        beforeWrite: idleAgentGuard(c, rcfg, itemId, "space"),
+        requireIdleInSpace: getSpaceScope(c).spaceId,
         manifest: asRecord(detail.manifest),
         draftContent: content,
         replace: files,
@@ -1370,9 +1345,8 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 
     const versionSpec = c.req.param("version")!;
     const deleted = await deletePackageVersion(
-      itemId,
+      { id: itemId, orgId, type: rcfg.cfg.type },
       versionSpec,
-      idleAgentGuard(c, rcfg, itemId, "org"),
     );
     if (!deleted) {
       throw notFound(`Version '${versionSpec}' not found`);

@@ -8,7 +8,7 @@
  * is `detailElsewhere` (`lib/test/detail-elsewhere.test.ts`).
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -19,11 +19,7 @@ installFakeStorage({
 
 const { $api, ApiError } = await import("../../api/client.ts");
 const { UnreadableDetail } = await import("../unreadable-detail.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
-const { render } = await import("../../test/render.tsx");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const i18nModule = await import("../../i18n.ts");
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
@@ -64,38 +60,23 @@ function detail(options: {
     { object: "list", hasMore: false, data: SPACES },
   );
   options.seed?.(queryClient);
-  const stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: ORG_ID,
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_hidden",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_detail", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: options.overview ? { [`u_detail:${ORG_ID}`]: true } : {},
-    }),
-  ];
-  try {
-    return render(
-      <UnreadableDetail
-        kind={options.agent ? "agent" : "run"}
-        id={options.agent ? "@acme/a" : "run_1"}
-        version={options.agent?.version}
-        error={options.error === undefined ? refused : options.error}
-        pending={<span>{PENDING}</span>}
-      />,
-      { queryClient, initialEntries: ["/agents/@acme/a/runs/run_1?journalFilter=tools"] },
-    );
-  } finally {
-    for (const stub of stubs) stub.mockRestore();
-  }
+  return renderInSpace(
+    <UnreadableDetail
+      kind={options.agent ? "agent" : "run"}
+      id={options.agent ? "@acme/a" : "run_1"}
+      version={options.agent?.version}
+      error={options.error === undefined ? refused : options.error}
+      pending={<span>{PENDING}</span>}
+    />,
+    {
+      overview: options.overview,
+      orgId: ORG_ID,
+      spaceId: "spc_hidden",
+      userId: "u_detail",
+      queryClient,
+      initialEntries: ["/agents/@acme/a/runs/run_1?journalFilter=tools"],
+    },
+  );
 }
 
 const UNAVAILABLE = () => i18n.t("common:error.resourceUnavailable");

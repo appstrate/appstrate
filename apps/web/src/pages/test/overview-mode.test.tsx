@@ -9,8 +9,8 @@
  * Out of the mode, nothing changes.
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it } from "bun:test";
+import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -26,10 +26,7 @@ const { RunsPage } = await import("../runs-page.tsx");
 const { SchedulesListPage } = await import("../schedules-list.tsx");
 const { RouteGate } = await import("../../components/route-gate.tsx");
 const { OrgSwitcher } = await import("../../components/org-switcher.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { memberSpaceClient, renderInSpace } = await import("../../test/space-context.ts");
 const { DashboardPage } = await import("../dashboard.tsx");
 const { PackageIndexPage } = await import("../package-index.tsx");
 const { IntegrationsPage } = await import("../integrations-page.tsx");
@@ -118,12 +115,6 @@ const packageRow = (space_ids: string[], extra: Record<string, unknown> = {}) =>
   ...extra,
 });
 
-let stubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
 function renderIn(
   overview: boolean,
   node: React.ReactElement,
@@ -131,51 +122,10 @@ function renderIn(
   seed: (queryClient: QueryClient) => void = () => {},
   spaces: readonly ReturnType<typeof space>[] = SPACES,
 ) {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { "u_1:org_1": true } : {},
-    }),
-  ];
-  const queryClient = new QueryClient();
-  queryClient.setQueryData(
-    ["orgs"],
-    [
-      {
-        id: "org_1",
-        name: "Acme",
-        slug: "acme",
-        icon: null,
-        color: null,
-        role: "member",
-        deleting_at: null,
-        permissions: [],
-        createdAt: "2026-09-05T00:00:00Z",
-      },
-    ],
-  );
-  queryClient.setQueryData(
-    ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-    {
-      object: "list",
-      hasMore: false,
-      data: spaces,
-    },
-  );
+  const queryClient = memberSpaceClient(spaces);
   seed(queryClient);
-  const html = render(<SidebarProvider>{node}</SidebarProvider>, {
+  const html = renderInSpace(<SidebarProvider>{node}</SidebarProvider>, {
+    overview,
     queryClient,
     initialEntries: [url],
   });

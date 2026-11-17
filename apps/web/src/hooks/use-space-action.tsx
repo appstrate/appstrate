@@ -48,7 +48,7 @@ function useActInSpace(): (spaceId: string, act: () => void) => void {
 
 /**
  * Where an action naming no space may act. Out of the mode: `offered` is the working space's
- * verdict and `eligible` is empty. In it: the spaces that grant `need`, only those of `among`
+ * verdict and its space when offered. In it: the spaces that grant `need`, only those of `among`
  * when given, `offered` when there is one, and `anyOf` the one an act answering the same from
  * any of them reads (the working space when it is one).
  */
@@ -75,7 +75,7 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const anyOf = (eligible.find((space) => space.id === workingSpaceId) ?? eligible[0])?.id;
   const working = spaces?.find((space) => space.id === workingSpaceId);
   const targets = on ? eligible : offered && working ? [working] : [];
-  return { on, eligible, offered, anyOf, targets };
+  return { on, offered, anyOf, targets };
 }
 
 /** How {@link useSpaceAction} picks and enters a space. */
@@ -106,13 +106,13 @@ export function useSpaceAction(
   among?: readonly string[],
   { preferWorkingSpace = among !== undefined, prepare }: SpaceActionOptions = {},
 ) {
-  const { on, eligible, offered } = useSpacesFor(need, among);
+  const { on, targets, offered } = useSpacesFor(need, among);
   const actInSpace = useActInSpace();
   const navigate = useNavigate();
   const workingSpaceId = useCurrentSpaceId();
-  const choice = on ? spaceChoice(eligible, preferWorkingSpace ? workingSpaceId : null) : null;
+  const choice = on ? spaceChoice(targets, preferWorkingSpace ? workingSpaceId : null) : null;
   const target =
-    choice?.kind === "one" ? eligible.find((space) => space.id === choice.spaceId) : undefined;
+    choice?.kind === "one" ? targets.find((space) => space.id === choice.spaceId) : undefined;
 
   const actIn = (spaceId: string, act: () => void) => {
     if (!prepare || spaceId === spaceStore.getState().id) return actInSpace(spaceId, act);
@@ -135,7 +135,7 @@ export function useSpaceAction(
     /** The menu of the spaces to act in, labelled `label` (« Créer dans… »); `undefined` unless the reader must choose. */
     choose: (label: string, act: () => void): SpaceChoiceMenu | undefined =>
       choice?.kind === "ask"
-        ? { label, spaces: eligible, onPick: (spaceId) => actIn(spaceId, act) }
+        ? { label, spaces: targets, onPick: (spaceId) => actIn(spaceId, act) }
         : undefined,
     /** A link to `to`: plain out of the mode; in it, `onSelect` replaces the navigation with `run`. */
     link: (to: string): { to: string; onSelect?: () => void } => ({

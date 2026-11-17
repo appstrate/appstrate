@@ -53,6 +53,15 @@ describe("chat attachment adapter — the space of an upload", () => {
     expect(sent.content).toMatchObject([{ type: "file", data: "upload://upl_1" }]);
   });
 
+  it("keeps the pending file's destination when the adapter is recreated", async () => {
+    const pending = await adapterOver(() => Promise.reject()).add({ file: NOTE() });
+    const changed = adapterOver(
+      (_file, spaceId) => Promise.resolve(`upload://${spaceId}`),
+      () => "spc_b",
+    );
+    expect((await changed.send(pending)).content).toMatchObject([{ data: "upload://spc_a" }]);
+  });
+
   it("refuses a file added with no space, before any upload", async () => {
     const uploads: string[] = [];
     const adapter = adapterOver(

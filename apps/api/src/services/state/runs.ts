@@ -74,7 +74,7 @@ import {
 import type { z } from "zod";
 import { tokenUsageSchema, type TokenUsage } from "@appstrate/core/token-usage";
 import { runModelErrorWire } from "@appstrate/shared-types";
-import type { SpaceScope, SpacesScope, OrgScope } from "../../lib/scope.ts";
+import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
   type ModelGenerationSettings,
@@ -1963,28 +1963,24 @@ export async function listScheduleRuns(
   );
 }
 
-/**
- * One run of the spaces of `scope`, enriched. `visibility` is the caller's
- * run-read predicate (`lib/run-visibility.ts`): a run the caller may not read
- * simply misses, so the handler's existing `notFound` covers it — hidden is
- * 404, never 403. `agentInput` answers, for the run's space, whether the caller
- * holds `agents:read` there: without it the run keeps its observable result
- * but not its imposed input values.
- */
+/** Enrich one run under its space's grant. Mutation responses have already authorized the run. */
 export async function getRunFull(
-  scope: SpacesScope,
+  orgId: string,
+  grants: readonly SpaceGrant[],
   id: string,
   actor: Actor | null,
   visibility: SQL | undefined,
-  agentInput: (spaceId: string) => boolean,
 ) {
-  if (scope.spaceIds.length === 0) return null;
+  if (!grants.length) return null;
   const conditions = [
     eq(runs.id, id),
-    eq(runs.orgId, scope.orgId),
-    inArray(runs.spaceId, [...scope.spaceIds]),
+    eq(runs.orgId, orgId),
+    inArray(
+      runs.spaceId,
+      grants.map((grant) => grant.spaceId),
+    ),
+    visibility,
   ];
-  if (visibility) conditions.push(visibility);
 
   // `packages.draftManifest` + `draftContent` (the agent's full prompt) are
   // consumed ONLY by the inline branch below, so they are deliberately NOT in
@@ -2018,7 +2014,7 @@ export async function getRunFull(
     const [pkg] = await db
       .select({ manifest: packages.draftManifest, content: packages.draftContent })
       .from(packages)
-      .where(and(eq(packages.id, row.run.packageId), orgOrSystemFilter(scope.orgId)))
+      .where(and(eq(packages.id, row.run.packageId), orgOrSystemFilter(orgId)))
       .limit(1);
     const manifest = pkg?.manifest as Record<string, unknown> | null | undefined;
     inlineManifest = manifest && Object.keys(manifest).length > 0 ? manifest : null;
@@ -2026,7 +2022,10 @@ export async function getRunFull(
   }
 
   return {
-    ...mapEnrichedRun(row, agentInput(row.run.spaceId)),
+    ...mapEnrichedRun(
+      row,
+      grants.some((g) => g.spaceId === row.run.spaceId && readsAgentContent(g.permissions)),
+    ),
     inline_manifest: inlineManifest,
     inline_prompt: inlinePrompt,
   };

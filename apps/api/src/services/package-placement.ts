@@ -6,7 +6,7 @@
  * here, or shipped with the deployment.
  */
 
-import { and, asc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { packages, schedules, spacePackages } from "@appstrate/db/schema";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -28,17 +28,10 @@ export function placementReadFilter(spaceId: string | AnyPgColumn) {
  * The ON clause every placement-aware query joins `spacePackages` with:
  * `(this package, THIS space)`. Dropping the space narrowing silently widens
  * "placed here" to "placed anywhere" (pinned by `package-placement-parity.test.ts`).
- * `spaceId` may be a column when each left row names its own space, or a list
- * of spaces when one read answers for each of them (one joined row per space).
+ * `spaceId` may be a column when each left row names its own space.
  */
-export function placementRowJoin(
-  packageIdColumn: AnyPgColumn,
-  spaceId: string | readonly string[] | AnyPgColumn,
-) {
-  const space = Array.isArray(spaceId)
-    ? inArray(spacePackages.spaceId, [...(spaceId as readonly string[])])
-    : eq(spacePackages.spaceId, spaceId as string | AnyPgColumn);
-  return and(eq(spacePackages.packageId, packageIdColumn), space);
+export function placementRowJoin(packageIdColumn: AnyPgColumn, spaceId: string | AnyPgColumn) {
+  return and(eq(spacePackages.packageId, packageIdColumn), eq(spacePackages.spaceId, spaceId));
 }
 
 /**

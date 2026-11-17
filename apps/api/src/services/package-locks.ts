@@ -16,9 +16,6 @@ import { sql } from "drizzle-orm";
 import { db, type Db } from "@appstrate/db/client";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
-/** A route's precondition evaluated in the transaction that changes the package. */
-export type PackageWriteGuard = (tx: Db) => Promise<void>;
-
 /** Guards the draft archive (`library-packages/{ns}/{folder}/{id}.afps`) and its row. */
 export async function lockPackageDraft(tx: DbOrTx, packageId: string): Promise<void> {
   await tx.execute(

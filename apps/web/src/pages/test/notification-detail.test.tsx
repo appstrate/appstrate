@@ -7,7 +7,7 @@
  * space is remembered. The route keeps the mode.
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { Route, Routes } from "react-router-dom";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -17,14 +17,10 @@ installFakeStorage({
   location: { pathname: "/", origin: "http://localhost" },
 });
 
-const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { NotificationDetailPage } = await import("../notification-detail.tsx");
 const { RouteGate } = await import("../../components/route-gate.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const { holdsOverview } = await import("../../lib/space-lists.ts");
 
 await i18nReady;
@@ -52,31 +48,7 @@ const NOTIFICATION = {
   createdAt: "2026-09-10T10:00:00.000Z",
 };
 
-let stubs: { mockRestore(): void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
 function renderAt(url: string, workingSpaceId: string) {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: workingSpaceId,
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: { "u_1:org_1": true },
-    }),
-  ];
   const queryClient = new QueryClient();
   queryClient.setQueryData(
     ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
@@ -100,7 +72,7 @@ function renderAt(url: string, workingSpaceId: string) {
     ],
     NOTIFICATION,
   );
-  return render(
+  return renderInSpace(
     <Routes>
       <Route
         path="/notifications/:id"
@@ -111,7 +83,7 @@ function renderAt(url: string, workingSpaceId: string) {
         }
       />
     </Routes>,
-    { queryClient, initialEntries: [url] },
+    { overview: true, spaceId: workingSpaceId, queryClient, initialEntries: [url] },
   );
 }
 

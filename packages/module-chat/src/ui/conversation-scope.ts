@@ -7,7 +7,7 @@
  * it from the host's selected space — the one thing that does NOT define an existing conversation.
  */
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { actsIn, useChatHost } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
 
@@ -177,21 +177,28 @@ export function useConversationAttachTarget(
   selectedSpaceId: string | null,
 ): { target: AttachTarget; getSpaceId: () => string | null } {
   const { actingSpaceIds } = useChatHost();
-  const [last, setLast] = useState<{ spaceId: string; under: string | null } | null>(null);
-  const picked = last && last.under === selectedSpaceId ? last.spaceId : null;
+  const [picked, pick] = useState<string | null>(null);
   const { originSpaceId, restricted } = scope;
-  const availability = useMemo(
-    () => attachAvailability({ originSpaceId, restricted }, actingSpaceIds, selectedSpaceId),
-    [originSpaceId, restricted, actingSpaceIds, selectedSpaceId],
+  const target = useMemo(
+    () => ({
+      availability: attachAvailability(
+        { originSpaceId, restricted },
+        actingSpaceIds,
+        selectedSpaceId,
+      ),
+      picked,
+      pick,
+    }),
+    [originSpaceId, restricted, actingSpaceIds, selectedSpaceId, picked],
   );
-  const pick = useCallback(
-    (spaceId: string) => setLast({ spaceId, under: selectedSpaceId }),
-    [selectedSpaceId],
-  );
-  const target = useMemo(() => ({ availability, picked, pick }), [availability, picked, pick]);
-  const getTarget = useLatest(target);
-  const getSpaceId = useCallback(() => attachSpaceOf(getTarget()), [getTarget]);
-  return { target, getSpaceId };
+  // Leaving the overview or losing the chosen space cancels the choice for future drops.
+  if (
+    picked &&
+    (target.availability.kind !== "choose" || !target.availability.spaceIds.includes(picked))
+  ) {
+    pick(null);
+  }
+  return { target, getSpaceId: useLatest(attachSpaceOf(target)) };
 }
 
 /**
@@ -210,16 +217,6 @@ export function useSpaceLabel(spaceId: string | null): string {
 export function useSpaceNode(spaceId: string | null): ReactNode {
   const { t, renderSpaces } = useChatHost();
   return spaceId ? renderSpaces([spaceId]) : t("composer.limit.thisSpace");
-}
-
-/** {@link useSpaceLabel} of the conversation's origin space. */
-export function useOriginSpaceLabel(): string {
-  return useSpaceLabel(useConversationScope().originSpaceId);
-}
-
-/** {@link useSpaceNode} of the conversation's origin space. */
-export function useOriginSpaceNode(): ReactNode {
-  return useSpaceNode(useConversationScope().originSpaceId);
 }
 
 /** The origin space a limited conversation acts in alone: set only while it is limited. */

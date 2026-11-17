@@ -13,7 +13,7 @@ import type { MenuAction, SpaceChoiceMenu } from "../lib/menu-action";
 import { spaceLabel } from "../lib/space-label";
 import { usePackageActivationInSpaces } from "../hooks/use-library";
 import { useOverviewMode } from "../hooks/use-overview-mode";
-import { useSpacesOf } from "../hooks/use-spaces";
+import type { useSpaceAction } from "../hooks/use-space-action";
 
 type ChoiceSpace = SpaceChoiceMenu["spaces"][number];
 
@@ -46,13 +46,7 @@ export interface SpaceDeed {
 
 /** `useSpaceAction`'s verdict as a deed: `act` performed in the space the action enters. */
 export function deedOfAction(
-  action: {
-    on: boolean;
-    offered: boolean;
-    target?: ChoiceSpace;
-    run: (act: () => void) => void;
-    choose: (label: string, act: () => void) => SpaceChoiceMenu | undefined;
-  },
+  action: ReturnType<typeof useSpaceAction>,
   labels: SpaceDeedLabels,
   act: () => void,
 ): SpaceDeed {
@@ -140,19 +134,16 @@ export function usePlacementDeeds(
           disabled: placement.pending,
         }
       : { offered: false };
-  const activateIn = useSpacesOf(placement.activateIn);
-  const deactivateIn = useSpacesOf(placement.deactivateIn);
-  const removeFrom = useSpacesOf(placement.removeFrom);
   return {
-    activate: deed(activateIn, ["spaceChoice.activate", "spaceChoice.activateIn"], (id) =>
+    activate: deed(placement.activateIn, ["spaceChoice.activate", "spaceChoice.activateIn"], (id) =>
       placement.setActive(id, true),
     ),
     deactivate: deed(
-      deactivateIn,
+      placement.deactivateIn,
       ["spaceChoice.deactivate", "spaceChoice.deactivateIn"],
       onDeactivate,
     ),
-    remove: deed(removeFrom, ["spaceChoice.remove", "spaceChoice.removeIn"], onRemove),
+    remove: deed(placement.removeFrom, ["spaceChoice.remove", "spaceChoice.removeIn"], onRemove),
     setActive: placement.setActive,
     pending: placement.pending,
   };

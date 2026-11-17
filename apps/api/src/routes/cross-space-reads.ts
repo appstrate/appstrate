@@ -27,7 +27,8 @@ import { respondRun, respondRunList } from "./runs.ts";
 import { respondScheduleList } from "./schedules.ts";
 import { respondFileList } from "./files.ts";
 import { respondAgentIndex, respondAgentPersistence } from "./agents.ts";
-import { loadAgentPlacedAcross } from "../middleware/guards.ts";
+import { packagePlacementsInSpaces } from "../services/space-packages.ts";
+import { agentNotFound } from "../middleware/guards.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { respondPackageIndex } from "./packages.ts";
 import {
@@ -113,8 +114,18 @@ export function createCrossSpaceReadsRouter() {
     `/:orgId/agents/${SCOPED_PACKAGE_ROUTE}/persistence`,
     ...readAcrossSpaces(["persistence:read"], async (c, orgId, grants) => {
       const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-      const placed = await loadAgentPlacedAcross(packageId, orgId, grants);
-      return respondAgentPersistence(c, placed.agent.id, placed.grants);
+      const placements = await packagePlacementsInSpaces(
+        orgId,
+        packageId,
+        grants.map((g) => g.spaceId),
+      );
+      if (!placements.length) throw agentNotFound(packageId);
+      const ids = new Set(placements.map((row) => row.id));
+      return respondAgentPersistence(
+        c,
+        packageId,
+        grants.filter((g) => ids.has(g.spaceId)),
+      );
     }),
   );
 

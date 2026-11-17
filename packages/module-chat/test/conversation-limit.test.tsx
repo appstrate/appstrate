@@ -18,13 +18,14 @@ import {
   DropdownMenuSubContent,
 } from "@appstrate/ui/components/dropdown-menu";
 
-import { changeLimit, creationFields, useConversationLimit } from "../src/ui/conversation-limit.ts";
+import { creationFields, useConversationLimit } from "../src/ui/conversation-limit.ts";
 import {
   AttachTargetProvider,
   ConversationScopeProvider,
   attachAvailability,
   attachSpaceOf,
   limitAvailability,
+  useConversationAttachTarget,
   limitedSpaceOf,
   type AttachAvailability,
   type ConversationScope,
@@ -42,7 +43,8 @@ import {
   type SessionsCache,
   type SessionSummary,
 } from "../src/ui/sessions.ts";
-import { requestAnswering, transportOf, transportOver } from "./fake-request.ts";
+import { useSessions, useSessionDetail } from "../src/ui/use-sessions.ts";
+import { transportOf, transportOver } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 
 describe("what the first message carries", () => {
@@ -129,170 +131,123 @@ describe("when the limit is on offer", () => {
 });
 
 describe("changing the limit of an existing conversation", () => {
-  const row: SessionSummary = {
-    id: "chs_1",
-    title: "T",
-    generating: false,
-    unread: false,
-    updatedAt: "",
-    spaceId: "spc_a",
-    restricted: false,
-    space_ids: ["spc_a"],
-  };
-  const history: SessionHistory = {
-    ...row,
-    messages: [],
-    skills: { skillMode: "auto", pinnedSkills: [] },
-    createdAt: "",
-  };
-
-  function seeded() {
+  function conversation(spaceId: string | null, touched: string[], restricted = false) {
     const qc = new QueryClient();
-    qc.setQueryData<SessionHistory | null>(sessionQueryKey("org_1", "chs_1"), history);
-    qc.setQueryData<SessionsCache>(sessionsQueryKey("spc_a"), {
-      pages: [{ data: [row], hasMore: false }],
-      pageParams: [undefined],
-    });
-    return qc;
-  }
-  const restrictedOf = (qc: QueryClient) => ({
-    detail: qc.getQueryData<SessionHistory>(sessionQueryKey("org_1", "chs_1"))?.restricted,
-    row: qc.getQueryData<SessionsCache>(sessionsQueryKey("spc_a"))?.pages[0]?.data[0]?.restricted,
-  });
-  const originOf = (qc: QueryClient) => {
-    const detail = qc.getQueryData<SessionHistory>(sessionQueryKey("org_1", "chs_1"));
-    const listed = qc.getQueryData<SessionsCache>(sessionsQueryKey("spc_a"))?.pages[0]?.data[0];
-    return {
-      detail: { spaceId: detail?.spaceId, restricted: detail?.restricted, ids: detail?.space_ids },
-      row: { spaceId: listed?.spaceId, restricted: listed?.restricted, ids: listed?.space_ids },
-    };
-  };
-  const ORIGIN_A = { spaceId: "spc_a", restricted: false };
-
-  it("PATCHes `restricted` and updates the detail and the list rows at once", async () => {
-    const qc = seeded();
-    const request = requestAnswering(() => new Response(null, { status: 204 }));
-    const shown: boolean[] = [];
-
-    const pending = changeLimit({
-      queryClient: qc,
-      transport: transportOver(request),
+    const row: SessionSummary = {
       id: "chs_1",
-      next: { spaceId: "spc_a", restricted: true },
-      previous: ORIGIN_A,
-      show: (value) => shown.push(value.restricted),
-    });
-    // Optimistic: the caches already say so before the server answered.
-    expect(restrictedOf(qc)).toEqual({ detail: true, row: true });
-    await pending;
-
-    expect(request.calls).toHaveLength(1);
-    expect(request.calls[0]!.path).toBe("/api/orgs/org_1/chat/sessions/chs_1");
-    expect(request.calls[0]!.init?.method).toBe("PATCH");
-    expect(JSON.parse(String(request.calls[0]!.init?.body))).toEqual({ restricted: true });
-    expect(shown).toEqual([true]);
-    expect(restrictedOf(qc)).toEqual({ detail: true, row: true });
-  });
-
-  it("rolls back everything when the server refuses, and rethrows", async () => {
-    const qc = seeded();
-    const request = requestAnswering(() => new Response(null, { status: 400 }));
-    const shown: boolean[] = [];
-
-    await expect(
-      changeLimit({
-        queryClient: qc,
-        transport: transportOver(request),
-        id: "chs_1",
-        next: { spaceId: "spc_a", restricted: true },
-        previous: ORIGIN_A,
-        show: (value) => shown.push(value.restricted),
-      }),
-    ).rejects.toBeDefined();
-
-    expect(shown).toEqual([true, false]);
-    expect(restrictedOf(qc)).toEqual({ detail: false, row: false });
-  });
-
-  describe("giving a conversation without an origin the space it is limited to", () => {
-    function seededWithoutOrigin(spaceIds: string[]) {
-      const qc = new QueryClient();
-      const none = { spaceId: null, restricted: false, space_ids: spaceIds };
-      qc.setQueryData<SessionHistory | null>(sessionQueryKey("org_1", "chs_1"), {
-        ...history,
-        ...none,
+      title: "Title",
+      generating: false,
+      unread: false,
+      updatedAt: "",
+      spaceId,
+      restricted,
+      space_ids: touched,
+    };
+    const detailKey = sessionQueryKey("org_1", row.id);
+    const listKey = sessionsQueryKey("spc_a");
+    function seed(changes: Partial<SessionSummary>) {
+      qc.setQueryData<SessionHistory>(detailKey, {
+        ...row,
+        ...changes,
+        messages: [],
+        skills: { skillMode: "auto", pinnedSkills: [] },
+        createdAt: "",
       });
-      qc.setQueryData<SessionsCache>(sessionsQueryKey("spc_a"), {
-        pages: [{ data: [{ ...row, ...none }], hasMore: false }],
+      qc.setQueryData<SessionsCache>(listKey, {
+        pages: [{ data: [{ ...row, ...changes }], hasMore: false }],
         pageParams: [undefined],
       });
-      return qc;
     }
-    const NONE = { spaceId: null, restricted: false };
-    const LIMITED_B = { spaceId: "spc_b", restricted: true };
-
-    it("PATCHes `spaceId` with the limit and shows the origin first at once", async () => {
-      const qc = seededWithoutOrigin(["spc_a"]);
-      const request = requestAnswering(() => new Response(null, { status: 204 }));
-      const shown: unknown[] = [];
-      const pending = changeLimit({
-        queryClient: qc,
-        transport: transportOver(request),
-        id: "chs_1",
-        next: LIMITED_B,
-        previous: NONE,
-        show: (value) => shown.push(value),
+    seed({});
+    const response = Promise.withResolvers<Response>();
+    const requested = Promise.withResolvers<unknown>();
+    const transport = transportOver(async (path, init) => {
+      expect(path).toBe("/api/orgs/org_1/chat/sessions/chs_1");
+      expect(init?.method).toBe("PATCH");
+      requested.resolve(JSON.parse(String(init?.body)));
+      const res = await response.promise;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    }, "spc_a");
+    const settled = new Promise<void>((resolve) => {
+      const off = qc.getMutationCache().subscribe(({ mutation }) => {
+        if (mutation?.state.status === "success" || mutation?.state.status === "error") {
+          off();
+          resolve();
+        }
       });
-      const optimistic = { spaceId: "spc_b", restricted: true, ids: ["spc_b", "spc_a"] };
-      expect(originOf(qc)).toEqual({ detail: optimistic, row: optimistic });
-      await pending;
-      expect(JSON.parse(String(request.calls[0]!.init?.body))).toEqual({
-        restricted: true,
-        spaceId: "spc_b",
-      });
-      expect(shown).toEqual([LIMITED_B]);
-      expect(originOf(qc)).toEqual({ detail: optimistic, row: optimistic });
     });
-
-    it("rolls the origin back on a refusal, dropping only the space it added", async () => {
-      for (const touched of [["spc_a"], ["spc_a", "spc_b"]]) {
-        const qc = seededWithoutOrigin(touched);
-        const shown: unknown[] = [];
-        await expect(
-          changeLimit({
-            queryClient: qc,
-            transport: transportOver(requestAnswering(() => new Response(null, { status: 409 }))),
-            id: "chs_1",
-            next: LIMITED_B,
-            previous: NONE,
-            show: (value) => shown.push(value),
-          }),
-        ).rejects.toBeDefined();
-        expect(shown).toEqual([LIMITED_B, NONE]);
-        const restored = { spaceId: null, restricted: false };
-        const state = originOf(qc);
-        expect(state.detail).toMatchObject(restored);
-        expect(state.row).toMatchObject(restored);
-        // Every copy is back as it was, in its order: a space touched before the limit stays
-        // where it was listed, one only the limit added is gone.
-        expect(state.row.ids).toEqual(touched);
-        expect(state.detail.ids).toEqual(touched);
+    function read() {
+      let scope!: ConversationScope;
+      let copies!: Array<SessionSummary | undefined | null>;
+      function Probe() {
+        const list = useSessions().data?.[0];
+        const detail = useSessionDetail(row.id).data;
+        copies = [list, detail];
+        scope = useConversationLimit({
+          id: row.id,
+          transport,
+          persistedAtMount: true,
+          stored: list,
+          selectedSpaceId: undefined,
+          generating: false,
+        }).scope;
+        return null;
       }
-    });
+      renderToStaticMarkup(
+        <QueryClientProvider client={qc}>
+          <ChatTransportProvider value={transport}>
+            <Probe />
+          </ChatTransportProvider>
+        </QueryClientProvider>,
+      );
+      return { scope, copies };
+    }
+    async function finish(status: number) {
+      response.resolve(new Response(null, { status }));
+      await settled;
+    }
+    return { read, seed, requested: requested.promise, finish };
+  }
 
-    it("never sends `spaceId` for a conversation that has its origin", async () => {
-      const qc = seeded();
-      const request = requestAnswering(() => new Response(null, { status: 204 }));
-      await changeLimit({
-        queryClient: qc,
-        transport: transportOver(request),
-        id: "chs_1",
-        next: { spaceId: "spc_a", restricted: false },
-        previous: { spaceId: "spc_a", restricted: true },
-        show: () => {},
-      });
-      expect(JSON.parse(String(request.calls[0]!.init?.body))).toEqual({ restricted: false });
-    });
+  it("shows the chosen origin on every reader before the server answers and keeps it on success", async () => {
+    const c = conversation(null, ["spc_a"]);
+    c.read().scope.limitTo("spc_b");
+    expect(await c.requested).toEqual({ restricted: true, spaceId: "spc_b" });
+    const limited = { spaceId: "spc_b", restricted: true, space_ids: ["spc_b", "spc_a"] };
+    for (const copy of c.read().copies) expect(copy).toMatchObject(limited);
+    await c.finish(204);
+    for (const copy of c.read().copies) expect(copy).toMatchObject(limited);
+  });
+
+  it("preserves changes received during a refused PATCH, including the server's touched-space order", async () => {
+    for (const touched of [["spc_a"], ["spc_a", "spc_b"]]) {
+      const c = conversation(null, touched);
+      c.read().scope.limitTo("spc_b");
+      await c.requested;
+      const newer = { title: "Renamed", space_ids: [...touched, "spc_c"] };
+      c.seed(newer);
+      for (const copy of c.read().copies) {
+        expect(copy).toMatchObject({
+          title: newer.title,
+          restricted: true,
+          space_ids: ["spc_b", "spc_a", "spc_c"],
+        });
+      }
+      await c.finish(409);
+      for (const copy of c.read().copies) {
+        expect(copy).toMatchObject({ ...newer, spaceId: null, restricted: false });
+      }
+    }
+  });
+
+  it("sends only restricted for an existing origin and shows the stored limit on refusal", async () => {
+    const c = conversation("spc_a", ["spc_a"], true);
+    c.read().scope.lift();
+    expect(await c.requested).toEqual({ restricted: false });
+    for (const copy of c.read().copies) expect(copy?.restricted).toBe(false);
+    await c.finish(400);
+    for (const copy of c.read().copies) expect(copy?.restricted).toBe(true);
   });
 });
 
@@ -388,7 +343,7 @@ describe("a new conversation's default limit", () => {
     let seen: ConversationScope | undefined;
     const queue = [...steps];
     function Harness() {
-      const [selected, setSelected] = useState(queue[0]![0]);
+      const [selected, setSelected] = useState(steps[0]![0]);
       seen = useConversationLimit({
         id: "chs_new",
         transport: undefined,
@@ -428,6 +383,15 @@ describe("a new conversation's default limit", () => {
       ["spc_c", null],
     ]);
     expect(scope).toMatchObject({ originSpaceId: "spc_c", restricted: true });
+  });
+
+  it("does not recover an abandoned choice when returning to the original view", () => {
+    const scope = across([
+      [undefined, (s) => s.limitTo("spc_b")],
+      ["spc_a", null],
+      [undefined, null],
+    ]);
+    expect(scope).toMatchObject({ originSpaceId: null, restricted: false });
   });
 
   it("is back to no origin when « Tous les espaces » is shown again", () => {
@@ -636,6 +600,33 @@ describe("the space a file is attached in", () => {
     }
   });
 
+  it("forgets a previous destination after leaving and returning to the overview", () => {
+    let step = 0;
+    let destination: string | null = null;
+    function Composer() {
+      const [shown, setShown] = useState<string | null>(null);
+      const { target } = useConversationAttachTarget(unlimited(null), shown);
+      destination = attachSpaceOf(target);
+      switch (step++) {
+        case 0:
+          target.pick("spc_b");
+          break;
+        case 1:
+          setShown("spc_a");
+          break;
+        case 2:
+          setShown(null);
+          break;
+      }
+      return null;
+    }
+    renderToStaticMarkup(
+      <ChatHostProvider value={testHost({ actingSpaceIds: acting })}>
+        <Composer />
+      </ChatHostProvider>,
+    );
+    expect(destination).toBeNull();
+  });
   it("goes, for a file added without asking (a drop), where it is decided or last picked", () => {
     const choose: AttachAvailability = { kind: "choose", spaceIds: acting };
     expect(

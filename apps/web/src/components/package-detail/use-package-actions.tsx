@@ -75,7 +75,6 @@ interface AgentMenu {
   bundle: SpaceDeed;
   clearRuns: SpaceDeed;
   clearMemories: SpaceDeed;
-  onDeleteAgent: () => void;
 }
 
 export interface PackageActionsDropdownProps {
@@ -127,16 +126,11 @@ export function usePackageActions({
   const share = useUrlModal(SHARE_PARAM);
   const navigate = useNavigate();
   const catalogue = useCatalogueEntry(type, packageId, catalogueVersion);
-  // `confirm` keeps its value while the dialog fades out, so the wording does not change under it.
-  const [confirm, setConfirm] = useState<"delete" | "deactivate">("delete");
+  // Keep the target while closing so the confirmation retains its wording during the fade.
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const askConfirm = (kind: "delete" | "deactivate") => {
-    setConfirm(kind);
+  const askConfirm = (deactivateIn: string | null) => {
+    setDeactivating(deactivateIn);
     setConfirmOpen(true);
-  };
-  const askDeactivate = (targetSpaceId: string) => {
-    setDeactivating(targetSpaceId);
-    askConfirm("deactivate");
   };
 
   const isOwned = isOwnedSource(detail?.source);
@@ -155,7 +149,7 @@ export function usePackageActions({
   const forkAction = useSpacesFor({ permission: packagePermission(type, "write") });
   const showFork = forkAction.offered && !isOwned;
   // The export needs `<type>:read`, which a summary-only caller (an `agents:run` runner) lacks,
-  // in a space the package is active in; the file is the same from any of them.
+  // in a readable placement. The file is the same from each of them.
   const readers = useSpacesFor(
     { permission: packagePermission(type, "read") },
     detail?.read_space_ids,
@@ -176,7 +170,7 @@ export function usePackageActions({
     (overview ? !inFlight.isError && inFlight.total !== 0 : (detail?.running_runs ?? 0) > 0);
 
   const placement = usePlacementDeeds(packageId, {
-    onDeactivate: askDeactivate,
+    onDeactivate: askConfirm,
     onRemove: setRemoving,
   });
 
@@ -326,9 +320,9 @@ export function usePackageActions({
       label: t("btn.delete"),
       destructive: true,
       disabled: deleteHeld,
-      // Deleting a skill, MCP server or integration an agent still uses is refused; an agent's own deletion is its page's confirmation.
+      // A dependency that an agent still uses cannot be deleted.
       hidden: !showDelete || (!agent && detail?.agents?.length !== 0),
-      onSelect: agent ? agent.onDeleteAgent : () => askConfirm("delete"),
+      onSelect: () => askConfirm(null),
     },
   ];
   const sections = menuSections(entries);
@@ -391,32 +385,31 @@ export function usePackageActions({
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title={
-          confirm === "deactivate"
+          deactivating
             ? t("detail.deactivateTitle", { space: deactivatingLabel })
-            : t("detail.deletePackageTitle")
+            : t(agent ? "detail.deleteTitle" : "detail.deletePackageTitle")
         }
         description={
-          confirm === "deactivate"
+          deactivating
             ? t("packages.deactivateConfirm", {
                 name: displayName,
                 space: deactivatingLabel,
                 ns: "settings",
               })
-            : t("packages.deleteConfirm", {
-                type: t(`packages.type.${type}`, { ns: "settings" }),
-                name: displayName,
-                ns: "settings",
-              })
+            : agent
+              ? t("detail.deleteConfirm", { name: displayName })
+              : t("packages.deleteConfirm", {
+                  type: t(`packages.type.${type}`, { ns: "settings" }),
+                  name: displayName,
+                  ns: "settings",
+                })
         }
-        confirmLabel={
-          confirm === "deactivate" ? t("detail.deactivate") : t("btn.delete", { ns: "common" })
-        }
+        confirmLabel={deactivating ? t("detail.deactivate") : t("btn.delete", { ns: "common" })}
         isPending={placement.pending || deletePkg.isPending}
         onConfirm={() => {
           const onSuccess = () => setConfirmOpen(false);
-          if (confirm === "deactivate") {
-            if (deactivating) placement.setActive(deactivating, false, { onSuccess });
-          } else deletePkg.mutate(packageId, { onSuccess });
+          if (deactivating) placement.setActive(deactivating, false, { onSuccess });
+          else deletePkg.mutate(packageId, { onSuccess });
         }}
       />
     </>

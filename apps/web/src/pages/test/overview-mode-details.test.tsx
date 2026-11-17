@@ -7,7 +7,7 @@
  * overlay is read off the address bar, not off the page drawn beneath it.
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -20,12 +20,8 @@ installFakeStorage({
   location: { pathname: "/", origin: "http://localhost" },
 });
 
-const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const { NavOrg } = await import("../../components/nav-org.tsx");
 const { PackageDetailSpaces } = await import("../../components/package-spaces.tsx");
 const { IntegrationActivateButton } =
@@ -52,42 +48,18 @@ const SPACES = [
   space("spc_c", "Atelier", ["runs:read", "integrations:read"]),
 ];
 
-let stubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
 function renderIn(
   overview: boolean,
   node: ReactElement,
   seed: (queryClient: QueryClient) => void = () => {},
 ) {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { "u_1:org_1": true } : {},
-    }),
-  ];
   const queryClient = new QueryClient();
   queryClient.setQueryData(
     ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
     { object: "list", hasMore: false, data: SPACES },
   );
   seed(queryClient);
-  const html = render(<SidebarProvider>{node}</SidebarProvider>, { queryClient });
+  const html = renderInSpace(<SidebarProvider>{node}</SidebarProvider>, { overview, queryClient });
   const asked = (root: string) =>
     queryClient
       .getQueryCache()

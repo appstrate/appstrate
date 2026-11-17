@@ -3,8 +3,6 @@
 import { $api } from "../../api/client";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { packageDetailQueryOptions } from "../../hooks/use-packages";
-import { usePermissions } from "../../hooks/use-permissions";
-import { useSpacesFor } from "../../hooks/use-space-action";
 import { spaceRead, useSpaceEntry } from "../../hooks/use-space-entry";
 
 /**
@@ -34,14 +32,4 @@ export function useIntegrationSpaceAction(
     ],
     { preferWorkingSpace: false },
   );
-}
-
-/**
- * Whether the integration's configuration opens: the working space's grant with a space selected;
- * in « Tous les espaces », some space of `spaceIds` (where it is active) granting it.
- */
-export function useConfiguresIntegration(spaceIds: readonly string[]): boolean {
-  const { can } = usePermissions();
-  const { on, offered } = useSpacesFor({ permission: "integrations:configure" }, spaceIds);
-  return on ? offered : can("integrations:configure");
 }

@@ -111,6 +111,13 @@ const PACKAGE_HOME_PROPERTIES = {
   },
 } as const;
 
+const readablePackageSpaceIds = {
+  type: "array",
+  items: { type: "string", pattern: SPACE_ID_RE.source },
+  description:
+    "The reached spaces where the caller can open this package detail, including inactive placements.",
+} as const;
+
 /**
  * What a write does to an `emoji:` icon (`normalizeEmoji`, `@appstrate/core/appearance`),
  * stated once for the identity component and every write body.
@@ -1255,12 +1262,7 @@ export const schemas = {
         description:
           "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted.",
       },
-      read_space_ids: {
-        type: "array",
-        items: { type: "string", pattern: SPACE_ID_RE.source },
-        description:
-          "The reached spaces where the caller can open this package detail, including inactive placements.",
-      },
+      read_space_ids: readablePackageSpaceIds,
       space_ids: {
         type: "array",
         items: { type: "string", pattern: SPACE_ID_RE.source },
@@ -2072,12 +2074,7 @@ export const schemas = {
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       ...PACKAGE_HOME_PROPERTIES,
-      read_space_ids: {
-        type: "array",
-        items: { type: "string", pattern: SPACE_ID_RE.source },
-        description:
-          "The reached spaces where the caller can open this package detail, including inactive placements.",
-      },
+      read_space_ids: readablePackageSpaceIds,
       space_ids: {
         type: "array",
         items: { type: "string", pattern: SPACE_ID_RE.source },

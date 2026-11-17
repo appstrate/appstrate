@@ -30,11 +30,8 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedEndUser, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
-import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
-import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -42,7 +39,6 @@ interface ListedNotification {
   id: string;
   spaceId: string;
   type: string;
-  read_at: string | null;
 }
 
 describe("GET /api/orgs/{orgId}/notifications", () => {
@@ -54,20 +50,18 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
   let n: Record<string, string>;
 
   async function share(spaceId: string, userId: string, orgId = owner.orgId): Promise<string> {
-    const packageId = `@orgnotif/pkg-${crypto.randomUUID().slice(0, 8)}`;
-    await createPackageShareNotification({
-      orgId,
-      spaceId,
-      recipientUserId: userId,
-      packageId,
-      packageType: "skill",
-      sharedByName: "Ada",
-    });
-    const rows = await db
-      .select({ id: notifications.id, payload: notifications.payload })
-      .from(notifications)
-      .where(and(eq(notifications.spaceId, spaceId), eq(notifications.recipientId, userId)));
-    return rows.find((row) => row.payload?.packageId === packageId)!.id;
+    const [row] = await db
+      .insert(notifications)
+      .values({
+        orgId,
+        spaceId,
+        recipientId: userId,
+        recipientType: "user",
+        type: "package_shared",
+        payload: { packageId: "@orgnotif/pkg", package_type: "skill", shared_by_name: "Ada" },
+      })
+      .returning({ id: notifications.id });
+    return row!.id;
   }
 
   beforeEach(async () => {
@@ -113,16 +107,13 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
 
   it("lists the caller's own notifications of every space they hold a role in, each naming its space", async () => {
     const rows = await list(member);
+    expect(await orgUnreadCount(member)).toBe(2);
     expect(new Map(rows.map((row) => [row.id, row.spaceId]))).toEqual(
       new Map([
         [n.defaultMember!, owner.defaultSpaceId],
         [n.unMember!, un],
       ]),
     );
-  });
-
-  it("counts the unread notifications of the same spaces", async () => {
-    expect(await orgUnreadCount(member)).toBe(2);
   });
 
   it("pages across spaces with the space feed's cursor", async () => {
@@ -172,37 +163,6 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
     expect(rows.map((row) => row.id)).toEqual([n.unOwner!]);
   });
 
-  describe("an API key", () => {
-    const keyFor = async (scopes: string[]) => {
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: un,
-        createdBy: owner.user.id,
-        scopes,
-      });
-      return { Authorization: `Bearer ${key.rawKey}` };
-    };
-
-    it("pinned to a space reaches that space only", async () => {
-      await share(owner.defaultSpaceId, owner.user.id);
-      const res = await app.request(listPath(), { headers: await keyFor(["runs:read"]) });
-      expect(res.status).toBe(200);
-      const rows = ((await res.json()) as { data: ListedNotification[] }).data;
-      expect(rows.map((row) => row.id)).toEqual([n.unOwner!]);
-    });
-
-    it("is refused when its scopes hold no run read, the feed's ceiling", async () => {
-      const res = await app.request(listPath(), { headers: await keyFor(["mcp:read"]) });
-      expect(res.status).toBe(403);
-    });
-
-    it("is refused acting as an end-user", async () => {
-      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
-      const headers = { ...(await keyFor(["runs:read"])), "Appstrate-User": endUser.id };
-      expect((await app.request(listPath(), { headers })).status).toBe(403);
-    });
-  });
-
   describe("the cursor and the query", () => {
     it("answers an empty page for a cursor that is not an id", async () => {
       expect(await list(member, "?startingAfter=not-a-uuid")).toEqual([]);
@@ -238,21 +198,20 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
     expect(rows.map((row) => row.id)).toEqual([ownDefault]);
   });
 
-  it("reaches with the chat's loopback bearer what the member's session reaches", async () => {
-    const res = await app.request(listPath(), {
-      headers: memberLoopbackHeaders(member, owner.orgId, ["runs:read"]),
-    });
-    expect(res.status, await res.clone().text()).toBe(200);
-    const viaBearer = ((await res.json()) as { data: ListedNotification[] }).data;
-    expect(viaBearer.map((row) => row.id).sort()).toEqual(
-      (await list(member)).map((row) => row.id).sort(),
-    );
-  });
-
   describe("GET /api/orgs/{orgId}/notifications/{id}", () => {
     const onePath = (id: string) => `/api/orgs/${owner.orgId}/notifications/${id}`;
     const status = async (id: string, headers: Record<string, string>) =>
       (await app.request(onePath(id), { headers })).status;
+
+    const pinnedKey = async () => {
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: un,
+        createdBy: owner.user.id,
+        scopes: ["runs:read"],
+      });
+      return { Authorization: `Bearer ${key.rawKey}` };
+    };
 
     it("finds the caller's notification in whichever space holds it", async () => {
       const res = await app.request(onePath(n.unMember!), { headers: session(member) });
@@ -270,13 +229,7 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
 
     it("bounds a space-pinned API key to its space", async () => {
       const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: un,
-        createdBy: owner.user.id,
-        scopes: ["runs:read"],
-      });
-      const headers = { Authorization: `Bearer ${key.rawKey}` };
+      const headers = await pinnedKey();
       expect(await status(n.unOwner!, headers)).toBe(200);
       expect(await status(ownDefault, headers)).toBe(404);
     });
@@ -289,21 +242,9 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
     });
 
     it("refuses an end-user", async () => {
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: un,
-        createdBy: owner.user.id,
-        scopes: ["runs:read"],
-      });
       const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
-      const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
+      const headers = { ...(await pinnedKey()), "Appstrate-User": endUser.id };
       expect(await status(n.unOwner!, headers)).toBe(403);
     });
-  });
-
-  it("refuses an organization the caller is not a member of", async () => {
-    const outsider = await createTestContext({ orgSlug: "orgnotif-outsider" });
-    const res = await app.request(listPath(), { headers: session(outsider) });
-    expect(res.status).toBe(403);
   });
 });

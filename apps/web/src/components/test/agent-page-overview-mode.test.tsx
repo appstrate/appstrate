@@ -8,9 +8,10 @@
  * With a space selected, every deed acts there as before.
  */
 
-import { afterAll, afterEach, describe, expect, it, spyOn } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { afterAll, describe, expect, it } from "bun:test";
+import type { QueryClient } from "@tanstack/react-query";
 import type { AgentDetail } from "@appstrate/shared-types";
+import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
@@ -27,13 +28,9 @@ afterAll(() => {
   Reflect.deleteProperty(globalThis, "document");
 });
 
-const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { $api } = await import("../../api/client.ts");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const { packageDetailQueryOptions } = await import("../../hooks/use-packages.ts");
 const { ACROSS_SPACES, paginatedRunsKeys, persistenceKeys } =
   await import("../../lib/query-keys.ts");
@@ -45,60 +42,14 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 const PACKAGE_ID = "@acme/reporter";
-const NAMES: Record<string, string> = { spc_a: "Atelier", spc_b: "Studio", spc_c: "Coffre" };
-
-const space = (id: string, permissions: string[]) => ({
-  id,
-  object: "space",
-  orgId: "org_1",
-  access: "member",
-  permissions,
-  personal: false,
-  isDefault: id === "spc_a",
-  name: NAMES[id] ?? id,
-  icon: null,
-  color: null,
-  role: null,
-});
-
 const DEEDS = ["agents:read", "agents:write", "agents:run", "runs:delete", "runs:read-all"];
 
 /** The working space (Atelier, hidden in the mode) and two others. */
 const SPACES = [
-  space("spc_a", ["agents:read", "agents:run"]),
-  space("spc_b", [...DEEDS, "schedules:write", "persistence:read", "persistence:delete"]),
-  space("spc_c", [...DEEDS, "persistence:read", "persistence:delete"]),
+  testSpace("spc_a", ["agents:read", "agents:run"]),
+  testSpace("spc_b", [...DEEDS, "schedules:write", "persistence:read", "persistence:delete"]),
+  testSpace("spc_c", [...DEEDS, "persistence:read", "persistence:delete"]),
 ];
-
-function detail(over: Partial<AgentDetail> = {}): AgentDetail {
-  return {
-    id: PACKAGE_ID,
-    icon: null,
-    color: null,
-    source: "local",
-    display_name: "Rapporteur",
-    dependencies: { skills: [], integrations: [] },
-    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
-    running_runs: 0,
-    last_run: null,
-    prompt: "Rapporte.",
-    manifest: { name: PACKAGE_ID },
-    scope: "@acme",
-    version: "1.0.0",
-    version_count: 1,
-    definition: "published",
-    home_space_id: "spc_b",
-    home_writable: false,
-    home_deletable: false,
-    home_shareable: false,
-    effective_timeout_seconds: 300,
-    // Switched off in the hidden working space, running in Studio and Coffre.
-    active: false,
-    space_ids: ["spc_b", "spc_c"],
-    read_space_ids: ["spc_b", "spc_c"],
-    ...over,
-  };
-}
 
 /** The organization library's row: off in Atelier, on (shared) in Studio, not placed in Coffre. */
 const LIBRARY = {
@@ -134,64 +85,19 @@ const LIBRARY = {
   },
 };
 
-let stubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
 function renderIn(
   overview: boolean,
   node: React.ReactElement,
   seed: (qc: QueryClient) => void = () => {},
 ) {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { "u_1:org_1": true } : {},
-    }),
-  ];
-  const qc = new QueryClient();
-  qc.setQueryData(
-    ["orgs"],
-    [
-      {
-        id: "org_1",
-        name: "Acme",
-        slug: "acme",
-        icon: null,
-        color: null,
-        role: "member",
-        deleting_at: null,
-        permissions: [],
-        createdAt: "2026-09-05T00:00:00Z",
-      },
-    ],
-  );
-  qc.setQueryData(["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }], {
-    object: "list",
-    hasMore: false,
-    data: SPACES,
-  });
+  const qc = memberSpaceClient(SPACES);
   qc.setQueryData(
     $api.queryOptions("get", "/api/library", { params: { header: { "X-Org-Id": "org_1" } } })
       .queryKey,
     LIBRARY,
   );
   seed(qc);
-  return render(node, { queryClient: qc });
+  return renderInSpace(node, { overview, queryClient: qc });
 }
 
 const NONE = { offered: false };
@@ -209,7 +115,7 @@ function MenuProbe({
   const { sections } = usePackageActions({
     packageId: PACKAGE_ID,
     type: "agent",
-    detail: detail({ source, home_deletable: deletable }),
+    detail: reporter({ source, home_deletable: deletable }),
     isHistoricalVersion: false,
     isActiveHere,
     agent: {
@@ -218,7 +124,6 @@ function MenuProbe({
       bundle: NONE,
       clearRuns: NONE,
       clearMemories: NONE,
-      onDeleteAgent: () => {},
     },
   });
   return (
@@ -355,7 +260,7 @@ const seedMemories = (qc: QueryClient, spaceIds: string[]) =>
 
 const probe = (overview: boolean, of: AgentDeed, seed: (qc: QueryClient) => void = () => {}) =>
   renderIn(overview, <DeedProbe of={of} />, (qc) => {
-    qc.setQueryData(detailKey("spc_a"), detail());
+    qc.setQueryData(detailKey("spc_a"), reporter());
     seed(qc);
   });
 
@@ -386,7 +291,7 @@ describe("the agent's deeds in the mode", () => {
 
   it("can clear a switched-off placement when another space fills the first page of running runs", () => {
     const html = probe(true, "clearRuns", (qc) => {
-      qc.setQueryData(detailKey("spc_a"), detail({ space_ids: ["spc_c"] }));
+      qc.setQueryData(detailKey("spc_a"), reporter({ space_ids: ["spc_c"] }));
       seedRuns(qc, { latest: ["spc_b"], inFlight: Array(25).fill("spc_c"), hasMore: true });
     });
     expect(html).toContain("<p>true|Supprimer les runs dans Studio||</p>");
@@ -444,7 +349,7 @@ describe("« Lancer » in the mode", () => {
   const seedDetail = (qc: QueryClient) =>
     qc.setQueryData(
       packageDetailQueryOptions("agent", { orgId: "org_1", spaceId: "spc_a" }, PACKAGE_ID).queryKey,
-      detail(),
+      reporter(),
     );
   const button = (html: string) => html.match(/<button[^>]*>/)?.[0] ?? "";
 
@@ -462,7 +367,7 @@ describe("« Lancer » in the mode", () => {
     const html = renderIn(
       true,
       <AgentRunButton packageId={PACKAGE_ID} versionLabel={undefined} />,
-      (qc) => qc.setQueryData(detailKey("spc_a"), detail({ space_ids: [] })),
+      (qc) => qc.setQueryData(detailKey("spc_a"), reporter({ space_ids: [] })),
     );
     expect(button(html)).toContain('disabled=""');
     expect(html).toContain(i18n.t("detail.titleNotActiveAcross", { ns: "agents" }));

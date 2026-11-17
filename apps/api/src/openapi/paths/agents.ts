@@ -47,68 +47,70 @@ const persistenceRowSpace = {
   },
 };
 
-/** The persistence snapshot of both reads: one space's, and the one spanning spaces. */
-const persistenceSnapshotResponse = {
-  description:
-    "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
-  headers: STD_RESPONSE_HEADERS,
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        required: ["object"],
-        properties: {
-          object: { type: "string", enum: ["agent_persistence"] },
-          pinned: {
-            type: "array",
-            items: {
-              type: "object",
-              required: [
-                "id",
-                "key",
-                "content",
-                "runId",
-                "actor_type",
-                "actor_id",
-                "createdAt",
-                "updatedAt",
-                "spaceId",
-              ],
-              properties: {
-                id: { type: "integer" },
-                key: { type: "string" },
-                content: {},
-                runId: { type: ["string", "null"] },
-                actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                actor_id: { type: ["string", "null"] },
-                createdAt: { type: ["string", "null"], format: "date-time" },
-                updatedAt: { type: ["string", "null"], format: "date-time" },
-                ...persistenceRowSpace,
+/** Both persistence reads return the same snapshot and refusals. */
+const persistenceResponses = {
+  "200": {
+    description:
+      "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object"],
+          properties: {
+            object: { type: "string", enum: ["agent_persistence"] },
+            pinned: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "key",
+                  "content",
+                  "runId",
+                  "actor_type",
+                  "actor_id",
+                  "createdAt",
+                  "updatedAt",
+                  "spaceId",
+                ],
+                properties: {
+                  id: { type: "integer" },
+                  key: { type: "string" },
+                  content: {},
+                  runId: { type: ["string", "null"] },
+                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                  actor_id: { type: ["string", "null"] },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  updatedAt: { type: ["string", "null"], format: "date-time" },
+                  ...persistenceRowSpace,
+                },
               },
             },
-          },
-          memories: {
-            type: "array",
-            items: {
-              type: "object",
-              required: [
-                "id",
-                "content",
-                "runId",
-                "actor_type",
-                "actor_id",
-                "createdAt",
-                "spaceId",
-              ],
-              properties: {
-                id: { type: "integer" },
-                content: { type: "string" },
-                runId: { type: ["string", "null"] },
-                actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                actor_id: { type: ["string", "null"] },
-                createdAt: { type: ["string", "null"], format: "date-time" },
-                pinned: { type: "boolean" },
-                ...persistenceRowSpace,
+            memories: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "content",
+                  "runId",
+                  "actor_type",
+                  "actor_id",
+                  "createdAt",
+                  "spaceId",
+                ],
+                properties: {
+                  id: { type: "integer" },
+                  content: { type: "string" },
+                  runId: { type: ["string", "null"] },
+                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                  actor_id: { type: ["string", "null"] },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  pinned: { type: "boolean" },
+                  ...persistenceRowSpace,
+                },
               },
             },
           },
@@ -116,6 +118,10 @@ const persistenceSnapshotResponse = {
       },
     },
   },
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "404": { $ref: "#/components/responses/NotFound" },
 };
 
 /** The responses of both agent indexes: one space's, and the one spanning spaces. */
@@ -428,13 +434,7 @@ export const agentsPaths = {
         { $ref: "#/components/parameters/PackageName" },
         ...PERSISTENCE_QUERY,
       ],
-      responses: {
-        "200": persistenceSnapshotResponse,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
+      responses: persistenceResponses,
     },
     delete: {
       operationId: "deleteAgentPersistence",
@@ -509,13 +509,7 @@ export const agentsPaths = {
         { $ref: "#/components/parameters/PackageName" },
         ...PERSISTENCE_QUERY,
       ],
-      responses: {
-        "200": persistenceSnapshotResponse,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
+      responses: persistenceResponses,
     },
   },
   "/api/agents/{scope}/{name}/persistence/memories/{id}": {

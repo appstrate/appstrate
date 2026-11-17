@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { useDeletePackage, usePackageDetail } from "../../hooks/use-packages";
+import { usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useAgentMemories, useDeleteAgentMemories } from "../../hooks/use-persistence";
 import { useDeleteAgentRuns, useRunLauncher } from "../../hooks/use-mutations";
@@ -11,7 +11,7 @@ import {
   useAgentLatestRunAcross,
   useAgentRunsInFlightAcross,
 } from "../../hooks/use-paginated-runs";
-import { usePermissions } from "../../hooks/use-permissions";
+import { usePermissions, useRowSpaceGrants } from "../../hooks/use-permissions";
 import { useAgentSpaceAction } from "../../hooks/use-agent-run-space";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useSpacesFor } from "../../hooks/use-space-action";
@@ -24,11 +24,10 @@ import { NewScheduleModal } from "../new-schedule-modal";
 import type { PackageActionsDropdownProps } from "./use-package-actions";
 import { deedInSpaces, deedOfAction, spaceDeedLabels, type SpaceDeed } from "../space-deed";
 
-type Confirmation = "deleteAgent" | "clearRuns" | "clearMemories";
+type Confirmation = "clearRuns" | "clearMemories";
 
 /** The title of each confirmation names its act; the button repeats the verb. */
 const CONFIRM_TEXT: Record<Confirmation, { title: string; description: string }> = {
-  deleteAgent: { title: "detail.deleteTitle", description: "detail.deleteConfirm" },
   clearRuns: { title: "detail.clearRunsTitle", description: "detail.clearRunsConfirm" },
   clearMemories: {
     title: "detail.clearMemoriesTitle",
@@ -74,14 +73,13 @@ export function useAgentActions({
   const spaceLabelOf = useSpaceLabelOf();
   const { data: detail } = usePackageDetail("agent", packageId);
   const spaceIds = detail?.space_ids ?? NO_SPACES;
-  const deleteAgent = useDeletePackage("agent");
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAgentMemories(packageId);
   const launcher = useRunLauncher(packageId);
   // The space a confirmation acts in, kept while its dialog fades out.
   const [confirming, setConfirming] = useState<{
     kind: Confirmation;
-    spaceId: string | null;
+    spaceId: string;
   } | null>(null);
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
@@ -98,27 +96,27 @@ export function useAgentActions({
   // it ran somewhere (a space with none answers `deleted_count: 0`); a space with a run in flight
   // is not offered.
   const deleters = useSpacesFor({ permission: "runs:delete" }, detail?.read_space_ids ?? NO_SPACES);
-  const allReaders = useSpacesFor(
-    { permission: "runs:read-all" },
-    detail?.read_space_ids ?? NO_SPACES,
-  );
+  const grants = useRowSpaceGrants();
   const latestAcross = useAgentLatestRunAcross(packageId, { enabled: overview });
   const inFlightAcross = useAgentRunsInFlightAcross(packageId, { enabled: overview });
   const ran = overview ? (latestAcross.data?.data.length ?? 0) > 0 : !!detail?.last_run;
   const runSpaces = ran
-    ? deleters.targets.filter((space) =>
-        allReaders.targets.some((reader) => reader.id === space.id),
-      )
+    ? deleters.targets.filter((space) => grants(space.id, "runs:read-all"))
     : [];
   const busy = (spaceId: string) =>
     overview ? inFlightAcross.busyIn(spaceId) : (detail?.running_runs ?? 0) > 0;
   const freeRunSpaces = runSpaces.filter((space) => !busy(space.id));
   const clearRunsLabels = spaceDeedLabels(t, "spaceChoice.clearRuns", "spaceChoice.clearRunsIn");
   const askClearRuns = (spaceId: string) => setConfirming({ kind: "clearRuns", spaceId });
-  const clearRuns: SpaceDeed =
-    runSpaces.length > 0 && freeRunSpaces.length === 0
-      ? { ...deedInSpaces(overview, runSpaces, clearRunsLabels, askClearRuns), disabled: true }
-      : deedInSpaces(overview, freeRunSpaces, clearRunsLabels, askClearRuns);
+  const clearRuns: SpaceDeed = {
+    ...deedInSpaces(
+      overview,
+      freeRunSpaces.length ? freeRunSpaces : runSpaces,
+      clearRunsLabels,
+      askClearRuns,
+    ),
+    disabled: runSpaces.length > 0 && freeRunSpaces.length === 0,
+  };
 
   // « Supprimer les mémoires » deletes the archived memories of one space: among those that grant
   // it and hold some, each row naming its space in the mode.
@@ -150,17 +148,11 @@ export function useAgentActions({
   const refusal = agentLaunchRefusal(detail, { spanning: overview });
   const runBlockedReason = refusal ? t(refusal) : unsavedReason;
   const canRunWithOptions = can("agents:run") && !runBlockedReason;
-  const pendingConfirmation =
-    deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending;
 
   const confirm = () => {
-    const onSuccess = () => setConfirming(null);
-    if (confirming?.kind === "deleteAgent") deleteAgent.mutate(detail.id, { onSuccess });
-    else if (confirming?.kind === "clearRuns" && confirming.spaceId) {
-      deleteRuns.mutate(confirming.spaceId, { onSuccess });
-    } else if (confirming?.kind === "clearMemories" && confirming.spaceId) {
-      deleteAllMemories.mutate(confirming.spaceId, { onSuccess });
-    }
+    if (!confirming) return;
+    const mutation = confirming.kind === "clearRuns" ? deleteRuns : deleteAllMemories;
+    mutation.mutate(confirming.spaceId, { onSuccess: () => setConfirming(null) });
   };
   const confirmText = confirming && CONFIRM_TEXT[confirming.kind];
   const confirmSpace = confirming?.spaceId
@@ -197,7 +189,6 @@ export function useAgentActions({
       bundle,
       clearRuns,
       clearMemories,
-      onDeleteAgent: () => setConfirming({ kind: "deleteAgent", spaceId: null }),
     },
   };
 
@@ -229,7 +220,7 @@ export function useAgentActions({
             : ""
         }
         confirmLabel={t("btn.delete", { ns: "common" })}
-        isPending={pendingConfirmation}
+        isPending={deleteRuns.isPending || deleteAllMemories.isPending}
       />
     </>
   );

@@ -6,7 +6,7 @@
  * they are set in, named, with the way to another. With a space selected, that space's grant alone.
  */
 
-import { afterAll, afterEach, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations.ts";
@@ -26,12 +26,8 @@ afterAll(() => {
   Reflect.deleteProperty(globalThis, "document");
 });
 
-const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const { IntegrationSettings } = await import("../integration-detail.tsx");
 
 await i18nReady;
@@ -58,31 +54,7 @@ const DETAIL = {
   block_user_connections: false,
 } as unknown as IntegrationDetailWire;
 
-let stubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
 function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a", "spc_b"]) {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { "u_1:org_1": true } : {},
-    }),
-  ];
   const queryClient = new QueryClient();
   queryClient.setQueryData(
     ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
@@ -95,7 +67,7 @@ function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a
       ],
     },
   );
-  return render(
+  return renderInSpace(
     <IntegrationSettings
       packageId="@acme/crm"
       detail={DETAIL}
@@ -105,6 +77,7 @@ function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a
       versionGrants={{ canRestore: false, canDelete: false }}
     />,
     {
+      overview,
       queryClient,
       initialEntries: ["/integrations/@acme/crm?integrationSettings=authentication#settings"],
     },

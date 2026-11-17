@@ -160,6 +160,9 @@ const notificationListPageResponses = {
       },
     },
   },
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
 };
 
 /** The unread count, the answer of both count routes. */
@@ -180,6 +183,9 @@ const unreadCountResponse = {
       },
     },
   },
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
 };
 
 /** One notification, the answer of both single reads. */
@@ -207,6 +213,10 @@ const notificationResponse = {
       },
     },
   },
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "404": { $ref: "#/components/responses/NotFound" },
 };
 
 /** The `id` path parameter of a notification. */
@@ -231,12 +241,7 @@ export const notificationsPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         ...notificationListQueryParameters,
       ],
-      responses: {
-        ...notificationListPageResponses,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: notificationListPageResponses,
     },
   },
   "/api/orgs/{orgId}/notifications": {
@@ -251,12 +256,7 @@ export const notificationsPaths = {
         { $ref: "#/components/parameters/OrgIdPath" },
         ...notificationListQueryParameters,
       ],
-      responses: {
-        ...notificationListPageResponses,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: notificationListPageResponses,
     },
   },
   "/api/orgs/{orgId}/notifications/unread-count": {
@@ -268,12 +268,7 @@ export const notificationsPaths = {
         "The number of unread notifications of the current recipient in every space of the organization where they hold a role — the spaces `GET /api/orgs/{orgId}/notifications` lists. " +
         ORG_READ_REACH,
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
-      responses: {
-        ...unreadCountResponse,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: unreadCountResponse,
     },
   },
   "/api/notifications/unread-count": {
@@ -289,9 +284,6 @@ export const notificationsPaths = {
       ],
       responses: {
         ...unreadCountResponse,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -306,21 +298,9 @@ export const notificationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-          description: "Notification id",
-        },
+        notificationIdParameter,
       ],
-      responses: {
-        ...notificationResponse,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
+      responses: notificationResponse,
     },
   },
   "/api/orgs/{orgId}/notifications/{id}": {
@@ -332,13 +312,7 @@ export const notificationsPaths = {
         "One notification of the current recipient, in whichever space of the organization they hold a role in — `GET /api/notifications/{id}` without naming the space. The item carries its `spaceId`, where its page opens and where `PUT /api/notifications/{id}/read` marks it read. 404, the same as for an unknown id, when it is another recipient's or lies in a space the caller does not reach. " +
         ORG_READ_REACH,
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, notificationIdParameter],
-      responses: {
-        ...notificationResponse,
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
+      responses: notificationResponse,
     },
   },
   "/api/notifications/{id}/read": {
@@ -351,13 +325,7 @@ export const notificationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-          description: "Notification id",
-        },
+        notificationIdParameter,
       ],
       responses: {
         "204": {

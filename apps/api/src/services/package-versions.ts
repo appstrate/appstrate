@@ -43,11 +43,9 @@ import { toISO } from "../lib/date-helpers.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
-import {
-  lockPackageVersions,
-  withPackageDraftLock,
-  type PackageWriteGuard,
-} from "./package-locks.ts";
+import { lockPackageVersions, withPackageDraftLock } from "./package-locks.ts";
+import type { SpaceScope } from "../lib/scope.ts";
+import { lockIdleAgent } from "./state/runs.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
 // ─────────────────────────────────────────────
@@ -55,7 +53,7 @@ import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 // ─────────────────────────────────────────────
 
 interface CreateVersionParams {
-  beforeWrite?: PackageWriteGuard;
+  requireIdleIn?: SpaceScope;
   packageId: string;
   version: string;
   integrity: string;
@@ -155,7 +153,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
 
   return await db.transaction(async (tx) => {
     await lockPackageVersions(tx, packageId);
-    await params.beforeWrite?.(tx);
+    if (params.requireIdleIn) await lockIdleAgent(tx, params.requireIdleIn, packageId);
 
     const outcome = await planVersionCreation(tx, packageId, version);
 
@@ -580,13 +578,13 @@ export async function getVersionCount(packageId: string): Promise<number> {
 
 /** Permanently delete a version. Reassigns dist-tags, then removes the DB row and storage artifact. */
 export async function deletePackageVersion(
-  packageId: string,
+  pkg: { id: string; orgId: string; type: PackageType },
   version: string,
-  beforeWrite?: PackageWriteGuard,
 ): Promise<boolean> {
+  const packageId = pkg.id;
   const deleted = await db.transaction(async (tx) => {
     await lockPackageVersions(tx, packageId);
-    await beforeWrite?.(tx);
+    if (pkg.type === "agent") await lockIdleAgent(tx, { orgId: pkg.orgId }, packageId);
 
     // Find the version row
     const [row] = await tx
@@ -763,7 +761,7 @@ type CreateVersionResult =
  *  (published versions are immutable — the old silent-success path overwrote the stored
  *  bytes while keeping the stale integrity row). */
 export async function createVersionFromDraft(params: {
-  beforeWrite?: PackageWriteGuard;
+  requireIdleInSpace?: string;
   packageId: string;
   orgId: string;
   userId: string;
@@ -901,7 +899,10 @@ export async function createVersionFromDraft(params: {
   }
 
   const result = await createVersionAndUpload({
-    beforeWrite: params.beforeWrite,
+    requireIdleIn:
+      pkg.type === "agent" && params.requireIdleInSpace
+        ? { orgId, spaceId: params.requireIdleInSpace }
+        : undefined,
     packageId,
     version,
     createdBy: userId,
@@ -1120,7 +1121,7 @@ export async function replaceVersionContent(params: {
  *  cannot overwrite published bytes (leaving the row's stale integrity hash to
  *  fail every subsequent run) or delete a good artifact. */
 export async function createVersionAndUpload(params: {
-  beforeWrite?: PackageWriteGuard;
+  requireIdleIn?: SpaceScope;
   packageId: string;
   version: string;
   createdBy: string | null;
@@ -1144,7 +1145,7 @@ export async function createVersionAndUpload(params: {
     // createPackageVersion's transaction; the artifact upload runs in there
     // too, only on a `created` outcome, so row and bytes commit together.
     return await createPackageVersion({
-      beforeWrite: params.beforeWrite,
+      requireIdleIn: params.requireIdleIn,
       packageId,
       version,
       integrity,

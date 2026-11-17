@@ -28,7 +28,7 @@ import {
   assertRunVisible,
   requireRunsRead,
 } from "../lib/run-visibility.ts";
-import { callerSpaceGrant, readsAgentContent, type SpaceGrant } from "../lib/permissions.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { parseStrictQuery } from "../lib/list-query.ts";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { setCursorLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
@@ -48,7 +48,7 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { markAllRunsRead, markRunRead } from "../services/state/run-reads.ts";
 import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
-import { getSpaceScope, spacesOf } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
   assertContextFilesFieldAvailable,
@@ -190,17 +190,20 @@ function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown
 
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
 
+/** Read back a launch, replay or cancellation in the space that authorized it. */
+function readRunInRequestSpace(
+  c: Context<AppEnv>,
+  id: string,
+  visibility?: ReturnType<typeof runVisibilityFilter>,
+) {
+  return getRunFull(c.get("orgId"), [callerSpaceGrant(c)], id, getActor(c), visibility);
+}
+
 /** The stored 201 body with its run fields re-read; launch-time `warnings` are kept as stored. */
 async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
   if (response.status !== 201) return response;
   const cached = z.looseObject({ id: z.string() }).parse(await response.json());
-  const run = await getRunFull(
-    spacesOf(getSpaceScope(c)),
-    cached.id,
-    getActor(c),
-    runVisibilityFilter(c),
-    () => !agentReadIsSummary(c),
-  );
+  const run = await readRunInRequestSpace(c, cached.id, runVisibilityFilter(c));
   if (!run || (c.get("package") && run.packageId !== c.get("package").id)) {
     throw notFound("Run not found");
   }
@@ -234,17 +237,8 @@ export async function respondRun(c: Context<AppEnv>, orgId: string, grants: Spac
   // run the caller could not read.
   const waitMs = parseWaitQuery(parseStrictQuery(c, runReadQuerySchema).wait);
   const actor = getActor(c);
-  const agentInput = new Set(
-    grants.filter((g) => readsAgentContent(g.permissions)).map((g) => g.spaceId),
-  );
-  const read = () =>
-    getRunFull(
-      { orgId, spaceIds: grants.map((g) => g.spaceId) },
-      runId,
-      actor,
-      runReadCondition(grants, actor),
-      (spaceId) => agentInput.has(spaceId),
-    );
+  const visibility = runReadCondition(grants, actor);
+  const read = () => getRunFull(orgId, grants, runId, actor, visibility);
 
   const row = await read();
   if (!row) throw notFound("Run not found");
@@ -462,13 +456,7 @@ export function createRunsRouter() {
         // plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
         // No legacy `runId` alias: the run id is `id`.
-        const row = await getRunFull(
-          spacesOf(getSpaceScope(c)),
-          runId,
-          getActor(c),
-          undefined,
-          () => !agentReadIsSummary(c),
-        );
+        const row = await readRunInRequestSpace(c, runId);
         if (!row) {
           // The run row was inserted by `prepareAndExecuteRun` above and is
           // read back on the same scope, so a miss means it was deleted out
@@ -666,13 +654,7 @@ export function createRunsRouter() {
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
     // completed_at). Same DTO and serializer as GET /runs/:id.
-    const row = await getRunFull(
-      spacesOf(scope),
-      runId,
-      getActor(c),
-      undefined,
-      () => !agentReadIsSummary(c),
-    );
+    const row = await readRunInRequestSpace(c, runId);
     if (!row) {
       // The run was readable above; a miss here means a concurrent delete
       // raced the finalize. The resource is gone — surface the same 404 a
@@ -792,13 +774,7 @@ export function createRunsRouter() {
         // to read from the `packageId` envelope field is the resource's own
         // `packageId`. The run row exists once `triggerInlineRun` resolves
         // (`prepareAndExecuteRun` inserts it before returning).
-        const row = await getRunFull(
-          spacesOf(getSpaceScope(c)),
-          runId,
-          getActor(c),
-          undefined,
-          () => !agentReadIsSummary(c),
-        );
+        const row = await readRunInRequestSpace(c, runId);
         if (!row) {
           // The shadow run was inserted by `triggerInlineRun` and read back on
           // the same scope; a miss means a concurrent teardown deleted it. The
