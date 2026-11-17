@@ -39,6 +39,7 @@ import {
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
@@ -97,6 +98,8 @@ export interface PiChatInput {
     surfaceKey?: string;
     /** Registers the `list_skills` tool (`manual` skill mode with `skills:read`). */
     listsSkills?: boolean;
+    /** The model the turn's inline runs launch on — see `BuildPlatformMcpToolsOptions`. */
+    inlineRunModel?: InlineRunModel;
   };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;

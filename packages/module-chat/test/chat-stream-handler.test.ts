@@ -1311,6 +1311,31 @@ describe("handleChatStream", () => {
     });
   });
 
+  describe("the composer's inline-run model switch", () => {
+    it("hands the run launcher the turn's model when on", async () => {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        body: { inline_runs_use_chat_model: true },
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      expect(calls[0]!.platformMcp.inlineRunModel).toEqual({
+        modelId: MODEL_PRESET_ID,
+        generation: calls[0]!.generation,
+      });
+    });
+
+    it("leaves inline runs on the default model when absent or off", async () => {
+      for (const body of [{}, { inline_runs_use_chat_model: false }]) {
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(mintSessionId(), undefined, engine, { body });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect(calls[0]!.platformMcp.inlineRunModel).toBeUndefined();
+      }
+    });
+  });
+
   it("hands the engine a byte-identical system prompt across turns", async () => {
     const first = scriptedEngine();
     await postChat(mintSessionId(), undefined, first.engine);
