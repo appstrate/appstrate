@@ -483,12 +483,15 @@ export async function callerSpaceAccessById(
 
 /**
  * Whether the request's credential may name `spaceId` at all: inside the space it pins and inside
- * its allowlist, each when present.
+ * its allowlist, each when present. `null` is a space the request would create (a personal space
+ * not provisioned yet): no pin or allowlist names it, so only an unconfined credential may.
  */
-export function credentialAdmitsSpace(c: Context<AppEnv>, spaceId: string): boolean {
+export function credentialAdmitsSpace(c: Context<AppEnv>, spaceId: string | null): boolean {
   const pinned = c.get("credentialSpaceId");
   const allowed = c.get("credentialSpaceIds");
-  return (!pinned || pinned === spaceId) && (!allowed || allowed.includes(spaceId));
+  return (
+    (!pinned || pinned === spaceId) && (!allowed || (spaceId !== null && allowed.includes(spaceId)))
+  );
 }
 
 /**

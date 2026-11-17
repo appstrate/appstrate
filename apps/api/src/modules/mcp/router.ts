@@ -196,13 +196,7 @@ export function buildServerInstructions(
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
-  // A `contextInjected` caller (the chat module) already injects the get_me
-  // payload into its own system prompt and we drop the get_me tool for it, so
-  // pushing "call get_me first" would point the model at a tool that isn't
-  // there. Tell it the context is already provided instead.
-  const grounding = contextInjected
-    ? `Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent) — is already provided to you; there is no get_me tool, do not look for one.`
-    : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
+  const grounding = `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The
   // chat renders the offer as a card itself, so the model must not restate it;
@@ -320,7 +314,7 @@ const pinnedSpaceContext =
   "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
 
 const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
-- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: there is no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request; when it is ambiguous, ask.
+- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask.
 - Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
 - Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
@@ -579,10 +573,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
 
     const reqUrl = new URL(c.req.url);
     const origin = getPublicAppOrigin();
-    // A consumer that injects the get_me payload (`/api/me/context`) into its
-    // own system prompt tags the session `?context=injected` so the redundant
-    // get_me tool — and its "call get_me first" instruction — are dropped. Only
-    // the in-process chat sets it; external MCP clients omit it and keep get_me.
+    // `?context=injected` tags a client that renders connect offers and run cards
+    // itself and resumes an unfinished run on a later turn (the in-process chat):
+    // it changes the instructions' delivery wording, never the tools. External MCP
+    // clients omit it.
     const contextInjected = reqUrl.searchParams.get("context") === "injected";
     // Set by the space-entry middleware mounted on this exact path; absent
     // means the chain was rewired, not that the caller holds nothing.
@@ -689,7 +683,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       authHeaders,
       dispatch,
       observe,
-      contextInjected,
       actor,
       scope,
       orgSpaces,

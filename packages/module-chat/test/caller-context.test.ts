@@ -721,7 +721,7 @@ describe("buildCallerContextBlock", () => {
       const out = await build({ origin: ORIGIN });
       expect(out).toContain("- `spc_1` — One (role builder)");
       expect(out).toContain(
-        "This conversation was started in One (`spc_1`): use it when a request names no space; never move a refused action into another space.",
+        "This conversation was started in One (`spc_1`): when the user names no space, pass `spc_1` as the `space_id`; never move a refused action into another space.",
       );
     });
 

@@ -17,10 +17,9 @@
  * limited conversation (`spaceId`), the endpoint pinned to its origin space
  * (`/api/mcp/o/:org/s/:space`, the endpoint's one client-side pin).
  *
- * The chat injects the caller's identity, role and spaces into its own system
- * prompt, so the server's get_me tool would only re-fetch what the model
- * already has. The tag tells the server to drop that redundant tool (and its
- * "call get_me first" instruction).
+ * The tag tells the server this client renders connect offers and run cards itself and resumes an
+ * unfinished run on a later turn, so its instructions say so; the tools are the same as any
+ * client's, `get_me` included.
  */
 export function platformMcpUrl(origin: string, orgId: string, spaceId?: string): string {
   const organization = `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`;

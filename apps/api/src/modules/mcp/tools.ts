@@ -205,13 +205,6 @@ export interface McpToolContext {
    * tests and any non-HTTP caller need not provide one.
    */
   observe?: McpObserver;
-  /**
-   * The caller already injects the get_me payload (`GET /api/me/context`) into
-   * its own system prompt, so the redundant get_me tool is dropped. Only the
-   * in-process chat consumer sets this (it injects that block + carries the
-   * server instructions); external MCP clients leave it false and keep get_me.
-   */
-  contextInjected?: boolean;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
 }
@@ -1919,8 +1912,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
           runs: surface.runs,
         })
       : []),
-    // Redundant for a context-injecting caller; search_operations stays for `best_match`.
-    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface)]),
+    buildGetMeTool(ctx, surface),
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;
@@ -1956,8 +1948,9 @@ function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
     enum: spaces.reachable.map((s) => s.id),
     description:
       `The space this call acts in, by id: ${spaces.reachable.map(describeSpace).join("; ")}. ` +
-      "Take it from the user's request; when the request names no space and several could serve, " +
-      "ask the user which one instead of choosing. There is no default space.",
+      "Take it from the user's request, or, when it names none, from the space your context " +
+      "designates for such a request; with neither, when several could serve, ask the user which " +
+      "one instead of choosing. The server picks no default space.",
   };
 }
 

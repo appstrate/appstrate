@@ -1935,6 +1935,7 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
       !personaFor(c, orgId) &&
       !c.get("credentialSpaceIds") &&
       ceilingAllows(c, "integrations:configure"),
+    admitsSpace: (target) => credentialAdmitsSpace(c, target),
     permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),
     spacesSeen: (orgId, orgRole) => callerSpacesSeen(c, orgId, orgRole),
   };

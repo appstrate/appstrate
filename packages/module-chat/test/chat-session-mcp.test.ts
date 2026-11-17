@@ -15,10 +15,13 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
+import { and, eq } from "drizzle-orm";
 import {
   integrationConnectionShares,
   integrationConnections,
   packageDistTags,
+  spacePackages,
+  spaces,
 } from "@appstrate/db/schema";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -45,6 +48,7 @@ import {
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { orgPermissions, presetPermissions } from "../../../apps/api/src/lib/permissions.ts";
+import { ensurePersonalSpaceFor } from "../../../apps/api/src/services/spaces.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { turnPermissions } from "../src/turn-permissions.ts";
@@ -402,6 +406,126 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
       .select({ spaceId: integrationConnectionShares.spaceId })
       .from(integrationConnectionShares);
     expect(shared.map((s) => s.spaceId)).toEqual([owner.defaultSpaceId]);
+  });
+
+  it("offers the chat get_me, which names the bearer's spaces alone", async () => {
+    const headers = bearer(caller, ceiling);
+    const tools = (await rpc(headers, "tools/list", {})).result?.tools as Array<{ name: string }>;
+    expect(tools.map((tool) => tool.name)).toContain("get_me");
+
+    const envelope = await rpc(headers, "tools/call", {
+      name: "get_me",
+      arguments: { space_id: gestion.id },
+    });
+    expect(envelope.result?.isError).toBeFalsy();
+    const content = envelope.result?.content as Array<{ text: string }>;
+    const me = JSON.parse(content[0]!.text) as {
+      spaces: Array<{ id: string }>;
+      body: { space: { id: string } };
+    };
+    expect(me.spaces.map((space) => space.id).sort()).toEqual(turnSpaces().sort());
+    expect(me.body.space.id).toBe(gestion.id);
+    // Outside the allowlist, though the caller reaches it as a viewer: refused.
+    const outside = await rpc(headers, "tools/call", {
+      name: "get_me",
+      arguments: { space_id: lecture.id },
+    });
+    expect(outside.result?.isError).toBe(true);
+  });
+
+  it("withdraws a connection from no space outside its allowlist, though it owns the connection", async () => {
+    await seedPackage({ id: "@chatorg/gmail", orgId: owner.orgId, type: "integration" });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@chatorg/gmail",
+        authKey: "google",
+        accountId: "acct-chat",
+        orgId: owner.orgId,
+        spaceId: null,
+        originSpaceId: owner.defaultSpaceId,
+        userId: owner.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "Work",
+      })
+      .returning({ id: integrationConnections.id });
+    await db.insert(integrationConnectionShares).values([
+      { connectionId: row!.id, spaceId: owner.defaultSpaceId, orgId: owner.orgId },
+      { connectionId: row!.id, spaceId: gestion.id, orgId: owner.orgId },
+    ]);
+    const headers = ownerBearer();
+    const unshare = (spaceId: string) =>
+      app.request(`/api/me/connections/${row!.id}/shares/${spaceId}`, {
+        method: "DELETE",
+        headers,
+      });
+
+    expect((await unshare(gestion.id)).status).toBe(403);
+    expect((await unshare(owner.defaultSpaceId)).status).toBe(204);
+    const shared = await db
+      .select({ spaceId: integrationConnectionShares.spaceId })
+      .from(integrationConnectionShares);
+    expect(shared.map((s) => s.spaceId)).toEqual([gestion.id]);
+  });
+
+  /** An agent homed in the default space with a published version, so it can be placed elsewhere. */
+  const seedPublishedAgent = async (id: string) => {
+    await seedPackage({ id, orgId: owner.orgId, homeSpaceId: owner.defaultSpaceId });
+    await seedSpacePackage(owner.defaultSpaceId, id);
+    const version = await seedPackageVersion({ packageId: id });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: id, tag: "latest", versionId: version.id });
+  };
+  const placements = async (packageId: string) =>
+    (
+      await db
+        .select({ spaceId: spacePackages.spaceId })
+        .from(spacePackages)
+        .where(eq(spacePackages.packageId, packageId))
+    )
+      .map((r) => r.spaceId)
+      .sort();
+
+  it("withdraws a package from no space outside its allowlist, though it governs the home", async () => {
+    await seedPublishedAgent("@chatorg/shared");
+    await seedSpacePackage(gestion.id, "@chatorg/shared");
+    const withdraw = (target: string) =>
+      app.request(`/api/packages/@chatorg/shared/shares/${target}`, {
+        method: "DELETE",
+        headers: { ...ownerBearer(), "X-Space-Id": owner.defaultSpaceId },
+      });
+
+    expect((await withdraw(gestion.id)).status).toBe(403);
+    expect(await placements("@chatorg/shared")).toEqual([owner.defaultSpaceId, gestion.id].sort());
+  });
+
+  it("shares a package with no person whose personal space lies outside its allowlist", async () => {
+    await seedPublishedAgent("@chatorg/gift");
+    const share = () =>
+      app.request(`/api/packages/@chatorg/gift/shares`, {
+        method: "POST",
+        headers: {
+          ...ownerBearer(),
+          "X-Space-Id": owner.defaultSpaceId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target: { kind: "user", userId: caller.user.id } }),
+      });
+    const personalSpaces = () =>
+      db
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(and(eq(spaces.orgId, owner.orgId), eq(spaces.ownerUserId, caller.user.id)));
+
+    // Not provisioned yet: refused, and nothing is created.
+    expect((await share()).status).toBe(403);
+    expect(await personalSpaces()).toEqual([]);
+    // Provisioned, and still outside the allowlist.
+    await ensurePersonalSpaceFor(owner.orgId, caller.user.id);
+    expect((await share()).status).toBe(403);
+    expect(await placements("@chatorg/gift")).toEqual([owner.defaultSpaceId]);
   });
 
   it("lists the bearer's spaces in every tool, so a surface is never another caller's", async () => {

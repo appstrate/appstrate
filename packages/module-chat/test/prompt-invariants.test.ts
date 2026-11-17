@@ -629,15 +629,15 @@ describe("the persona and the spaces", () => {
   });
 
   describe("the origin space", () => {
-    const sentence = (space: string) =>
-      `This conversation was started in ${space}: use it when a request names no space; never move a refused action into another space.`;
+    const sentence = (space: string, id: string) =>
+      `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`; never move a refused action into another space.`;
 
     it("is a default for a request naming no space, never a pin", () => {
       const out = contextText(identityOf("Ada"), {
         ...CONTEXT_OPTS,
         origin: { id: "spc_b", name: "Beta" },
       });
-      expect(out).toContain(sentence("Beta (`spc_b`)"));
+      expect(out).toContain(sentence("Beta", "spc_b"));
       // Every acting space stays listed: the default pins none.
       expect(out).toContain("- `spc_a` — Alpha (role operator)");
       expect(out).toContain("- `spc_b` — Beta (role admin)");

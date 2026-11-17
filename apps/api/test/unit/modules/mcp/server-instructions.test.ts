@@ -375,3 +375,14 @@ describe("MCP server instructions — agent authoring", () => {
     expect(cannotInvoke).not.toContain("building or configuring an agent");
   });
 });
+
+describe("buildServerInstructions grounding", () => {
+  it("points every client at get_me, the chat included: the tool is declared for all", () => {
+    for (const contextInjected of [false, true]) {
+      expect(instructionsFor(permissions, contextInjected)).toContain("Start by calling get_me");
+      expect(instructionsFor(permissions, contextInjected)).not.toContain(
+        "there is no get_me tool",
+      );
+    }
+  });
+});

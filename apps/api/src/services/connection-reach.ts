@@ -127,6 +127,8 @@ export interface ConnectionCaller {
   canShareAllSpaces?: (orgId: string) => boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
+  /** The credential may name this space at all (its pin, its allowlist): a share's target must be one. */
+  admitsSpace: (spaceId: string) => boolean;
   /** The caller's permissions in one space of `orgId` (empty outside it). */
   permissionsIn: (spaceId: string, orgId: string) => Promise<ReadonlySet<Permission>>;
   /** Every space of `orgId` the caller sees under its role `orgRole` there, in one read. */

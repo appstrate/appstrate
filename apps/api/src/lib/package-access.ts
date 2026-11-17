@@ -31,7 +31,7 @@ import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import { callerOrgRole, callerPersonalOwnerId } from "./view-as.ts";
+import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import { callerReachableSpaces, type ReachableSpace } from "./reachable-spaces.ts";
@@ -594,6 +594,17 @@ export async function callerPlacementAuthority(
   };
 }
 
+/**
+ * A share's target space — placed into or withdrawn from — is one the request's credential may
+ * name (`credentialAdmitsSpace`), whichever side's authority acts: home authority reaches the
+ * package, not every space it could be placed in. `null`: a personal space the share would create.
+ */
+export function assertShareTargetAdmitted(c: Context<AppEnv>, spaceId: string | null): void {
+  if (!credentialAdmitsSpace(c, spaceId)) {
+    throw forbidden("Credential scope does not include this space");
+  }
+}
+
 /** Which side's authority withdrew a placement — recorded on `package.unshared`. */
 export type PlacementRemovalAuthority = "home" | "recipient";
 
@@ -612,6 +623,7 @@ export async function assertPlacementRemovalAccess(
   pkg: PackageAccessRow;
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
 }> {
+  assertShareTargetAdmitted(c, targetSpaceId);
   const { pkg, accessible } = await loadGovernedPackage(c, packageId, "share");
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);

@@ -94,6 +94,7 @@ import {
   assertPackageMutationAccess,
   assertPackageShareAccess,
   assertPlacementRemovalAccess,
+  assertShareTargetAdmitted,
   callerPlacementAuthority,
   heldPlacementAuthority,
   homeWireForCaller,
@@ -2094,8 +2095,10 @@ export function createPackagesRouter() {
       await makePermissionGuard("members:read")(c, async () => {});
       const membership = await getOrgMember(orgId, target.userId);
       if (!membership) throw notFound(`User '${target.userId}' not found in this organization`);
-      // A refused share provisions nothing: ask `package_has_no_version` before creating the space.
+      // A refused share provisions nothing: ask the credential's scope and
+      // `package_has_no_version` before creating the space.
       let space = await findPersonalSpace(orgId, target.userId);
+      assertShareTargetAdmitted(c, space?.id ?? null);
       if (!space) {
         await assertHasPublishedVersion(packageId);
         space = await ensurePersonalSpaceFor(orgId, target.userId);

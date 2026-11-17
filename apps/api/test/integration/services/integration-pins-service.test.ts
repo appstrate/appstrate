@@ -1719,10 +1719,8 @@ describe("integration-pins-service — DB access/ownership", () => {
         orgId: ctx.orgId,
         spaceId: scope.spaceId,
       };
-      const bound: ConnectionCaller = {
-        ...ownerOn(),
-        principal: boundPrincipal,
-      };
+      // As the door builds it: the credential admits the space it is bound to, alone.
+      const bound = testCaller(boundPrincipal, { permissionsIn: async () => CONNECT });
       const orgRow = await seedConnection({
         spaceId: other,
         orgScope: true,

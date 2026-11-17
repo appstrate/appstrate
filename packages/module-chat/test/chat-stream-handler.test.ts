@@ -1540,7 +1540,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
 
         expect(calls[0]!.system).toContain(
-          `This conversation was started in Beta (\`${spaceB}\`): use it when a request names no space; never move a refused action into another space.`,
+          `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`; never move a refused action into another space.`,
         );
         // The default pins nothing: every acting space stays listed, on the organization endpoint.
         expect(calls[0]!.system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
