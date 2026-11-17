@@ -28,7 +28,7 @@ describe("RunIdentity with its agent", () => {
 
   it("leads with the agent's tile and name", () => {
     expect(html).toContain(AGENT.name);
-    expect(html).toContain("bg-identity-blue/20");
+    expect(html).toContain("bg-identity-blue-tile");
   });
 
   it("puts the number, the start and the duration under the name", () => {

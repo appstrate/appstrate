@@ -68,6 +68,7 @@ describe("route declarations", () => {
       "/chat",
       "/files",
       "/integrations",
+      "/onboarding/create",
       "/org-settings",
       "/preferences",
       "/runs",

@@ -49,6 +49,23 @@ export class Sidebar {
     await expect(this.page).toHaveURL("/");
   }
 
+  /**
+   * Open another organisation's settings from the gear of its row. The gear shows on the
+   * row pointed at, and the switcher enters that organisation before opening them.
+   */
+  async openOrgSettings(orgName: string) {
+    await this.openSwitcher();
+    await this.dropdownMenu
+      .getByTestId(/^org-item-/)
+      .filter({ has: this.page.getByText(orgName, { exact: true }) })
+      .hover();
+    await this.dropdownMenu
+      .getByRole("link", { name: `Paramètres de ${orgName}`, exact: true })
+      .click();
+    await expect(this.dropdownMenu).toHaveCount(0);
+    await expect(this.page).toHaveURL(/\/org-settings(\/|$)/);
+  }
+
   /** Open the switcher and click a workspace of the current org by name. */
   async switchSpace(spaceName: string) {
     // Match the name on its own element, exactly: "Default" must not pick
