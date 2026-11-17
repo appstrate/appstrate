@@ -248,7 +248,7 @@ function ResizeHandle({
       onPointerUp={end}
       onPointerCancel={end}
       onDoubleClick={onReset}
-      className="after:bg-border hover:after:bg-primary absolute inset-y-0 right-0 z-30 w-2 cursor-col-resize touch-none select-none after:absolute after:inset-y-2 after:right-0 after:w-px"
+      className="after:bg-border hover:after:bg-primary absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize touch-none select-none after:absolute after:inset-y-2 after:right-0 after:w-px"
     />
   );
 }
@@ -287,8 +287,9 @@ export function DataTable<T>({
   // One frame per table: its own card on a page, none inside a surface that is already framed
   // (`INTEGRATED_TABLE_SURFACE`: every overlay and modal, a framed detail tab), whose card it shares.
   const frameClass = cn(
-    // `isolate`: the held cells (`z-20`) and the resize handles (`z-30`) only
-    // outrank what scrolls inside the table, never the shell's sticky header.
+    // `isolate`: the held cells (`z-20`) and the resize handles (`z-10`, under
+    // the held cells they scroll behind) only outrank what scrolls inside the
+    // table, never the shell's sticky header.
     "@container/table isolate overflow-hidden",
     "bg-card rounded-lg border [--dt-surface:var(--color-card)] [[data-table-surface=integrated]_&]:rounded-none [[data-table-surface=integrated]_&]:border-0 [[data-table-surface=integrated]_&]:bg-transparent",
     "[--dt-surface-hover:color-mix(in_oklab,var(--color-muted)_50%,var(--dt-surface))]",
