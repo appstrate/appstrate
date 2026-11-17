@@ -81,6 +81,7 @@ import { connectionPrincipal } from "../lib/connection-principal.ts";
 import {
   callerPermissionsInSpace,
   credentialAdmitsSpace,
+  credentialConfinedToSpaces,
   callerPersonalOwnerId,
   effectiveInSpace,
   orgHalfFor,
@@ -1930,10 +1931,10 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
         : (c.get("permissions")?.has("integrations:connect") ?? false),
     governs: spaceId !== null && canConfigureIntegrations(c),
     // `integrations:connect` is already `canConnect`, which `connectionActions` requires first.
-    // Consent to every space is not given by a credential bound to some of them.
+    // Consent to every space is not given by a credential confined to some of them.
     canShareAllSpaces: (orgId) =>
       !personaFor(c, orgId) &&
-      !c.get("credentialSpaceIds") &&
+      !credentialConfinedToSpaces(c) &&
       ceilingAllows(c, "integrations:configure"),
     admitsSpace: (target) => credentialAdmitsSpace(c, target),
     permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),

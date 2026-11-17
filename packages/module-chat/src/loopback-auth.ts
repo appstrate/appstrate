@@ -164,12 +164,11 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi engine for
- * its own connection: the organization endpoint (`/api/mcp/o/:org`), or the one pinned to
- * the origin space of a limited conversation.
+ * its own connection: the organization endpoint (`/api/mcp/o/:org`).
  *
- * `spaceIds` are the turn's spaces and the ONLY ones the bearer reaches, on both endpoints
- * (the generic credential allowlist, `AuthResolution.spaceIds`); each request it makes acts
- * in one of them.
+ * `spaceIds` are the turn's spaces (a limited conversation's origin alone) and the ONLY ones
+ * the bearer reaches (the generic credential allowlist, `AuthResolution.spaceIds`); each
+ * request it makes acts in one of them.
  *
  * `permissions` MUST be the caller's already-resolved permission set (the union over
  * the turn's spaces): the MCP meta-tools re-enter the platform in-process

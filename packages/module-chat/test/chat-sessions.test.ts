@@ -29,6 +29,7 @@ import {
   seedSpace,
   seedSpaceMember,
 } from "../../../apps/api/test/helpers/seed.ts";
+import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
 import { ensureSession, touchSessionSpace } from "../src/persistence.ts";
 
 const app = getTestApp();
@@ -228,10 +229,31 @@ describe("chat sessions", () => {
       expect(await touchedBy(created.id)).toEqual([spaceB]);
     });
 
-    it("deletes the conversation with its origin space", async () => {
-      const created = await createSession(ctx, { spaceId: spaceB });
-      await db.delete(spaces).where(eq(spaces.id, spaceB));
-      expect((await orgCall(ctx, `/sessions/${created.id}`)).status).toBe(404);
+    it("detaches the conversation from its deleted origin space, lifting its limit", async () => {
+      const spaceC = (await seedSpace({ orgId: ctx.orgId, name: "Space C" })).id;
+      const created = await createSession(ctx, { spaceId: spaceB, restricted: true });
+      await touch(created.id, spaceC);
+      const deleted = await app.request(`/api/spaces/${spaceB}`, {
+        method: "DELETE",
+        headers: orgOnlyHeaders(ctx),
+      });
+      expect(deleted.status).toBe(204);
+      const res = await orgCall(ctx, `/sessions/${created.id}`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        spaceId: null,
+        restricted: false,
+        space_ids: [spaceC],
+      });
+      expect(await listSessionIds(ctx, `?spaceId=${spaceC}`)).toEqual([created.id]);
+    });
+
+    it("leaves an organization deletable with a limited conversation", async () => {
+      const created = await createSession(ctx, { spaceId: spaceB, restricted: true });
+      await deleteOrganization(ctx.orgId);
+      expect(await db.select().from(chatSessions).where(eq(chatSessions.id, created.id))).toEqual(
+        [],
+      );
     });
   });
 

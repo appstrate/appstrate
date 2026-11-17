@@ -535,14 +535,8 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [
-    models,
-    { permissions, capabilities, listsSkills, spaces, originSpace, restricted, organization },
-  ] = await Promise.all([
-    listModels(origin, inferenceHeaders, platformFetch),
-    turn,
-    enforcedSkills,
-  ]);
+  const [models, { permissions, capabilities, listsSkills, spaces, organization }] =
+    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, enforcedSkills]);
   let chosen;
   try {
     chosen = pickModel(models, modelId);
@@ -778,8 +772,7 @@ export async function handleChatStream(
   // API-key bindings carry only the inert proxy key and mint a fresh loopback
   // bearer for every llm-proxy call.
   //
-  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`, or the endpoint
-  // pinned to the origin space of a limited conversation), and
+  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
@@ -798,7 +791,7 @@ export async function handleChatStream(
       viewAs: persona,
       // What `resources/read` serves without `skills:*`: the definitions this prompt injected.
       injectedSkills,
-      // The spaces the bearer reaches: the turn's, whichever endpoint it connects to.
+      // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
@@ -807,9 +800,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  // A limited conversation is confined by the server: its endpoint is pinned to the origin space.
-  const pinnedSpaceId = restricted ? originSpace?.id : undefined;
-  const mcpUrl = platformMcpUrl(origin, orgId, pinnedSpaceId);
+  const mcpUrl = platformMcpUrl(origin, orgId);
   try {
     const response = await finalize(
       runEngine({
@@ -831,7 +822,6 @@ export async function handleChatStream(
           url: mcpUrl,
           headers: mcpHeaders,
           organization,
-          pinnedSpaceId,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on

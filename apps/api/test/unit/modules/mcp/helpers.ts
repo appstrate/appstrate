@@ -29,7 +29,7 @@ export function toolsFor(ctx: McpToolContext, proxyAcceptsCredential = true, pro
 }
 
 /** The instructions the router serves a user holding `permissions`. */
-export function instructionsFor(permissions: Iterable<string>, contextInjected = false): string {
+export function instructionsFor(permissions: Iterable<string>, rendersCards = false): string {
   const set = new Set(permissions);
   return buildServerInstructions(
     set,
@@ -37,7 +37,7 @@ export function instructionsFor(permissions: Iterable<string>, contextInjected =
     deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true, {
       credentialProxyOpen: true,
     }),
-    contextInjected,
+    rendersCards,
   );
 }
 

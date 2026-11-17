@@ -110,7 +110,7 @@ describe("chat session delete — file teardown", () => {
     // Mirror the DELETE /api/orgs/:orgId/chat/sessions/:id route: teardown + session-row
     // delete in ONE transaction (the tx threaded into the teardown).
     await db.transaction(async (tx) => {
-      await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId] }, tx);
+      await detachOrDeleteContainedFiles({ chatSessionId: sessionId, orgId: ctx.orgId }, tx);
       await tx.delete(chatSessions).where(eq(chatSessions.id, sessionId));
     });
 
@@ -146,7 +146,7 @@ describe("chat session delete — file teardown", () => {
     // and the outbox enqueue share the same rolled-back transaction.
     await expect(
       db.transaction(async (tx) => {
-        await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId] }, tx);
+        await detachOrDeleteContainedFiles({ chatSessionId: sessionId, orgId: ctx.orgId }, tx);
         throw new Error("session-row delete failed");
       }),
     ).rejects.toThrow("session-row delete failed");

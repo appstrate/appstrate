@@ -40,6 +40,7 @@ import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { parseListPagination } from "@appstrate/core/list-query";
 import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
+import { credentialAdmitsSpace, credentialConfinedToSpaces } from "../../lib/view-as.ts";
 
 /**
  * Assert that a space belongs to the given org.
@@ -208,17 +209,14 @@ export function createWebhooksRouter() {
       }
       await assertWebhookPermission(c, data.level, "write");
 
-      // A pinned credential — a key or an end-user token — cannot create an
-      // org-level webhook (it would span foreign spaces) nor a space-level one
-      // targeting another space. Same key as `webhookScope` above.
-      const pinnedSpaceId = c.get("spaceId");
-      if (pinnedSpaceId) {
-        if (data.level !== "space") {
-          throw forbidden("A space-pinned credential cannot create org-level webhooks");
-        }
-        if (data.spaceId !== pinnedSpaceId) {
-          throw forbidden("Credential scope does not include this space");
-        }
+      // A credential confined to spaces — a key, an end-user token, an allowlist — cannot
+      // create an org-level webhook (it would span foreign spaces) nor a space-level one
+      // outside its scope.
+      if (data.level === "org" && credentialConfinedToSpaces(c)) {
+        throw forbidden("A credential confined to spaces cannot create org-level webhooks");
+      }
+      if (data.level === "space" && !credentialAdmitsSpace(c, data.spaceId)) {
+        throw forbidden("Credential scope does not include this space");
       }
 
       const result = await createWebhook(
@@ -256,11 +254,16 @@ export function createWebhooksRouter() {
   router.get("/api/webhooks", rateLimit(300), requireAnyPermission(ANY_WEBHOOK_READ), async (c) => {
     const scope = webhookScope(c);
 
-    // The page spans BOTH levels: drop rows whose level the caller cannot read.
-    // `permissions` is read at call time — entering a space below rewrites it.
+    // The page spans BOTH levels: drop rows whose level the caller cannot read, and the
+    // org-level ones for a credential confined to spaces. `permissions` is read at call
+    // time — entering a space below rewrites it.
+    const confined = credentialConfinedToSpaces(c);
     const readable = (rows: WebhookInfo[]): WebhookInfo[] => {
       const permissions = c.get("permissions") ?? new Set<string>();
-      return rows.filter((w) => permissions.has(`${webhookResource(w.level)}:read`));
+      return rows.filter(
+        (w) =>
+          permissions.has(`${webhookResource(w.level)}:read`) && !(confined && w.level === "org"),
+      );
     };
 
     // SpaceScope callers (API keys) are fully narrowed inside listWebhooks —
@@ -281,6 +284,7 @@ export function createWebhooksRouter() {
     if (all) {
       // `all=true` spans EVERY space; `readable` checks level, not space, so
       // only the org-level permission may authorise a cross-space view.
+      if (confined) throw forbidden("A credential confined to spaces cannot list every space");
       await assertWebhookPermission(c, "org", "read");
     }
     return c.json(listResponse(readable(await listWebhooks(scope, { spaceId, all }))));
@@ -294,6 +298,10 @@ export function createWebhooksRouter() {
     let webhook: WebhookInfo;
     try {
       webhook = await getWebhook(webhookScope(c), c.req.param("id")!);
+      // An org-level row spans every space: a credential confined to spaces does not see it.
+      if (webhook.level === "org" && credentialConfinedToSpaces(c)) {
+        throw notFound(`Webhook '${webhook.id}' not found`);
+      }
     } catch (err) {
       // ONLY the 404 is convertible; laundering a DB failure into 403 would hide an outage.
       if (!(err instanceof ApiError && err.status === 404)) throw err;

@@ -26,7 +26,7 @@ import {
 } from "../src/pi-chat/mcp-surface-cache.ts";
 
 const ORIGIN = "http://127.0.0.1:1";
-const MCP_URL = `${ORIGIN}/api/mcp/o/org_1?context=injected`;
+const MCP_URL = `${ORIGIN}/api/mcp/o/org_1?renders_cards=true`;
 
 interface RegisteredTool {
   name: string;
@@ -317,14 +317,14 @@ describe("platform MCP surface cache", () => {
     expect(surfaceKey(MCP_URL, [...perms].reverse())).toBe(key);
     expect(surfaceKey(MCP_URL, [...perms, perms[0]!])).toBe(key);
     expect(surfaceKey(MCP_URL, perms.slice(1))).not.toBe(key);
-    // `context=injected` changes the server's instructions, so it is part of the surface.
+    // `renders_cards=true` changes the server's instructions, so it is part of the surface.
     expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_1`, perms)).not.toBe(key);
-    expect(surfaceKey("http://other.test/api/mcp/o/org_1?context=injected", perms)).not.toBe(key);
+    expect(surfaceKey("http://other.test/api/mcp/o/org_1?renders_cards=true", perms)).not.toBe(key);
   });
 
   it("keys the organization's endpoint by its spaces", () => {
     const perms = uniquePermissions("runs:read");
-    const org = `${ORIGIN}/api/mcp/o/org_1?context=injected`;
+    const org = `${ORIGIN}/api/mcp/o/org_1?renders_cards=true`;
     const alpha = {
       id: "spc_a",
       name: "Alpha",
@@ -341,7 +341,7 @@ describe("platform MCP surface cache", () => {
     };
 
     // The org id in the path reaches no descriptor.
-    expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_2?context=injected`, perms)).toBe(
+    expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_2?renders_cards=true`, perms)).toBe(
       surfaceKey(MCP_URL, perms),
     );
     // The spaces are written into every descriptor: another caller's reach is another surface.
@@ -623,18 +623,5 @@ describe("list_skills", () => {
     } finally {
       await turn.close();
     }
-  });
-});
-
-describe("platform MCP surface key and the pinned endpoint", () => {
-  it("keys the organization endpoint and a space-pinned one apart, whatever the permissions", () => {
-    const permissions = uniquePermissions();
-    expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_1/s/spc_1?context=injected`, permissions)).not.toBe(
-      surfaceKey(`${ORIGIN}/api/mcp/o/org_1?context=injected`, permissions),
-    );
-    // The ids of the path reach no descriptor: two pins of the same shape share a key.
-    expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_1/s/spc_1?context=injected`, permissions)).toBe(
-      surfaceKey(`${ORIGIN}/api/mcp/o/org_2/s/spc_2?context=injected`, permissions),
-    );
   });
 });

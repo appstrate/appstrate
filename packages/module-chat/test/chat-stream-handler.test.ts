@@ -1457,7 +1457,7 @@ describe("handleChatStream", () => {
       const input = calls[0]!;
       const url = new URL(input.platformMcp.url);
       expect(url.pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
-      expect(url.searchParams.get("context")).toBe("injected");
+      expect(url.searchParams.get("renders_cards")).toBe("true");
       // A permission held in Beta alone is in the ceiling: each call is decided in the space it
       // names, which recomputes `(org ∪ role) ∩ ceiling` there. Gamma is outside the acting set:
       // its `runs:read-all` is not lent to the others.
@@ -1545,7 +1545,6 @@ describe("handleChatStream", () => {
         // The default pins nothing: every acting space stays listed, on the organization endpoint.
         expect(calls[0]!.system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
         expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
-        expect(calls[0]!.platformMcp.pinnedSpaceId).toBeUndefined();
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: spaceB, restricted: false });
         // The origin space is touched by definition, recorded nowhere else.
         expect(await touchedBy(sessionId)).toEqual([]);
@@ -1591,7 +1590,9 @@ describe("handleChatStream", () => {
         expect(calls[0]!.system).toContain(
           `This conversation was started in Alpha (\`${ctx.defaultSpaceId}\`)`,
         );
-        expect(calls[0]!.platformMcp.pinnedSpaceId).toBeUndefined();
+        expect([...(await tokenSpaceIds(calls[0]!))!].sort()).toEqual(
+          [ctx.defaultSpaceId, spaceB].sort(),
+        );
         expect(await rowOf(sessionId)).toMatchObject({
           spaceId: ctx.defaultSpaceId,
           restricted: false,
@@ -1648,7 +1649,7 @@ describe("handleChatStream", () => {
         return { res, calls };
       };
 
-      it("acts through the endpoint pinned to its origin space, under that space's set alone", async () => {
+      it("acts on the organization endpoint in its origin space alone, under that space's set", async () => {
         const sessionId = mintSessionId();
         const { res, calls } = await limitedTurn(sessionId);
         expect(res.status).toBe(200);
@@ -1656,8 +1657,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
 
         const input = calls[0]!;
-        expect(new URL(input.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}/s/${spaceB}`);
-        expect(input.platformMcp.pinnedSpaceId).toBe(spaceB);
+        expect(new URL(input.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
         // Beta's set, narrowed by the turn: nothing of Alpha (`agents:run`) is lent to it.
         expect(await tokenPermissions(input)).toEqual(
           [
@@ -1688,14 +1688,13 @@ describe("handleChatStream", () => {
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         const system = calls[0]!.system;
+        expect(system).toContain(`- \`${spaceB}\` — Beta (role builder)`);
         expect(system).toContain(
-          `This conversation is limited to Beta (\`${spaceB}\`, role builder)`,
+          `This conversation is limited to Beta (\`${spaceB}\`): pass \`${spaceB}\` as the \`space_id\` of every call`,
         );
-        expect(system).toContain("takes no `space_id`");
         expect(system).toContain("The user lifts the limit in the composer");
         expect(system).not.toContain(ctx.defaultSpaceId);
         expect(system).not.toContain("Alpha");
-        expect(system).not.toContain("takes the `space_id` of one of them");
       });
 
       it("touches its origin space with nothing recorded, the only space its tools may name", async () => {

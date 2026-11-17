@@ -334,7 +334,7 @@ type CallerContextOpts = {
   spaces: readonly ReachableSpaceGrant[];
   /** The conversation's origin space, when it can act there: the default of a request naming none. */
   origin?: { id: string; name: string };
-  /** Limited to the origin space: the pinned endpoint serves it alone and its tools take no `space_id`. */
+  /** Limited to the origin space: the turn's spaces are that space alone. */
   restricted: boolean;
   /** The conversation has an origin space where its author can no longer act. */
   originLapsed: boolean;
@@ -380,35 +380,25 @@ export function formatCallerContext(
   ];
   // The spaces the turn acts in, then its origin space: a default for a request naming no
   // space, never a pin (a conversation without one has none, and the model asks). A limited
-  // conversation acts in its origin alone, through the space-pinned endpoint.
+  // conversation's spaces are its origin alone, which every call still names.
   const preview = opts.rolePreview ? " (role preview active)" : "";
-  if (opts.restricted && opts.origin) {
-    const role = opts.spaces.find((space) => space.id === opts.origin?.id)?.role;
-    lines.push(
-      `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`${role ? `, role ${role}` : ""})${preview}: every tool acts in that space alone, takes no \`space_id\`, and no other space can be reached. The user lifts the limit in the composer; never move a refused action elsewhere.`,
-    );
-    lines.push(
-      `Permissions this turn (your role in that space): ${
-        opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
-      }`,
-    );
-  } else {
-    lines.push(
-      `Spaces you can act in${preview}; every tool that acts in a space takes the \`space_id\` of one of them:`,
-      ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
-      opts.origin
+  lines.push(
+    `Spaces you can act in${preview}; every tool that acts in a space takes the \`space_id\` of one of them:`,
+    ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
+    opts.restricted && opts.origin
+      ? `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`): pass \`${opts.origin.id}\` as the \`space_id\` of every call; no other space can be reached. The user lifts the limit in the composer; never move a refused action elsewhere.`
+      : opts.origin
         ? `This conversation was started in ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`; never move a refused action into another space.`
         : "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
-    );
-    // The set is the union over the spaces listed above: it bounds what the turn may attempt,
-    // while each call is decided by the role held in the space it names. Permissions are in the
-    // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
-    lines.push(
-      `Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): ${
-        opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
-      }`,
-    );
-  }
+  );
+  // The set is the union over the spaces listed above: it bounds what the turn may attempt,
+  // while each call is decided by the role held in the space it names. Permissions are in the
+  // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
+  lines.push(
+    `Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): ${
+      opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
+    }`,
+  );
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
   //

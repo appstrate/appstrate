@@ -180,7 +180,7 @@ admission read, the same one a pinned URL costs. No new table, no cache.
 - Unpinned clients that relied on the default space pass `space_id` on every
   call. The refusal lists the spaces, so a model recovers in one turn. No flag
   and no compatibility branch (`docs/NO_TRANSITIONAL_CODE.md`).
-- The in-process chat (#1886) uses the organization endpoint for an unlimited conversation, the origin space being a default the turn tells the model, never a pin. A **limited** conversation (`chat_sessions.restricted`) uses the space-pinned endpoint of its origin space (`/api/mcp/o/:org/s/:space`), so the server confines it: its calls name no `space_id`, and `run_and_wait` sends the origin as `X-Space-Id`.
+- The in-process chat (#1886) uses the organization endpoint for an unlimited conversation, the origin space being a default the turn tells the model, never a pin. A **limited** conversation (`chat_sessions.restricted`) uses the same endpoint; its bearer allowlists its origin space alone, so the server confines it while its calls still name that `space_id`.
 
 ## Open questions
 

@@ -181,7 +181,7 @@ export function buildServerInstructions(
   permissions: ReadonlySet<string>,
   ceiling: ReadonlySet<string> | undefined,
   surface: McpSurface,
-  contextInjected = false,
+  rendersCards = false,
   orgSpaces?: OrgWideSpaces,
 ): string {
   // A missing act is taught by ABSENCE (see `McpSurface`).
@@ -202,7 +202,7 @@ export function buildServerInstructions(
   // chat renders the offer as a card itself, so the model must not restate it;
   // an external MCP client has no card, so the model hands the URL over. One
   // string, emitted once, so the two branches cannot drift apart.
-  const connectDelivery = contextInjected
+  const connectDelivery = rendersCards
     ? "The client renders the connect button from this result on its own; your text must NOT duplicate it — do NOT paste the link, do not describe the button or where to click. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn."
     : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
   // Every inline-run span below follows `run_and_wait`'s own descriptor: a
@@ -242,7 +242,7 @@ export function buildServerInstructions(
     : "";
   // A `done:false` run is still going. An external client waits on it; the chat
   // gets `done:false` at the end of its turn budget, too late for a long-poll.
-  const doneFalseFollowUp = contextInjected
+  const doneFalseFollowUp = rendersCards
     ? RUN_AND_WAIT_RESUME_INSTRUCTION
     : RUN_AND_WAIT_LONG_POLL_RESUME;
   const runBullets = runs
@@ -271,7 +271,7 @@ export function buildServerInstructions(
     : "";
   // This server's `run_and_wait` strips the link from a started run's warnings for every caller
   // (tools.ts); only the chat's own launcher keeps it, for the connect card it renders.
-  const warningConnect = contextInjected
+  const warningConnect = rendersCards
     ? "; the chat client renders a connect button under the run itself when connecting would help). Report the result as lacking that integration and offer to connect it when that button appears — do NOT paste or promise a link"
     : `; a warning here never carries a \`connect_url\`). Report the result as lacking that integration and offer to connect it when the warning carries a connect target — ${connects ? "when the caller asks, start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`, as for an error item below" : "connecting it is for the user to do"}`;
   const connectBullets = runs
@@ -573,11 +573,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
 
     const reqUrl = new URL(c.req.url);
     const origin = getPublicAppOrigin();
-    // `?context=injected` tags a client that renders connect offers and run cards
+    // `?renders_cards=true` tags a client that renders connect offers and run cards
     // itself and resumes an unfinished run on a later turn (the in-process chat):
     // it changes the instructions' delivery wording, never the tools. External MCP
     // clients omit it.
-    const contextInjected = reqUrl.searchParams.get("context") === "injected";
+    const rendersCards = reqUrl.searchParams.get("renders_cards") === "true";
     // Set by the space-entry middleware mounted on this exact path; absent
     // means the chain was rewired, not that the caller holds nothing.
     const permissions = c.get("permissions");
@@ -726,7 +726,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
           permissions,
           ceiling,
           surface,
-          contextInjected,
+          rendersCards,
           orgSpaces,
         ),
         resources,

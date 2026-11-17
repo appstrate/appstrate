@@ -259,7 +259,7 @@ async function runTurn(
       system: "You are a helpful assistant.",
       generation: turn.generation ?? {},
       platformMcp: {
-        url: `${ORIGIN}/api/mcp/o/org_live/s/spc_live?context=injected`,
+        url: `${ORIGIN}/api/mcp/o/org_live?renders_cards=true`,
         headers: {},
         spaceId: "spc_live",
         ...(platformFetch ? { fetch: platformFetch } : {}),
@@ -558,7 +558,7 @@ describe("runPiChat against a stub provider", () => {
         system: "You are a helpful assistant.",
         generation: {},
         platformMcp: {
-          url: `${ORIGIN}/api/mcp/o/org_live/s/spc_live?context=injected`,
+          url: `${ORIGIN}/api/mcp/o/org_live?renders_cards=true`,
           headers: {},
           spaceId: "spc_live",
         },
@@ -652,7 +652,7 @@ describe("runPiChat against a stub provider", () => {
         system: "You are a helpful assistant.",
         generation: {},
         platformMcp: {
-          url: `${ORIGIN}/api/mcp/o/org_live/s/spc_live?context=injected`,
+          url: `${ORIGIN}/api/mcp/o/org_live?renders_cards=true`,
           headers: {},
           spaceId: "spc_live",
         },
@@ -729,7 +729,7 @@ describe("runPiChat against a stub provider", () => {
         system: "You are a helpful assistant.",
         generation: {},
         platformMcp: {
-          url: `${ORIGIN}/api/mcp/o/org_live/s/spc_live?context=injected`,
+          url: `${ORIGIN}/api/mcp/o/org_live?renders_cards=true`,
           headers: {},
           spaceId: "spc_live",
         },

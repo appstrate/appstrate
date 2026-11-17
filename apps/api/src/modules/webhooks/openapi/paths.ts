@@ -32,7 +32,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Create a webhook",
       description:
-        "Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.",
+        "Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. A credential confined to spaces (a space key or token, a space allowlist) cannot create an org-level webhook (403). The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -161,7 +161,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
-        "List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.",
+        "List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`. A credential confined to spaces sees no org-level row, by id either (404), and is refused `all=true` (403).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

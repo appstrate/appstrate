@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A chat turn's loopback bearer against the REAL MCP endpoints (`/api/mcp/o/:org`, and
- * `/api/mcp/o/:org/s/:space`).
+ * A chat turn's loopback bearer against the REAL organization MCP endpoint (`/api/mcp/o/:org`).
  *
  * The bearer is a CEILING, not a grant: its permission list is the union of the
  * caller's effective sets over the turn's spaces, and each space entry
  * recomputes `(org ∪ role in that space) ∩ ceiling`. So a permission held in one
  * space is in the list and still cannot act in another where the caller's role
  * lacks it. It also carries the turn's spaces as a credential allowlist: it reaches
- * those alone, on both endpoints, and each request acts in one of them. The caller
+ * those alone, and each request acts in one of them. The caller
  * here is `operator` in the default space, `admin` in "Gestion" and `viewer` in
  * "Lecture"; the turn's spaces are the first two (a viewer holds no `chat:write`).
  */
@@ -99,9 +98,8 @@ async function rpc(
   headers: Record<string, string>,
   method: string,
   params: Record<string, unknown>,
-  pinnedSpaceId?: string,
 ): Promise<JsonRpcEnvelope> {
-  const { envelope } = await post(headers, method, params, pinnedSpaceId);
+  const { envelope } = await post(headers, method, params);
   return envelope;
 }
 
@@ -109,9 +107,8 @@ async function post(
   headers: Record<string, string>,
   method: string,
   params: Record<string, unknown>,
-  pinnedSpaceId?: string,
 ): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const url = new URL(platformMcpUrl(ORIGIN, owner.orgId, pinnedSpaceId));
+  const url = new URL(platformMcpUrl(ORIGIN, owner.orgId));
   const res = await app.request(`${url.pathname}${url.search}`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
@@ -198,21 +195,13 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
     expect(unknown.data.accepted as string[]).not.toContain(foreign.id);
   });
 
-  it("enters no space outside its allowlist, though the caller reaches it, on the organization and the pinned endpoints", async () => {
+  it("enters no space outside its allowlist, though the caller reaches it", async () => {
     // The caller is an admin in Gestion; the bearer allowlists the default space alone.
     const headers = bearer(caller, ceiling, [owner.defaultSpaceId]);
     const named = await invoke(headers, gestion.id, "listAgents");
     expect(named.isError).toBe(true);
     expect(named.data.code).toBe("unknown_space");
     expect(named.data.accepted as string[]).toEqual([owner.defaultSpaceId]);
-
-    // The same bearer on the endpoint pinned to Gestion: refused as a space it does not reach.
-    const pinnedOutside = await post(headers, "tools/list", {}, gestion.id);
-    expect(pinnedOutside.status).toBe(404);
-    // On the pinned endpoint of a space it allowlists, it is served.
-    const pinnedInside = await post(headers, "tools/list", {}, owner.defaultSpaceId);
-    expect(pinnedInside.status).toBe(200);
-    expect(pinnedInside.envelope.result?.tools).toBeDefined();
   });
 
   it("refuses an empty allowlist without claiming the caller holds no role", async () => {
@@ -370,6 +359,50 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
       headers: { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
     });
     expect(gestionNow.status).toBe(200);
+  });
+
+  it("manages no org-level webhook, though its org permissions hold org-webhooks:*", async () => {
+    const json = { "Content-Type": "application/json" };
+    const session = { Cookie: owner.cookie, "X-Org-Id": owner.orgId, ...json };
+    const orgHook = JSON.stringify({
+      level: "org",
+      url: "https://example.com/org",
+      events: ["run.success"],
+    });
+    const created = await app.request("/api/webhooks", {
+      method: "POST",
+      headers: session,
+      body: orgHook,
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const headers = { ...ownerBearer(), ...json };
+    const call = (path: string, method = "GET", body?: string) =>
+      app.request(path, { method, headers, ...(body ? { body } : {}) });
+
+    // An org-level webhook fires for every space: a credential confined to some spaces neither
+    // creates one nor reads the page spanning every space.
+    expect((await call("/api/webhooks", "POST", orgHook)).status).toBe(403);
+    expect((await call("/api/webhooks?all=true")).status).toBe(403);
+    const listed = (await (await call("/api/webhooks")).json()) as { data: Array<{ id: string }> };
+    expect(listed.data.map((row) => row.id)).not.toContain(id);
+    // By id it is not there for it, whatever the action.
+    for (const [path, method, body] of [
+      [`/api/webhooks/${id}`, "GET"],
+      [`/api/webhooks/${id}`, "PATCH", JSON.stringify({ enabled: false })],
+      [`/api/webhooks/${id}/rotate`, "POST"],
+      [`/api/webhooks/${id}/test`, "POST"],
+      [`/api/webhooks/${id}/deliveries`, "GET"],
+      [`/api/webhooks/${id}`, "DELETE"],
+    ] as const) {
+      expect({ path, method, status: (await call(path, method, body)).status }).toEqual({
+        path,
+        method,
+        status: 404,
+      });
+    }
+    const still = await app.request(`/api/webhooks/${id}`, { headers: session });
+    expect(((await still.json()) as { enabled: boolean }).enabled).toBe(true);
   });
 
   it("shares a connection into no space outside its allowlist, nor into every space", async () => {

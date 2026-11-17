@@ -26,7 +26,6 @@ import {
   organizations,
   storageDeletionJobs,
   chatSessions,
-  fileLinks,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -416,7 +415,7 @@ describe("storage-deletion outbox", () => {
     expect(new Set(workspaceJobs.map((job) => job.reason))).toEqual(new Set(["space_deleted"]));
   });
 
-  it("deleteSpace deletes an unconsumed file its conversations hold in another space, keeps a consumed one", async () => {
+  it("deleteSpace detaches a conversation from its origin: its file there leaves, its file elsewhere stays", async () => {
     const origin = await createSpace(scope.orgId, { name: "Origin" }, ctx.user.id);
     const sessionId = `chs_${crypto.randomUUID()}`;
     await db.insert(chatSessions).values({
@@ -424,41 +423,29 @@ describe("storage-deletion outbox", () => {
       orgId: scope.orgId,
       userId: ctx.user.id,
       spaceId: origin.id,
+      restricted: true,
     });
-    // Two files attached from the default space, contained by the conversation; a run in that
-    // space still consumes one of them.
-    const runId = await seedRunRow(scope);
-    const unconsumed = await publishDoc(scope, runId, "unconsumed.txt", "unconsumed bytes");
-    const consumed = await publishDoc(scope, runId, "consumed.txt", "consumed bytes");
+    // One file the conversation holds in the default space, one in its origin.
+    const elsewhere = await publishDoc(scope, await seedRunRow(scope), "elsewhere.txt", "kept");
+    const originScope = { orgId: scope.orgId, spaceId: origin.id };
+    const here = await publishDoc(originScope, await seedRunRow(originScope), "here.txt", "gone");
     await db
       .update(files)
       .set({ runId: null, chatSessionId: sessionId })
-      .where(inArray(files.id, [unconsumed.id, consumed.id]));
-    await db
-      .insert(fileLinks)
-      .values({ fileId: consumed.id, consumerRunId: runId, orgId: scope.orgId });
-    const { inKey: unconsumedKey } = split(unconsumed.storageKey);
-    const { inKey: consumedKey } = split(consumed.storageKey);
+      .where(inArray(files.id, [elsewhere.id, here.id]));
 
     await deleteSpace(scope.orgId, origin.id);
 
-    expect(await db.select().from(files).where(eq(files.id, unconsumed.id))).toHaveLength(0);
+    const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(session).toMatchObject({ spaceId: null, restricted: false });
+    const [kept] = await db.select().from(files).where(eq(files.id, elsewhere.id));
+    expect(kept).toMatchObject({ chatSessionId: sessionId, spaceId: scope.spaceId });
+    expect(await db.select().from(files).where(eq(files.id, here.id))).toHaveLength(0);
     const jobs = await db
       .select({ reason: storageDeletionJobs.reason })
       .from(storageDeletionJobs)
-      .where(eq(storageDeletionJobs.storageKey, unconsumedKey));
-    expect(jobs).toHaveLength(1);
-
-    const [kept] = await db.select().from(files).where(eq(files.id, consumed.id));
-    expect(kept).toBeDefined();
-    expect(kept!.chatSessionId).toBeNull();
-    expect(kept!.spaceId).toBe(scope.spaceId);
-    expect(
-      await db
-        .select()
-        .from(storageDeletionJobs)
-        .where(eq(storageDeletionJobs.storageKey, consumedKey)),
-    ).toHaveLength(0);
+      .where(eq(storageDeletionJobs.storageKey, split(here.storageKey).inKey));
+    expect(jobs).toEqual([{ reason: "space_deleted" }]);
     const [after] = await db
       .select({ used: organizations.filesBytesUsed })
       .from(organizations)

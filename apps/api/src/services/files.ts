@@ -1674,22 +1674,20 @@ export async function listFilesForActor(
 export async function detachOrDeleteContainedFiles(
   container:
     | { runIds: string[]; orgId: string }
-    | { chatSessionIds: string[]; orgId: string }
+    | { chatSessionId: string; orgId: string }
     | { endUserId: string; orgId: string },
   tx?: DbOrTx,
 ): Promise<void> {
   const runIds = "runIds" in container ? container.runIds : null;
   // An empty run set contains nothing — skip the transaction entirely.
   if (runIds && runIds.length === 0) return;
-  const chatSessionIds = "chatSessionIds" in container ? container.chatSessionIds : null;
-  // An empty session set contains nothing, same as an empty run set.
-  if (chatSessionIds && chatSessionIds.length === 0) return;
+  const chatSessionId = "chatSessionId" in container ? container.chatSessionId : null;
   const endUserId = "endUserId" in container ? container.endUserId : null;
 
   const containedWhere = runIds
     ? inArray(files.runId, runIds)
-    : chatSessionIds
-      ? inArray(files.chatSessionId, chatSessionIds)
+    : chatSessionId
+      ? eq(files.chatSessionId, chatSessionId)
       : eq(files.endUserId, endUserId!);
 
   const teardown = async (exec: DbOrTx): Promise<number> => {
@@ -1732,7 +1730,7 @@ export async function detachOrDeleteContainedFiles(
       await exec
         .update(files)
         .set(
-          runIds ? { runId: null } : chatSessionIds ? { chatSessionId: null } : { endUserId: null },
+          runIds ? { runId: null } : chatSessionId ? { chatSessionId: null } : { endUserId: null },
         )
         .where(inArray(files.id, detachIds));
     }

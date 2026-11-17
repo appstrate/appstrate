@@ -65,7 +65,7 @@ export function attachAvailability(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
   workingSpaceId: string | null | undefined,
 ): { available: true } | { available: false; reason: "outside" | "limited" } {
-  const origin = pinnedSpaceOf(scope);
+  const origin = limitedSpaceOf(scope);
   if (origin !== undefined && workingSpaceId !== origin) {
     return { available: false, reason: "limited" };
   }
@@ -106,8 +106,8 @@ export function useOriginSpaceNode(): ReactNode {
     : t("composer.limit.thisSpace");
 }
 
-/** The origin space as the pinned endpoint sees it: set only while the conversation is limited. */
-export function pinnedSpaceOf(
+/** The origin space a limited conversation acts in alone: set only while it is limited. */
+export function limitedSpaceOf(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
 ): string | undefined {
   return scope.restricted && scope.originSpaceId ? scope.originSpaceId : undefined;

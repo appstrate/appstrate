@@ -3070,7 +3070,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, through the space-pinned MCP endpoint, and is refused (403) once the caller can no longer act there. The conversation's origin space is the default of a request that names no space (never a pin); `spaceId` and `restricted` set it, and are read only when this turn creates the conversation — an existing one keeps its own. Absent from the overview, where the assistant asks. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The conversation's origin space is the default of a request that names no space (never a pin); `spaceId` and `restricted` set it, and are read only when this turn creates the conversation — an existing one keeps its own. Absent from the overview, where the assistant asks. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -5240,13 +5240,13 @@ export interface paths {
         };
         /**
          * List webhooks
-         * @description List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.
+         * @description List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`. A credential confined to spaces sees no org-level row, by id either (404), and is refused `all=true` (403).
          */
         get: operations["listWebhooks"];
         put?: never;
         /**
          * Create a webhook
-         * @description Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.
+         * @description Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. A credential confined to spaces (a space key or token, a space allowlist) cannot create an org-level webhook (403). The secret is returned once in the response. Max 20 webhooks per org.
          */
         post: operations["createWebhook"];
         delete?: never;
@@ -6035,9 +6035,9 @@ export interface components {
             skill_mode: "auto" | "manual" | "strict";
             /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
-            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview. Not an owner: lists, filters and opening do not depend on it. It gives the enforced skills, the default space of a request naming none, and the space a limited conversation is confined to. */
+            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the enforced skills, the default space of a request naming none, and the space a limited conversation is confined to. */
             spaceId: string | null;
-            /** @description Whether the conversation is limited to its origin space: its tools act there alone, through the space-pinned MCP endpoint. Always false without an origin space. */
+            /** @description Whether the conversation is limited to its origin space: its tools act there alone. Always false without an origin space. */
             restricted: boolean;
             /** @description The touched spaces: the origin space (first), then those a tool call named by `space_id`, a `skill://` or `appfile://` read or an attachment touched, by touch time. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`. */
             space_ids: string[];

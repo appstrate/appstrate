@@ -49,11 +49,11 @@ export const chatSessions = pgTable(
      * The conversation's ORIGIN space: the space selected when it was created, NULL when it
      * was created from the overview. It is not an owner: lists, filters and opening do not
      * depend on it. It gives the enforced skills, the default space of a request naming none,
-     * and the space a limited conversation is confined to. Deleting the space deletes the
-     * conversation.
+     * and the space a limited conversation is confined to. Deleting the space detaches the
+     * conversation (NULL, and `restricted` false: `deleteSpace` writes both in its transaction).
      */
-    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
-    /** Confined to its origin space (the space-pinned MCP endpoint); needs an origin space. */
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "set null" }),
+    /** Confined to its origin space (its turns' allowlist is that space alone); needs an origin space. */
     restricted: boolean("restricted").notNull().default(false),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no

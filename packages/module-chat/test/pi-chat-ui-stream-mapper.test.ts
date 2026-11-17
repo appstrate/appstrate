@@ -500,20 +500,17 @@ describe("the space a tool call is stamped with", () => {
   ];
 
   it("rides tool-input-available as providerMetadata.appstrate.spaceId", () => {
-    const mapper = new PiChatUiStreamMapper({ callSpace: (args) => dispatchSpace("spc_o", args) });
-    const chunks = callEnd({}).flatMap((e) => mapper.map(e));
+    const mapper = new PiChatUiStreamMapper({ callSpace: dispatchSpace });
+    const chunks = callEnd({ space_id: "spc_o" }).flatMap((e) => mapper.map(e));
     const available = chunks.find((c) => c.type === "tool-input-available") as
       { providerMetadata?: unknown } | undefined;
     expect(available?.providerMetadata).toEqual({ appstrate: { spaceId: "spc_o" } });
   });
 
-  it("is the named space_id on the org endpoint, and nothing for a call naming none", () => {
-    expect(dispatchSpace(undefined, { space_id: "spc_b" })).toBe("spc_b");
-    expect(dispatchSpace(undefined, {})).toBeUndefined();
-    expect(dispatchSpace("spc_o", { space_id: "spc_b" })).toBe("spc_o");
-    const mapper = new PiChatUiStreamMapper({
-      callSpace: (args) => dispatchSpace(undefined, args),
-    });
+  it("is the named space_id, and nothing for a call naming none", () => {
+    expect(dispatchSpace({ space_id: "spc_b" })).toBe("spc_b");
+    expect(dispatchSpace({})).toBeUndefined();
+    const mapper = new PiChatUiStreamMapper({ callSpace: dispatchSpace });
     const chunks = callEnd({}).flatMap((e) => mapper.map(e));
     const available = chunks.find((c) => c.type === "tool-input-available") as object;
     expect("providerMetadata" in available).toBe(false);

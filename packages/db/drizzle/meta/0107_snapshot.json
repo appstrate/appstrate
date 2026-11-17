@@ -10094,7 +10094,7 @@
           "tableTo": "spaces",
           "columnsFrom": ["space_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

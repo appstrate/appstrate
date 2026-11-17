@@ -43,8 +43,8 @@ const permissions = new Set([
 ]);
 
 /** The connect bullet only — asserting on the whole prompt would match the index. */
-function connectBullet(contextInjected: boolean): string {
-  const instructions = instructionsFor(permissions, contextInjected);
+function connectBullet(rendersCards: boolean): string {
+  const instructions = instructionsFor(permissions, rendersCards);
   const start = instructions.indexOf("- Connecting or reconnecting an integration before a run");
   const end = instructions.indexOf("\n- The exception —", start);
   expect(start).toBeGreaterThan(-1);
@@ -57,8 +57,8 @@ describe("MCP server instructions — connect bullet", () => {
     // The readiness envelope is `409 missing_integration_connection`
     // (services/agent-readiness.ts); a model told to expect a 400 treats the
     // 409 as an unknown failure and gives up instead of connecting.
-    for (const contextInjected of [false, true]) {
-      const bullet = connectBullet(contextInjected);
+    for (const rendersCards of [false, true]) {
+      const bullet = connectBullet(rendersCards);
       expect(bullet).toMatch(/\b409 `missing_integration_connection`/);
       expect(bullet).not.toMatch(/\b400\b/);
     }
@@ -67,8 +67,8 @@ describe("MCP server instructions — connect bullet", () => {
   it("points at the item's own `connect_url` before the kickoff tool", () => {
     // An item that already carries a link is a finished offer; calling the
     // kickoff anyway mints a second capability and asks for consent twice.
-    for (const contextInjected of [false, true]) {
-      const bullet = connectBullet(contextInjected);
+    for (const rendersCards of [false, true]) {
+      const bullet = connectBullet(rendersCards);
       expect(bullet).toMatch(/FIRST[^.]*`connect_url`/);
       expect(bullet.indexOf("connect_url")).toBeLessThan(
         bullet.indexOf("initiateIntegrationConnect"),
@@ -89,8 +89,8 @@ describe("MCP server instructions — connect bullet", () => {
 
   // #1871: an in-place upgrade widens every agent bound to the connection.
   it("answers `insufficient_scopes` with a new connection the run is rebound to", () => {
-    for (const contextInjected of [false, true]) {
-      const bullet = connectBullet(contextInjected);
+    for (const rendersCards of [false, true]) {
+      const bullet = connectBullet(rendersCards);
       const start = bullet.indexOf("An `insufficient_scopes` item");
       expect(start).toBeGreaterThan(-1);
       const part = bullet.slice(start);
@@ -256,8 +256,8 @@ describe("MCP server instructions — run guidance", () => {
   it("follows a `done:false` run up by client: a long-poll outside the chat, a read inside it", () => {
     // The chat gets `done:false` at the end of its turn budget, with less time
     // left than a `wait: true` long-poll may block; an external client has time.
-    const shortcutOf = (contextInjected: boolean) =>
-      instructionsFor(RUNNER, contextInjected)
+    const shortcutOf = (rendersCards: boolean) =>
+      instructionsFor(RUNNER, rendersCards)
         .split("\n")
         .find((line) => line.startsWith("- Shortcut —"))!;
     const external = shortcutOf(false);
@@ -271,8 +271,8 @@ describe("MCP server instructions — run guidance", () => {
     );
     expect(chat).not.toContain("wait: true");
     // The generic run bullet defers to the shortcut instead of contradicting it.
-    for (const contextInjected of [false, true]) {
-      expect(instructionsFor(RUNNER, contextInjected)).toContain(
+    for (const rendersCards of [false, true]) {
+      expect(instructionsFor(RUNNER, rendersCards)).toContain(
         "for a run `run_and_wait` returned with `done:false`, see the shortcut below",
       );
     }
@@ -378,11 +378,9 @@ describe("MCP server instructions — agent authoring", () => {
 
 describe("buildServerInstructions grounding", () => {
   it("points every client at get_me, the chat included: the tool is declared for all", () => {
-    for (const contextInjected of [false, true]) {
-      expect(instructionsFor(permissions, contextInjected)).toContain("Start by calling get_me");
-      expect(instructionsFor(permissions, contextInjected)).not.toContain(
-        "there is no get_me tool",
-      );
+    for (const rendersCards of [false, true]) {
+      expect(instructionsFor(permissions, rendersCards)).toContain("Start by calling get_me");
+      expect(instructionsFor(permissions, rendersCards)).not.toContain("there is no get_me tool");
     }
   });
 });

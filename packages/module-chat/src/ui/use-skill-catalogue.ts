@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSkills } from "./chat-skills.ts";
-import { pinnedSpaceOf, useConversationScope } from "./conversation-scope.ts";
+import { limitedSpaceOf, useConversationScope } from "./conversation-scope.ts";
 import { useCanIn, useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 /**
@@ -16,12 +16,12 @@ export function useSkillCatalogue(transport: ChatTransport | undefined) {
   const canIn = useCanIn();
   // A limited conversation reaches its origin space alone: its skills, not the acting set's.
   const scope = useConversationScope();
-  const pinnedSpaceId = pinnedSpaceOf(scope);
+  const limitedSpaceId = limitedSpaceOf(scope);
   const catalogueSpaceIds = useMemo(
-    () => (pinnedSpaceId ? [pinnedSpaceId] : actingSpaceIds),
-    [pinnedSpaceId, actingSpaceIds],
+    () => (limitedSpaceId ? [limitedSpaceId] : actingSpaceIds),
+    [limitedSpaceId, actingSpaceIds],
   );
-  const readable = !!transport && canIn(pinnedSpaceId, "skills:read");
+  const readable = !!transport && canIn(limitedSpaceId, "skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry

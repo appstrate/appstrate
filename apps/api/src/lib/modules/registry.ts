@@ -89,7 +89,7 @@ function buildPlatformServices(): PlatformServices {
     // before the session row is removed (the module has no storage access).
     cleanupSessionFiles: (chatSessionId, orgId, tx) =>
       detachOrDeleteContainedFiles(
-        { chatSessionIds: [chatSessionId], orgId },
+        { chatSessionId, orgId },
         // `tx` is opaque in the core contract (no Drizzle dep there); it is the
         // chat module's own open transaction handle, so the teardown runs in the
         // same tx as the `chat_sessions` delete.

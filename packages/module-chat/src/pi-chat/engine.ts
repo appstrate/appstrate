@@ -92,8 +92,6 @@ export interface PiChatInput {
     url: string;
     /** The spaces a call may name, and the record of those the conversation touched. */
     organization: TurnSpaces;
-    /** The space the URL pins: a limited conversation's origin. */
-    pinnedSpaceId?: string;
     headers: Record<string, string>;
     fetch?: typeof fetch;
     surfaceKey?: string;
@@ -234,7 +232,7 @@ export function runPiChat(input: PiChatInput): Response {
     // Bands each call by its tier for the platform to price; a proxy-metered turn needs none.
     cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
     // Every call records the space it was dispatched in, for the cards that show it later.
-    callSpace: (args) => dispatchSpace(platformMcp.pinnedSpaceId, args),
+    callSpace: dispatchSpace,
   });
 
   const stream = createUIMessageStream({

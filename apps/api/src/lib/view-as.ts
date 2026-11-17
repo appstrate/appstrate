@@ -495,6 +495,14 @@ export function credentialAdmitsSpace(c: Context<AppEnv>, spaceId: string | null
 }
 
 /**
+ * Whether the request's credential is confined to spaces: it pins one, or allowlists a set. Such
+ * a credential reaches no org-level resource that spans every space, whatever its permissions.
+ */
+export function credentialConfinedToSpaces(c: Context<AppEnv>): boolean {
+  return c.get("credentialSpaceId") !== undefined || c.get("credentialSpaceIds") !== undefined;
+}
+
+/**
  * The caller's effective set in ANY space of `orgId` (empty outside it, or outside what the request
  * may name), not only the request's: org role, space and membership read as one snapshot
  * (RBAC spec §4.4), under the credential ceiling.

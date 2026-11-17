@@ -18,7 +18,7 @@ import {
   attachAvailability,
   useAttachAvailability,
   limitAvailability,
-  pinnedSpaceOf,
+  limitedSpaceOf,
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
 import { ComposerTools } from "../src/ui/composer-tools.tsx";
@@ -184,9 +184,9 @@ describe("the space a tool card shows", () => {
   });
 
   it("pins the origin only while the conversation is limited", () => {
-    expect(pinnedSpaceOf({ originSpaceId: "spc_a", restricted: true })).toBe("spc_a");
-    expect(pinnedSpaceOf({ originSpaceId: "spc_a", restricted: false })).toBeUndefined();
-    expect(pinnedSpaceOf({ originSpaceId: null, restricted: true })).toBeUndefined();
+    expect(limitedSpaceOf({ originSpaceId: "spc_a", restricted: true })).toBe("spc_a");
+    expect(limitedSpaceOf({ originSpaceId: "spc_a", restricted: false })).toBeUndefined();
+    expect(limitedSpaceOf({ originSpaceId: null, restricted: true })).toBeUndefined();
   });
 });
 

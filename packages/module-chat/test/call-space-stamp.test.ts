@@ -30,11 +30,8 @@ function callEnd(args: Record<string, unknown>): AgentSessionEvent[] {
 }
 
 /** Run one call through mapper → SSE → persisted-message assembly; the stored tool part. */
-async function persistedToolPart(
-  pinnedSpaceId: string | undefined,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const mapper = new PiChatUiStreamMapper({ callSpace: (a) => dispatchSpace(pinnedSpaceId, a) });
+async function persistedToolPart(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const mapper = new PiChatUiStreamMapper({ callSpace: dispatchSpace });
   const chunks: UIMessageChunk[] = [
     { type: "start", messageId: "asst_1" },
     ...callEnd(args).flatMap((e) => mapper.map(e)),
@@ -53,23 +50,15 @@ async function persistedToolPart(
 }
 
 describe("a finalized assistant message keeps each call's space", () => {
-  it("stamps a pinned call with the conversation's origin", async () => {
-    const part = await persistedToolPart("spc_origin", { operation_id: "listRuns" });
+  it("stamps a call with the space it names", async () => {
+    const part = await persistedToolPart({ operation_id: "listRuns", space_id: "spc_named" });
     expect(part.state).toBe("output-available");
-    expect(part.callProviderMetadata).toEqual({ appstrate: { spaceId: "spc_origin" } });
-  });
-
-  it("stamps an organization call with the space it names", async () => {
-    const part = await persistedToolPart(undefined, {
-      operation_id: "listRuns",
-      space_id: "spc_named",
-    });
     expect(part.callProviderMetadata).toEqual({ appstrate: { spaceId: "spc_named" } });
   });
 
   it("is what the card reads back, live and after reload", async () => {
-    const part = await persistedToolPart("spc_origin", { operation_id: "listRuns" });
+    const part = await persistedToolPart({ operation_id: "listRuns", space_id: "spc_named" });
     // The runtime hands the card the stored `callProviderMetadata` as `providerMetadata`.
-    expect(callSpaceOf({ providerMetadata: part.callProviderMetadata })).toBe("spc_origin");
+    expect(callSpaceOf({ providerMetadata: part.callProviderMetadata })).toBe("spc_named");
   });
 });

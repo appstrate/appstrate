@@ -159,8 +159,8 @@ export interface PiTurnBudget {
 /**
  * What a conversation's connection needs from it: the spaces a call may name (on the
  * organization endpoint, `/api/mcp/o/:org`, each space-acting tool takes a `space_id`; a
- * limited conversation's pinned endpoint serves its origin space alone), and the record of
- * the spaces the conversation touched.
+ * limited conversation's are its origin space alone), and the record of the spaces the
+ * conversation touched.
  */
 export interface TurnSpaces {
   spaces: readonly NamedSpace[];
@@ -175,15 +175,10 @@ export interface TurnSpaces {
 }
 
 type BuildPlatformMcpToolsOptions = {
-  /** Platform MCP endpoint (`/api/mcp/o/:org[/s/:space]?context=injected`). */
+  /** Platform MCP endpoint (`/api/mcp/o/:org?renders_cards=true`). */
   url: string;
   /** The spaces a call may name: each space-acting call takes its `space_id`. */
   organization: TurnSpaces;
-  /**
-   * The space the URL pins (a limited conversation's origin): its calls carry no `space_id`,
-   * and `run_and_wait`'s REST hops name it in `X-Space-Id`.
-   */
-  pinnedSpaceId?: string;
   /** Auth + org headers (short-lived MCP loopback bearer + org id). */
   headers: Record<string, string>;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
@@ -342,7 +337,6 @@ export async function buildPlatformMcpTools(
           origin: runOrigin,
           headers: opts.headers,
           organization,
-          pinnedSpaceId: opts.pinnedSpaceId,
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,
@@ -386,15 +380,8 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/**
- * The space a platform tool call is dispatched in: the origin a pinned endpoint serves, else the
- * one the call names (`space_id`); none for a call that names none.
- */
-export function dispatchSpace(
-  pinnedSpaceId: string | undefined,
-  args: Record<string, unknown>,
-): string | undefined {
-  if (pinnedSpaceId !== undefined) return pinnedSpaceId;
+/** The space a platform tool call names (`space_id`), where it is dispatched; none when it names none. */
+export function dispatchSpace(args: Record<string, unknown>): string | undefined {
   return typeof args.space_id === "string" ? args.space_id : undefined;
 }
 
@@ -626,8 +613,6 @@ function makeRunAndWaitExtension(
     headers: Record<string, string>;
     /** The spaces one of which each call names. */
     organization: TurnSpaces;
-    /** The space the endpoint pins, when it does: no call names one. */
-    pinnedSpaceId?: string;
     /** Transport for the launch POST and the poll loop — see the option above. */
     fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
@@ -642,13 +627,9 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
-        // Pinned: the URL's space. Otherwise the one the call names, taken out of the
-        // arguments (the shared launch refuses an argument it does not declare) and recorded
-        // before anything is launched.
-        const target =
-          ctx.pinnedSpaceId === undefined
-            ? await namedSpace(params, ctx.organization)
-            : { spaceId: ctx.pinnedSpaceId, args: (params ?? {}) as Record<string, unknown> };
+        // The space the call names, taken out of the arguments (the shared launch refuses an
+        // argument it does not declare) and recorded before anything is launched.
+        const target = await namedSpace(params, ctx.organization);
         if ("refusal" in target) {
           return withTurnBudgetNote(toPiToolResult(target.refusal), ctx.turnBudget);
         }

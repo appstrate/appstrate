@@ -659,7 +659,9 @@ describe("the persona and the spaces", () => {
         origin: { id: "spc_b", name: "Beta" },
         restricted: true,
       });
-      expect(out).toContain("This conversation is limited to Beta (`spc_b`, role admin)");
+      expect(out).toContain(
+        "This conversation is limited to Beta (`spc_b`): pass `spc_b` as the `space_id` of every call",
+      );
       expect(out).toContain("The user lifts the limit in the composer");
       expect(out).not.toContain("spc_a");
       expect(out).not.toContain("Ask the user which space");

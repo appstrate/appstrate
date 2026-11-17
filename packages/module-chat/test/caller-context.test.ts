@@ -742,14 +742,14 @@ describe("buildCallerContextBlock", () => {
       expect(out).toContain("Ask the user which space when the request does not say");
     });
 
-    it("says a limited conversation acts in its origin space alone, without a space_id", async () => {
+    it("says a limited conversation acts in its origin space alone, naming it on every call", async () => {
       const out = await build({ origin: ORIGIN, restricted: true });
-      expect(out).toContain("This conversation is limited to One (`spc_1`, role builder)");
-      expect(out).toContain("takes no `space_id`");
+      expect(out).toContain(
+        "This conversation is limited to One (`spc_1`): pass `spc_1` as the `space_id` of every call; no other space can be reached.",
+      );
       expect(out).toContain("The user lifts the limit in the composer");
-      expect(out).not.toContain("every tool that acts in a space takes the `space_id`");
       expect(out).not.toContain("Ask the user which space");
-      expect(out).toContain("Permissions this turn (your role in that space)");
+      expect(out).not.toContain("This conversation was started in");
     });
   });
 

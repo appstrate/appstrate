@@ -22,11 +22,7 @@ import { prefixedId } from "@appstrate/db/ids";
 import { lockOrganizationRow, scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import {
-  decrementOrgFileBytes,
-  detachOrDeleteContainedFiles,
-  storageKeyToDeletionJob,
-} from "./files.ts";
+import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere } from "./package-placement.ts";
@@ -470,19 +466,14 @@ async function deleteSpaceInTx(
     );
   }
 
-  // A conversation originating in this space dies with it (`chat_sessions.space_id` cascades), and
-  // `files.chat_session_id` cascades with the conversation. The origin is not an owner of what the
-  // conversation holds in OTHER spaces: such a file goes through the chat detach-or-delete rule
-  // (a file a run still consumes is kept, detached; the rest is deleted with its outbox job and
-  // byte decrement), BEFORE the enumeration below so nothing is counted twice. Files living in
-  // this space are enumerated plainly: they leave with it.
-  const originSessionIds = (
-    await tx
-      .select({ id: chatSessions.id })
-      .from(chatSessions)
-      .where(eq(chatSessions.spaceId, spaceId))
-  ).map((row) => row.id);
-  await detachOrDeleteContainedFiles({ chatSessionIds: originSessionIds, orgId }, tx);
+  // A conversation originating in this space outlives it: its origin is not an owner. It is
+  // detached here rather than by the FK's `SET NULL`, because its limit needs an origin
+  // (`chat_sessions_restricted_needs_space`) and falls in the same statement. What it holds in
+  // this space leaves with the space, like any file here; what it holds elsewhere stays with it.
+  await tx
+    .update(chatSessions)
+    .set({ spaceId: null, restricted: false })
+    .where(and(eq(chatSessions.orgId, orgId), eq(chatSessions.spaceId, spaceId)));
 
   const docRows = await tx
     .select({ storageKey: files.storageKey, size: files.size })
