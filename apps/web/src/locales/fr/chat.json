@@ -179,7 +179,7 @@
   "threads.settings.name": "Nom",
   "threads.settings.openFor": "Paramètres de « {{title}} »",
   "model.loadFailed": "Modèles indisponibles",
-  "composer.settings": "Paramètres de la conversation",
+  "composer.settings": "Réglages de l’assistant",
   "composer.skills": "Compétences…",
   "composer.creationMode": "Mode création",
   "composer.creationOff": "Création désactivée",

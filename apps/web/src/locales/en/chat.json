@@ -179,7 +179,7 @@
   "threads.settings.name": "Name",
   "threads.settings.openFor": "Settings for “{{title}}”",
   "model.loadFailed": "Models unavailable",
-  "composer.settings": "Conversation settings",
+  "composer.settings": "Assistant settings",
   "composer.skills": "Skills…",
   "composer.creationMode": "Creation mode",
   "composer.creationOff": "Creation off",
