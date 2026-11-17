@@ -6,11 +6,15 @@ import { useTranslation } from "react-i18next";
 import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
+import { useFirstRunsPage } from "../../hooks/use-paginated-runs";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { RunStatusBadge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
 import { latestMemoryDate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
+import { linkedSpacePath } from "../../lib/across-spaces";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
@@ -61,6 +65,28 @@ export function AgentOverviewTab({
 function OperationalSummary({ packageId, detail }: { packageId: string; detail: AgentDetail }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
+  // The detail counts the space it was read in. In « Tous les espaces » the figures follow the
+  // Runs tab instead: the agent's runs in every space the reader reaches.
+  const { on: spanning } = useOverviewMode();
+  const workingSpaceId = useCurrentSpaceId();
+  const latest = useFirstRunsPage({ packageId, spanning: true, limit: 1, enabled: spanning });
+  const active = useFirstRunsPage({
+    packageId,
+    spanning: true,
+    status: ["pending", "running"],
+    limit: 1,
+    enabled: spanning,
+  });
+  const latestRun = latest.data?.data[0];
+  const lastRun = spanning
+    ? latestRun && {
+        id: latestRun.id,
+        status: latestRun.status,
+        started_at: latestRun.started_at,
+        spaceId: latestRun.spaceId,
+      }
+    : detail.last_run && { ...detail.last_run, spaceId: undefined };
+  const runningRuns = spanning ? active.data?.total : detail.running_runs;
   const {
     data: schedules,
     isLoading: schedulesLoading,
@@ -102,18 +128,32 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
               label={
                 <span className="flex flex-wrap items-center gap-2">
                   {t("detail.overview.lastRun")}
-                  {detail.last_run && <RunStatusBadge status={detail.last_run.status} compact />}
+                  {lastRun && <RunStatusBadge status={lastRun.status} compact />}
                 </span>
               }
               value={
-                detail.last_run ? (
-                  formatDateField(detail.last_run.started_at, "datetime")
-                ) : (
-                  <span className="text-muted-foreground">{t("detail.overview.noRuns")}</span>
-                )
+                <QueryValue
+                  loading={spanning && latest.isLoading}
+                  error={spanning && latest.isError}
+                  skeleton="w-32"
+                >
+                  {lastRun?.started_at ? (
+                    formatDateField(lastRun.started_at, "datetime")
+                  ) : (
+                    <span className="text-muted-foreground">{t("detail.overview.noRuns")}</span>
+                  )}
+                </QueryValue>
               }
               target={
-                detail.last_run ? { to: runDetailPath(packageId, detail.last_run.id) } : undefined
+                lastRun
+                  ? {
+                      to: linkedSpacePath(
+                        runDetailPath(packageId, lastRun.id),
+                        lastRun.spaceId,
+                        workingSpaceId,
+                      ),
+                    }
+                  : undefined
               }
             />
             <OperationalStat
@@ -147,9 +187,16 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
           <dl className="grid h-full grid-cols-2 divide-x xl:grid-cols-1 xl:divide-x-0 xl:divide-y">
             <OperationalStat
               label={t("detail.overview.runningRuns")}
-              value={String(detail.running_runs)}
+              value={
+                <QueryValue
+                  loading={spanning && active.isLoading}
+                  error={spanning && active.isError}
+                >
+                  {String(runningRuns ?? 0)}
+                </QueryValue>
+              }
               target={
-                detail.running_runs > 0
+                (runningRuns ?? 0) > 0
                   ? { to: destination("#runs", "agentRunStatus", "running") }
                   : undefined
               }
