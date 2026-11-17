@@ -69,6 +69,7 @@ export function NewScheduleModal({
   const navigate = useNavigate();
   return (
     <Modal
+      inSpace
       onClose={onClose}
       title={t("schedule.titleNew")}
       className="max-h-[90svh] overflow-y-auto sm:max-w-xl"

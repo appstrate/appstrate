@@ -2,7 +2,7 @@
 
 /**
  * The products toggle draws nothing when only one product remains: one choice is no choice. In
- * « Vue d'ensemble » the Chat tab is offered where some space opens the chat, as out of it.
+ * « Tous les espaces » the Chat tab is offered where some space opens the chat, as out of it.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -53,7 +53,7 @@ describe("the products toggle", () => {
     }
   });
 
-  it("draws the Chat tab in « Vue d'ensemble » where a space opens the chat", () => {
+  it("draws the Chat tab in « Tous les espaces » where a space opens the chat", () => {
     const tabs = (overview: boolean, workingPermissions: string[]) => {
       const stubs = [
         spyOn(orgStore, "getInitialState").mockReturnValue({

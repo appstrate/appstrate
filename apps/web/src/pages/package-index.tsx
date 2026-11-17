@@ -6,9 +6,9 @@
  * the actions menu) lands on both. Integrations have their own page: a source
  * filter and connection columns.
  *
- * In « Vue d'ensemble » it lists every space the reader reaches, each package
- * once naming its spaces. A row runs in one of its spaces; creating, importing
- * and browsing the catalogue ask which space (`useSpaceAction`).
+ * In « Tous les espaces » it lists every space the reader reaches, each package
+ * once naming its spaces. A row runs in one of its spaces; creating and
+ * importing choose their space in their own menu (`useSpaceAction`).
  */
 
 import { useState } from "react";
@@ -116,7 +116,7 @@ function PackageIndexBody({
     type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
   );
   const words = presentation(type, t);
-  const { canCreate, creation, importing, setImporting, createAction, actionsMenu, pickers } =
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
     usePackageIndexActions(type, words.create);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
   const integrationDetail = useIntegrationDetail(
@@ -179,7 +179,6 @@ function PackageIndexBody({
           integration={integration}
         />
       )}
-      {pickers}
     </>
   );
 }

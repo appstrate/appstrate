@@ -13,6 +13,7 @@ import { cn } from "@appstrate/ui/cn";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
+import { SpaceChoiceDropdown } from "../components/space-choice-menu";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -41,7 +42,7 @@ const CODING_AGENT_SETUP_PROMPT = `Fetch and follow the Appstrate coding-agent s
 
 export interface DashboardData {
   firstName: string;
-  /** « Vue d'ensemble »: the rows are every space's, each naming its space. */
+  /** « Tous les espaces »: the rows are every space's, each naming its space. */
   spanning: boolean;
   agents: AgentListItem[];
   runs: EnrichedRun[];
@@ -68,7 +69,8 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 /**
  * The greeting: drawn at once, its running count a placeholder until the runs answer. The
- * assistant names no space; its chat door opens in one, which « Vue d'ensemble » asks for.
+ * assistant names no space; its chat door opens in one, which « Tous les espaces » chooses in the
+ * door's own menu.
  */
 export function DashboardHeader({
   firstName,
@@ -88,12 +90,16 @@ export function DashboardHeader({
     month: "long",
   }).format(new Date());
 
+  const toChat = () =>
+    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
   const openChat = () => {
     setAssistOpen(false);
-    chat.run(() =>
-      navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) }),
-    );
+    chat.run(toChat);
   };
+  const chatIn = chat.choose(t("common:spaceChoice.open"), () => {
+    setAssistOpen(false);
+    toChat();
+  });
 
   const copyCodingAgentSetup = async () => {
     if (await copy(CODING_AGENT_SETUP_PROMPT))
@@ -143,12 +149,14 @@ export function DashboardHeader({
           <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
             {chat.offered && (
-              <ChoiceCard
-                icon={MessageSquareText}
-                title={t("dashboard.askAi.chat")}
-                description={t("dashboard.askAi.chatDescription")}
-                onClick={openChat}
-              />
+              <SpaceChoiceDropdown choice={chatIn}>
+                <ChoiceCard
+                  icon={MessageSquareText}
+                  title={t("dashboard.askAi.chat")}
+                  description={t("dashboard.askAi.chatDescription")}
+                  onClick={chatIn ? undefined : openChat}
+                />
+              </SpaceChoiceDropdown>
             )}
             <ChoiceCard
               icon={Bot}
@@ -160,7 +168,6 @@ export function DashboardHeader({
           </div>
         </Modal>
       )}
-      {chat.picker}
     </>
   );
 }
@@ -244,7 +251,7 @@ function DashboardScheduleRow({
   const linkInSpace = useSpaceLink();
   const nextRunAt = scheduleNextRunAt(schedule);
   return (
-    // A schedule of another space (« Vue d'ensemble ») names it: the detail enters it.
+    // A schedule of another space (« Tous les espaces ») names it: the detail enters it.
     <Link
       to={linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       className="hover:bg-muted/50 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
@@ -361,8 +368,8 @@ export function DashboardContent(data: DashboardData) {
   const { data: spaces } = useSpaces();
   const orgPermissions = useOrg().currentOrg?.permissions;
   // The dashboard is the fallback route and renders for ANY principal: each
-  // section answers to the guard of the query that feeds it — in « Vue
-  // d'ensemble », granted in some space (the org route lists those).
+  // section answers to the guard of the query that feeds it — in « Tous les
+  // espaces », granted in some space (the org route lists those).
   const sections = dashboardSections(
     data.spanning
       ? (permission) => spacesWhere(spaces, orgPermissions, (can) => can(permission)).length > 0

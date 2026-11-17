@@ -16,7 +16,7 @@ const persisted = persistedJson<Record<string, true>>(STORAGE_KEY, (value) =>
 );
 
 interface OverviewState {
-  /** Where the reader chose « Vue d'ensemble », per account and org. */
+  /** Where the reader chose « Tous les espaces », per account and org. */
   chosen: Record<string, true>;
   set: (key: string, on: boolean) => void;
 }

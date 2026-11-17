@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The stored « Vue d'ensemble » choices: only an entry set to `true` is a choice. Each write reads
+ * The stored « Tous les espaces » choices: only an entry set to `true` is a choice. Each write reads
  * the persisted map, so the tests drive the store through `set` rather than through its initial
  * state — the module may already be loaded by another file of the same test process.
  */

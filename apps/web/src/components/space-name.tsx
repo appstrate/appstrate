@@ -6,6 +6,8 @@ import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
 import { useViewer } from "../hooks/use-viewer";
 import { useSpaces } from "../hooks/use-spaces";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel } from "../lib/space-label";
 
@@ -61,4 +63,15 @@ export function SpaceNameOf({
   const { data: spaces } = useSpaces();
   const space = spaces?.find((s) => s.id === spaceId);
   return space ? <SpaceName space={space} {...props} /> : null;
+}
+
+/**
+ * The working space, named while « Tous les espaces » is on: the screen showing it (a detail page,
+ * a dialog an action opened) acts there, which the mode's switcher does not say. Nothing out of
+ * the mode, where the switcher names it.
+ */
+export function WorkingSpaceName(props: Omit<Parameters<typeof SpaceNameOf>[0], "spaceId">) {
+  const { on } = useOverviewMode();
+  const spaceId = useCurrentSpaceId();
+  return on ? <SpaceNameOf spaceId={spaceId} {...props} /> : null;
 }

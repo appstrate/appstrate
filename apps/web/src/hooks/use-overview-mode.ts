@@ -18,6 +18,7 @@ import {
 } from "../lib/space-lists";
 import { useOrg } from "./use-org";
 import { useSpaces } from "./use-spaces";
+import { useCurrentSpaceId } from "./use-current-space";
 
 /** Where the reader's choice is kept in the current org: per account and org; null before both. */
 function useChoiceKey(): string | null {
@@ -27,7 +28,7 @@ function useChoiceKey(): string | null {
 }
 
 /**
- * « Vue d'ensemble »: a mode of the shell chosen in the switcher, laid over the working space
+ * « Tous les espaces »: a mode of the shell chosen in the switcher, laid over the working space
  * (which stays a real space). The one answer to "is it on" — nothing re-derives it: on while the
  * reader chose it AND it is offered. `known` once the space listing has answered (or failed):
  * before, `on` reads false. `choose` writes the reader's choice in an org, the current one by
@@ -98,4 +99,14 @@ export function useOverviewRules(): void {
   useEffect(() => {
     if (key) withdrawIfLapsed(key, spaces);
   }, [key, spaces]);
+}
+
+/**
+ * The space a surface of no space (the catalogue) may call « ici »: the working space, except in
+ * « Tous les espaces », where the working space is hidden and nothing is « here ».
+ */
+export function useHereSpaceId(): string | null {
+  const { on } = useOverviewMode();
+  const working = useCurrentSpaceId();
+  return on ? null : working;
 }

@@ -50,7 +50,7 @@ describe("route declarations", () => {
   /** Routes outside `MainLayout`, which no declaration covers. */
   const OUTSIDE_MAIN_LAYOUT = new Set(["/onboarding/create"]);
   const links = (text: string) => [...text.matchAll(/\bto(?:=|: )"([^"]+)"/g)].map((m) => m[1]!);
-  /** A route gated by its declaration: `canReach`, or `useSpaceAction`, which reads it per space in « Vue d'ensemble ». */
+  /** A route gated by its declaration: `canReach`, or `useSpaceAction`, which reads it per space in « Tous les espaces ». */
   const reached = (text: string) =>
     [...text.matchAll(/(?:canReach\(|useSpaceAction\(\{ route: )"([^"]+)"/g)].map((m) => m[1]!);
 

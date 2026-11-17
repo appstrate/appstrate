@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The shell's entries are the same in and out of « Vue d'ensemble »: the Catalogue entry is
- * offered where a space opens the catalogue, whichever space is the working one.
+ * The shell's entries are the same in and out of « Tous les espaces »: the catalogue names no
+ * space (its add menu names each deed's), so its entry is judged as its page is, by the route's
+ * verdict, and opens without asking for a space.
  */
 
 import { afterAll, describe, expect, it, spyOn } from "bun:test";
@@ -59,8 +60,8 @@ const space = (id: string, permissions: string[]) => ({
   role: null,
 });
 
-/** The sidebar standing in spc_a, which reads no catalogue; spc_b does. */
-function sidebar(overview: boolean): string {
+/** The sidebar standing in spc_a, which reads the catalogue when `workingReads`; spc_b does. */
+function sidebar(overview: boolean, workingReads = false): string {
   const stubs = [
     spyOn(orgStore, "getInitialState").mockReturnValue({
       ...orgStore.getInitialState(),
@@ -102,7 +103,7 @@ function sidebar(overview: boolean): string {
       object: "list",
       hasMore: false,
       data: [
-        space("spc_a", ["runs:read", "agents:read"]),
+        space("spc_a", ["runs:read", "agents:read", ...(workingReads ? ["spaces:read"] : [])]),
         space("spc_b", ["runs:read", "spaces:read"]),
       ],
     },
@@ -126,12 +127,21 @@ function catalogueShown(html: string): boolean {
   return entry >= 0 && !menu.slice(0, menu.indexOf(">")).includes("hidden");
 }
 
-describe("the sidebar in « Vue d'ensemble »", () => {
-  it("offers the Catalogue where a space opens it, though the working space does not", () => {
-    expect(catalogueShown(sidebar(true))).toBe(true);
+describe("the sidebar in « Tous les espaces »", () => {
+  it("offers the Catalogue where its route opens, in the mode as out of it", () => {
+    for (const overview of [true, false]) {
+      expect({ overview, shown: catalogueShown(sidebar(overview, true)) }).toEqual({
+        overview,
+        shown: true,
+      });
+      expect({ overview, shown: catalogueShown(sidebar(overview, false)) }).toEqual({
+        overview,
+        shown: false,
+      });
+    }
   });
 
-  it("judges it by the working space out of the mode", () => {
-    expect(catalogueShown(sidebar(false))).toBe(false);
+  it("links it straight to the catalogue: no space is asked for", () => {
+    expect(sidebar(true, true)).toContain('href="/catalogue/agent"');
   });
 });

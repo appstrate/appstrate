@@ -7,7 +7,10 @@ import { useSharedFromText } from "../hooks/use-shared-from-text";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { SpaceNameOf } from "./space-name";
 
-/** The count of the spaces a package reaches beyond its home, the names in a tooltip. */
+/**
+ * The count of the spaces a package reaches beyond its home, as « +2 », the names in a tooltip.
+ * Text, not the share icon: outside the mode that icon says "shared from" (`PackageSharedFrom`).
+ */
 function SpacesBadge({ names, text }: { names: readonly string[]; text: string }) {
   if (names.length === 0) return null;
   return (
@@ -17,10 +20,9 @@ function SpacesBadge({ names, text }: { names: readonly string[]; text: string }
           tabIndex={0}
           role="img"
           aria-label={text}
-          className="text-muted-foreground relative z-10 flex shrink-0 items-center gap-0.5 tabular-nums"
+          className="text-muted-foreground relative z-10 shrink-0 tabular-nums"
         >
-          <Share2 className="size-3" aria-hidden />
-          {names.length}
+          {`+${names.length}`}
         </span>
       </TooltipTrigger>
       <TooltipContent>{text}</TooltipContent>

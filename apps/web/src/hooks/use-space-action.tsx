@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Acting from « Vue d'ensemble », where the screen is the same as in a space and an action that
+ * Acting from « Tous les espaces », where the screen is the same as in a space and an action that
  * needs a space gets one:
  *
  * - on a ROW, in the row's space: the action names that space itself (an explicit `X-Space-Id`),
  *   or is a `useSpaceAction` among the row's spaces when it continues there (`RunAgentButton`),
  *   in the working space when it is one of them;
- * - naming NO space (create, import, the catalogue, the chat): `useSpaceAction` offers it where
- *   some space grants it, asks « Dans quel espace ? » between several (the only one is taken
- *   without asking), enters the space picked as the working space, then continues the action,
- *   which therefore renders and requests in that space. Out of the mode it is the working
- *   space's action, unchanged.
+ * - naming NO space (create, import, the chat): `useSpaceAction` offers it where some space
+ *   grants it; between several its own trigger is a menu of them (`choose`, drawn by
+ *   `SpaceChoiceDropdown` or a menu entry's sub-menu), the only one is taken without asking. It
+ *   enters the space chosen as the working space, then continues the action, which therefore
+ *   renders and requests in that space (its dialog names it, `Modal`'s `inSpace`). Out of the
+ *   mode it is the working space's action, unchanged.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { SpacePickerModal } from "../components/space-picker-modal";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
+import type { SpaceChoiceMenu } from "../lib/menu-action";
 import { spaceChoice, spacesWhere, type SpaceGate } from "../lib/space-lists";
 import { useAppConfig } from "./use-app-config";
 import { useCanReach } from "./use-can-reach";
-import { useSpaceSwitcher } from "./use-current-space";
+import { useCurrentSpaceId, useSpaceSwitcher } from "./use-current-space";
 import { requestScopeChange } from "./use-unsaved-changes";
 import { spaceStore } from "../stores/space-store";
 import { useOrg } from "./use-org";
@@ -83,46 +84,36 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
 
 /**
  * An action naming no space. `offered`: whether to show it at all. `run(act)`: performs `act` in
- * a space that grants `need`, among `among` when given (out of the mode, the working space).
- * `link(to)`: a link going to `to` the same way. `picker`: render it, it is the question when one
- * is asked.
+ * the space that grants `need`, among `among` when given (out of the mode, the working space);
+ * between several it does nothing, the reader choosing in `choose(label, act)`, the menu its
+ * trigger becomes — `undefined` when there is nothing to choose. `link(to)`: a link going to `to`
+ * the same way.
  */
 export function useSpaceAction(need: SpaceNeed, among?: readonly string[]) {
   const { on, eligible, offered } = useSpacesFor(need, among);
   const actIn = useActInSpace();
   const navigate = useNavigate();
-  const [asking, setAsking] = useState<{ act: () => void } | null>(null);
+  const workingSpaceId = useCurrentSpaceId();
+  // A row's action continues in the working space when it is among the row's.
+  const choice = on ? spaceChoice(eligible, among ? workingSpaceId : null) : null;
 
   const run = (act: () => void) => {
-    if (!on) return act();
-    // A row's action continues in the working space when it is among the row's.
-    const choice = spaceChoice(eligible, among ? spaceStore.getState().id : null);
-    if (choice.kind === "one") {
-      actIn(choice.spaceId, act);
-    } else if (choice.kind === "ask") {
-      setAsking({ act });
-    }
+    if (!choice) return act();
+    if (choice.kind === "one") actIn(choice.spaceId, act);
   };
-
-  const picker = asking && (
-    <SpacePickerModal
-      spaces={eligible}
-      onPick={(spaceId) => {
-        setAsking(null);
-        actIn(spaceId, asking.act);
-      }}
-      onClose={() => setAsking(null)}
-    />
-  );
 
   return {
     offered,
     run,
+    /** The menu of the spaces to act in, labelled `label` (« Créer dans… »); `undefined` unless the reader must choose. */
+    choose: (label: string, act: () => void): SpaceChoiceMenu | undefined =>
+      choice?.kind === "ask"
+        ? { label, spaces: eligible, onPick: (spaceId) => actIn(spaceId, act) }
+        : undefined,
     /** A link to `to`: plain out of the mode; in it, `onSelect` replaces the navigation with `run`. */
     link: (to: string): { to: string; onSelect?: () => void } => ({
       to,
       onSelect: on ? () => run(() => navigate(to)) : undefined,
     }),
-    picker,
   };
 }

@@ -11,7 +11,7 @@ import { overviewListVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
- * permissions, except a list's route in « Vue d'ensemble », which opens where a space admits it.
+ * permissions, except a list's route in « Tous les espaces », which opens where a space admits it.
  */
 export function useRouteVerdict() {
   const { can, inPersonalSpace } = usePermissions();

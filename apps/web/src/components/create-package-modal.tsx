@@ -104,6 +104,7 @@ export function CreatePackageModal({
 
   return (
     <FormModal
+      inSpace
       onClose={onClose}
       title={t(WORDS[type].title)}
       description={t(WORDS[type].description)}

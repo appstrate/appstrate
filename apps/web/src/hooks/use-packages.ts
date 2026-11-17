@@ -152,7 +152,7 @@ type Segment = (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType];
 
 /**
  * One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`).
- * `spanning` (any type but the agent, whose index is `useAgents`): every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), each package once with its `space_ids` — asked by an index PAGE in « Vue d'ensemble », never by a surface of one space.
+ * `spanning` (any type but the agent, whose index is `useAgents`): every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), each package once with its `space_ids` — asked by an index PAGE in « Tous les espaces », never by a surface of one space.
  */
 function usePackageList<T extends PackageType>(
   type: T,
@@ -305,7 +305,7 @@ export {
 
 /**
  * The agent index for the current space: the ACTIVE set ({@link usePackageList}), so a listed agent is a runnable one.
- * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), each agent once with its `space_ids` and its counters over them, polled — asked by the agent index and the dashboard in « Vue d'ensemble », never by a surface of one space.
+ * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), each agent once with its `space_ids` and its counters over them, polled — asked by the agent index and the dashboard in « Tous les espaces », never by a surface of one space.
  * `enabled: false` asks nothing (a surface that does not show it).
  */
 export function useAgents({ spanning = false, enabled = true } = {}) {

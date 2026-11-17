@@ -77,7 +77,7 @@ describe("PackageSpaces", () => {
     );
     expect(html).toContain(">Studio<");
     expect(html).toContain('aria-label="Partagé avec Atelier, Coffre"');
-    expect(html).toMatch(/<\/svg>2<\/span>/);
+    expect(html).toMatch(/>\+2<\/span>/);
   });
 
   it("shows no badge when the package is active in its home only", () => {
@@ -94,7 +94,9 @@ describe("PackageSpaces", () => {
     );
     expect(html).toContain(">Plateforme<");
     expect(html).toContain('aria-label="Disponible dans Atelier, Studio"');
-    expect(html).toMatch(/<\/svg>2<\/span>/);
+    expect(html).toMatch(/>\+2<\/span>/);
+    // No share icon: outside the mode it means "shared from".
+    expect(html).not.toContain("<svg");
   });
 
   it("labels a withheld home « Espace non visible » and counts every space", () => {

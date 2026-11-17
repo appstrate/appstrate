@@ -13,7 +13,7 @@ import { recentAgentsFirst } from "../lib/recent-agents";
 import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 /**
- * `/`: the working space's dashboard, or in « Vue d'ensemble » the mode's home, drawn from every
+ * `/`: the working space's dashboard, or in « Tous les espaces » the mode's home, drawn from every
  * space the reader reaches (the org routes of its three lists).
  */
 export function DashboardPage() {

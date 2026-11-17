@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The steps « Vue d'ensemble » takes on its own: acting in a space the reader picked, and
+ * The steps « Tous les espaces » takes on its own: acting in a space the reader picked, and
  * withdrawing the mode on a page of one space or once the listing no longer offers it. Asserted on
  * the functions the hooks' callbacks and effects call: this harness renders with
  * `renderToStaticMarkup`, which never runs an effect nor a click.
@@ -58,7 +58,27 @@ describe("the overview rules", () => {
   beforeEach(() => overviewStore.getState().set(KEY, true));
 
   it("keeps the mode on a list, one of its rows and a page of no space", () => {
-    for (const pathname of ["/runs", "/agents/@acme/triage", "/", "/org-settings/members"]) {
+    for (const pathname of [
+      "/runs",
+      "/agents/@acme/triage",
+      "/",
+      "/org-settings/members",
+      "/preferences/connections",
+    ]) {
+      withdrawOnPage(KEY, pathname);
+      expect({ pathname, chosen: chosen() }).toEqual({ pathname, chosen: true });
+    }
+  });
+
+  // The report « opening an agent's Paramètres › Connexions from the mode lands on « Mon espace » »:
+  // the page holds the mode; the catalogue its « Voir dans le catalogue » opens withdrew it, and
+  // closing the overlay left the reader in the space the row had silently entered.
+  it("keeps the mode on an agent's settings and over the catalogue they link to", () => {
+    for (const pathname of [
+      "/agents/@acme/agent-form",
+      "/catalogue/agent",
+      "/catalogue/integration",
+    ]) {
       withdrawOnPage(KEY, pathname);
       expect({ pathname, chosen: chosen() }).toEqual({ pathname, chosen: true });
     }

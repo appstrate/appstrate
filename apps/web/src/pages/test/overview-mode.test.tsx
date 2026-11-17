@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * « Vue d'ensemble » over the working space: the switcher names it, the list pages and the
+ * « Tous les espaces » over the working space: the switcher names it, the list pages and the
  * dashboard ask the org routes (which list every space the reader reaches) and nothing of the
  * working space's lists, one row per placement naming its space and linking into it, and the gate
  * opens a list another space admits. Nothing is hidden by the mode: a row acts in its own space,
@@ -35,6 +35,7 @@ const { IntegrationsPage } = await import("../integrations-page.tsx");
 const { FilesPage } = await import("../files.tsx");
 const { fileFixture } = await import("../../test/render.tsx");
 const { makeRun } = await import("../../test/run-fixture.ts");
+const { WorkingSpaceName } = await import("../../components/space-name.tsx");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -188,7 +189,7 @@ function renderIn(
 describe("the switcher", () => {
   it("names the organization and the space, or the mode, in its accessible name", () => {
     expect(renderIn(true, <OrgSwitcher variant="brand" />).html).toContain(
-      "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Vue d'ensemble)\"",
+      "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Tous les espaces)\"",
     );
     expect(renderIn(false, <OrgSwitcher variant="brand" />).html).toContain(
       "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Studio)\"",
@@ -198,7 +199,7 @@ describe("the switcher", () => {
   it("names the mode where it names the working space, in the sidebar and the phone header alike", () => {
     for (const variant of ["brand", "mobile"] as const) {
       expect(renderIn(true, <OrgSwitcher variant={variant} />).html).toContain(
-        'title="Vue d\'ensemble"',
+        'title="Tous les espaces"',
       );
       expect(renderIn(false, <OrgSwitcher variant={variant} />).html).toContain('title="Studio"');
     }
@@ -245,6 +246,32 @@ describe("a list page in the mode", () => {
     expect(empty(true)).toContain("Nouvelle planification");
     expect(empty(false)).toContain("Nouvelle planification");
   });
+
+  it("chooses the space in the creation's own menu between several, acts at once with one", () => {
+    const creation = (spaces: readonly ReturnType<typeof space>[]) => {
+      const { html } = renderIn(
+        true,
+        <SchedulesListPage />,
+        "/schedules",
+        (qc) => qc.setQueryData(["schedules", "org_1", "across-spaces"], []),
+        spaces,
+      );
+      // The empty state's button: its own trigger, a menu of the spaces or a plain button.
+      const at = html.indexOf("Nouvelle planification");
+      return html.slice(html.lastIndexOf("<button", at), at);
+    };
+    // Only spc_a writes schedules: the button creates there, no menu.
+    expect(creation(SPACES)).not.toContain('aria-haspopup="menu"');
+    const writer = space("spc_c", ["schedules:read", "schedules:write"]);
+    expect(creation([...SPACES, writer])).toContain('aria-haspopup="menu"');
+  });
+});
+
+describe("the space a screen acts in", () => {
+  it("is named in the mode, the working space's own name; nothing out of it", () => {
+    expect(renderIn(true, <WorkingSpaceName />).html).toContain('title="Studio">Studio</span>');
+    expect(renderIn(false, <WorkingSpaceName />).html).not.toContain("Studio");
+  });
 });
 
 describe("the agent index in the mode", () => {
@@ -286,6 +313,23 @@ describe("the agent index in the mode", () => {
       ]),
     ).toBe(true);
     expect(run([without(SPACES[0]!), SPACES[1]!])).toBe(false);
+  });
+
+  it("runs a row in the working space when it is one of its spaces, else lets the reader choose", () => {
+    const runner = (id: string) => space(id, ["agents:read", "agents:run"]);
+    const runButton = (spaceIds: string[]) => {
+      const { html } = renderIn(
+        true,
+        <PackageIndexPage type="agent" />,
+        "/agents",
+        (qc) => qc.setQueryData(["agents", "org_1", "across-spaces"], [agent(spaceIds)]),
+        [SPACES[0]!, runner("spc_b"), runner("spc_c")],
+      );
+      const at = html.indexOf('aria-label="Lancer"');
+      return html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at));
+    };
+    expect(runButton(["spc_a", "spc_b"])).not.toContain('aria-haspopup="menu"');
+    expect(runButton(["spc_b", "spc_c"])).toContain('aria-haspopup="menu"');
   });
 
   it("offers no write while the space listing has not answered: it appears once, never flips", () => {

@@ -2,9 +2,9 @@
 
 /**
  * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
- * placed here but switched off, or never switched on, is in the space library. In « Vue
- * d'ensemble » it lists every space the reader reaches, each integration once naming its spaces;
- * creating, importing and browsing the catalogue ask which space (`useSpaceAction`).
+ * placed here but switched off, or never switched on, is in the space library. In « Tous
+ * les espaces » it lists every space the reader reaches, each integration once naming its spaces;
+ * creating and importing choose their space in their own menu (`useSpaceAction`).
  */
 
 import { useMemo, useState } from "react";
@@ -53,7 +53,7 @@ export function IntegrationsPage() {
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "source"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const { canCreate, creation, importing, setImporting, createAction, actionsMenu, pickers } =
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
     usePackageIndexActions("integration", t("integrations.create"));
   const [creating, setCreating] = useState(false);
 
@@ -194,7 +194,6 @@ export function IntegrationsPage() {
       {creating && canCreate && (
         <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
-      {pickers}
     </div>
   );
 }
