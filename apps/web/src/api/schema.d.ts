@@ -7838,6 +7838,17 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description `run_capacity_starting` — the platform is still starting: its orphan-run cleanup and first runtime initialisation are not done, so no run is accepted yet and no run is created. Transient; retry after the `Retry-After` delay (seconds). The rest of the API already answers. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored. */
+        RunLaunchUnavailable: {
+            headers: {
+                /** @description Seconds to wait before retrying (`run_capacity_starting`). */
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Unexpected server error */
         InternalServerError: {
             headers: {
@@ -9211,7 +9222,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            503: components["responses"]["EncryptionKeyUnavailable"];
+            503: components["responses"]["RunLaunchUnavailable"];
         };
     };
     listAgentRuns: {
@@ -14106,7 +14117,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
+            /** @description `run_capacity_starting` — the platform is still starting its run capacity (orphan cleanup, runtime initialisation); retry after the `Retry-After` delay. Otherwise (`connect_unavailable`) the configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -14594,7 +14605,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
+            /** @description `run_capacity_starting` — the platform is still starting its run capacity (orphan cleanup, runtime initialisation); retry after the `Retry-After` delay. Otherwise (`connect_unavailable`) the configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -24949,7 +24960,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            503: components["responses"]["EncryptionKeyUnavailable"];
+            503: components["responses"]["RunLaunchUnavailable"];
         };
     };
     validateInlineRun: {

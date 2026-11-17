@@ -16,8 +16,9 @@ let serverReady = false;
 
 /**
  * Flip the process to "ready". Called once from `index.ts` when
- * `bootBackground()` resolves — i.e. when orphan cleanup, the system-package
- * DB sync and every worker are done. The port is already bound well before
+ * `bootServing()` resolves — i.e. when the system-package DB sync, LISTEN/NOTIFY
+ * and the metering recovery worker are done. Run launches have their own,
+ * later gate (`assertRunCapacityReady`). The port is already bound well before
  * this; see {@link bootGate}.
  */
 export function markServerReady(): void {
@@ -31,7 +32,7 @@ export function _resetServerReadyForTesting(): void {
 
 /**
  * Boot gate — the mirror image of the shutdown gate. Between the port bind and
- * the end of `bootBackground()` the process is listening but not ready, so
+ * the end of `bootServing()` the process is listening but not ready, so
  * rather than run a request against half-initialized state (or leave the socket
  * closed and hand clients a bare CONNREFUSED) it answers an explicit 503 that
  * says which state we are in.

@@ -33,6 +33,8 @@ const TRACKED = [
   "AFPS_SIGNATURE_POLICY",
   "MODEL_CATALOG_URL",
   "TRUSTED_ORIGINS",
+  "MIGRATIONS_ON_BOOT",
+  "DATABASE_URL",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -727,5 +729,42 @@ describe("EGRESS_ALLOW_INTERNAL_HOSTS", () => {
     expect(() => getEnv()).toThrow(/EGRESS_ALLOW_INTERNAL_HOSTS/);
     expect(() => getEnv()).toThrow(/"kc\.internal:8443" is not a bare hostname/);
     expect(() => getEnv()).toThrow(/"https:\/\/x" is not a bare hostname/);
+  });
+});
+
+describe("MIGRATIONS_ON_BOOT", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    delete process.env.MIGRATIONS_ON_BOOT;
+    delete process.env.DATABASE_URL;
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("defaults to apply", () => {
+    expect(getEnv().MIGRATIONS_ON_BOOT).toBe("apply");
+  });
+
+  it("accepts verify with a DATABASE_URL", () => {
+    process.env.MIGRATIONS_ON_BOOT = "verify";
+    process.env.DATABASE_URL = "postgresql://u:p@localhost:5432/db";
+    expect(getEnv().MIGRATIONS_ON_BOOT).toBe("verify");
+  });
+
+  it("refuses verify without a DATABASE_URL (embedded PGlite)", () => {
+    process.env.MIGRATIONS_ON_BOOT = "verify";
+    expect(() => getEnv()).toThrow(/MIGRATIONS_ON_BOOT=verify requires DATABASE_URL/);
+  });
+
+  it("refuses an unknown value", () => {
+    process.env.MIGRATIONS_ON_BOOT = "skip";
+    expect(() => getEnv()).toThrow(/MIGRATIONS_ON_BOOT/);
   });
 });

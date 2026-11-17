@@ -208,6 +208,8 @@ services:
       # ── Coupled to the YAML above ──
       - PORT=3000
       - DOCKER_SOCKET=/var/run/docker.sock
+      # The appstrate-migrate service this one waits on owns the migrations; boot only checks them.
+      - MIGRATIONS_ON_BOOT=verify
       # ── Infra plumbing (refers to compose service hostnames) ──
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
       - REDIS_URL=redis://appstrate-redis:6379

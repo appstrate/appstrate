@@ -85,7 +85,7 @@ You also need at least one LLM provider. Set `SYSTEM_PROVIDER_KEYS` (a JSON arra
 docker compose up -d
 ```
 
-The first start pulls the platform, the agent runtime, the sidecar and the five MCP runner images. Compose gates the platform on the agent runtime and sidecar pulls (the tier templates gate it on all seven pulls), so a slow first start is normal. The tier templates also run a one-shot `migrate` service before the platform. The root file migrates at boot only.
+The first start pulls the platform, the agent runtime, the sidecar and the five MCP runner images. Compose gates the platform on the agent runtime and sidecar pulls (the tier templates gate it on all seven pulls), so a slow first start is normal. The tier templates also run a one-shot `migrate` service before the platform. The root file migrates at boot only; the tier templates migrate in their `migrate` service and again at boot, which then finds nothing to apply. Only `deploy/docker-compose.yml` sets `MIGRATIONS_ON_BOOT=verify`.
 
 </Step>
 
@@ -127,7 +127,7 @@ The platform, `PI_IMAGE` and `SIDECAR_IMAGE` form a version contract. When all t
 curl http://localhost:3000/health
 ```
 
-`/health` returns `status` (`healthy`, `degraded`, `unhealthy` or `starting`), `version`, `uptime_ms` and per-subsystem `checks` (`database`, `agents`, `realtime`). The HTTP status is `503` when the database is unhealthy and while the server is still starting, `200` otherwise. `GET /` serves the dashboard.
+`/health` returns `status` (`healthy`, `degraded`, `unhealthy` or `starting`), `version`, `uptime_ms` and per-subsystem `checks` (`database`, `agents`, `realtime`). The HTTP status is `503` when the database is unhealthy and while the server is still starting, `200` otherwise. Right after startup `status` stays `degraded` (`checks.agents`) until the run orchestrator has initialized, and run launches answer `503` `run_capacity_starting` until the startup's orphan cleanup and first initialization are done. `GET /` serves the dashboard.
 
 ## First owner
 

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
-import postgres from "postgres";
+import { applyCoreMigrations } from "./core-migrations.ts";
 import { logger } from "./logger.ts";
 
 const url = process.env["DATABASE_URL"];
@@ -11,11 +9,6 @@ if (!url) {
   process.exit(1);
 }
 
-const client = postgres(url, { max: 1 });
-const db = drizzle(client);
-
 logger.info("Running migrations...");
-await migrate(db, { migrationsFolder: "./packages/db/drizzle" });
+await applyCoreMigrations(url);
 logger.info("Migrations complete");
-
-await client.end();

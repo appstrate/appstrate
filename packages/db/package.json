@@ -9,6 +9,7 @@
     "./run-status": "./src/run-status.ts",
     "./pricing-status": "./src/pricing-status.ts",
     "./client": "./src/client.ts",
+    "./core-migrations": "./src/core-migrations.ts",
     "./auth": "./src/auth.ts",
     "./auth-policy": "./src/auth-policy.ts",
     "./password-policy": "./src/password-policy.ts",

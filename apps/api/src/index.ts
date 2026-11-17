@@ -4,7 +4,13 @@ import { Hono, type Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
-import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
+import {
+  bootCritical,
+  bootServing,
+  bootRunCapacity,
+  bootHousekeeping,
+  probeUsercontentReachability,
+} from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "./middleware/space-context.ts";
 import { requestId } from "./middleware/request-id.ts";
@@ -120,7 +126,7 @@ app.use("*", async (c, next) => {
   return globalBodyLimit(c, next);
 });
 
-// Boot gate — 503 on every route until `bootBackground()` (kicked off after
+// Boot gate — 503 on every route until `bootServing()` (kicked off after
 // the export at the bottom of this file) resolves. Registered BEFORE
 // `healthRouter` so the probe is answered by the gate while starting.
 // Definition + rationale: `routes/health.ts`.
@@ -208,7 +214,7 @@ app.route("/api/auth/bootstrap", createAuthBootstrapRouter());
 // auth strategies → Bearer API key → cookie session middleware, org
 // context, and session permission resolution. The test harness
 // (`apps/api/test/helpers/app.ts`) calls the same helper so the two
-// cannot drift. Accessors are lazy: this is wired before `await boot()`
+// cannot drift. Accessors are lazy: this is wired before `bootCritical()`
 // finishes loading modules, so snapshotting here would miss module
 // contributions.
 applyAuthPipeline(app, {
@@ -260,7 +266,16 @@ app.use("*", idempotencyGuard());
 // Boot phase 1 — migrations, modules, auth, fail-fast config validation.
 // Everything the route table's shape depends on. Phase 2 is kicked off after
 // the export below, so the port binds without waiting for it.
-await bootCritical();
+// A refusal here (pending migration, pending data script, missing key…) is
+// fatal like any boot failure, and logged as the same structured line rather
+// than left to Bun's uncaught-error stack trace.
+const criticalStartedAt = performance.now();
+try {
+  await bootCritical();
+} catch (err) {
+  logBootFailureAndExit(err);
+}
+const criticalMs = Math.round(performance.now() - criticalStartedAt);
 
 // Initialize app config (async — modules may contribute structured data like OIDC client ID)
 await initAppConfig();
@@ -444,32 +459,46 @@ export default {
 
 logger.info("Server listening (starting up)", { port: env.PORT });
 
-// Boot phase 2 — orphan cleanup, system-package DB sync, workers. Deliberately
-// NOT awaited: Bun binds the port once this module finishes evaluating, so
-// awaiting here would keep the socket closed for the whole of it (worst case
-// the per-orphan container stops, which is exactly the restart-after-incident
-// path where the API should come back fastest). Until it resolves, the boot
-// gate above answers 503 on every route.
+// Boot phase 2 — readiness by capacity. Deliberately NOT awaited: Bun binds the
+// port once this module finishes evaluating, so awaiting here would keep the
+// socket closed for the whole of it.
+//   1. `bootServing()` (system-package sync, LISTEN/NOTIFY, cancel subscriber,
+//      metering recovery): until it resolves the boot gate above answers 503 on
+//      every route; then `markServerReady()` opens reads, auth and the dashboard.
+//   2. `bootRunCapacity()` (orphan cleanup, runtime first initialisation, run
+//      workers) and `bootHousekeeping()` run after. Until the first one calls
+//      `markRunCapacityReady()`, every run launch is refused with 503
+//      `run_capacity_starting` (`assertRunCapacityReady`, in the services).
 //
-// A rejection is fatal, matching the previous blocking `await boot()`: the
-// metering retry worker's init is deliberately uncaught upstream because a
-// missing durable recovery channel can lose billable spend permanently.
-const bootStartedAt = Date.now();
-void bootBackground()
+// A rejection anywhere is fatal: the metering retry worker's init is
+// deliberately uncaught upstream because a missing durable recovery channel can
+// lose billable spend permanently.
+const servingStartedAt = performance.now();
+void bootServing()
   .then(() => {
     markServerReady();
-    logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
+    logger.info("Server ready", {
+      port: env.PORT,
+      // Since the process started (`performance.now()` counts from process start).
+      startupMs: Math.round(performance.now()),
+      criticalMs,
+      servingMs: Math.round(performance.now() - servingStartedAt),
+    });
     // Fire-and-forget reachability probe for USERCONTENT_URL.
     // Never awaited, never fatal; runs after readiness so it can't race the
     // boot gate's 503-until-ready window against a hairpin route.
     void probeUsercontentReachability();
+    return Promise.all([bootRunCapacity(), bootHousekeeping()]);
   })
-  .catch((err: unknown) => {
-    logger.error("Boot failed — exiting", {
-      error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-    });
-    process.exit(1);
+  .catch(logBootFailureAndExit);
+
+/** Any boot failure, in either phase: one structured line, then exit 1. */
+function logBootFailureAndExit(err: unknown): never {
+  logger.error("Boot failed — exiting", {
+    error: err instanceof Error ? (err.stack ?? err.message) : String(err),
   });
+  process.exit(1);
+}
 
 // Proxy-upload diagnosability: with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser

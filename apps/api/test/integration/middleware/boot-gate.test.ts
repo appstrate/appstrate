@@ -5,8 +5,8 @@
  *
  * `apps/api/src/index.ts` binds the port as soon as `bootCritical()` (core
  * migrations, module load, auth, fail-fast config validation) is done, then
- * runs `bootBackground()` — orphan cleanup, the system-package DB sync, every
- * worker — without blocking the bind. That window used to be a closed socket:
+ * runs `bootServing()` (system-package DB sync, LISTEN/NOTIFY, metering
+ * recovery), then `bootRunCapacity()` / `bootHousekeeping()`, without blocking the bind. That window used to be a closed socket:
  * clients got CONNREFUSED with nothing to distinguish "starting" from "dead".
  *
  * The gate turns that window into an explicit answer:

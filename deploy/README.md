@@ -30,7 +30,7 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.68`, not `v1.0.0-beta.68`).
 2. Redeploy.
 
-`appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
+`appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`); the application itself only verifies (`MIGRATIONS_ON_BOOT=verify`) and refuses to boot against a schema with a pending migration. `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
 
 **A release is not always an image swap.** Migrations that cannot be replayed, one-off data scripts, and environment variables that must land at a particular moment are all real. The runbook is the authority; this file is not a substitute for it.
 

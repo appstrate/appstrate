@@ -14,8 +14,8 @@
 -- operator-provisioned, and its tokens are not confined.
 --
 -- The API refuses to boot while any row this script would fold is left, and its
--- refusal names this file (`assertSelfServiceFoldApplied`,
--- `apps/api/src/lib/boot.ts`). That check reads the same `WHERE` as the UPDATE
+-- refusal names this file (the `0011` entry of
+-- `PENDING_DATA_SCRIPTS`, `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). That check reads the same `WHERE` as the UPDATE
 -- below, so running this script is always enough to clear it — the unparseable
 -- rows it skips are excluded there too.
 --

@@ -753,7 +753,7 @@ const connectKickoffRelayProperties = {
 const connectRunResponses = {
   "503": {
     description:
-      "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+      "`run_capacity_starting` — the platform is still starting its run capacity (orphan cleanup, runtime initialisation); retry after the `Retry-After` delay. Otherwise (`connect_unavailable`) the configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

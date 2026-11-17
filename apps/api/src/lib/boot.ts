@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
-import type { SQL } from "drizzle-orm";
+import { db, isEmbeddedDb } from "@appstrate/db/client";
+import {
+  applyCoreMigrations,
+  assertCoreMigrationsApplied,
+  CORE_MIGRATIONS_FOLDER,
+} from "@appstrate/db/core-migrations";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -57,15 +61,22 @@ import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { startRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { initializeAgentRuntime } from "../services/orchestrator/agent-runtime-readiness.ts";
+import {
+  initializeAgentRuntime,
+  markRunCapacityReady,
+} from "../services/orchestrator/agent-runtime-readiness.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { countByKid, type KidCount } from "@appstrate/db/encrypted-columns";
-import { keyringKids, opensWithKeyring } from "@appstrate/connect";
 import { warnOnUnreadEnvKeys } from "./unread-env-keys.ts";
+import { bootStep } from "./boot-step.ts";
+import {
+  assertKeyringCoversCiphertexts,
+  assertOAuthResourceColumnsPresent,
+} from "./boot-guards/schema-invariants.ts";
+import { assertNoPendingDataScripts } from "./boot-guards/pending-data-scripts.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -86,55 +97,58 @@ const ORPHAN_CLEANUP_CONCURRENCY = 6;
  * config, and aborting is only meaningful before anything is listening.
  *
  * Everything that is merely *state the handlers read* moves to
- * {@link bootBackground}, behind the readiness gate in `index.ts`.
+ * {@link bootServing} / {@link bootRunCapacity} / {@link bootHousekeeping}, behind the
+ * boot gate in `index.ts` (serving) and the run-capacity check in the services.
  */
 export async function bootCritical(): Promise<void> {
   // First, so the unread-key line is logged even if a later boot step fails.
   // Namespace rule and limits: docs/ENV.md § Unread keys (docs/NO_TRANSITIONAL_CODE.md §4).
-  warnOnUnreadEnvKeys();
+  await bootStep("critical", "warn-unread-env-keys", () => warnOnUnreadEnvKeys());
 
   // Register RBAC denial audit handler BEFORE modules load. Every guard
   // created from this point on — core routes via `requirePermission`,
   // module routes via `requireModulePermission`/`requireCorePermission` —
   // flows through the same `permission_denied` log line.
-  installPermissionAuditLogger();
+  await bootStep("critical", "permission-audit-logger", () => installPermissionAuditLogger());
 
   // Apply core migrations at boot (before modules, so DB is ready).
-  // Both PGlite and PostgreSQL auto-migrate — no manual `db:migrate` step needed.
+  // Both PGlite and PostgreSQL migrate at boot, except PostgreSQL under
+  // MIGRATIONS_ON_BOOT=verify (see below); no manual `db:migrate` step needed.
   const env = (await import("@appstrate/env")).getEnv();
-  if (isEmbeddedDb) {
-    logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
-    await applyEmbeddedMigrations();
-  } else {
-    logger.info("Database: PostgreSQL", {
-      url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
-    });
-    await applyCoreMigrations();
-  }
+  await bootStep("critical", "core-migrations", async () => {
+    if (isEmbeddedDb) {
+      logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
+      await applyEmbeddedMigrations();
+    } else {
+      logger.info("Database: PostgreSQL", {
+        url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
+        migrationsOnBoot: env.MIGRATIONS_ON_BOOT,
+      });
+      // `verify`: a separate step (the compose `appstrate-migrate` service) owns the
+      // migrations, so boot applies no core migration and refuses a database behind its code.
+      if (env.MIGRATIONS_ON_BOOT === "verify") {
+        await assertCoreMigrationsApplied(env.DATABASE_URL!);
+      } else {
+        await applyCoreMigrations(env.DATABASE_URL!);
+        logger.info("Core migrations applied");
+      }
+    }
+  });
 
-  // Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
-  // are absent although the migrator reported nothing pending. Detection only —
-  // the repair is an operator task, see the function's doc comment.
-  await assertOAuthResourceColumnsPresent();
+  await bootStep("critical", "assert-oauth-resource-columns", () =>
+    assertOAuthResourceColumnsPresent(),
+  );
 
-  // Refuse to boot while `oauth_clients.self_service` still disagrees with the
-  // `metadata` JSON key migration 0057 left behind — a self-registered client
-  // reading as operator-provisioned is a security control that is OFF.
-  // Detection only; the fold is an operator task, see the function's doc comment.
-  await assertSelfServiceFoldApplied();
-
-  // Refuse to boot while connection shares still sit in `shared_space_ids`, where nothing reads
-  // them. Detection only; the copy is an operator task, see the function's doc comment.
   const embeddedDataDir = isEmbeddedDb
     ? (await import("node:path")).resolve(env.PGLITE_DATA_DIR)
     : null;
-  await assertConnectionSharesCopied(embeddedDataDir);
+  await bootStep("critical", "pending-data-scripts", () =>
+    assertNoPendingDataScripts(embeddedDataDir),
+  );
 
-  // Refuse to boot while a package share has no `space_packages` row, where nothing reads it.
-  // Detection only; the fold is an operator task, see the function's doc comment.
-  await assertPackageSharesFolded(embeddedDataDir);
-
-  await assertKeyringCoversCiphertexts();
+  await bootStep("critical", "assert-keyring-covers-ciphertexts", () =>
+    assertKeyringCoversCiphertexts(),
+  );
 
   // Bootstrap-token reconciliation. If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -142,22 +156,28 @@ export async function bootCritical(): Promise<void> {
   // boolean in AppConfig reports `false` immediately. Otherwise an operator
   // who forgot to clear .env after a successful claim sends returning
   // visitors back through `/claim`, where redemption then 410s.
-  await reconcileBootstrapTokenAtBoot().catch((err) => {
-    logger.warn("Could not reconcile bootstrap token at boot", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("critical", "reconcile-bootstrap-token", () =>
+    reconcileBootstrapTokenAtBoot().catch((err) => {
+      logger.warn("Could not reconcile bootstrap token at boot", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 
   // Load modules (oidc, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
-  await loadModules(getModuleRegistry(), buildModuleInitContext());
+  await bootStep("critical", "load-modules", () =>
+    loadModules(getModuleRegistry(), buildModuleInitContext()),
+  );
 
   // Aggregate model provider contributions from every loaded module into
   // the runtime registry. The three core API-key providers (openai,
   // anthropic, openai-compatible) ship as the `core-providers` module;
   // OAuth-flavoured providers ship as opt-in workspace modules
   // (`@appstrate/module-*`). There is no in-code seed.
-  registerModelProviders(getModuleModelProviders());
+  await bootStep("critical", "register-model-providers", () =>
+    registerModelProviders(getModuleModelProviders()),
+  );
 
   // Initialize Better Auth AFTER modules have registered their plugin +
   // schema contributions. Passed as a thunk, which `createAuth()` calls
@@ -167,19 +187,23 @@ export async function bootCritical(): Promise<void> {
   // plugin list type. Module tables (e.g. OIDC's oauth_clients/jwks) now live
   // in the core schema barrel, so the Better Auth adapter resolves them
   // directly — no module schema injection.
-  createAuth({
-    plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
-    rateLimitStorage: betterAuthRateLimitStorage(),
-    rateLimitEnabled: env.NODE_ENV === "production",
-    clientIpHeader: CLIENT_IP_HEADER,
-  });
+  await bootStep("critical", "create-auth", () =>
+    createAuth({
+      plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
+      rateLimitStorage: betterAuthRateLimitStorage(),
+      rateLimitEnabled: env.NODE_ENV === "production",
+      clientIpHeader: CLIENT_IP_HEADER,
+    }),
+  );
 
   // Wire module contributions that were declared on the module contract
-  for (const mod of getModules().values()) {
-    if (mod.emailOverrides) {
-      registerEmailOverrides(mod.emailOverrides);
+  await bootStep("critical", "wire-module-contributions", () => {
+    for (const mod of getModules().values()) {
+      if (mod.emailOverrides) {
+        registerEmailOverrides(mod.emailOverrides);
+      }
     }
-  }
+  });
   // `beforeSignup` / `afterSignup` broadcast to EVERY loaded module (not
   // first-match-wins like the other hooks) via `callAllHooks`: the ee module's
   // free-tier gate AND the OIDC per-client signup policy both run on every
@@ -216,95 +240,126 @@ export async function bootCritical(): Promise<void> {
   warnOnTrustProxyMisconfig(env.TRUST_PROXY, env.NODE_ENV);
 
   // Verify storage backend is accessible (fail-fast if misconfigured)
-  await ensureBucket();
+  await bootStep("critical", "ensure-bucket", () => ensureBucket());
 
   // Parse AFPS_TRUST_ROOT (fail-fast) and log the effective signature policy.
-  initBundleSignaturePolicy();
+  await bootStep("critical", "init-bundle-signature-policy", () => initBundleSignaturePolicy());
 
   // Parse + validate run limits (PLATFORM_RUN_LIMITS, INLINE_RUN_LIMITS).
   // Throws at boot on invalid shape — no run can start without them.
-  initRunLimits();
+  await bootStep("critical", "init-run-limits", () => initRunLimits());
 
   // Parse + validate proxy limits (LLM_PROXY_LIMITS, CREDENTIAL_PROXY_LIMITS).
   // Same fail-fast contract as initRunLimits — strict Zod, unknown keys reject.
-  initProxyLimits();
+  await bootStep("critical", "init-proxy-limits", () => initProxyLimits());
 
   // Load system proxies from SYSTEM_PROXIES env var
-  initSystemProxies();
+  await bootStep("critical", "init-system-proxies", () => initSystemProxies());
   logger.info("System proxies loaded");
 
   // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
-  initSystemModelProviderKeys();
+  await bootStep("critical", "init-system-model-provider-keys", () =>
+    initSystemModelProviderKeys(),
+  );
   logger.info("System provider keys loaded");
 
   // Load system integrations (auto-active policy + shared OAuth clients) from
   // the SYSTEM_INTEGRATIONS env var
-  initSystemIntegrations();
+  await bootStep("critical", "init-system-integrations", () => initSystemIntegrations());
 
   // Read the `.afps` archives off disk into the in-memory registry. Cheap
-  // (~45 ms) and consulted by request-path helpers (`isSystemPackage`), so it
-  // stays pre-bind; the DB + S3 reconciliation it used to be bundled with is
-  // the slow half and runs in `bootBackground`.
-  await initSystemPackages().catch((err) => {
-    logger.warn("Could not load system packages", {
-      error: getErrorMessage(err),
-    });
-  });
+  // and consulted by request-path helpers (`isSystemPackage`), so it
+  // stays pre-bind; the DB + S3 reconciliation is the slow half and runs in
+  // `bootServing`.
+  await bootStep("critical", "init-system-packages", () =>
+    initSystemPackages().catch((err) => {
+      logger.warn("Could not load system packages", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 }
 
 /**
- * Phase 2 — state, workers and cleanup. Runs AFTER the port is bound, behind
- * the readiness gate in `index.ts`, which answers 503 on every route until
- * this resolves. Nothing here changes the route table.
+ * Phase 2a — serving. Runs AFTER the port is bound, behind the readiness gate in
+ * `index.ts`, which answers 503 on every route until this resolves; reads, auth
+ * and the dashboard need nothing more. Nothing here changes the route table.
  *
- * A rejection here is fatal exactly as it was when this code lived in a
- * blocking `await boot()`: the caller in `index.ts` exits the process.
+ * A rejection is fatal: the caller in `index.ts` exits the process.
  */
-export async function bootBackground(): Promise<void> {
-  const env = (await import("@appstrate/env")).getEnv();
-
+export async function bootServing(): Promise<void> {
   // Reconcile the loaded system packages into the DB + S3.
-  await syncSystemPackagesToDb().catch((err) => {
-    logger.warn("Could not sync system packages", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("serving", "sync-system-packages", () =>
+    syncSystemPackagesToDb().catch((err) => {
+      logger.warn("Could not sync system packages", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 
   // Surface orgs whose stored API-version pin this build cannot serve.
-  await warnOnUnserveableApiVersionPins().catch((err) => {
-    logger.warn("Could not check organization API version pins", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("serving", "api-version-pins", () =>
+    warnOnUnserveableApiVersionPins().catch((err) => {
+      logger.warn("Could not check organization API version pins", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 
   // Read in the background: boot never waits on the channel.
-  startModelCatalogSync();
+  await bootStep("serving", "model-catalog-sync", () => startModelCatalogSync());
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
     // `error`, not `warn`: without the triggers every dashboard SSE is silent
     // for the life of the process, and without LISTEN until a retry succeeds.
-    createNotifyTriggers(db)
-      .then(() => logger.info("NOTIFY triggers installed"))
-      .catch((err) => {
-        logger.error("Could not install NOTIFY triggers", {
-          error: getErrorMessage(err),
-        });
+    bootStep("serving", "notify-triggers", () =>
+      createNotifyTriggers(db)
+        .then(() => logger.info("NOTIFY triggers installed"))
+        .catch((err) => {
+          logger.error("Could not install NOTIFY triggers", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("serving", "realtime-listen", () =>
+      retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
+        initialDelayMs: 1_000,
+        level: "error",
       }),
-    retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
-      initialDelayMs: 1_000,
-      level: "error",
-    }),
+    ),
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
     // other replicas fall back to their TTL — degraded, not broken.
-    initCacheBus().catch((err) => {
-      logger.warn("Could not initialize the cache invalidation bus", {
-        error: getErrorMessage(err),
-      });
-    }),
+    bootStep("serving", "cache-bus", () =>
+      initCacheBus().catch((err) => {
+        logger.warn("Could not initialize the cache invalidation bus", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
   ]);
 
+  // Initialize cross-instance cancel subscriber
+  await bootStep("serving", "cancel-subscriber", () => initCancelSubscriber());
+
+  // Billing correctness barrier: unlike ancillary workers, this init is not
+  // caught/degraded. Boot must fail if the durable metering recovery channel
+  // is unavailable; otherwise a transient ledger write failure after
+  // provider spend could be lost permanently.
+  await bootStep("serving", "llm-usage-retry-worker", () => initLlmUsageRetryWorker());
+}
+
+/**
+ * Phase 2b — run capacity. Orphan cleanup then the runtime's first
+ * `initialize()` attempt (image pre-pull); only execution needs them. When they
+ * are done {@link markRunCapacityReady} lifts the launch refusal
+ * (`assertRunCapacityReady`) and the run-related workers start. A rejection is
+ * fatal, as for {@link bootServing}.
+ */
+export async function bootRunCapacity(): Promise<void> {
+  const startedAt = performance.now();
+  const env = (await import("@appstrate/env")).getEnv();
   // Sequential cleanup: orphan runs must be finalized before container
   // cleanup, and containers must be cleaned before orchestrator init.
   //
@@ -314,136 +369,113 @@ export async function bootBackground(): Promise<void> {
   // makes this race-safe against a delayed metric POST that lands during
   // the same boot window.
   const orchestrator = getOrchestrator();
-  try {
-    const orphanIds = await listOrphanRunIds();
-    if (orphanIds.length > 0) {
-      let finalized = 0;
-      // Bounded parallelism, NOT a serial loop. Each orphan costs a Docker
-      // `POST /containers/{id}/stop?t=5`, which blocks for up to the full
-      // grace period when the container ignores SIGTERM — serially that is
-      // 5 s × orphan count added to boot, at exactly the moment (restart
-      // after an incident) the API should come back fastest. The grace
-      // period itself is deliberately left alone: it is what lets a still
-      // running sidecar flush its final events before the SIGKILL.
-      //
-      // Concurrency is capped well under the postgres.js pool (`max: 20`)
-      // because `synthesiseFinalize` writes.
-      // The pool aborts on the first rejection (no new orphan is picked up
-      // once one worker throws). That is a real change from the pool this used
-      // to call, which kept draining the queue regardless — but it cannot fire
-      // here: the callback body below catches everything it can raise and
-      // degrades to a `logger.warn`, so a boot with N orphans still attempts
-      // all N. The abort is the safety net for the day that stops being true.
-      await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
-        try {
-          // An orphaned run may still have a live remote workload — a
-          // firecracker microVM on the runner host keeps executing (and
-          // billing) across a platform restart, and holds a concurrency
-          // slot. Stop it before synthesising the failed terminal. This
-          // is safe for every adapter: docker stops idempotently, process
-          // finds nothing after a restart, firecracker proxies the stop
-          // to the daemon which kills the microVM. `listOrphanRunIds`
-          // already excludes runs a live sibling instance heartbeats
-          // (stall-threshold cutoff), so this never kills another
-          // instance's in-flight run.
-          await orchestrator.stopByRunId(runId).catch((err) => {
-            logger.warn("Could not stop orphaned run's workload", {
+  await bootStep("run-capacity", "orphan-runs", async () => {
+    try {
+      const orphanIds = await listOrphanRunIds();
+      if (orphanIds.length > 0) {
+        let finalized = 0;
+        // Bounded parallelism, NOT a serial loop. Each orphan costs a Docker
+        // `POST /containers/{id}/stop?t=5`, which blocks for up to the full
+        // grace period when the container ignores SIGTERM — serially that is
+        // 5 s × orphan count added to boot, at exactly the moment (restart
+        // after an incident) the API should come back fastest. The grace
+        // period itself is deliberately left alone: it is what lets a still
+        // running sidecar flush its final events before the SIGKILL.
+        //
+        // Concurrency is capped well under the postgres.js pool (`max: 20`)
+        // because `synthesiseFinalize` writes.
+        // The pool aborts on the first rejection (no new orphan is picked up
+        // once one worker throws). It cannot fire here: the callback body below
+        // catches everything it can raise and degrades to a `logger.warn`, so a
+        // boot with N orphans still attempts all N.
+        await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
+          try {
+            // An orphaned run may still have a live remote workload — a
+            // firecracker microVM on the runner host keeps executing (and
+            // billing) across a platform restart, and holds a concurrency
+            // slot. Stop it before synthesising the failed terminal. This
+            // is safe for every adapter: docker stops idempotently, process
+            // finds nothing after a restart, firecracker proxies the stop
+            // to the daemon which kills the microVM. `listOrphanRunIds`
+            // already excludes runs a live sibling instance heartbeats
+            // (stall-threshold cutoff), so this never kills another
+            // instance's in-flight run.
+            await orchestrator.stopByRunId(runId).catch((err) => {
+              logger.warn("Could not stop orphaned run's workload", {
+                runId,
+                error: getErrorMessage(err),
+              });
+            });
+            await synthesiseFinalize(runId, {
+              status: "failed",
+              error: { message: "Server restarted while run was in progress. Please retry." },
+            });
+            finalized++;
+          } catch (err) {
+            logger.warn("Could not finalize orphaned run", {
               runId,
               error: getErrorMessage(err),
             });
-          });
-          await synthesiseFinalize(runId, {
-            status: "failed",
-            error: { message: "Server restarted while run was in progress. Please retry." },
-          });
-          finalized++;
-        } catch (err) {
-          logger.warn("Could not finalize orphaned run", {
-            runId,
-            error: getErrorMessage(err),
-          });
-        }
+          }
+        });
+        logger.info("Finalized orphaned runs", { count: finalized, runIds: orphanIds });
+      }
+    } catch (err) {
+      logger.warn("Could not clean orphaned runs", {
+        error: getErrorMessage(err),
       });
-      logger.info("Finalized orphaned runs", { count: finalized, runIds: orphanIds });
     }
-  } catch (err) {
-    logger.warn("Could not clean orphaned runs", {
-      error: getErrorMessage(err),
-    });
-  }
+  });
 
-  try {
-    const report = await orchestrator.cleanupOrphans();
-    if (report.workloads > 0 || report.isolationBoundaries > 0) {
-      logger.info("Cleaned up orphaned resources", { ...report });
+  await bootStep("run-capacity", "orphan-resources", async () => {
+    try {
+      const report = await orchestrator.cleanupOrphans();
+      if (report.workloads > 0 || report.isolationBoundaries > 0) {
+        logger.info("Cleaned up orphaned resources", { ...report });
+      }
+    } catch (err) {
+      logger.warn("Could not clean up orphaned resources", {
+        error: getErrorMessage(err),
+      });
     }
-  } catch (err) {
-    logger.warn("Could not clean up orphaned resources", {
-      error: getErrorMessage(err),
-    });
-  }
+  });
 
-  // Initialize cross-instance cancel subscriber
-  await initCancelSubscriber();
+  await bootStep("run-capacity", "agent-runtime", () => initializeAgentRuntime(orchestrator));
+  markRunCapacityReady();
+  logger.info("Run capacity ready", { runCapacityMs: Math.round(performance.now() - startedAt) });
 
-  // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
-  const parallelInits: Promise<void>[] = [
-    // Billing correctness barrier: unlike ancillary workers, this init is not
-    // caught/degraded. Boot must fail if the durable metering recovery channel
-    // is unavailable; otherwise a transient ledger write failure after
-    // provider spend could be lost permanently.
-    initLlmUsageRetryWorker(),
-    initializeAgentRuntime(orchestrator),
-    initScheduleWorker().catch((err) => {
-      logger.warn("Could not initialize schedule worker", {
-        error: getErrorMessage(err),
-      });
-    }),
-    initInlineCompactionWorker().catch((err) => {
-      logger.warn("Could not initialize inline compaction worker", {
-        error: getErrorMessage(err),
-      });
-    }),
-    initPersonalSpaceSweeperWorker().catch((err) => {
-      logger.warn("Could not initialize personal-space sweeper", {
-        error: getErrorMessage(err),
-      });
-    }),
-    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
-    // sidecar's reactive 401-retry path and the on-demand token resolver
-    // cover correctness without it; the worker only matters for credentials
-    // that go dormant long enough that their refresh_token would expire
-    // upstream.
-    (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
-      (err) => {
-        logger.warn("Could not initialize OAuth model refresh worker", {
+  await Promise.all([
+    bootStep("run-capacity", "schedule-worker", () =>
+      initScheduleWorker().catch((err) => {
+        logger.warn("Could not initialize schedule worker", {
           error: getErrorMessage(err),
         });
-      },
+      }),
     ),
-    // Pairing-table cleanup runs unconditionally — pure table-bloat
-    // janitor for `model_provider_pairings`, unrelated to the refresh
-    // hot path.
-    initPairingCleanupWorker().catch((err) => {
-      logger.warn("Could not initialize OAuth model pairing cleanup worker", {
-        error: getErrorMessage(err),
-      });
-    }),
-    startRunWatchdog({
-      intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
-      stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
-      maxFinalizesPerTick: 200,
-    }).catch((err) => {
-      logger.warn("Could not start run watchdog", {
-        error: getErrorMessage(err),
-      });
-    }),
+    bootStep("run-capacity", "inline-compaction-worker", () =>
+      initInlineCompactionWorker().catch((err) => {
+        logger.warn("Could not initialize inline compaction worker", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    bootStep("run-capacity", "run-watchdog", () =>
+      startRunWatchdog({
+        intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
+        stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
+        maxFinalizesPerTick: 200,
+      }).catch((err) => {
+        logger.warn("Could not start run watchdog", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
     // Keep the runtime images warm + pinned on the Docker host. Docker-only:
     // it reconciles Docker images and containers, and every other backend
     // owns its own artifact locality. `initialize()` above pre-pulls once;
     // this is what keeps that true against host-level image pruning between
     // runs (see services/orchestrator/runtime-image-warmer.ts).
-    Promise.resolve().then(() => {
+    bootStep("run-capacity", "runtime-image-warmer", () => {
       if (getExecutionMode() !== "docker") return;
       startRuntimeImageWarmer({
         intervalSeconds: env.RUNTIME_IMAGE_WARM_INTERVAL_SECONDS,
@@ -453,46 +485,95 @@ export async function bootBackground(): Promise<void> {
         ],
       });
     }),
-    expireOldInvitations()
-      .then((expiredCount) => {
-        if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
-      })
-      .catch((err) => {
-        logger.warn("Could not expire old invitations", {
-          error: getErrorMessage(err),
-        });
-      }),
-    cleanupExpiredKeys()
-      .then((expiredKeyCount) => {
-        if (expiredKeyCount > 0)
-          logger.info("Revoked expired API keys", { count: expiredKeyCount });
-      })
-      .catch((err) => {
-        logger.warn("Could not clean up expired API keys", {
-          error: getErrorMessage(err),
-        });
-      }),
-    cleanupExpiredUploads()
-      .then((count) => {
-        if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
-      })
-      .catch((err) => {
-        logger.warn("Could not clean up expired uploads", {
-          error: getErrorMessage(err),
-        });
-      }),
-    cleanupExpiredFiles()
-      .then((count) => {
-        if (count > 0) logger.info("Removed expired files", { count });
-      })
-      .catch((err) => {
-        logger.warn("Could not clean up expired files", {
-          error: getErrorMessage(err),
-        });
-      }),
-  ];
+  ]);
+}
 
-  await Promise.all(parallelInits);
+/**
+ * Phase 2c — housekeeping. Table-bloat janitors and storage GC; nothing waits
+ * on them. A rejection is fatal, as for {@link bootServing}.
+ */
+export async function bootHousekeeping(): Promise<void> {
+  const env = (await import("@appstrate/env")).getEnv();
+  await Promise.all([
+    bootStep("housekeeping", "personal-space-sweeper-worker", () =>
+      initPersonalSpaceSweeperWorker().catch((err) => {
+        logger.warn("Could not initialize personal-space sweeper", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
+    // sidecar's reactive 401-retry path and the on-demand token resolver
+    // cover correctness without it; the worker only matters for credentials
+    // that go dormant long enough that their refresh_token would expire
+    // upstream.
+    ...(env.OAUTH_REFRESH_WORKER_ENABLED
+      ? [
+          bootStep("housekeeping", "oauth-model-refresh-worker", () =>
+            initOAuthModelRefreshWorker().catch((err) => {
+              logger.warn("Could not initialize OAuth model refresh worker", {
+                error: getErrorMessage(err),
+              });
+            }),
+          ),
+        ]
+      : []),
+    // Pairing-table cleanup runs unconditionally — pure table-bloat
+    // janitor for `model_provider_pairings`, unrelated to the refresh
+    // hot path.
+    bootStep("housekeeping", "pairing-cleanup-worker", () =>
+      initPairingCleanupWorker().catch((err) => {
+        logger.warn("Could not initialize OAuth model pairing cleanup worker", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    bootStep("housekeeping", "expire-invitations", () =>
+      expireOldInvitations()
+        .then((expiredCount) => {
+          if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
+        })
+        .catch((err) => {
+          logger.warn("Could not expire old invitations", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("housekeeping", "cleanup-expired-keys", () =>
+      cleanupExpiredKeys()
+        .then((expiredKeyCount) => {
+          if (expiredKeyCount > 0)
+            logger.info("Revoked expired API keys", { count: expiredKeyCount });
+        })
+        .catch((err) => {
+          logger.warn("Could not clean up expired API keys", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("housekeeping", "cleanup-expired-uploads", () =>
+      cleanupExpiredUploads()
+        .then((count) => {
+          if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
+        })
+        .catch((err) => {
+          logger.warn("Could not clean up expired uploads", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("housekeeping", "cleanup-expired-files", () =>
+      cleanupExpiredFiles()
+        .then((count) => {
+          if (count > 0) logger.info("Removed expired files", { count });
+        })
+        .catch((err) => {
+          logger.warn("Could not clean up expired files", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+  ]);
 
   // Kick off the recurring upload + file sweeps once initial cleanup is scheduled.
   startUploadGc();
@@ -504,363 +585,13 @@ export async function bootBackground(): Promise<void> {
 }
 
 /**
- * Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
- * are absent although the migrator reported nothing pending.
- *
- * drizzle-orm's postgres-js migrator applies migrations by timestamp watermark
- * (`max(created_at)` in `__drizzle_migrations`), NOT by hash-set membership. A
- * production DB whose watermark was corrupted to a future date (known prod
- * incident) reports nothing pending while every migration below that date was
- * never applied — 0006 among them, which adds `resources text[]` to
- * oauth_access_tokens / oauth_consents / oauth_refresh_tokens and re-defaults
- * oauth_clients.level. The pinned better-auth 1.7 oauth-provider then queries
- * columns that do not exist, and token mint fails on resource/MCP flows.
- * Tier 0 cannot reach this state: `applyCorePGliteMigrations` keys on the
- * journal tag, not on a watermark.
- *
- * This used to re-run 0006's DDL here, idempotently, on every boot of every
- * deployment, forever — a broken database made to work silently, with nothing
- * recording when the repair could stop shipping. That is what
- * `docs/NO_TRANSITIONAL_CODE.md` §3 and §5 forbid. The DDL moved to
- * `scripts/migration/0004-oauth-resources-watermark-drift.sql`, run once by an
- * operator; what stays here detects and refuses.
- *
- * NOT retirement machinery, despite replacing a self-heal: it does not refuse a
- * RETIRED FORM, it detects a watermark corruption that — in this function's own
- * words below — "fires for a drift that first appears from here on". The
- * transition it came from is over; the failure mode it guards is not, so
- * `docs/NO_TRANSITIONAL_CODE.md` §4 does not reach it. A transitional-code
- * audit deleted it once on the strength of the resemblance; that was wrong.
- *
- * Refusing rather than warning, deliberately: the drift is not scoped to 0006.
- * It skipped every migration below the corrupted watermark, so a process that
- * kept running would be serving from a schema nobody can enumerate, failing
- * later at arbitrary unrelated queries. One actionable message at boot beats
- * that. The cost is real and accepted — a deployment this used to repair in
- * place now stays down until the script is run.
- *
- * The probe is a signature, not a proof, and the gap is wider than it looks.
- * It sees one migration, so a watermark corrupted *after* 0006 applied leaves
- * these columns present and this check passes with other migrations still
- * missing. Worse for the upgrade path: the self-heal shipped in every release
- * up to this one and ran on every boot, so a database that drifted BEFORE this
- * release already had the columns restored — it will pass here while its
- * watermark is still corrupt. In practice this fires for a drift that first
- * appears from here on, and for restores of a backup taken before the heal.
- *
- * Restoring the columns therefore clears the boot refusal, not the drift.
- * `scripts/migration/0004-…` ships the ledger diagnostic for the real extent,
- * and its header says the same thing.
- *
- * The general check — compare `max(created_at)` in `__drizzle_migrations`
- * against the largest `when` in `meta/_journal.json` — was considered and
- * rejected. It is exact for this incident but refuses boot after any deliberate
- * ROLLBACK, where a database legitimately carries a watermark from a newer
- * release than the code, and turning routine rollbacks into outages costs more
- * than the corruption it would catch. The diagnostic stays a query an operator
- * runs, not a predicate that stops the process.
- *
- * `columnExists` is injected for tests — production reads the live database.
- */
-export async function assertOAuthResourceColumnsPresent(
-  columnExists: () => Promise<boolean> = oauthResourcesColumnExists,
-): Promise<void> {
-  if (await columnExists()) return;
-
-  throw new Error(
-    "Schema drift: the oauth `resources` columns (migration 0006) are absent even though " +
-      "the migrator reported nothing pending. __drizzle_migrations is ahead of the real " +
-      "schema, so 0006 — and every other migration below the corrupted watermark — was " +
-      "silently skipped. Refusing to boot: token mint would fail at runtime on resource/MCP " +
-      "flows, and the rest of the skipped set is unknown. Apply " +
-      "scripts/migration/0004-oauth-resources-watermark-drift.sql to this database (it ships " +
-      "the diagnostic query for the full extent of the drift), then restart.",
-  );
-}
-
-async function oauthResourcesColumnExists(): Promise<boolean> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const present = toRows(
-    await db.execute(rawSql`
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_name = 'oauth_access_tokens'
-        AND column_name = 'resources'
-      LIMIT 1
-    `),
-  );
-  return present.length > 0;
-}
-
-/**
- * Refuse to boot while `oauth_clients.self_service` still contradicts the
- * `metadata` JSON key it replaced — i.e. while
- * `scripts/migration/0011-oauth-clients-self-service-fold.sql` has not been run
- * on this database.
- *
- * `0057_oauth_provider_1_7_3` lands the column `false` on every row and leaves
- * `metadata` standing, so filling the column from it is operator data repair
- * rather than migration. That opens a window in which every already-registered
- * DCR/CIMD client reads as operator-provisioned.
- *
- * `/oauth2/token` reads `self_service = true` to confine such a client's tokens
- * to exactly one protected resource (`modules/oidc/auth/guards.ts`); a `false`
- * row skips that branch, so the client may bind its token to the broad platform
- * audience and act across the REST API with the connecting user's full
- * authority. Registration is unauthenticated, so it need not be a client an
- * operator knows about.
- *
- * Refusing rather than warning, for the reason
- * {@link assertOAuthResourceColumnsPresent} does.
- *
- * The predicate is EXACTLY the script's `WHERE`, `pg_input_is_valid` included:
- * a row whose `metadata` text is not JSON is one the fold deliberately skips,
- * and counting it here would refuse a boot the script can never clear.
- *
- * §4: delete this, its tests and the README note in the PR that records `0011`
- * as run.
- *
- * `pendingFolds` is injected for tests — production reads the live database.
- */
-export async function assertSelfServiceFoldApplied(
-  pendingFolds: () => Promise<number> = unfoldedSelfServiceClientCount,
-): Promise<void> {
-  const pending = await pendingFolds();
-  if (pending === 0) return;
-
-  throw new Error(
-    `Security control off: ${pending} oauth client(s) carry the metadata key \`selfService\` ` +
-      "while their `self_service` column is still false, so migration 0057 has been applied " +
-      "and scripts/migration/0011-oauth-clients-self-service-fold.sql has not. Until it runs, " +
-      "/oauth2/token reads those self-registered (DCR/CIMD) clients as operator-provisioned " +
-      "and stops confining their tokens to a single protected resource — each one may bind a " +
-      "token to the whole platform audience and act across the REST API with the connecting " +
-      "user's full authority. Refusing to boot: apply " +
-      "scripts/migration/0011-oauth-clients-self-service-fold.sql to this database, then " +
-      "restart.",
-  );
-}
-
-async function unfoldedSelfServiceClientCount(): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const [row] = toRows<{ pending: number }>(
-    await db.execute(rawSql`
-      SELECT count(*)::int AS pending
-      FROM oauth_clients
-      WHERE self_service = false
-        AND metadata IS NOT NULL
-        AND pg_input_is_valid(metadata, 'jsonb')
-        AND metadata::jsonb ->> 'selfService' = 'true'
-    `),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while a connection's shares are still in `integration_connections.shared_space_ids`
- * — i.e. while `scripts/migration/0044-connection-shares.ts` has not been run on this database.
- *
- * Drizzle `0089` creates `integration_connection_shares` empty and leaves the column standing,
- * read only by `0044` and this guard. Every share lives in the table, so until `0044` copies the
- * column into it every existing share is invisible: the members of the target space no longer
- * reach the connection, and a schedule naming it is disabled at its next fire, for good.
- *
- * Refusing rather than warning, for the reason {@link assertOAuthResourceColumnsPresent} does.
- *
- * The predicate is EXACTLY the `WHERE` with which `0044` empties the column, so the script always
- * clears it: a target space it skips (deleted, or of another organization) is emptied all the same.
- * A fresh install never writes the column, and a database `0044` has run on holds it empty.
- *
- * The command it names targets the database this process runs on: `DATABASE_URL`, or, on an
- * embedded database (`embeddedDataDir`), that directory named through `PGLITE_DATA_DIR`, which the
- * script requires so that a run with a forgotten `.env` never opens the default one.
- *
- * §4: delete this and its tests in the release that drops `shared_space_ids`.
- *
- * `pendingCopies` is injected for tests — production reads the live database.
- */
-export async function assertConnectionSharesCopied(
-  embeddedDataDir: string | null,
-  pendingCopies: () => Promise<number> = uncopiedShareConnectionCount,
-): Promise<void> {
-  const pending = await pendingCopies();
-  if (pending === 0) return;
-
-  const script = "bun scripts/migration/0044-connection-shares.ts";
-  const command =
-    embeddedDataDir === null
-      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
-      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
-        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
-        "opens in one process at a time)";
-  throw new Error(
-    `Connection shares not copied: ${pending} connection(s) still hold space ids in ` +
-      "integration_connections.shared_space_ids, so migration 0089 has been applied and " +
-      "scripts/migration/0044-connection-shares.ts has not. Until it runs, every one of those " +
-      "shares is invisible: the spaces they reach lose the connection, and each schedule naming " +
-      `one is disabled at its next fire. Refusing to boot: run ${command}, then restart.`,
-  );
-}
-
-/** `database` is injected for tests that probe a second embedded database. */
-export async function uncopiedShareConnectionCount(
-  database: { execute(query: SQL): PromiseLike<unknown> } = db,
-): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const [row] = toRows<{ pending: number }>(
-    await database.execute(rawSql`
-      SELECT count(*)::int AS pending
-      FROM integration_connections
-      WHERE cardinality(shared_space_ids) > 0
-    `),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while `package_shares` holds a row, i.e. until
- * `scripts/migration/0048-fold-package-shares.ts` has run: unfolded shares would
- * vanish from the spaces they were shared with. Refuses rather than warns, like
- * {@link assertOAuthResourceColumnsPresent}. Delete with the release that drops
- * `package_shares` (§4). `pendingFolds` is injected for tests.
- */
-export async function assertPackageSharesFolded(
-  embeddedDataDir: string | null,
-  pendingFolds: () => Promise<number> = unfoldedPackageShareCount,
-): Promise<void> {
-  const pending = await pendingFolds();
-  if (pending === 0) return;
-
-  const script = "bun scripts/migration/0048-fold-package-shares.ts";
-  const command =
-    embeddedDataDir === null
-      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
-      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
-        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
-        "opens in one process at a time)";
-  throw new Error(
-    `Package shares not folded: package_shares still holds ${pending} row(s), so migration 0100 ` +
-      "has been applied and scripts/migration/0048-fold-package-shares.ts has not. Until it " +
-      "runs, every package shared but never activated is gone from the space it was shared " +
-      `with. Refusing to boot: run ${command}, then restart.`,
-  );
-}
-
-/** `database` is injected for tests that probe a second embedded database. */
-export async function unfoldedPackageShareCount(
-  database: { execute(query: SQL): PromiseLike<unknown> } = db,
-): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  const [row] = toRows<{ pending: number }>(
-    await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while the database holds a ciphertext under a key id absent from the keyring
- * (a retired key dropped before `scripts/rekey-encrypted-columns.ts` re-encrypted its rows, a
- * misspelt kid): every read of those rows would fail. The inventory is the rekey script's.
- * A configured kid none of whose samples opens is only warned about: dead rows written by an
- * older key under the same id would make a refusal crash-loop on a correct key.
- */
-export async function assertKeyringCoversCiphertexts(
-  inventory: () => Promise<readonly KidCount[]> = storedCiphertextKids,
-  knownKids: ReadonlySet<string> = keyringKids(),
-): Promise<void> {
-  const missing = new Map<string, string[]>();
-  const opens = new Map<string, boolean>();
-  for (const { table, column, kid, count, samples } of await inventory()) {
-    if (kid === null) continue;
-    if (knownKids.has(kid)) {
-      opens.set(kid, opens.get(kid) || samples.some(opensWithKeyring));
-      continue;
-    }
-    missing.set(kid, [...(missing.get(kid) ?? []), `${table}.${column} (${count})`]);
-  }
-  for (const [kid, opened] of opens) {
-    if (opened) continue;
-    logger.warn("Encryption key opens none of its kid's sampled ciphertexts", {
-      kid,
-      remedy:
-        "a key replaced under the same id? `bun scripts/rekey-encrypted-columns.ts` names the column",
-    });
-  }
-  if (missing.size === 0) return;
-
-  const detail = [...missing].map(([kid, where]) => `'${kid}' in ${where.join(", ")}`);
-  throw new Error(
-    `Missing encryption key(s): the database holds ciphertexts under ${detail.join("; ")}, ` +
-      "and no key with that id is configured. Refusing to boot: every read of those rows " +
-      "would fail. Add each missing key to CONNECTION_ENCRYPTION_KEYS (kid → base64 key), " +
-      "then restart.",
-  );
-}
-
-async function storedCiphertextKids(): Promise<KidCount[]> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  return countByKid(async (text) => toRows(await db.execute(rawSql.raw(text))));
-}
-
-/**
  * Apply Drizzle migrations programmatically for PGlite (embedded mode).
  * Delegates to the shared `applyCorePGliteMigrations` helper so the embedded
  * boot path and the tier0 test preload run identical migration logic.
  */
 async function applyEmbeddedMigrations(): Promise<void> {
-  const { resolve } = await import("node:path");
   const { applyCorePGliteMigrations } = await import("./pglite-migrate.ts");
-  await applyCorePGliteMigrations(resolve(import.meta.dir, "../../../../packages/db/drizzle"));
-}
-
-/**
- * Apply Drizzle migrations for PostgreSQL using the standard migrator.
- * Idempotent — already-applied migrations are skipped via the tracking table.
- *
- * Multi-replica safety: drizzle-orm's migrator does not take a lock, so two
- * API replicas starting simultaneously can race on `__drizzle_migrations`.
- * We wrap the whole migration in a PostgreSQL session-level advisory lock
- * using a stable constant key (shared across all replicas). A second caller
- * blocks until the first finishes, then observes its entries in the tracking
- * table and skips them.
- *
- * pg_advisory_lock is session-scoped: the lock and unlock must target the
- * same backend connection. We pin them to a reserved postgres-js connection;
- * the migrator runs on the shared pool since holding the lock elsewhere is
- * enough to block concurrent replicas.
- */
-const APPSTRATE_CORE_MIGRATION_LOCK_KEY = 7246811234567890n;
-
-async function applyCoreMigrations(): Promise<void> {
-  const { resolve } = await import("node:path");
-  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
-  const { sql: rawSql } = await import("drizzle-orm");
-
-  const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
-
-  const reserved = await reservePgConnection();
-  if (!reserved) {
-    throw new Error("reservePgConnection() returned null — expected PostgreSQL client");
-  }
-  const { sql: reservedSql, release } = reserved;
-
-  try {
-    await reservedSql`SELECT pg_advisory_lock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
-    try {
-      await db.execute(rawSql`SET client_min_messages TO 'warning'`);
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema generic widening for migrator
-        await migrate(db as any, { migrationsFolder });
-      } finally {
-        await db.execute(rawSql`SET client_min_messages TO 'notice'`);
-      }
-    } finally {
-      await reservedSql`SELECT pg_advisory_unlock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
-    }
-  } finally {
-    release();
-  }
-  logger.info("Core migrations applied");
+  await applyCorePGliteMigrations(CORE_MIGRATIONS_FOLDER);
 }
 
 /**

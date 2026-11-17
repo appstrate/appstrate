@@ -18,9 +18,11 @@ import { drizzle } from "drizzle-orm/pglite";
 import { db, getPGliteClient } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import {
-  assertConnectionSharesCopied,
-  uncopiedShareConnectionCount,
-} from "../../apps/api/src/lib/boot.ts";
+  assertNoPendingDataScripts,
+  PENDING_DATA_SCRIPTS,
+  type PendingDatabase,
+  type PendingDataScript,
+} from "../../apps/api/src/lib/boot-guards/pending-data-scripts.ts";
 import { runConnectionShares } from "../migration/0044-connection-shares.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
@@ -56,22 +58,39 @@ async function seedConnection(sharedSpaceIds: string[]): Promise<void> {
 }
 
 const apply0044 = () => runConnectionShares({ apply: true, out: () => {} });
-const guard = () => assertConnectionSharesCopied(null);
+const ENTRY = PENDING_DATA_SCRIPTS.find((e) => e.after === "0089")!;
+const withCount = (pending: PendingDataScript["pending"]) => [{ ...ENTRY, pending }];
+const assertEntry = (dir: string | null, database?: PendingDatabase) =>
+  assertNoPendingDataScripts(dir, [ENTRY], database);
+const guard = () => assertEntry(null);
 
-describe("assertConnectionSharesCopied — injected count", () => {
+describe("0044 entry — injected count", () => {
   it("returns once no connection holds a share in the column", async () => {
-    expect(await assertConnectionSharesCopied(null, async () => 0)).toBeUndefined();
+    expect(
+      await assertNoPendingDataScripts(
+        null,
+        withCount(async () => 0),
+      ),
+    ).toBeUndefined();
   });
 
   it("refuses to boot, naming the count and the operator command", async () => {
-    await expect(assertConnectionSharesCopied(null, async () => 3)).rejects.toThrow(
-      /3 connection\(s\)[\s\S]*Refusing to boot[\s\S]*0044-connection-shares\.ts --apply`, with this DATABASE_URL/,
+    await expect(
+      assertNoPendingDataScripts(
+        null,
+        withCount(async () => 3),
+      ),
+    ).rejects.toThrow(
+      /0044-connection-shares\.ts \(after drizzle 0089\): 3 pending[\s\S]*then `bun scripts\/migration\/0044-connection-shares\.ts --apply`, with this DATABASE_URL[\s\S]*Refusing to boot/,
     );
   });
 
   it("names the embedded database's directory on an embedded database", async () => {
     await expect(
-      assertConnectionSharesCopied("/srv/appstrate/data/pglite", async () => 1),
+      assertNoPendingDataScripts(
+        "/srv/appstrate/data/pglite",
+        withCount(async () => 1),
+      ),
     ).rejects.toThrow(
       "`PGLITE_DATA_DIR=/srv/appstrate/data/pglite bun scripts/migration/0044-connection-shares.ts` (dry run), then the same with `--apply`",
     );
@@ -79,13 +98,16 @@ describe("assertConnectionSharesCopied — injected count", () => {
 
   it("propagates a failing probe instead of assuming the copy ran", async () => {
     const boom = new Error("connection terminated");
-    await expect(assertConnectionSharesCopied(null, () => Promise.reject(boom))).rejects.toThrow(
-      boom,
-    );
+    await expect(
+      assertNoPendingDataScripts(
+        null,
+        withCount(() => Promise.reject(boom)),
+      ),
+    ).rejects.toThrow(boom);
   });
 });
 
-describe("assertConnectionSharesCopied — live database", () => {
+describe("0044 entry — live database", () => {
   const dirs: string[] = [];
   const tempDir = (prefix: string) => {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -113,7 +135,7 @@ describe("assertConnectionSharesCopied — live database", () => {
     await expect(guard()).rejects.toThrow(COMMAND);
 
     await runConnectionShares({ apply: false, out: () => {} });
-    await expect(guard()).rejects.toThrow(/1 connection\(s\)/);
+    await expect(guard()).rejects.toThrow(/: 1 pending/);
 
     expect((await apply0044()).inserted).toBe(1);
     expect(await guard()).toBeUndefined();
@@ -136,9 +158,7 @@ describe("assertConnectionSharesCopied — live database", () => {
       await seedConnection([ctx.defaultSpaceId]);
       const dataDir = tempDir("pglite-0044-");
       const seeded = new PGlite(dataDir, { loadDataDir: await getPGliteClient()!.dumpDataDir() });
-      await expect(
-        assertConnectionSharesCopied(dataDir, () => uncopiedShareConnectionCount(drizzle(seeded))),
-      ).rejects.toThrow(
+      await expect(assertEntry(dataDir, drizzle(seeded))).rejects.toThrow(
         `PGLITE_DATA_DIR=${dataDir} bun scripts/migration/0044-connection-shares.ts`,
       );
       await seeded.close();
@@ -173,11 +193,7 @@ describe("assertConnectionSharesCopied — live database", () => {
 
       const migrated = new PGlite(dataDir);
       try {
-        expect(
-          await assertConnectionSharesCopied(dataDir, () =>
-            uncopiedShareConnectionCount(drizzle(migrated)),
-          ),
-        ).toBeUndefined();
+        expect(await assertEntry(dataDir, drizzle(migrated))).toBeUndefined();
       } finally {
         await migrated.close();
       }

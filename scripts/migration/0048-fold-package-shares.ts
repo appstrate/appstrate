@@ -9,7 +9,8 @@
  *
  * Run after drizzle `0100` has applied and BEFORE the app starts (`pg_dump`
  * first): the platform refuses to boot while `package_shares` holds a row
- * (`assertPackageSharesFolded`). Dry run by default (rolled back); `--apply`
+ * (the `0048` entry of
+ * `PENDING_DATA_SCRIPTS`, `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). Dry run by default (rolled back); `--apply`
  * commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or
  * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
  *
