@@ -27,6 +27,8 @@ const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { render } = await import("../../test/render.tsx");
 const { $api } = await import("../../api/client.ts");
+const { authStore } = await import("../../stores/auth-store.ts");
+const { overviewStore } = await import("../../stores/overview-store.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
@@ -38,7 +40,7 @@ const SPACE_ID = "spc_a";
 
 type Verdict = "allowed" | "not_shareable" | "forbidden";
 
-function renderAlert(verdict: Verdict): string {
+function renderAlert(verdict: Verdict, seed: (qc: QueryClient) => void = () => {}): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/spaces/{id}/library", {
@@ -60,6 +62,7 @@ function renderAlert(verdict: Verdict): string {
       },
     },
   );
+  seed(queryClient);
   const org = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
     id: ORG_ID,
@@ -98,5 +101,40 @@ describe("the switched-off banner", () => {
     const html = renderAlert("forbidden");
     expect(html).toContain(i18n.t("detail.deactivatedHere", { ns: "agents" }));
     expect(hasActivateButton(html)).toBe(false);
+  });
+});
+
+describe("the switched-off banner in « Tous les espaces »", () => {
+  it("is silent: it would speak of a space the page does not name", () => {
+    const mode = [
+      spyOn(authStore, "getInitialState").mockReturnValue({
+        ...authStore.getInitialState(),
+        user: { id: "u_1", email: "u@example.test", emailVerified: true },
+      }),
+      spyOn(overviewStore, "getInitialState").mockReturnValue({
+        ...overviewStore.getInitialState(),
+        chosen: { [`u_1:${ORG_ID}`]: true },
+      }),
+    ];
+    try {
+      const html = renderAlert("allowed", (qc) =>
+        qc.setQueryData(
+          $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
+            .queryKey,
+          {
+            object: "list",
+            hasMore: false,
+            data: [SPACE_ID, "spc_b"].map((id) => ({
+              id,
+              access: "member",
+              permissions: ["agents:read"],
+            })),
+          },
+        ),
+      );
+      expect(html).toBe("");
+    } finally {
+      for (const stub of mode) stub.mockRestore();
+    }
   });
 });

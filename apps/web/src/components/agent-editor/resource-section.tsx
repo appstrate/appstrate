@@ -43,7 +43,8 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { useSpacesFor } from "../../hooks/use-space-action";
 import { packagePermission } from "@appstrate/core/permissions";
 import { TextSkeleton } from "../loading-skeletons";
 
@@ -72,16 +73,22 @@ export function ResourceSection({
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  // The picker offers what this space RUNS: activation governs what a space
-  // offers — hints, CLI sync, this list — so the index (placed here and
+  // The picker offers what the working space RUNS: activation governs what a
+  // space offers — hints, CLI sync, this list — so the index (placed there and
   // switched on, every type) is the offer. It is narrower than what a manifest
   // may declare: resolving a DECLARED dependency name stays org-wide (RBAC
   // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
-  // package this space does not run, and the entry below stays visible for it.
-  const { data: items, isLoading, error } = usePackageList(type);
+  // package that space does not run, and the entry below stays visible for it.
+  // The definition is the package's, the same in every space: in « Tous les
+  // espaces » the offer is what runs in any space the reader reaches.
+  const { on: anySpace } = useOverviewMode();
+  const { data: items, isLoading, error } = usePackageList(type, anySpace);
   // Without the type's read the catalog never loads: the declared
   // entries are then all this section knows, listed by id.
-  const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
+  const canReadCatalog = useSpacesFor({ permission: packagePermission(type, "read") }).offered;
+  const catalogUnreadable = t(
+    anySpace ? "editor.catalogUnreadableAnySpace" : "editor.catalogUnreadable",
+  );
   const [importing, setImporting] = useState(false);
   const [picking, setPicking] = useState(false);
   const [toolsId, setToolsId] = useState<string | null>(null);
@@ -171,7 +178,7 @@ export function ResourceSection({
         <TextSkeleton className="py-2" />
       ) : selectedEntries.length === 0 ? (
         <EmptyState
-          message={canReadCatalog ? emptyLabel : t("editor.catalogUnreadable")}
+          message={canReadCatalog ? emptyLabel : catalogUnreadable}
           icon={SearchX}
           compact
         >
@@ -185,7 +192,7 @@ export function ResourceSection({
         <div className="border-border overflow-hidden rounded-lg border">
           {!canReadCatalog && (
             <p className="text-muted-foreground border-border border-b px-4 py-3 text-xs">
-              {t("editor.catalogUnreadable")}
+              {catalogUnreadable}
             </p>
           )}
           <Table>
@@ -217,9 +224,15 @@ export function ResourceSection({
                         {flagged ? (
                           <span className="text-destructive inline-flex items-center gap-1 text-xs">
                             <AlertTriangle className="size-3.5 shrink-0" />
-                            {isIntegration
-                              ? t("editor.integrationInactive")
-                              : t("editor.dependencyMissing")}
+                            {t(
+                              isIntegration
+                                ? anySpace
+                                  ? "editor.integrationInactiveAnySpace"
+                                  : "editor.integrationInactive"
+                                : anySpace
+                                  ? "editor.dependencyMissingAnySpace"
+                                  : "editor.dependencyMissing",
+                            )}
                           </span>
                         ) : (
                           item?.description && (
@@ -237,7 +250,9 @@ export function ResourceSection({
                             {entry.version ?? "*"}
                           </span>
                         ) : (
-                          isIntegration && <ActivateIntegrationButton packageId={entry.id} />
+                          // It switches it on in the working space, which the mode does not name.
+                          isIntegration &&
+                          !anySpace && <ActivateIntegrationButton packageId={entry.id} />
                         )
                       ) : (
                         <PackageVersionSelect

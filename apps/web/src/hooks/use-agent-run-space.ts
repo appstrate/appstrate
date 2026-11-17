@@ -14,14 +14,15 @@ import { spaceStore } from "../stores/space-store";
 const NO_SPACES: readonly string[] = [];
 
 /**
- * Running an agent where it runs: `useSpaceAction` over `agents:run` among `spaceIds` (the working
+ * An act on an agent where `permission` holds: `useSpaceAction` among `spaceIds` (the working
  * space's alone when empty). Entering another space reads the agent's detail there first;
  * `enteredDetail()`, called by the action once in the space, puts it back on that space's key (the
  * switch drops the package caches) and returns it, so the screen redrawn after the switch and the
- * dialog the run opens hold that space's agent without waiting for it. `entering` while it reads.
+ * dialog the act opens hold that space's agent without waiting for it. `entering` while it reads.
  */
-export function useAgentRunSpace(
+export function useAgentSpaceAction(
   packageId: string,
+  permission: string,
   spaceIds: readonly string[] = NO_SPACES,
   { preferWorkingSpace }: { preferWorkingSpace?: boolean } = {},
 ) {
@@ -35,7 +36,7 @@ export function useAgentRunSpace(
     packageDetailQueryOptions("agent", { orgId, spaceId }, packageId);
 
   const action = useSpaceAction(
-    { permission: "agents:run" },
+    { permission },
     spaceIds.length > 0 ? spaceIds : workingSpaceId ? [workingSpaceId] : NO_SPACES,
     {
       preferWorkingSpace,
@@ -63,4 +64,13 @@ export function useAgentRunSpace(
   };
 
   return { ...action, entering, enteredDetail };
+}
+
+/** Running an agent where it runs: {@link useAgentSpaceAction} over `agents:run`. */
+export function useAgentRunSpace(
+  packageId: string,
+  spaceIds?: readonly string[],
+  options?: { preferWorkingSpace?: boolean },
+) {
+  return useAgentSpaceAction(packageId, "agents:run", spaceIds, options);
 }

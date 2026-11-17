@@ -20,6 +20,7 @@ import type { SchemaWrapper } from "@appstrate/core/form";
 import type { Versioned } from "../../hooks/use-packages";
 import { RoleLimitNotice } from "../role-limit-notice";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useAdmittingSpaces, useOverviewMode } from "../../hooks/use-overview-mode";
 import { agentConnectionsTabVisible } from "../../lib/route-access";
 import {
   AGENT_DEFINITION_SECTIONS,
@@ -107,6 +108,10 @@ export function AgentSettingsView({
 }) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
+  // The schedules section spans spaces in « Tous les espaces »: some space grants reading them.
+  const { on: overview } = useOverviewMode();
+  const scheduleSpaces = useAdmittingSpaces("schedules");
+  const readsSchedules = overview ? scheduleSpaces.length > 0 : can("schedules:read");
   // Write authority is the package's HOME space (`home_writable`), never the
   // space being browsed; nobody writes a system agent or a pinned version.
   const canEditDefinition = !!detail.home_writable && !isHistorical;
@@ -121,7 +126,7 @@ export function AgentSettingsView({
     if (section === "model" || section === "proxy" || section === "inputs") {
       return can("agents:configure");
     }
-    if (section === "schedules") return can("schedules:read");
+    if (section === "schedules") return readsSchedules;
     if (section === "connections") return agentConnectionsTabVisible(can);
     if (section === "files") return can("agents:read");
     // A system agent has no history of its own to browse.

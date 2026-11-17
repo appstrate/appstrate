@@ -39,9 +39,20 @@ export const AGENT_RUN_BLOCKERS = Object.keys({
   "detail.titleNoDefaultModel": true,
 } satisfies Record<AgentRunBlocker, true>);
 
+/**
+ * Where a verdict is judged: the space the detail was read in, or, `anySpace` (« Tous les espaces »,
+ * the space chosen at launch), only on what holds in every space; the launch answers the rest.
+ */
+interface VerdictScope {
+  anySpace?: boolean;
+}
+
 /** The refusals no launch option can cure, as i18n keys (namespace `agents`); switched off comes first (one click cures it). */
-export function agentLaunchRefusal(detail: AgentDetail): AgentLaunchRefusal | null {
-  if (!detail.active) return "detail.titleNotActive";
+export function agentLaunchRefusal(
+  detail: AgentDetail,
+  { anySpace = false }: VerdictScope = {},
+): AgentLaunchRefusal | null {
+  if (!anySpace && !detail.active) return "detail.titleNotActive";
   if (isNeverPublishedForReader(detail)) return "detail.titleNeverPublished";
   return null;
 }
@@ -55,17 +66,20 @@ export function agentModelBlocker(
   return orgModels.some(isModelSelectable) ? "detail.titleNoDefaultModel" : "detail.titleModel";
 }
 
-/** What blocks a plain run in this space. Unfilled parameters and missing connections are not gates: the launch asks for them. */
+/** What blocks a plain run. Unfilled parameters and missing connections are not gates: the launch asks for them. */
 export function agentRunBlocker(
   detail: AgentDetail,
   modelBlocker: AgentModelBlocker | null,
+  scope: VerdictScope = {},
 ): AgentRunBlocker | null {
-  const refusal = agentLaunchRefusal(detail);
+  const refusal = agentLaunchRefusal(detail, scope);
   if (refusal) return refusal;
   // A summary read (`agents:run` without `agents:read`) omits the prompt: absent is unknown.
   if (detail.prompt !== undefined && isPromptEmpty(detail.prompt)) {
     return "detail.titleEmptyPrompt";
   }
+  // The skills a run gets are those placed in the space it runs in.
+  if (scope.anySpace) return modelBlocker;
   const requiredSkills =
     (detail.manifest?.dependencies as Record<string, Record<string, string>> | undefined)?.skills ??
     {};
@@ -76,17 +90,26 @@ export function agentRunBlocker(
   return modelBlocker;
 }
 
-/** `undefined` for a page that is not an agent's: neither read is made. */
-export function useAgentModelBlocker(packageId: string | undefined): AgentModelBlocker | null {
+/**
+ * `undefined` for a page that is not an agent's: neither read is made. `anySpace` reads no space's
+ * pin and blocks only on an organization with no usable model: a pin in the chosen space may
+ * answer a missing default.
+ */
+export function useAgentModelBlocker(
+  packageId: string | undefined,
+  { anySpace = false }: VerdictScope = {},
+): AgentModelBlocker | null {
   const { data: orgModels } = useModels(packageId !== undefined);
-  const { data: agentModel } = useAgentModel(packageId);
-  return agentModelBlocker(orgModels, agentModel?.modelId);
+  const { data: agentModel } = useAgentModel(anySpace ? undefined : packageId);
+  const blocker = agentModelBlocker(orgModels, agentModel?.modelId);
+  return anySpace && blocker === "detail.titleNoDefaultModel" ? null : blocker;
 }
 
 export function useAgentRunBlocker(
   packageId: string,
   detail: AgentDetail | undefined,
+  scope: VerdictScope = {},
 ): AgentRunBlocker | null {
-  const modelBlocker = useAgentModelBlocker(packageId);
-  return detail ? agentRunBlocker(detail, modelBlocker) : null;
+  const modelBlocker = useAgentModelBlocker(packageId, scope);
+  return detail ? agentRunBlocker(detail, modelBlocker, scope) : null;
 }

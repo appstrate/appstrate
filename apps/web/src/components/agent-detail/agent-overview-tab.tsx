@@ -66,7 +66,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
   const { t } = useTranslation("agents");
   const location = useLocation();
   // The detail counts the space it was read in. In « Tous les espaces » the figures follow the
-  // Runs tab instead: the agent's runs in every space the reader reaches.
+  // tabs instead: the agent's runs, schedules and memory in every space the reader reaches.
   const { on: spanning } = useOverviewMode();
   const workingSpaceId = useCurrentSpaceId();
   const latest = useFirstRunsPage({ packageId, spanning: true, limit: 1, enabled: spanning });
@@ -92,18 +92,24 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
     isLoading: schedulesLoading,
     isError: schedulesError,
     isSuccess: schedulesSuccess,
-  } = useSchedules(packageId);
+  } = useSchedules(packageId, { spanning });
   const {
     data: memories,
     isLoading: memoriesLoading,
     isError: memoriesError,
-  } = useAgentMemories(packageId);
+  } = useAgentMemories(packageId, { spanning });
   const {
     data: pinned,
     isLoading: pinnedLoading,
     isError: pinnedError,
-  } = useAgentPinned(packageId);
-  const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
+  } = useAgentPinned(packageId, { spanning });
+  const nextSchedule = schedules
+    ?.filter((schedule) => schedule.enabled && schedule.next_run_at)
+    .reduce<(typeof schedules)[number] | undefined>(
+      (soonest, schedule) =>
+        !soonest || schedule.next_run_at! < soonest.next_run_at! ? schedule : soonest,
+      undefined,
+    );
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
   const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 

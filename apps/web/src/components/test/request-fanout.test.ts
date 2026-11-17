@@ -71,6 +71,7 @@ const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
 const ACTIONS_DROPDOWN = read("../package-detail/package-actions-dropdown.tsx");
+const AGENT_DEEDS = read("../package-detail/use-agent-deeds.ts");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
@@ -104,7 +105,8 @@ describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
     expect(code(AGENT_ACTIONS)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
     expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
-    expect(ACTIONS_DROPDOWN).toContain("!detail?.last_run");
+    // With a working space the deed reads the detail; only « Tous les espaces » asks each space.
+    expect(AGENT_DEEDS).toContain("!!detail?.last_run");
   });
 
   it("marks the run lists stale on launch without refetching the page being left", () => {
@@ -132,13 +134,18 @@ describe("package pages other than an agent's", () => {
 });
 
 describe("notification freshness", () => {
+  // One space's feed: the stream keeps it live, the poll is a backstop. Across spaces the feed
+  // polls with the other spanning lists (`across-spaces-polling.test.tsx`).
   it("polls as a backstop (5 min), on every notification query", () => {
     expect(NOTIFICATIONS).toContain("const NOTIFICATION_POLL_INTERVAL_MS = 300_000;");
     const intervals = [...NOTIFICATIONS.matchAll(/refetchInterval:\s*([^,\n]+)/g)].map(
       (m) => m[1]!,
     );
-    expect(intervals).toHaveLength(2);
-    expect(intervals.every((v) => v === "NOTIFICATION_POLL_INTERVAL_MS")).toBe(true);
+    expect(intervals).toEqual([
+      "scope.refetchInterval ?? NOTIFICATION_POLL_INTERVAL_MS",
+      "scope.refetchInterval",
+      "scope.refetchInterval",
+    ]);
   });
 
   // The load-bearing half: without this, slowing the poll down means a missed

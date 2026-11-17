@@ -2,17 +2,20 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { schemaHasFileFields } from "@appstrate/core/form";
+import type { AgentDetail } from "@appstrate/shared-types";
 import { useDeletePackage, usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
-import { useAgentMemories } from "../../hooks/use-persistence";
-import {
-  useDeleteAgentRuns,
-  useDeleteAllMemories,
-  useRunLauncher,
-} from "../../hooks/use-mutations";
+import { useAgentMemories, useDeleteAgentMemories } from "../../hooks/use-persistence";
+import { useDeleteAgentRuns, useRunLauncher } from "../../hooks/use-mutations";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useAgentRunSpace } from "../../hooks/use-agent-run-space";
+import { useAgentRunSpace, useAgentSpaceAction } from "../../hooks/use-agent-run-space";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
+import { spaceStore } from "../../stores/space-store";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
+import { deedOfAction } from "./space-deed";
+import { useBundleDeed, useClearRunsDeed } from "./use-agent-deeds";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
 import { RunLaunchRecovery } from "../run-launch-recovery";
@@ -55,22 +58,41 @@ export function AgentActions({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { can } = usePermissions();
+  const { on: overview } = useOverviewMode();
+  const spaceLabelOf = useSpaceLabelOf();
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeletePackage("agent");
   const deleteRuns = useDeleteAgentRuns(packageId);
-  const deleteAllMemories = useDeleteAllMemories(packageId);
+  const deleteAllMemories = useDeleteAgentMemories(packageId);
   const launcher = useRunLauncher(packageId);
-  const [confirming, setConfirming] = useState<Confirmation | null>(null);
+  // The space a confirmation acts in, kept while its dialog fades out.
+  const [confirming, setConfirming] = useState<{
+    kind: Confirmation;
+    spaceId: string | null;
+  } | null>(null);
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
-  // As « Lancer »: in « Tous les espaces », the space is picked among the agent's.
+  // In « Tous les espaces », each deed below asks its space among the agent's: the page names none.
   const runSpace = useAgentRunSpace(packageId, detail?.space_ids, { preferWorkingSpace: false });
+  const scheduleSpace = useAgentSpaceAction(packageId, "schedules:write", detail?.space_ids, {
+    preferWorkingSpace: false,
+  });
+  const memoriesSpace = useAgentSpaceAction(packageId, "persistence:delete", detail?.space_ids, {
+    preferWorkingSpace: false,
+  });
+  const clearRuns = useClearRunsDeed(packageId, detail, (spaceId) =>
+    setConfirming({ kind: "clearRuns", spaceId }),
+  );
+  const bundle = useBundleDeed(
+    detail,
+    downloadBundle ? () => downloadBundle(downloadVersion) : undefined,
+  );
 
   if (!detail) return null;
 
   // Not the full run verdict: the options modal picks the model and the version.
-  const refusal = agentLaunchRefusal(detail);
+  const refusal = agentLaunchRefusal(detail, { anySpace: overview });
   const runBlockedReason = refusal ? t(refusal) : unsavedReason;
   const canRunWithOptions = can("agents:run") && !runBlockedReason;
   // Opened once in the space: the modal reads the agent of the space entered.
@@ -78,15 +100,36 @@ export function AgentActions({
     runSpace.enteredDetail();
     setRunOptionsOpen(true);
   };
+  // Asked once in the space: the deletion runs in the space entered.
+  const confirmMemories = () => {
+    memoriesSpace.enteredDetail();
+    setConfirming({ kind: "clearMemories", spaceId: spaceStore.getState().id });
+  };
+  const openNewSchedule = () => {
+    scheduleSpace.enteredDetail();
+    setNewScheduleOpen(true);
+  };
+  const clearMemories = deedOfAction(
+    memoriesSpace,
+    t("common:spaceChoice.clearMemories"),
+    confirmMemories,
+  );
   const pendingConfirmation =
     deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending;
 
   const confirm = () => {
     const onSuccess = () => setConfirming(null);
-    if (confirming === "deleteAgent") deleteAgent.mutate(detail.id, { onSuccess });
-    else if (confirming === "clearRuns") deleteRuns.mutate(undefined, { onSuccess });
-    else if (confirming === "clearMemories") deleteAllMemories.mutate(undefined, { onSuccess });
+    if (confirming?.kind === "deleteAgent") deleteAgent.mutate(detail.id, { onSuccess });
+    else if (confirming?.kind === "clearRuns" && confirming.spaceId) {
+      deleteRuns.mutate(confirming.spaceId, { onSuccess });
+    } else if (confirming?.kind === "clearMemories" && confirming.spaceId) {
+      deleteAllMemories.mutate(confirming.spaceId, { onSuccess });
+    }
   };
+  const confirmText = confirming && CONFIRM_TEXT[confirming.kind];
+  const confirmSpace = confirming?.spaceId
+    ? (spaceLabelOf(confirming.spaceId) ?? confirming.spaceId)
+    : "";
 
   return (
     <>
@@ -97,24 +140,29 @@ export function AgentActions({
         isHistoricalVersion={isHistoricalVersion}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
-        // Whether the agent RUNS in the space this page is read from, off the response the menu
-        // already has: a system agent is no exception, and a caller the library stays silent
-        // about (a `runner` holds no `agents:read`) still gets a verdict.
+        // Whether the agent RUNS in the working space, off the response the menu already has: a
+        // system agent is no exception, and a caller the library stays silent about (a `runner`
+        // holds no `agents:read`) still gets a verdict.
         isActiveHere={detail.active}
         onCreateVersion={onCreateVersion}
         createVersionBlockedReason={unsavedReason}
         catalogueVersion={catalogueVersion}
         agent={{
-          hasMemories: !!memories && memories.length > 0,
-          onDownloadBundle: downloadBundle,
-          onDeleteAgent: () => setConfirming("deleteAgent"),
-          onDeleteRuns: () => setConfirming("clearRuns"),
-          onDeleteMemories: () => setConfirming("clearMemories"),
-          onAddSchedule: () => setNewScheduleOpen(true),
-          runOffered: runSpace.offered,
-          onRunWithOptions: () => runSpace.run(openRunOptions),
-          runWithOptionsIn: runSpace.choose(t("common:spaceChoice.run"), openRunOptions),
+          runWithOptions: deedOfAction(runSpace, t("common:spaceChoice.run"), openRunOptions),
           runBlockedReason,
+          addSchedule: {
+            ...deedOfAction(scheduleSpace, t("common:spaceChoice.schedule"), openNewSchedule),
+            // A schedule cannot carry a file input.
+            offered: scheduleSpace.offered && !schemaHasFileInput(detail),
+          },
+          bundle,
+          clearRuns,
+          clearMemories: {
+            ...clearMemories,
+            // With a working space, only once it holds memories.
+            offered: clearMemories.offered && (overview || (!!memories && memories.length > 0)),
+          },
+          onDeleteAgent: () => setConfirming({ kind: "deleteAgent", spaceId: null }),
         }}
       />
       <RunWithOptionsModal
@@ -136,13 +184,19 @@ export function AgentActions({
         open={confirming !== null}
         onClose={() => setConfirming(null)}
         onConfirm={confirm}
-        title={confirming ? t(CONFIRM_TEXT[confirming].title) : ""}
+        title={confirmText ? t(confirmText.title) : ""}
         description={
-          confirming ? t(CONFIRM_TEXT[confirming].description, { name: detail.display_name }) : ""
+          confirmText
+            ? t(confirmText.description, { name: detail.display_name, space: confirmSpace })
+            : ""
         }
         confirmLabel={t("btn.delete", { ns: "common" })}
         isPending={pendingConfirmation}
       />
     </>
   );
+}
+
+function schemaHasFileInput(detail: AgentDetail): boolean {
+  return !!schemaHasFileFields(detail.input?.schema);
 }

@@ -190,7 +190,22 @@ function ListTabBlocks() {
  * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
  * in the tab panel's card.
  */
-function RailPanelBlocks() {
+/**
+ * An agent's configuration section set in one space (model, proxy, parameters, connections — the
+ * section the rail opens on when none is named) names that space above its heading in « Tous les
+ * espaces » (`AgentConfigurationView`).
+ */
+function useNamesConfigurationSpace(type: PackageType): boolean {
+  const { on } = useOverviewMode();
+  const section = new URLSearchParams(useLocation().search).get("agentSettings");
+  return (
+    on &&
+    type === "agent" &&
+    (section === null || ["model", "proxy", "inputs", "connections"].includes(section))
+  );
+}
+
+function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <Card className="@container/split overflow-hidden">
       <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
@@ -205,6 +220,13 @@ function RailPanelBlocks() {
             <Skeleton className="h-11 w-full" />
           </div>
           <div className="p-6">
+            {/* The space the configuration is read in (`ConfigurationSpace`): label, then its button. */}
+            {spaceLine && (
+              <div className="mb-6 flex items-center gap-2">
+                <SkeletonLine className="w-36 text-sm" />
+                <Skeleton className="h-8 w-32" />
+              </div>
+            )}
             {/* The open section's `SettingsHeading` (title over its hint), then its rows. */}
             <header className="mb-6">
               <SkeletonLine className="w-32 text-xl font-semibold" />
@@ -295,17 +317,18 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const listCrumb = usePackageListCrumb(type);
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
+  const spaceLine = useNamesConfigurationSpace(type);
   return (
     <DetailPageSkeleton
       title={title}
       trail={[listCrumb]}
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
-      // An agent's line opens with the spaces it is active in.
-      spaces={type === "agent"}
+      // Every package's line opens with the spaces it is active in.
+      spaces
       panel={
         tab === "settings" ? (
-          <RailPanelBlocks />
+          <RailPanelBlocks spaceLine={spaceLine} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (

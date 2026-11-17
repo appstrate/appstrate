@@ -21,10 +21,10 @@ import {
   agentsKeys,
   runKeys,
   paginatedRunsKeys,
-  persistenceKeys,
   invalidatePackageFiles,
   invalidatePackageCaches,
   invalidateVersionInfo,
+  invalidatePaths,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -254,16 +254,18 @@ export function useCancelRun() {
   });
 }
 
+/** Deletes an agent's completed runs in `spaceId` (the route is per space). */
 export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (spaceId: string) => {
       const { data } = await client.DELETE("/api/agents/{scope}/{name}/runs", {
-        params: { path: splitPackageRef(packageId) },
+        params: { path: splitPackageRef(packageId), header: { "X-Space-Id": spaceId } },
       });
       return data!;
     },
     onSuccess: () => {
+      void invalidatePaths(qc, ["/api/agents/{scope}/{name}/runs"]);
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
@@ -272,35 +274,6 @@ export function useDeleteAgentRuns(packageId: string) {
 }
 
 // --- Memory mutations (unified persistence) ---
-
-export function useDeleteMemory(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (memoryId: number) => {
-      await client.DELETE("/api/agents/{scope}/{name}/persistence/memories/{id}", {
-        params: { path: { ...splitPackageRef(packageId), id: memoryId } },
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: persistenceKeys.all });
-    },
-  });
-}
-
-export function useDeleteAllMemories(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const { data } = await client.DELETE("/api/agents/{scope}/{name}/persistence", {
-        params: { path: splitPackageRef(packageId), query: { kind: "memory" } },
-      });
-      return data!;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: persistenceKeys.all });
-    },
-  });
-}
 
 // --- Package (skill/tool) create/update mutations ---
 

@@ -71,21 +71,33 @@ export function useScheduleById(id: string | undefined) {
   });
 }
 
-export function useSchedules(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const canRead = useCanReadSchedules();
+/**
+ * An agent's schedules: the current space's, or, `spanning`, every space's the reader reaches
+ * (`GET /api/orgs/{orgId}/schedules?packageId=`), each row naming its `spaceId`.
+ */
+export function useSchedules(
+  packageId: string | undefined,
+  { spanning = false }: { spanning?: boolean } = {},
+) {
+  const scope = useListScope(spanning, useCanReadSchedules());
   return useQuery({
     // Key pinned (under the prefix use-global-run-sync invalidates).
-    queryKey: scheduleKeys.listForAgent(orgId, spaceId, packageId),
+    queryKey: scheduleKeys.listForAgent(scope.orgId, scope.keySpace, packageId),
     queryFn: async (): Promise<EnrichedSchedule[]> => {
-      const { scope, name } = splitPackageRef(packageId!);
+      if (scope.acrossOrgId) {
+        const { data } = await client.GET("/api/orgs/{orgId}/schedules", {
+          params: { path: { orgId: scope.acrossOrgId }, query: { packageId: packageId! } },
+        });
+        return data?.data ?? [];
+      }
+      const { scope: packageScope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
-        params: { path: { scope, name } },
+        params: { path: { scope: packageScope, name } },
       });
       return data?.data ?? [];
     },
-    enabled: canRead && !!packageId && !!spaceId,
+    enabled: scope.enabled && !!packageId,
+    refetchInterval: scope.refetchInterval,
   });
 }
 

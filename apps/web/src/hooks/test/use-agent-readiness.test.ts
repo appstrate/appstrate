@@ -185,3 +185,30 @@ describe("AGENT_RUN_BLOCKERS", () => {
     }
   });
 });
+
+describe("the verdict in « Tous les espaces » (`anySpace`)", () => {
+  // The page reads the agent in a working space it does not name; the run's space is chosen at
+  // launch. Only what holds in every space blocks.
+  const anySpace = { anySpace: true };
+
+  it("ignores the hidden space's switch and skills", () => {
+    const off = agent({ active: false });
+    expect(agentLaunchRefusal(off, anySpace)).toBeNull();
+    const missingSkill = agent({
+      manifest: { name: "@acme/worker", dependencies: { skills: { "@acme/skill": "^1.0.0" } } },
+    });
+    expect(agentRunBlocker(missingSkill, agentModelBlocker([DEFAULT_OK], null))).toBe(
+      "detail.titleMissingSkill",
+    );
+    expect(agentRunBlocker(missingSkill, agentModelBlocker([DEFAULT_OK], null), anySpace)).toBe(
+      null,
+    );
+    expect(agentRunBlocker(off, agentModelBlocker([DEFAULT_OK], null), anySpace)).toBeNull();
+  });
+
+  it("still blocks what no space cures: the reader's publication and the prompt", () => {
+    const unpublished = agent({ definition: "draft", home_writable: false, active: false });
+    expect(agentLaunchRefusal(unpublished, anySpace)).toBe("detail.titleNeverPublished");
+    expect(agentRunBlocker(agent({ prompt: "" }), null, anySpace)).toBe("detail.titleEmptyPrompt");
+  });
+});

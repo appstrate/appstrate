@@ -258,20 +258,24 @@ export function useSetPackageActive() {
   });
 }
 
+/** `packageId`'s row in a library snapshot, of any type. */
+function libraryRow(
+  library: Pick<LibraryResponse, "packages"> | undefined,
+  packageId: string,
+): LibraryPackageItem | undefined {
+  return library
+    ? Object.values(library.packages)
+        .flat()
+        .find((pkg) => pkg.id === packageId)
+    : undefined;
+}
+
 /** One package's switch in the current space: the server's two verdicts (`activation` on its library row) and the two acts. A row the library does not carry answers `false` both ways. */
 export function usePackageActivation(packageId: string) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
   const { data: library } = useSpaceLibrary();
-  const row = useMemo(
-    () =>
-      library
-        ? Object.values(library.packages)
-            .flat()
-            .find((pkg) => pkg.id === packageId)
-        : undefined,
-    [library, packageId],
-  );
+  const row = useMemo(() => libraryRow(library, packageId), [library, packageId]);
   const may = (next: boolean) => !!spaceId && !!row && activationGate(row, spaceId, next).allowed;
   const set = (active: boolean, options?: { onSuccess?: () => void }) => {
     if (spaceId) setActive.mutate({ spaceId, packageId, active }, options);
@@ -283,6 +287,32 @@ export function usePackageActivation(packageId: string) {
     mayRemove: !!row && mayRemoveFromSpace(row, spaceId),
     activate: (options?: { onSuccess?: () => void }) => set(true, options),
     deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
+    pending: setActive.isPending,
+  };
+}
+
+/**
+ * One package's switches in every space the organization library grades, for a page naming no
+ * space (« Tous les espaces »): where the reader may switch it on (placed and off, or not placed
+ * yet), switch it off (it runs there), or take it out (a placement shared to the space), each in
+ * the library's space order, and the act naming its space. `enabled: false` reads nothing and
+ * offers nothing.
+ */
+export function usePackageActivationInSpaces(
+  packageId: string,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  const setActive = useSetPackageActive();
+  const { data: library } = useCatalogueLibrary({ enabled });
+  const row = enabled ? libraryRow(library, packageId) : undefined;
+  const spaceIds = row ? (library?.spaces ?? []).map((space) => space.id) : [];
+  const runsIn = (spaceId: string) => placementIn(row!, spaceId)?.state === "active";
+  return {
+    activateIn: spaceIds.filter((id) => !runsIn(id) && activationGate(row!, id, true).allowed),
+    deactivateIn: spaceIds.filter((id) => runsIn(id) && activationGate(row!, id, false).allowed),
+    removeFrom: spaceIds.filter((id) => mayRemoveFromSpace(row!, id)),
+    setActive: (spaceId: string, active: boolean, options?: { onSuccess?: () => void }) =>
+      setActive.mutate({ spaceId, packageId, active }, options),
     pending: setActive.isPending,
   };
 }

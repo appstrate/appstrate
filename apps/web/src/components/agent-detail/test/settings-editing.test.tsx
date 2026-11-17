@@ -90,6 +90,7 @@ function skill(over: Partial<OrgPackageItemDetail> = {}): Versioned<OrgPackageIt
     definition: "draft",
     content: "# Style",
     agents: [],
+    space_ids: ["spc_home"],
     etag: null,
     ...over,
   };
