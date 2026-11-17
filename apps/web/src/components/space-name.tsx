@@ -21,23 +21,32 @@ const SIZES = {
   lg: { box: "gap-3 text-sm", tile: "size-7 rounded-md" },
 } as const;
 
+/** No tile stacked behind a space's own. */
+const NO_SPACES: readonly SpaceListed[] = [];
+
+/** Front to back, for the tiles a {@link SpaceName} stacks (static classes, for Tailwind). */
+const STACK_ORDER = ["z-[3]", "z-[2]", "z-[1]"] as const;
+
 /**
  * A space as the app names it everywhere: its tile, then its name in the reader's words
  * (`spaceLabel`: « Mon espace » for the reader's own), truncated with the full name in `title`
  * unless the caller says something else there (why a closed space cannot be entered). The name is
  * raised over a table row's link (`relative z-10`, see `data-table.tsx`), or the row would swallow
- * its hover. `children` follow the name (a marker such as the default space's star).
+ * its hover. `stacked` spaces draw their tiles overlapping behind its own (the other spaces of a
+ * package listed in several). `children` follow the name (a marker such as the default space's star).
  */
 export function SpaceName({
   space,
   size = "sm",
   title,
+  stacked = NO_SPACES,
   className,
   children,
 }: {
   space: SpaceListed;
   size?: keyof typeof SIZES;
   title?: string;
+  stacked?: readonly SpaceListed[];
   className?: string;
   children?: ReactNode;
 }) {
@@ -46,7 +55,24 @@ export function SpaceName({
   const label = spaceLabel(space, t);
   return (
     <span className={cn("flex min-w-0 items-center", SIZES[size].box, className)}>
-      <IdentityTile {...spaceTile(space, viewer)} className={cn("shrink-0", SIZES[size].tile)} />
+      <span className="flex shrink-0">
+        {[space, ...stacked].map((tile, index) => (
+          // The home tile in front: each one behind is drawn under the one before it.
+          <span
+            key={tile.id}
+            className={cn("relative flex", STACK_ORDER[index], index > 0 && "-ml-1.5")}
+          >
+            <IdentityTile
+              {...spaceTile(tile, viewer)}
+              className={cn(
+                "shrink-0",
+                SIZES[size].tile,
+                index > 0 && "ring-background ring-[1.5px]",
+              )}
+            />
+          </span>
+        ))}
+      </span>
       <span className="relative z-10 truncate" title={title ?? label}>
         {label}
       </span>
