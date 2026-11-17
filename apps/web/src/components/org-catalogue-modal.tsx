@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Check, ExternalLink, LibraryBig } from "lucide-react";
+import { ArrowLeft, ExternalLink, LibraryBig } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -125,8 +125,8 @@ export function OrgCatalogueModal({
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   // « Here »: the working space, none in « Tous les espaces », where the catalogue claims no
-  // space (no « Pas encore dans… » sections, no « ici », no bulk activation): the add menu and
-  // the « Par espace » matrix name the space of every deed.
+  // space (no « ici », no bulk activation): the add menu and the « Par espace » matrix name the
+  // space of every deed.
   const spaceId = useHereSpaceId();
   const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
@@ -308,7 +308,6 @@ export function OrgCatalogueModal({
     };
     if (layout !== "cards") return row;
     const placement = placementById.get(item.id);
-    const activeHere = placement?.here === "active";
     const icon = tileOf(item.id, row.displayName);
     // Spaces where it already runs (ticked, so nothing vanishes after a click) or where this reader may add it.
     const addable = spaces
@@ -327,15 +326,10 @@ export function OrgCatalogueModal({
     return {
       ...row,
       icon,
-      status: activeHere ? (
-        <span className="bg-success/10 text-success flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium">
-          <Check className="size-3.5" aria-hidden />
-          {t("catalogue.activeHere")}
-        </span>
-      ) : (
+      status: (
         <CatalogueAddButton
           spaces={addable}
-          currentSpaceId={spaceId}
+          workingSpaceId={spaceId}
           busy={activate.isPending}
           onAdd={(targetSpaceId) => void onSetActive(row, targetSpaceId, true)}
         />
@@ -641,23 +635,6 @@ export function OrgCatalogueModal({
             actionsColumn,
           ]}
           rowAction={(item) => preview.open(item.id)}
-          // "Not yet", not "to add": a package the reader may not add is in the first section too.
-          cardSections={
-            discovering && spaceId
-              ? (cards) => [
-                  {
-                    key: "to-add",
-                    title: t("catalogue.section.toAdd", { space: spaceNameOf(spaceId) }),
-                    items: cards.filter((card) => placementById.get(card.id)?.here !== "active"),
-                  },
-                  {
-                    key: "already",
-                    title: t("catalogue.section.already", { space: spaceNameOf(spaceId) }),
-                    items: cards.filter((card) => placementById.get(card.id)?.here === "active"),
-                  },
-                ]
-              : undefined
-          }
           actions={
             <>
               {viewSwitcher}
