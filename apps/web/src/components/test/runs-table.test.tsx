@@ -68,7 +68,7 @@ describe("the runs column set", () => {
 
   it("draws the agent's tile before its name", () => {
     // The tile wears the agent's chosen colour.
-    expect(html).toContain("bg-identity-blue/20");
+    expect(html).toContain("bg-identity-blue-tile");
   });
 
   it("leads to the run, under a name that says which run", () => {
