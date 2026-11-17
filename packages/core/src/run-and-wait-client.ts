@@ -6,6 +6,7 @@ import { encodePackageIdPath, toSlug } from "./naming.ts";
 import { terminalRunStatusValues } from "./run-status.ts";
 import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "./integration.ts";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
+import type { ModelGenerationSettings } from "./model-generation.ts";
 
 /**
  * Fallback wait ceiling for a caller that has no deadline of its own.
@@ -104,6 +105,12 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
  */
 export const RUN_CONNECT_OFFERS_HEADER = "X-Appstrate-Connect-Offers";
 
+/** The model an inline launch runs on, and its generation override. */
+export interface InlineRunModel {
+  modelId: string;
+  generation?: ModelGenerationSettings;
+}
+
 export interface RunAndWaitClientOptions {
   origin: string;
   headers: RunAndWaitHeaders;
@@ -117,6 +124,14 @@ export interface RunAndWaitClientOptions {
    * reaches this caller's error payload.
    */
   connectOffers?: boolean;
+  /**
+   * The model an INLINE launch runs on, and its generation override, written into
+   * the `POST /api/runs/inline` body as `modelId` / `generation`. A caller option,
+   * never a tool argument: the model driving `run_and_wait` cannot choose what a
+   * run costs. Ignored for `kind: "agent"`, whose model is its author's (or the
+   * cascade's) choice. The route judges it like any explicit `modelId`.
+   */
+  inlineRunModel?: InlineRunModel;
 }
 
 export interface RunAndWaitLaunchResult {
@@ -727,6 +742,10 @@ export async function launchRunAndWait(
     // One spelling reaches the wire because `unknownArgumentsError` accepts
     // only one — nothing is canonicalized here.
     if (contextFiles) launchBody.context_files = contextFiles;
+    if (opts.inlineRunModel) {
+      launchBody.modelId = opts.inlineRunModel.modelId;
+      if (opts.inlineRunModel.generation) launchBody.generation = opts.inlineRunModel.generation;
+    }
   } else {
     return refuseUnusable(args, ["kind"], "`kind` must be 'agent' or 'inline'.");
   }

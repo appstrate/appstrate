@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RunAndWaitClientOptions.inlineRunModel`** (`@appstrate/core/run-and-wait-client`, #2262):
+  `{ modelId, generation? }`, written into an inline launch body as `modelId` / `generation`. A
+  caller option, never a `run_and_wait` argument, so the model driving the tool cannot choose
+  what a run costs; ignored for `kind: "agent"`.
+
 - **`AuthResolution.serverMinted`** (`@appstrate/core/module`): declares the bearer a strategy
   verified a server-minted one (process-local secret, never reachable from a browser). The
   credential proxy accepts it like an allowlisted bearer; `firstPartyLoopback` stays the one
