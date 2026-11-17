@@ -25,20 +25,13 @@ async function count(database: PendingDatabase, query: SQL): Promise<number> {
 }
 
 /**
- * Transitional boot refusals: one entry per one-off data script that has to run on every database
- * before the platform may serve from it.
+ * Transitional boot refusals: one entry per one-off data script that must run before the
+ * platform serves. Deleting an entry and its test case is the whole removal
+ * (`docs/NO_TRANSITIONAL_CODE.md` §4).
  *
- * An entry exists ONLY while a script is pending somewhere. Deleting the entry (and its test case)
- * is the whole removal — `docs/NO_TRANSITIONAL_CODE.md` §4.
- *
- * There is deliberately no ledger table ("script N ran"): each `pending` predicate reads the data
- * the script fixes, so it discriminates a half-applied script, which a ledger row would not. The
- * predicates are EXACTLY the scripts' own `WHERE` on purpose, so the script always clears the
- * refusal it causes — a row it deliberately skips must not be counted here, or the boot could never
- * be cleared.
- *
- * Refusing rather than warning, for the reason `assertOAuthResourceColumnsPresent` does
- * (`schema-invariants.ts`): detection only, the repair is an operator task.
+ * No ledger table: each `pending` predicate reads the data the script fixes, with EXACTLY the
+ * script's own `WHERE`, so a half-applied script is caught and the script always clears the
+ * refusal it causes.
  */
 export const PENDING_DATA_SCRIPTS: readonly PendingDataScript[] = [
   {
@@ -114,15 +107,10 @@ function commandFor(script: string, embeddedDataDir: string | null): string {
 }
 
 /**
- * Refuse to boot while any one-off data script of {@link PENDING_DATA_SCRIPTS} is pending. Every
- * entry is evaluated, and ONE error lists them all, so an operator clears the whole window in one
- * pass rather than one crash-loop per script.
- *
- * A `.ts` script's command targets the database this process runs on: `DATABASE_URL`, or, on an
- * embedded database (`embeddedDataDir`), that directory named through `PGLITE_DATA_DIR`, which the
- * script requires so that a run with a forgotten `.env` never opens the default one.
- *
- * `scripts` and `database` are injected for tests — production reads the live database.
+ * Refuse to boot while any entry of {@link PENDING_DATA_SCRIPTS} is pending. ONE error lists
+ * them all, so an operator clears the window in one pass. The command it prints targets this
+ * process's database (`DATABASE_URL`, or `PGLITE_DATA_DIR` when `embeddedDataDir` is set).
+ * `scripts` and `database` are injected for tests.
  */
 export async function assertNoPendingDataScripts(
   embeddedDataDir: string | null,

@@ -11,6 +11,7 @@ import { describe, it, expect, afterAll, beforeAll } from "bun:test";
 import { bootHousekeeping, bootRunCapacity } from "../../../src/lib/boot.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import {
+  _resetAgentRuntimeReadinessForTesting,
   _resetRunCapacityReadyForTesting,
   assertRunCapacityReady,
   markRunCapacityReady,
@@ -32,7 +33,9 @@ describe("boot phases after the port is bound", () => {
 
   afterAll(async () => {
     _setOrchestratorForTesting(null);
-    // The preload marks the flag ready for the whole process: restore it.
+    // Process-wide flags, shared with every later test file: put both back as
+    // the preload left them (runtime not initialised, run capacity ready).
+    _resetAgentRuntimeReadinessForTesting();
     markRunCapacityReady();
     stopRuntimeImageWarmer();
     stopUploadGc();

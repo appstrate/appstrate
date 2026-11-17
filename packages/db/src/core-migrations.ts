@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The platform's core migrations, applied or verified against a PostgreSQL URL.
- *
- * Deliberately free of `./client.ts` and of `getEnv()`: the standalone migrator
- * (`migrate.ts`, the compose `appstrate-migrate` service) runs in a container that
- * carries `DATABASE_URL` and nothing else, and the application's boot calls the same
- * functions on PostgreSQL (PGlite keeps `apps/api/src/lib/pglite-migrate.ts`). One
- * implementation, so "apply" and "verify" cannot disagree about what is pending.
- *
- * Scope: the core journal (`drizzle.__drizzle_migrations`) only. `@appstrate/module-ee`
- * keeps its own journal (`drizzle.ee_migrations`) and applies it itself at `init()`.
+ * The platform's core migrations on PostgreSQL, shared by the boot and by the standalone
+ * migrator (`migrate.ts`). Free of `./client.ts` and `getEnv()`: the migrate container carries
+ * `DATABASE_URL` and nothing else. Core journal only; `@appstrate/module-ee` applies its own.
  */
 
 import { resolve } from "node:path";
@@ -22,30 +15,21 @@ import postgres from "postgres";
 export const CORE_MIGRATIONS_FOLDER = resolve(import.meta.dir, "../drizzle");
 
 /**
- * Key of the session-level advisory lock that serializes core migrations.
- *
- * Drizzle's migrator takes no lock of its own: it reads the journal BEFORE opening its
- * transaction, so two runners starting together (several app replicas, or a replica
- * beside the `appstrate-migrate` service) both read the same watermark and both try to
- * apply the same files — the loser crashes with "relation already exists". Holding this
- * lock around the migrator makes the second runner wait, then find nothing pending.
- * Arbitrary constant; it only has to be unique within the database.
+ * Session-level advisory lock serializing core migrations. Drizzle's migrator reads the
+ * journal before opening its transaction, so two runners starting together would apply the
+ * same files and the loser would crash. Arbitrary value, unique within the database.
  */
 const CORE_MIGRATION_LOCK_KEY = 7246811234567890n;
 
-/** Journal location. Matches drizzle's defaults, which the migrator is called with. */
+/** Drizzle's default journal table. */
 const JOURNAL_TABLE = "drizzle.__drizzle_migrations";
 
 /** Most tags named in `assertCoreMigrationsApplied`'s message. */
 const MAX_TAGS_LISTED = 10;
 
 /**
- * Apply every pending core migration.
- *
- * A dedicated `max: 1` client: the advisory lock is per SESSION, so the lock and the
- * migration must run on the one connection (a pool would hand the migrator a different
- * one and the lock would guard nothing). `onnotice` is silenced: on an up-to-date
- * database the migrator's `IF NOT EXISTS` statements raise a notice on every boot.
+ * Apply every pending core migration. `max: 1`: the lock is per session, so lock and migration
+ * must share one connection. `onnotice` silences the migrator's `IF NOT EXISTS` notices.
  */
 export async function applyCoreMigrations(databaseUrl: string): Promise<void> {
   const client = postgres(databaseUrl, { max: 1, onnotice: () => {} });
@@ -59,7 +43,7 @@ export async function applyCoreMigrations(databaseUrl: string): Promise<void> {
       );
     }
   } finally {
-    // Ending the session also releases the lock if the unlock above failed.
+    // Also releases the lock if the unlock above failed.
     await client.end();
   }
 }
@@ -81,17 +65,10 @@ async function readJournal(): Promise<JournalEntry[]> {
 /**
  * Tags, in journal order, that `applyCoreMigrations` would run now. Read-only, no lock.
  *
- * Same rule as drizzle's migrator, which decides by WATERMARK and not by file:
- * a migration is applied when its journal `when` (`folderMillis`) is greater than
- * the `created_at` of the LAST journal row, read as drizzle reads it
- * (`ORDER BY created_at DESC LIMIT 1`; Postgres sorts NULL first in DESC, so a NULL row
- * makes everything pending, as for the migrator, where `max()` would ignore it) — see
- * `node_modules/drizzle-orm/pg-core/dialect.js`,
- * `PgDialect.migrate` (`lastDbMigration.created_at < migration.folderMillis`), with
- * `folderMillis` set from `journalEntry.when` in `drizzle-orm/migrator.js`. Mirroring it
- * means a database AHEAD of the code (a rollback) reports nothing pending, exactly as
- * the migrator would do nothing. A missing journal table means a fresh database: every
- * tag is pending.
+ * Drizzle's own rule (`PgDialect.migrate`): a watermark, not a per-file check. A migration
+ * is pending when its journal `when` is greater than the `created_at` of the last journal
+ * row (`ORDER BY created_at DESC LIMIT 1`, NULL first). So a database ahead of the code
+ * reports nothing pending, and a missing journal table reports everything.
  */
 export async function listPendingCoreMigrations(databaseUrl: string): Promise<string[]> {
   const entries = await readJournal();
@@ -112,10 +89,7 @@ export async function listPendingCoreMigrations(databaseUrl: string): Promise<st
   }
 }
 
-/**
- * Throw unless every core migration is applied. The boot's `verify` mode: an
- * application that did not migrate refuses to run against a schema older than its code.
- */
+/** Throw unless every core migration is applied (the boot's `verify` mode). */
 export async function assertCoreMigrationsApplied(databaseUrl: string): Promise<void> {
   const pending = await listPendingCoreMigrations(databaseUrl);
   if (pending.length === 0) return;
