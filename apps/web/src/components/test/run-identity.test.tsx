@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { IDENTITY_COLOR_CLASSES } from "@appstrate/ui/identity-colors";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunIdentity } from "../run-identity.tsx";
 import { RunRow } from "../run-row.tsx";
@@ -29,7 +28,7 @@ describe("RunIdentity with its agent", () => {
 
   it("leads with the agent's tile and name", () => {
     expect(html).toContain(AGENT.name);
-    expect(html).toContain(IDENTITY_COLOR_CLASSES.blue);
+    expect(html).toContain("bg-identity-blue-tile");
   });
 
   it("puts the number, the start and the duration under the name", () => {

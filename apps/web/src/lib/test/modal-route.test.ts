@@ -9,6 +9,7 @@ import {
   modalReturnTarget,
   orgSwitchLanding,
   overlayCloseStep,
+  overlayStateAfterOrgSwitch,
   pageLocation,
   withBackground,
 } from "../modal-route";
@@ -130,6 +131,25 @@ describe("organization switch", () => {
     expect(orgSwitchLanding("/chat/c_1")).toBe("/chat");
     expect(orgSwitchLanding("/chat")).toBe("/chat");
     expect(orgSwitchLanding("/chatroom")).toBe("/");
+  });
+
+  // The switcher's gear of another organization: the previous organization's agent page
+  // would 404 under its settings.
+  it("opens the new organization's settings over the landing, not over the page it left", () => {
+    const held = backgroundOf(overlayStateAfterOrgSwitch("/agents/@acme/triage/runs/run_1"));
+    expect(held).toMatchObject({ location: { pathname: "/", search: "", hash: "" }, index: null });
+    const settings = at("/org-settings", { state: overlayStateAfterOrgSwitch("/agents/@acme/t") });
+    expect(pageLocation(settings, backgroundOf(settings.state)!.location).pathname).toBe("/");
+  });
+
+  it("keeps the chat under settings opened from it", () => {
+    expect(backgroundOf(overlayStateAfterOrgSwitch("/chat/c_1"))?.location.pathname).toBe("/chat");
+  });
+
+  it("closes them onto the landing, which has no entry of its own", () => {
+    const held = backgroundOf(overlayStateAfterOrgSwitch("/agents"))!;
+    expect(overlayCloseStep(held.index, 5)).toBeNull();
+    expect(modalReturnTarget(held.location).to).toEqual({ pathname: "/", search: "", hash: "" });
   });
 });
 

@@ -6,7 +6,7 @@ import type { ChatTransport } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /**
- * Shared by the picker and the read-only indicator. Default staleness (30 s):
+ * Shared by the picker and the composer's skill chips. Default staleness (30 s):
  * a library toggle shows on the next mount past it, without a cross-module
  * invalidation.
  */

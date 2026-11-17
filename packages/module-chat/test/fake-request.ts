@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The host's `ChatRequest` contract, faked: a non-2xx answer is thrown with its `status`/`code`. */
+/** The host's request seam, faked: `ChatRequest` (a non-2xx answer thrown with its `status`/`code`) and the transport. */
 
 import type { ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
 

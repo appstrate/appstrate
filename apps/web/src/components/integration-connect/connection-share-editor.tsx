@@ -140,7 +140,8 @@ export function ConnectionShareEditor({
             )}
           </div>
           {!shareAllSpaces && (
-            <Command>
+            // The search field draws only the line under it: the rule above parts it from the help.
+            <Command className="rounded-none border-t">
               <CommandInput placeholder={t("integration.connection.share.search")} />
               <CommandList>
                 <CommandEmpty>{t("viewAs.noSpace")}</CommandEmpty>
