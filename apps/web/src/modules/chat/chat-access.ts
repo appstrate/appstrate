@@ -108,3 +108,44 @@ export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCap
         : "granted",
   }));
 }
+
+/** The standing the summary names: the headline role and the line under the verdicts. */
+export interface AccessStanding {
+  headline: string;
+  line: {
+    key: "access.roleLine" | "access.roleLineOrg" | "access.roleLineIn";
+    params: Record<string, string>;
+  };
+}
+
+/**
+ * The standing to name. With a space selected: the caller's role there (else the org role) and
+ * both in the line. In « Tous les espaces » the working space is unseen, so it is never named:
+ * the org role heads, and the line adds the conversation's origin space by name with the role
+ * held there, when it has one.
+ */
+export function accessStanding(input: {
+  overview: boolean;
+  orgRole: string;
+  /** The role in the working space, `null` for none. */
+  workingRole: string | null;
+  /** The conversation's origin space, by name, with the role held there. */
+  origin: { name: string; role: string | null } | null;
+}): AccessStanding {
+  const { overview, orgRole, workingRole, origin } = input;
+  if (!overview) {
+    return {
+      headline: workingRole ?? orgRole,
+      line: { key: "access.roleLine", params: { org: orgRole, space: workingRole ?? "—" } },
+    };
+  }
+  return {
+    headline: orgRole,
+    line: origin
+      ? {
+          key: "access.roleLineIn",
+          params: { org: orgRole, name: origin.name, space: origin.role ?? "—" },
+        }
+      : { key: "access.roleLineOrg", params: { org: orgRole } },
+  };
+}

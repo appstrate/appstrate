@@ -31,7 +31,7 @@ import {
   type ChatMessageContent,
 } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
-import { notFound } from "@appstrate/core/api-errors";
+import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection } from "./skills.ts";
@@ -127,6 +127,37 @@ export async function touchSessionSpace(
   if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
 }
 
+/** Levels of `cause` walked: Drizzle wraps the driver error, whose own `code` is the SQLSTATE. */
+const MAX_CAUSE_DEPTH = 8;
+
+/**
+ * A write refused by a foreign key: PostgreSQL `23503`, or `23001` (PGlite surfaces an
+ * `ON DELETE RESTRICT` with it), on the error or down its `cause` chain.
+ */
+export function isForeignKeyViolation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && typeof current === "object" && current; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (code === "23503" || code === "23001") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Runs a write that sets a conversation's origin space, checked in the acting set before it:
+ * the space deleted in between refuses the write on its foreign key, answered as the same 400
+ * naming `spaceId` the check gives.
+ */
+export async function writingOriginSpace<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isForeignKeyViolation(error)) throw error;
+    throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+  }
+}
+
 /** Create a conversation with its origin space and limit (`restricted` needs the space). */
 export async function createSession(input: {
   id: string;
@@ -136,8 +167,8 @@ export async function createSession(input: {
   spaceId: string | null;
   restricted: boolean;
 }): Promise<typeof chatSessions.$inferSelect> {
-  const [row] = await db.insert(chatSessions).values(input).returning();
-  return row!;
+  const insert = async () => (await db.insert(chatSessions).values(input).returning())[0]!;
+  return input.spaceId === null ? insert() : writingOriginSpace(insert);
 }
 
 /** The space a file belongs to, or undefined when `orgId` holds no such file. */
@@ -226,14 +257,16 @@ export async function ensureSession(
         created: sql<boolean>`(xmax = 0)`,
       });
   const row = origin
-    ? await db.transaction(async (tx) => {
-        const [inserted] = await upsert(tx);
-        if (!inserted?.created) return inserted;
-        const created = origin();
-        if (!created) return inserted;
-        await tx.update(chatSessions).set(created).where(eq(chatSessions.id, id));
-        return { ...inserted, ...created };
-      })
+    ? await writingOriginSpace(() =>
+        db.transaction(async (tx) => {
+          const [inserted] = await upsert(tx);
+          if (!inserted?.created) return inserted;
+          const created = origin();
+          if (!created) return inserted;
+          await tx.update(chatSessions).set(created).where(eq(chatSessions.id, id));
+          return { ...inserted, ...created };
+        }),
+      )
     : (await upsert(db))[0];
   if (!row || row.orgId !== orgId || row.userId !== userId) {
     throw notFound("Chat session not found");

@@ -25,7 +25,12 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
-import { ensureSession, touchSessionSpace } from "../src/persistence.ts";
+import {
+  ensureSession,
+  isForeignKeyViolation,
+  touchSessionSpace,
+  writingOriginSpace,
+} from "../src/persistence.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
 import { installPermissionAuditLogger } from "../../../apps/api/src/lib/permission-audit.ts";
@@ -422,6 +427,22 @@ describe("chat sessions", () => {
         expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: acting, restricted: true });
       });
 
+      it("refuses a space outside the caller's acting set, the row unchanged (400 naming spaceId)", async () => {
+        // A closed space the caller never joined, a space of another organization, an unknown id.
+        const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
+          .id;
+        const member = await memberContext(ctx, "member", "operator");
+        const foreign = await createTestContext({ orgSlug: "foreignspace" });
+        const overview = await createSession(member);
+        for (const spaceId of [closed, foreign.defaultSpaceId, "spc_nonexistent"]) {
+          const refused = await patch(member, overview.id, { spaceId, restricted: true });
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+          expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
+        }
+        expect(await touchedBy(overview.id)).toEqual([]);
+      });
+
       it("refuses it while a turn is running (409): the turn claims on the scope it read", async () => {
         const overview = await createSession(ctx);
         await db
@@ -796,6 +817,37 @@ describe("chat sessions", () => {
       expect(((await res.json()) as { detail: string }).detail).toContain("confined to spaces");
     }
     expect(await db.select({ id: chatSessions.id }).from(chatSessions)).toEqual([]);
+  });
+});
+
+describe("an origin space deleted between its check and the write", () => {
+  it("refuses the write on its foreign key, answered as the 400 naming spaceId", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "originrace" });
+    // The space the check accepted, gone by the time the row names it.
+    const write = () =>
+      db.insert(chatSessions).values({
+        id: "chs_origin_race",
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        spaceId: "spc_deleted_since",
+      });
+    const raw = await write().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(isForeignKeyViolation(raw)).toBe(true);
+    await expect(writingOriginSpace(write)).rejects.toMatchObject({
+      status: 400,
+      param: "spaceId",
+    });
+    expect(await db.select().from(chatSessions)).toEqual([]);
+  });
+
+  it("lets every other failure through", async () => {
+    const other = new Error("boom");
+    await expect(writingOriginSpace(() => Promise.reject(other))).rejects.toBe(other);
+    expect(isForeignKeyViolation(new Error("x", { cause: { code: "23505" } }))).toBe(false);
   });
 });
 

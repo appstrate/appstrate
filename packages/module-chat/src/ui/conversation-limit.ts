@@ -60,26 +60,37 @@ function writeRow(
   );
 }
 
-/** Whether a cached copy of the conversation lists `spaceId` among the spaces it touched. */
-function touchedInCache(
+/** What the limit changes on a cached copy of the conversation. */
+type LimitFields = Pick<SessionSummary, "spaceId" | "restricted" | "space_ids">;
+
+/** The limit fields of every cached copy of the conversation, by cache key, to restore them. */
+function snapshotRows(
   queryClient: QueryClient,
   transport: ChatTransport,
   id: string,
-  spaceId: string,
-): boolean {
-  const detail = queryClient.getQueryData<SessionHistory | null>(
-    sessionQueryKey(transport.orgId, id),
-  );
-  const rows = queryClient
+): Array<{ queryKey: readonly unknown[]; fields: LimitFields; detail: boolean }> {
+  const fieldsOf = ({ spaceId, restricted, space_ids }: SessionSummary): LimitFields => ({
+    spaceId,
+    restricted,
+    space_ids,
+  });
+  const detailKey = sessionQueryKey(transport.orgId, id);
+  const detail = queryClient.getQueryData<SessionHistory | null>(detailKey);
+  const lists = queryClient
     .getQueriesData<SessionsCache>({ queryKey: SESSIONS_QUERY_KEY })
-    .flatMap(([, cache]) => cache?.pages.flatMap((page) => page.data) ?? []);
-  return [detail, ...rows].some((row) => row?.id === id && row.space_ids.includes(spaceId));
+    .flatMap(([queryKey, cache]) => {
+      const row = cache?.pages.flatMap((page) => page.data).find((s) => s.id === id);
+      return row ? [{ queryKey, fields: fieldsOf(row), detail: false }] : [];
+    });
+  return detail
+    ? [{ queryKey: detailKey, fields: fieldsOf(detail), detail: true }, ...lists]
+    : lists;
 }
 
 /**
  * Limits or lifts an existing conversation, giving one without an origin the space `next` names:
- * shown at once (`show` and the caches), rolled back to `previous` when the server refuses, and
- * the refusal rethrown for the host's error handling.
+ * shown at once (`show` and the caches), every cached copy put back as it was when the server
+ * refuses, and the refusal rethrown for the host's error handling.
  */
 export async function changeLimit(args: {
   queryClient: QueryClient;
@@ -91,7 +102,7 @@ export async function changeLimit(args: {
 }): Promise<void> {
   const { queryClient, transport, id, next, previous, show } = args;
   const gained = next.spaceId !== previous.spaceId ? next.spaceId : null;
-  const touchedBefore = gained !== null && touchedInCache(queryClient, transport, id, gained);
+  const snapshot = snapshotRows(queryClient, transport, id);
   show(next);
   writeRow(queryClient, transport, id, (row) => ({
     ...row,
@@ -105,14 +116,19 @@ export async function changeLimit(args: {
     });
   } catch (error) {
     show(previous);
-    writeRow(queryClient, transport, id, (row) => ({
-      ...row,
-      ...previous,
-      space_ids:
-        gained === null || touchedBefore
-          ? row.space_ids
-          : row.space_ids.filter((spaceId) => spaceId !== gained),
-    }));
+    for (const { queryKey, fields, detail } of snapshot) {
+      if (detail) {
+        queryClient.setQueryData<SessionHistory | null>(queryKey, (prev) =>
+          prev ? { ...prev, ...fields } : prev,
+        );
+      } else {
+        queryClient.setQueryData<SessionsCache>(queryKey, (prev) =>
+          patchSessionsCache(prev, (rows) =>
+            rows.map((s) => (s.id === id ? { ...s, ...fields } : s)),
+          ),
+        );
+      }
+    }
     throw error;
   }
 }
@@ -136,6 +152,12 @@ interface Draft {
   restricted: boolean;
 }
 
+/**
+ * A conversation started in a space is limited to it unless the user lifts the limit before
+ * sending; from the overview it has no origin, so it starts unlimited until one is chosen.
+ */
+const INITIAL_DRAFT: Draft = { chosenSpaceId: null, restricted: true };
+
 /** The origin of a conversation not created yet: the space chosen, else the selected one. */
 function draftOrigin(draft: Draft, selectedSpaceId: string | undefined): string | null {
   return draft.chosenSpaceId ?? selectedSpaceId ?? null;
@@ -158,9 +180,17 @@ export function useConversationLimit({
   // Frozen at the first message: a retry after a failed first turn keeps it. Every later turn
   // carries it too, and the server reads it only on the turn that creates the conversation.
   const frozen = useRef<Limit | null>(null);
-  // A conversation started in a space is limited to it unless the user lifts the limit before
-  // sending; from the overview it has no origin, so it starts unlimited until one is chosen.
-  const [draft, setDraft] = useState<Draft>({ chosenSpaceId: null, restricted: true });
+  // A draft answers the space selected when it was made: selecting another (or « Tous les
+  // espaces ») starts the conversation over from that one, as a new conversation there would.
+  const [made, setMade] = useState<{ draft: Draft; under: string | undefined }>({
+    draft: INITIAL_DRAFT,
+    under: selectedSpaceId,
+  });
+  const draft = made.under === selectedSpaceId ? made.draft : INITIAL_DRAFT;
+  const setDraft = useCallback(
+    (next: Draft) => setMade({ draft: next, under: selectedSpaceId }),
+    [selectedSpaceId],
+  );
   // The limit the user last set on a conversation that exists, over what was loaded or frozen.
   const [override, setOverride] = useState<Limit>();
 
@@ -218,16 +248,16 @@ export function useConversationLimit({
       // The origin never changes once set: `spaceId` is taken only by a conversation without one.
       change({ spaceId: current.spaceId ?? spaceId, restricted: true });
     },
-    [exists, selectedSpaceId, change, current.spaceId],
+    [exists, selectedSpaceId, setDraft, change, current.spaceId],
   );
   const lift = useCallback(() => {
     if (!exists) {
       // A chosen space goes with the limit: the draft is back to having no origin.
-      setDraft((prev) => ({ chosenSpaceId: null, restricted: prev.chosenSpaceId !== null }));
+      setDraft({ chosenSpaceId: null, restricted: draft.chosenSpaceId !== null });
       return;
     }
     change({ spaceId: current.spaceId, restricted: false });
-  }, [exists, change, current.spaceId]);
+  }, [exists, setDraft, draft.chosenSpaceId, change, current.spaceId]);
 
   const scope = useMemo(
     () => ({ originSpaceId, restricted, generating, pending: isPending, limitTo, lift }),

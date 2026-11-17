@@ -57,7 +57,13 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import { createSession, sessionVisible, touchedSpaceIds, touchedUnder } from "./persistence.ts";
+import {
+  createSession,
+  sessionVisible,
+  touchedSpaceIds,
+  touchedUnder,
+  writingOriginSpace,
+} from "./persistence.ts";
 import {
   readableSpaceIds,
   spacesHolding,
@@ -448,9 +454,8 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
         if (!canActIn(reachable, spaceId)) {
           throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
         }
-      }
-      // Limiting needs an origin space the caller can still act in; lifting is always allowed.
-      if (restricted && !canActIn(reachable, spaceId ?? session.spaceId)) {
+      } else if (restricted && !canActIn(reachable, session.spaceId)) {
+        // Limiting needs an origin space the caller can still act in; lifting is always allowed.
         throw invalidRequest(
           "restricted needs an origin space this conversation can act in",
           "restricted",
@@ -458,37 +463,39 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       }
       // The turn in flight keeps the reach it was minted with, so the limit changes between turns.
       const limitChanges = restricted !== undefined && restricted !== session.restricted;
-      const updated = await db.transaction(async (tx) => {
-        const rows = await tx
-          .update(chatSessions)
-          .set({
-            ...(title === undefined ? {} : { title }),
-            ...(restricted === undefined ? {} : { restricted }),
-            ...(spaceId === undefined ? {} : { spaceId }),
-            // Renaming reorders the sidebar; limiting or lifting the limit does not (as pins don't).
-            ...(title === undefined ? {} : { updatedAt: new Date() }),
-          })
-          .where(
-            and(
-              eq(chatSessions.id, session.id),
-              limitChanges ? isNull(chatSessions.activeStreamId) : undefined,
-              spaceId === undefined ? undefined : isNull(chatSessions.spaceId),
-            ),
-          )
-          .returning({ id: chatSessions.id });
-        // The origin is touched by definition: a space touched before becomes the origin, once.
-        if (rows.length > 0 && spaceId !== undefined) {
-          await tx
-            .delete(chatSessionSpaces)
+      const write = () =>
+        db.transaction(async (tx) => {
+          const rows = await tx
+            .update(chatSessions)
+            .set({
+              ...(title === undefined ? {} : { title }),
+              ...(restricted === undefined ? {} : { restricted }),
+              ...(spaceId === undefined ? {} : { spaceId }),
+              // Renaming reorders the sidebar; limiting or lifting the limit does not (as pins don't).
+              ...(title === undefined ? {} : { updatedAt: new Date() }),
+            })
             .where(
               and(
-                eq(chatSessionSpaces.sessionId, session.id),
-                eq(chatSessionSpaces.spaceId, spaceId),
+                eq(chatSessions.id, session.id),
+                limitChanges ? isNull(chatSessions.activeStreamId) : undefined,
+                spaceId === undefined ? undefined : isNull(chatSessions.spaceId),
               ),
-            );
-        }
-        return rows;
-      });
+            )
+            .returning({ id: chatSessions.id });
+          // The origin is touched by definition: a space touched before becomes the origin, once.
+          if (rows.length > 0 && spaceId !== undefined) {
+            await tx
+              .delete(chatSessionSpaces)
+              .where(
+                and(
+                  eq(chatSessionSpaces.sessionId, session.id),
+                  eq(chatSessionSpaces.spaceId, spaceId),
+                ),
+              );
+          }
+          return rows;
+        });
+      const updated = await (spaceId === undefined ? write() : writingOriginSpace(write));
       if (updated.length === 0) {
         if (!limitChanges) throw notFound("Chat session not found");
         // Another request gave the conversation its origin first.

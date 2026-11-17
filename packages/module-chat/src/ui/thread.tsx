@@ -53,8 +53,8 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useAttachAvailability } from "./conversation-scope.ts";
-import { sentenceWithName } from "./sentence-with-name.tsx";
+import { attachSpaceOf, useAttachTarget, useSpaceNode } from "./conversation-scope.ts";
+import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
@@ -85,13 +85,17 @@ export function Thread({
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
-  const attach = useAttachAvailability();
+  // A drop cannot ask for a space: it goes to the one decided, or to the one last picked.
+  const dropSpaceId = attachSpaceOf(useAttachTarget());
+  const shownSpaceId = useChatTransport()?.spaceId ?? null;
+  const dropElsewhere = dropSpaceId !== null && dropSpaceId !== shownSpaceId;
+  const dropSpaceNode = useSpaceNode(dropSpaceId);
   return (
     // The whole thread is the drop target, welcome screen and transcript alike;
     // dropped files take the same adapter path as the picker. A reader gets no
     // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || !attach.available}
+      disabled={!can("chat:write") || dropSpaceId === null}
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -157,7 +161,11 @@ export function Thread({
       >
         <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
           <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+          <p className="text-sm font-medium">
+            {dropElsewhere
+              ? sentenceWithNode(t, "composer.dropzoneIn", dropSpaceNode)
+              : t("composer.dropzone")}
+          </p>
         </div>
       </div>
     </ComposerPrimitive.AttachmentDropzone>
@@ -180,9 +188,10 @@ function ThreadWelcome({
   const { can, t, firstName: name, actingSpaceIds } = useChatHost();
   const canWrite = can("chat:write");
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
-  // still runs, in the caller's other spaces, and touches none of this one.
+  // still runs, in the caller's other spaces, and touches none of this one. Unsaid until known.
   const spaceId = useChatTransport()?.spaceId;
-  const outsideActingSet = canWrite && !!spaceId && !actsIn(actingSpaceIds, spaceId);
+  const outsideActingSet =
+    canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">

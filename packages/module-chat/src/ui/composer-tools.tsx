@@ -8,7 +8,7 @@
  */
 
 import { useRef, useState, type ReactNode } from "react";
-import { ComposerPrimitive } from "@assistant-ui/react";
+import { useAui } from "@assistant-ui/react";
 import {
   BookOpenIcon,
   MapPinIcon,
@@ -30,19 +30,20 @@ import { cn } from "@appstrate/ui/cn";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
-  useAttachAvailability,
+  useAttachTarget,
   useConversationScope,
   useOriginSpaceLabel,
   useOriginSpaceNode,
   useSpaceLabel,
   useSpaceNode,
+  type AttachUnavailableReason,
   type LimitUnavailableReason,
 } from "./conversation-scope.ts";
 import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost, useChatTransport, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
@@ -51,6 +52,12 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
   "no-acting-space": "composer.limit.noActingSpace",
   outside: "composer.limit.outside",
+};
+
+const ATTACH_REASON_KEY: Record<AttachUnavailableReason, string> = {
+  outside: "composer.attachUnavailable",
+  "origin-outside": "composer.limit.outside",
+  "no-acting-space": "composer.limit.noActingSpace",
 };
 
 export interface ComposerToolsProps {
@@ -75,7 +82,6 @@ export function ComposerTools({
 }: ComposerToolsProps) {
   const { t } = useChatHost();
   const scope = useConversationScope();
-  const attach = useAttachAvailability();
   // The origin's plain name, for the accessible names: the node below carries a tile the name
   // does not. Without an origin, the sentence stays generic.
   const spaceLabel = useOriginSpaceLabel();
@@ -111,28 +117,7 @@ export function ComposerTools({
             setSkillsOpen(true);
           }}
         >
-          {attach.available ? (
-            <ComposerPrimitive.AddAttachment multiple asChild>
-              <DropdownMenuItem>
-                <PaperclipIcon />
-                {t("composer.attach")}
-              </DropdownMenuItem>
-            </ComposerPrimitive.AddAttachment>
-          ) : (
-            // An upload lands in the working space: where the chat does not act, or off the
-            // origin of a limited conversation.
-            <UnavailableItem
-              icon={<PaperclipIcon />}
-              label={t("composer.attach")}
-              reason={
-                attach.reason === "limited"
-                  ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
-                  : t("composer.attachUnavailable")
-              }
-              testId="composer-attach-item"
-              reasonTestId="composer-attach-reason"
-            />
-          )}
+          <AttachMenuEntry />
           {showPicker && (
             <DropdownMenuItem
               onSelect={() => {
@@ -203,6 +188,89 @@ export function ComposerTools({
 }
 
 /**
+ * The « + » menu's attach entry, as `attachAvailability` decides: the file picker for the space
+ * decided (named when it is not the one the host shows), the host's sub-menu of the acting spaces
+ * then the picker, or an inert entry giving the reason.
+ */
+export function AttachMenuEntry() {
+  const { t, SpaceChoiceSubmenu } = useChatHost();
+  const { availability, pick } = useAttachTarget();
+  const shownSpaceId = useChatTransport()?.spaceId ?? null;
+  const openFilePicker = useFilePicker();
+  const named = availability.kind === "attach" ? availability.spaceId : null;
+  const spaceLabel = useSpaceLabel(named);
+  const spaceNode = useSpaceNode(named);
+  if (availability.kind === "attach") {
+    const elsewhere = availability.spaceId !== shownSpaceId;
+    return (
+      <DropdownMenuItem
+        onSelect={openFilePicker}
+        aria-label={elsewhere ? t("composer.attachIn", { name: spaceLabel }) : undefined}
+        data-testid="composer-attach-item"
+      >
+        <PaperclipIcon />
+        {elsewhere ? sentenceWithNode(t, "composer.attachIn", spaceNode) : t("composer.attach")}
+      </DropdownMenuItem>
+    );
+  }
+  if (availability.kind === "choose") {
+    return (
+      <SpaceChoiceSubmenu
+        label={t("composer.attach.choose")}
+        spaceIds={availability.spaceIds}
+        onPick={(spaceId) => {
+          pick(spaceId);
+          openFilePicker();
+        }}
+        trigger={
+          <>
+            <PaperclipIcon />
+            {t("composer.attach")}
+          </>
+        }
+        testId="composer-attach-item"
+      />
+    );
+  }
+  return (
+    <UnavailableItem
+      icon={<PaperclipIcon />}
+      label={t("composer.attach")}
+      reason={availability.reason && t(ATTACH_REASON_KEY[availability.reason])}
+      testId="composer-attach-item"
+      reasonTestId="composer-attach-reason"
+    />
+  );
+}
+
+/**
+ * Opens the browser's file picker and adds what is picked to the composer, as
+ * `ComposerPrimitive.AddAttachment` does, from a menu item or a space picked in a sub-menu.
+ */
+function useFilePicker(): () => void {
+  const aui = useAui();
+  return () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.hidden = true;
+    document.body.appendChild(input);
+    input.onchange = () => {
+      const files = Array.from(input.files ?? []);
+      input.remove();
+      // A refused file is reported by the composer's error line.
+      for (const file of files)
+        void aui
+          .composer()
+          .addAttachment(file)
+          .catch(() => {});
+    };
+    input.oncancel = () => input.remove();
+    input.click();
+  };
+}
+
+/**
  * The « + » menu's limit entry, as {@link limitAvailability} decides: one click limiting to the
  * space it names, the host's sub-menu of the acting spaces for a conversation without an origin,
  * or an inert entry giving the reason.
@@ -211,8 +279,8 @@ export function LimitMenuEntry() {
   const { t, actingSpaceIds, SpaceChoiceSubmenu } = useChatHost();
   const scope = useConversationScope();
   const limit = limitAvailability(scope, actingSpaceIds);
-  // The space a click limits to (the origin, or the one acting space), else the origin.
-  const named = limit.kind === "toggle" ? limit.spaceId : scope.originSpaceId;
+  // The space a click limits to: the origin, or the one acting space.
+  const named = limit.kind === "toggle" ? limit.spaceId : null;
   const spaceLabel = useSpaceLabel(named);
   const spaceNode = useSpaceNode(named);
   return limit.kind === "toggle" ? (
@@ -241,17 +309,18 @@ export function LimitMenuEntry() {
       testId="composer-limit-item"
     />
   ) : (
-    // A turn generating, no space to act in, or an origin the chat no longer acts in.
+    // A turn generating, no space to act in, an origin the chat no longer acts in, or the
+    // acting set not known yet (no reason then).
     <UnavailableItem
       icon={<MapPinIcon />}
       label={t("composer.limit.generic")}
-      reason={t(LIMIT_REASON_KEY[limit.reason])}
+      reason={limit.reason && t(LIMIT_REASON_KEY[limit.reason])}
       testId="composer-limit-item"
     />
   );
 }
 
-/** A menu item that cannot be chosen here, with the reason under its label. */
+/** A menu item that cannot be chosen here, with the reason under its label when there is one. */
 function UnavailableItem({
   icon,
   label,
@@ -270,12 +339,14 @@ function UnavailableItem({
       {icon}
       <span className="flex flex-col">
         {label}
-        <span
-          className="text-muted-foreground max-w-56 text-xs whitespace-normal"
-          data-testid={reasonTestId}
-        >
-          {reason}
-        </span>
+        {reason ? (
+          <span
+            className="text-muted-foreground max-w-56 text-xs whitespace-normal"
+            data-testid={reasonTestId}
+          >
+            {reason}
+          </span>
+        ) : null}
       </span>
     </DropdownMenuItem>
   );

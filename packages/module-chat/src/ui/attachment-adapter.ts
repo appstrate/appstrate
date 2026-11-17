@@ -4,15 +4,19 @@
  * assistant-ui `AttachmentAdapter` for the chat composer (pinned
  * `@assistant-ui/react` 0.14.27). Its three methods:
  *
- *  - `add({file})` — register a picked file as a pending attachment (a chip);
- *    the client-side size guard rejects an over-cap file here, before any upload.
- *  - `send(pending)` — on composer submit, stage the bytes through the host's
- *    uploader and return a complete attachment whose `file` content part carries
+ *  - `add({file})` — register a picked file as a pending attachment (a chip),
+ *    with the space it is uploaded into, read then (`spaceOf`): a file that has
+ *    none is refused, and the client-side size guard rejects an over-cap file
+ *    here, before any upload.
+ *  - `send(pending)` — on composer submit, stage the bytes into that space through
+ *    the host's uploader and return a complete attachment whose `file` content part carries
  *    the `upload://upl_x` URI. react-ai-sdk's `toCreateMessage` maps that part to
  *    an ai-SDK file part (`url: upload://…`) on the outgoing UIMessage; the
  *    server then materializes it into a durable `appfile://` file.
  *  - `remove()` — no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
+ *
+ * The space is fixed when the file is added: the user picked it then, or saw it decided.
  *
  * The uploader and the translator come from the host injection seam
  * (`runtime-context.ts`) — the adapter owns no transport and no literal text.
@@ -46,19 +50,27 @@ function uploadFailureKey(err: unknown): string {
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
+  /** The space a file added now is uploaded into (`attachSpaceOf`), `null` for none. */
+  spaceOf: () => string | null;
 }): AttachmentAdapter {
-  const { upload, t } = deps;
+  const { upload, t, spaceOf } = deps;
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
+  // Each pending attachment's space, by attachment id.
+  const spaces = new Map<string, string>();
   return {
     // Any file type — the composer accepts arbitrary files (the agent's
     // input schema, not the composer, decides what a run will accept).
     accept: "*",
     add({ file }): Promise<PendingAttachment> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
+      const spaceId = spaceOf();
+      if (spaceId === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
+      const id = crypto.randomUUID();
+      spaces.set(id, spaceId);
       return Promise.resolve({
-        id: crypto.randomUUID(),
+        id,
         type: "file",
         name: file.name,
         contentType: file.type || "application/octet-stream",
@@ -68,9 +80,11 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
+      const spaceId = spaces.get(attachment.id);
+      if (spaceId === undefined) throw new Error(t("upload.failed"));
       let uri: string;
       try {
-        uri = await stageComposerFile(upload, attachment.file);
+        uri = await stageComposerFile(upload, attachment.file, spaceId);
       } catch (err) {
         // The host uploader's message is technical (status codes, English) and
         // ends up in the composer chip — surface the translated one instead.
@@ -82,6 +96,7 @@ export function createChatAttachmentAdapter(deps: {
         // browser console instead of gone.
         throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
+      spaces.delete(attachment.id);
       return {
         ...attachment,
         status: { type: "complete" },
@@ -95,7 +110,8 @@ export function createChatAttachmentAdapter(deps: {
         ],
       };
     },
-    remove(): Promise<void> {
+    remove(attachment): Promise<void> {
+      spaces.delete(attachment.id);
       return Promise.resolve();
     },
   };

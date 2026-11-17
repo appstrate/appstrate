@@ -9,7 +9,7 @@
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { UploadFn } from "@appstrate/ui/schema-form";
-import { uploadClient } from "../api/uploads";
+import { uploadClient, uploadInSpace } from "../api/uploads";
 import { invalidateOrgDetail } from "../lib/query-keys";
 
 export function useUploadClient(): UploadFn {
@@ -17,6 +17,23 @@ export function useUploadClient(): UploadFn {
   return useCallback(
     async (file, signal) => {
       const uri = await uploadClient(file, signal);
+      void invalidateOrgDetail(queryClient);
+      return uri;
+    },
+    [queryClient],
+  );
+}
+
+/** The same uploader, into a space the caller names (the chat attaches where the conversation acts). */
+export function useUploadInSpace(): (
+  file: File,
+  spaceId: string,
+  signal?: AbortSignal,
+) => Promise<string> {
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (file, spaceId, signal) => {
+      const uri = await uploadInSpace(file, spaceId, signal);
       void invalidateOrgDetail(queryClient);
       return uri;
     },

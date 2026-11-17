@@ -11,7 +11,7 @@ import type { UploadFn } from "@appstrate/ui/schema-form";
 import { client } from "./client";
 
 /**
- * Test seam, third and defaulted so `uploadClient` still satisfies `UploadFn`.
+ * Test seam, last and defaulted.
  * The spec paths are relative (`/api/uploads`) because the SPA is served
  * same-origin, and a relative URL only resolves against a document — outside a
  * browser the typed client cannot even construct its Request, so the descriptor
@@ -29,13 +29,24 @@ const defaultDeps: UploadDeps = {
   fetch: (input, init) => globalThis.fetch(input, init),
 };
 
-export const uploadClient = (async (file, signal, deps: UploadDeps = defaultDeps) => {
+/**
+ * Stages `file` and returns its `upload://` URI. `spaceId` names the space the upload lands in
+ * (the chat, which attaches in a space it chose); absent, the working space, as the client's
+ * middleware fills it.
+ */
+export async function uploadInSpace(
+  file: File,
+  spaceId: string | undefined,
+  signal?: AbortSignal,
+  deps: UploadDeps = defaultDeps,
+): Promise<string> {
   const { data: desc } = await deps.client.POST("/api/uploads", {
     body: {
       name: file.name,
       size: file.size,
       mime: file.type || "application/octet-stream",
     },
+    ...(spaceId ? { params: { header: { "X-Space-Id": spaceId } } } : {}),
     signal,
   });
   if (!desc) throw new Error("upload failed: empty descriptor response");
@@ -50,4 +61,7 @@ export const uploadClient = (async (file, signal, deps: UploadDeps = defaultDeps
     throw new Error(`upload failed: ${putRes.status} ${putRes.statusText}`);
   }
   return desc.uri;
-}) satisfies UploadFn;
+}
+
+export const uploadClient = ((file, signal) =>
+  uploadInSpace(file, undefined, signal)) satisfies UploadFn;

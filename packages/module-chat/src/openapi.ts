@@ -286,7 +286,15 @@ export const chatPaths = {
                     "The origin space of a conversation without one (with `restricted: true` only).",
                 },
               },
-              minProperties: 1,
+              // `title` or `restricted` (a top-level `anyOf` would read as a union of shapes).
+              if: { not: { properties: { title: {} }, required: ["title"] } },
+              then: { properties: { restricted: {} }, required: ["restricted"] },
+              dependentSchemas: {
+                spaceId: {
+                  properties: { restricted: { const: true } },
+                  required: ["restricted"],
+                },
+              },
               additionalProperties: false,
             },
           },

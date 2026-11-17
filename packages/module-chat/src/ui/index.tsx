@@ -27,7 +27,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
@@ -91,7 +91,12 @@ import {
   type ConversationCreation,
 } from "./chat-route.ts";
 import { useConversationLimit } from "./conversation-limit.ts";
-import { ConversationScopeProvider, useConversationScope } from "./conversation-scope.ts";
+import {
+  AttachTargetProvider,
+  ConversationScopeProvider,
+  useConversationAttachTarget,
+  useConversationScope,
+} from "./conversation-scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -187,10 +192,8 @@ export interface ChatPageProps {
   can: ChatCan;
   /** The caller's grants in a named space (see `ChatHost`). Pass a stable function. */
   canIn: ChatHost["canIn"];
-  /** The spaces the chat acts in (see `ChatHost`). Pass a stable array. */
+  /** The spaces the chat acts in, `null` until known (see `ChatHost`). Pass a stable array. */
   actingSpaceIds: ChatHost["actingSpaceIds"];
-  /** The host's working space, where an upload lands (see `ChatHost`). */
-  workingSpaceId: ChatHost["workingSpaceId"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -225,7 +228,6 @@ export function ChatPage({
   can,
   canIn,
   actingSpaceIds,
-  workingSpaceId,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -334,7 +336,6 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
-      workingSpaceId,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -353,7 +354,6 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
-      workingSpaceId,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -364,16 +364,6 @@ export function ChatPage({
       useSpaceLabelOf,
       SpaceChoiceSubmenu,
     ],
-  );
-
-  // File attachments: the composer stages picked files through the HOST uploader
-  // and sends them as `upload://` file parts the server materializes into
-  // durable files. Built HERE (where the host props land) and handed down as
-  // a single prop — its only consumer is the runtime mounted two components
-  // below, in this same file, so it needs no context hop.
-  const attachments = useMemo(
-    () => createChatAttachmentAdapter({ upload: uploadFile, t }),
-    [uploadFile, t],
   );
 
   // Built once per catalog/selection change, NOT per `ChatPage` render: this
@@ -425,7 +415,7 @@ export function ChatPage({
               isPersisted={isPersisted}
               initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
               onConversationChange={onConversationChange}
-              attachments={attachments}
+              uploadFile={uploadFile}
               composerSlot={composerSlot}
               authorsPackages={authorsPackages}
               canPinSkills={canPinSkills(can)}
@@ -448,8 +438,8 @@ interface ConversationProps {
   isPersisted: boolean;
   initialComposerDraft?: string;
   onConversationChange?: SelectConversation;
-  /** Composer attachment adapter, built once by `ChatPage` from the host props. */
-  attachments: AttachmentAdapter;
+  /** The host's uploader, which the conversation's attachment adapter stages files through. */
+  uploadFile: UploadFile;
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
   canPinSkills: boolean;
@@ -475,9 +465,9 @@ interface ConversationProps {
  * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
  * `isPersisted`, the `server*` / `stored*` fields of the active row), a host
- * value the host memoises (`onConversationChange`, and `transport`, rebuilt
- * when the list filter changes), or a `useMemo` product of `ChatPage`
- * (`attachments`, `composerSlot`), so a list refetch that leaves the active row
+ * value the host memoises (`onConversationChange`, `uploadFile`, and `transport`,
+ * rebuilt when the list filter changes), or a `useMemo` product of `ChatPage`
+ * (`composerSlot`), so a list refetch that leaves the active row
  * untouched is a no-op here.
  */
 const Conversation = memo(function Conversation({
@@ -520,6 +510,8 @@ const Conversation = memo(function Conversation({
     selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
     generating: rest.serverGenerating === true,
   });
+  // The space a file goes to (`attachAvailability`), and the one last picked when it is asked.
+  const attach = useConversationAttachTarget(scope, transport?.spaceId ?? null);
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
@@ -568,17 +560,20 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <ConversationInner
-        id={id}
-        transport={transport}
-        isPersisted={persistedAtMount}
-        initialMessages={initialMessages}
-        composerTools={tools}
-        composerSlot={composerSlot}
-        getChosenSkills={getChosenSkills}
-        getCreation={getCreation}
-        {...rest}
-      />
+      <AttachTargetProvider value={attach.target}>
+        <ConversationInner
+          id={id}
+          transport={transport}
+          isPersisted={persistedAtMount}
+          initialMessages={initialMessages}
+          composerTools={tools}
+          composerSlot={composerSlot}
+          getChosenSkills={getChosenSkills}
+          getCreation={getCreation}
+          getAttachSpaceId={attach.getSpaceId}
+          {...rest}
+        />
+      </AttachTargetProvider>
     </ConversationScopeProvider>
   );
 });
@@ -615,13 +610,14 @@ function ConversationInner({
   isPersisted,
   initialComposerDraft,
   onConversationChange,
-  attachments,
+  uploadFile,
   composerTools,
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
   getChosenSkills,
   getCreation,
+  getAttachSpaceId,
 }: Omit<
   ConversationProps,
   "canPinSkills" | "canWrite" | "authorsPackages" | "storedSpaceId" | "storedRestricted"
@@ -631,8 +627,18 @@ function ConversationInner({
   getChosenSkills: () => ChatSkillSelection | undefined;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
+  /** The space a file added now is uploaded into, `null` for none. */
+  getAttachSpaceId: () => string | null;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useChatHost();
+  // File attachments: the composer stages picked files through the HOST uploader, into the
+  // space each was added for, and sends them as `upload://` file parts the server
+  // materializes into durable files.
+  const attachments = useMemo(
+    () => createChatAttachmentAdapter({ upload: uploadFile, t, spaceOf: getAttachSpaceId }),
+    [uploadFile, t, getAttachSpaceId],
+  );
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
   const getScope = useLatest(useConversationScope());

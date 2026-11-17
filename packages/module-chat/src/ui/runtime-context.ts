@@ -25,8 +25,8 @@
  *    call site (all props required) can never reach anyway.
  *
  * `uploadFile` is NOT in the bag: its only consumer is the composer's attachment
- * adapter, which `ChatPage` builds itself and passes down as a prop — a context
- * hop for a value that never leaves the file would be pure ceremony.
+ * adapter, which the conversation builds from the prop `ChatPage` passes down — a
+ * context hop for a value that never leaves the file would be pure ceremony.
  */
 
 import { createContext, useContext, type ComponentType, type ReactNode } from "react";
@@ -147,13 +147,13 @@ export type DownloadFile = (id: string, name: string, spaceId?: string) => void;
 export type UseFileImageSrc = (id: string, spaceId?: string) => string | null | undefined;
 
 /**
- * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
- * returning the `upload://upl_x` URI the server materializes into a durable
- * file. Same function the shell hands to its own `<SchemaForm>` uploader —
- * the module adds only its staged-image preview cache on top (`upload.ts`).
- * Travels as a `ChatPage` prop, not through context (see the file header).
+ * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink) into `spaceId`,
+ * returning the `upload://upl_x` URI the server materializes into a durable file there. The
+ * chat names the space of every upload (`attachAvailability`), never the host's working one.
+ * The module adds only its staged-image preview cache on top (`upload.ts`). Travels as a
+ * `ChatPage` prop, not through context (see the file header).
  */
-export type UploadFile = (file: File, signal?: AbortSignal) => Promise<string>;
+export type UploadFile = (file: File, spaceId: string, signal?: AbortSignal) => Promise<string>;
 
 /**
  * The host's i18next `t`, scoped to the chat namespace. The seam exists so the
@@ -188,18 +188,12 @@ export interface ChatHost {
    */
   canIn: ChatCanIn;
   /**
-   * The spaces the chat acts in (the host's acting set). The skills picker lists them, and a new
-   * conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it is
-   * one of them.
+   * The spaces the chat acts in (the host's acting set), `null` until the host's listing has
+   * answered: what needs it then waits, and gives no reason. The skills picker lists them, and a
+   * new conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it
+   * is one of them.
    */
-  actingSpaceIds: readonly string[];
-  /**
-   * The host's working space, where an upload lands, `null` when it has none. Distinct from
-   * `ChatTransport.spaceId`, the list filter, which is `null` in « Tous les espaces » while the
-   * working space stays the one entered. A limited conversation takes a file only while this is
-   * its origin space.
-   */
-  workingSpaceId: string | null;
+  actingSpaceIds: readonly string[] | null;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
@@ -240,10 +234,10 @@ export interface ChatHost {
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */
 export function actsIn(
-  actingSpaceIds: readonly string[],
+  actingSpaceIds: readonly string[] | null,
   spaceId: string | null | undefined,
 ): boolean {
-  return !!spaceId && actingSpaceIds.includes(spaceId);
+  return !!spaceId && !!actingSpaceIds?.includes(spaceId);
 }
 
 /**

@@ -30,7 +30,7 @@ import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
-import { useUploadClient } from "../../hooks/use-upload";
+import { useUploadInSpace } from "../../hooks/use-upload";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
@@ -148,9 +148,8 @@ export function ChatModulePage() {
     [downloadFile, orgId, currentSpaceId],
   );
   // The very same uploader every SchemaForm file field uses — including its
-  // refresh of the org storage gauge. The chat composer stages files through
-  // it instead of re-implementing the 2-step upload.
-  const uploadFile = useUploadClient();
+  // refresh of the org storage gauge — into the space the chat names for each file.
+  const uploadFile = useUploadInSpace();
   const queryClient = useQueryClient();
   // The assistant creates and imports packages: the lists show them as the editor's would.
   const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
@@ -193,7 +192,6 @@ export function ChatModulePage() {
               t={translate}
               can={can}
               canIn={canIn}
-              workingSpaceId={currentSpaceId}
               actingSpaceIds={actingSpaceIds}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}

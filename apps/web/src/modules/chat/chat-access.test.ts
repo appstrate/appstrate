@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
+import { accessStanding, resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
 import { spacePackagePermission } from "@appstrate/core/permissions";
 import type { SpaceGrant } from "../../lib/package-permissions.ts";
 
@@ -334,5 +334,56 @@ describe("a caller who may read the chat but not write to it", () => {
       ),
     );
     expect(Object.values(readOnlyEverything)).toEqual(ROW_IDS.map(() => false));
+  });
+});
+
+describe("the standing the access summary names", () => {
+  const origin = { name: "Atelier", role: "Opérateur" };
+
+  it("names the selected space's role, the org role standing in for none", () => {
+    for (const conversationOrigin of [origin, null]) {
+      expect(
+        accessStanding({
+          overview: false,
+          orgRole: "Membre",
+          workingRole: "Lecteur",
+          origin: conversationOrigin,
+        }),
+      ).toEqual({
+        headline: "Lecteur",
+        line: { key: "access.roleLine", params: { org: "Membre", space: "Lecteur" } },
+      });
+    }
+    expect(
+      accessStanding({ overview: false, orgRole: "Membre", workingRole: null, origin: null }),
+    ).toEqual({
+      headline: "Membre",
+      line: { key: "access.roleLine", params: { org: "Membre", space: "—" } },
+    });
+  });
+
+  it("never names the hidden working space in « Tous les espaces »", () => {
+    const standing = accessStanding({
+      overview: true,
+      orgRole: "Membre",
+      workingRole: "Lecteur",
+      origin: null,
+    });
+    expect(standing).toEqual({
+      headline: "Membre",
+      line: { key: "access.roleLineOrg", params: { org: "Membre" } },
+    });
+  });
+
+  it("names the conversation's origin space by name, with the role held there", () => {
+    expect(
+      accessStanding({ overview: true, orgRole: "Membre", workingRole: "Lecteur", origin }),
+    ).toEqual({
+      headline: "Membre",
+      line: {
+        key: "access.roleLineIn",
+        params: { org: "Membre", name: "Atelier", space: "Opérateur" },
+      },
+    });
   });
 });

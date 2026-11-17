@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Protocol guards for `uploadClient` — THE uploader behind every file input
+ * Protocol guards for `uploadInSpace` — THE uploader behind every file input
  * (`<SchemaForm upload={...} />` via `hooks/use-upload.ts`).
  *
  * The same protocol used to be specified by `packages/ui/test/upload-client.test.ts`,
@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { uploadClient } from "../uploads.ts";
+import { uploadInSpace } from "../uploads.ts";
 
 const DESCRIPTOR = {
   id: "upl_abc",
@@ -34,6 +34,7 @@ interface PostCall {
   path: string;
   body: { name: string; size: number; mime: string };
   signal?: AbortSignal | null;
+  space?: string;
 }
 interface PutCall {
   url: string;
@@ -51,8 +52,20 @@ function harness(options: { descriptor?: typeof DESCRIPTOR | null; putStatus?: n
   const puts: PutCall[] = [];
   const deps = {
     client: {
-      POST: (async (path: string, init: { body: PostCall["body"]; signal?: AbortSignal }) => {
-        posts.push({ path, body: init.body, signal: init.signal });
+      POST: (async (
+        path: string,
+        init: {
+          body: PostCall["body"];
+          signal?: AbortSignal;
+          params?: { header?: { "X-Space-Id"?: string } };
+        },
+      ) => {
+        posts.push({
+          path,
+          body: init.body,
+          signal: init.signal,
+          space: init.params?.header?.["X-Space-Id"],
+        });
         return { data: descriptor ?? undefined, error: undefined, response: new Response() };
       }) as never,
     },
@@ -67,12 +80,19 @@ function harness(options: { descriptor?: typeof DESCRIPTOR | null; putStatus?: n
   return { deps, posts, puts };
 }
 
-describe("uploadClient", () => {
+describe("uploadInSpace", () => {
+  it("names the space it is given, and leaves the working space to the client otherwise", async () => {
+    const { deps, posts } = harness();
+    await uploadInSpace(new File(["x"], "x.txt"), "spc_chosen", undefined, deps);
+    await uploadInSpace(new File(["x"], "x.txt"), undefined, undefined, deps);
+    expect(posts.map((post) => post.space)).toEqual(["spc_chosen", undefined]);
+  });
+
   it("POSTs the descriptor, PUTs the bytes to the returned url, returns the uri", async () => {
     const { deps, posts, puts } = harness();
     const file = new File(["hello"], "hello.txt", { type: "text/plain" });
 
-    const uri = await uploadClient(file, undefined, deps);
+    const uri = await uploadInSpace(file, undefined, undefined, deps);
 
     expect(uri).toBe("upload://upl_abc");
     expect(posts).toHaveLength(1);
@@ -88,7 +108,12 @@ describe("uploadClient", () => {
   it("describes the file by name, size and mime in the descriptor request", async () => {
     const { deps, posts } = harness();
 
-    await uploadClient(new File(["hello"], "hello.txt", { type: "text/plain" }), undefined, deps);
+    await uploadInSpace(
+      new File(["hello"], "hello.txt", { type: "text/plain" }),
+      undefined,
+      undefined,
+      deps,
+    );
 
     expect(posts[0]!.body.name).toBe("hello.txt");
     expect(posts[0]!.body.size).toBe(5);
@@ -100,7 +125,7 @@ describe("uploadClient", () => {
 
     // No extension, no explicit type — `file.type` is the empty string, and an
     // empty mime is not something the sink can store.
-    await uploadClient(new File(["x"], "blob"), undefined, deps);
+    await uploadInSpace(new File(["x"], "blob"), undefined, undefined, deps);
 
     expect(posts[0]!.body.mime).toBe("application/octet-stream");
   });
@@ -108,17 +133,17 @@ describe("uploadClient", () => {
   it("throws when the sink rejects the PUT", async () => {
     const { deps } = harness({ putStatus: 502 });
 
-    await expect(uploadClient(new File(["x"], "x.txt"), undefined, deps)).rejects.toThrow(
-      /^upload failed: 502 Bad Gateway$/,
-    );
+    await expect(
+      uploadInSpace(new File(["x"], "x.txt"), undefined, undefined, deps),
+    ).rejects.toThrow(/^upload failed: 502 Bad Gateway$/);
   });
 
   it("throws when the descriptor response carries no body", async () => {
     const { deps, puts } = harness({ descriptor: null });
 
-    await expect(uploadClient(new File(["x"], "x.txt"), undefined, deps)).rejects.toThrow(
-      "upload failed: empty descriptor response",
-    );
+    await expect(
+      uploadInSpace(new File(["x"], "x.txt"), undefined, undefined, deps),
+    ).rejects.toThrow("upload failed: empty descriptor response");
     // And never reaches the sink with an undefined url.
     expect(puts).toHaveLength(0);
   });
@@ -127,7 +152,7 @@ describe("uploadClient", () => {
     const { deps, posts, puts } = harness();
     const controller = new AbortController();
 
-    await uploadClient(new File(["x"], "x.txt"), controller.signal, deps);
+    await uploadInSpace(new File(["x"], "x.txt"), undefined, controller.signal, deps);
 
     // Cancelling the form must cancel the upload in flight, whichever leg it is
     // on: a signal wired to only one of them leaves the other running.

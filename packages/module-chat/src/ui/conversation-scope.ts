@@ -7,8 +7,9 @@
  * it from the host's selected space — the one thing that does NOT define an existing conversation.
  */
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { actsIn, useChatHost } from "./runtime-context.ts";
+import { useLatest } from "./use-latest.ts";
 
 export interface ConversationScope {
   /**
@@ -54,12 +55,13 @@ export type LimitUnavailableReason = "generating" | "no-acting-space" | "outside
 /**
  * How the limit can change. `toggle`: one click, naming `spaceId` (the origin, or the one space
  * the chat acts in for a conversation without an origin); `choose`: a conversation without an
- * origin picks it among `spaceIds`, the spaces the chat acts in; `unavailable`, with the reason.
+ * origin picks it among `spaceIds`, the spaces the chat acts in; `unavailable`, with the reason,
+ * `null` while the acting set is not known.
  */
 export type LimitAvailability =
   | { kind: "toggle"; spaceId: string }
   | { kind: "choose"; spaceIds: readonly string[] }
-  | { kind: "unavailable"; reason: LimitUnavailableReason };
+  | { kind: "unavailable"; reason: LimitUnavailableReason | null };
 
 /**
  * The one decision on « Limiter à… ». Not while a turn generates (the server refuses). A limited
@@ -68,12 +70,14 @@ export type LimitAvailability =
  */
 export function limitAvailability(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted" | "generating">,
-  actingSpaceIds: readonly string[],
+  actingSpaceIds: readonly string[] | null,
 ): LimitAvailability {
   if (scope.generating) return { kind: "unavailable", reason: "generating" };
   const origin = scope.originSpaceId;
+  if (origin && scope.restricted) return { kind: "toggle", spaceId: origin };
+  if (actingSpaceIds === null) return { kind: "unavailable", reason: null };
   if (origin) {
-    return scope.restricted || actsIn(actingSpaceIds, origin)
+    return actsIn(actingSpaceIds, origin)
       ? { kind: "toggle", spaceId: origin }
       : { kind: "unavailable", reason: "outside" };
   }
@@ -83,28 +87,111 @@ export function limitAvailability(
 }
 
 /**
- * Whether the composer may stage a file. An upload lands in the working space, which the turn
- * resolves only where the chat acts; and a LIMITED conversation reaches its origin space alone, so
- * it takes a file only while the working space IS that origin.
+ * Why no file can be attached: the selected space is not one the chat acts in, the limited
+ * conversation's origin no longer is, or the chat acts nowhere.
+ */
+export type AttachUnavailableReason = "outside" | "origin-outside" | "no-acting-space";
+
+/**
+ * Where a file goes. `attach`: uploaded into `spaceId` at once; `choose`: the user picks it among
+ * `spaceIds`, the spaces the chat acts in; `unavailable`, with the reason, `null` while the acting
+ * set is not known.
+ */
+export type AttachAvailability =
+  | { kind: "attach"; spaceId: string }
+  | { kind: "choose"; spaceIds: readonly string[] }
+  | { kind: "unavailable"; reason: AttachUnavailableReason | null };
+
+/**
+ * The one decision on the space a file is uploaded into, which the conversation then touches.
+ * The origin while the chat acts there; a limited conversation takes files only there. Without
+ * one, the space the host has selected (`selectedSpaceId`) when the chat acts there; in
+ * « Tous les espaces » (`null`), the one acting space, else the user picks. Never the host's
+ * working space unseen.
  */
 export function attachAvailability(
-  actingSpaceIds: readonly string[],
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
-  workingSpaceId: string | null | undefined,
-): { available: true } | { available: false; reason: "outside" | "limited" } {
-  const origin = limitedSpaceOf(scope);
-  if (origin !== undefined && workingSpaceId !== origin) {
-    return { available: false, reason: "limited" };
+  actingSpaceIds: readonly string[] | null,
+  selectedSpaceId: string | null,
+): AttachAvailability {
+  if (actingSpaceIds === null) return { kind: "unavailable", reason: null };
+  const origin = scope.originSpaceId;
+  if (origin && actsIn(actingSpaceIds, origin)) return { kind: "attach", spaceId: origin };
+  if (origin && scope.restricted) return { kind: "unavailable", reason: "origin-outside" };
+  if (selectedSpaceId !== null) {
+    return actsIn(actingSpaceIds, selectedSpaceId)
+      ? { kind: "attach", spaceId: selectedSpaceId }
+      : { kind: "unavailable", reason: "outside" };
   }
-  return actsIn(actingSpaceIds, workingSpaceId)
-    ? { available: true }
-    : { available: false, reason: "outside" };
+  if (actingSpaceIds.length === 0) return { kind: "unavailable", reason: "no-acting-space" };
+  if (actingSpaceIds.length === 1) return { kind: "attach", spaceId: actingSpaceIds[0]! };
+  return { kind: "choose", spaceIds: actingSpaceIds };
 }
 
-/** {@link attachAvailability} of the open conversation, in the host's working space. */
-export function useAttachAvailability(): ReturnType<typeof attachAvailability> {
-  const { actingSpaceIds, workingSpaceId } = useChatHost();
-  return attachAvailability(actingSpaceIds, useConversationScope(), workingSpaceId);
+/**
+ * The open conversation's {@link attachAvailability}, with the space last picked for it: a
+ * dropped file, which cannot ask, goes there while the choice stands.
+ */
+export interface AttachTarget {
+  availability: AttachAvailability;
+  /** The space last picked in a `choose`; it counts only while it is one of the choices. */
+  picked: string | null;
+  /** Picks the space the next files go to. */
+  pick: (spaceId: string) => void;
+}
+
+/** Where a file added now is uploaded: the decided space, else the one picked; none otherwise. */
+export function attachSpaceOf(
+  target: Pick<AttachTarget, "availability" | "picked">,
+): string | null {
+  const { availability } = target;
+  if (availability.kind === "attach") return availability.spaceId;
+  const { picked } = target;
+  return availability.kind === "choose" && picked && availability.spaceIds.includes(picked)
+    ? picked
+    : null;
+}
+
+const NO_ATTACH_TARGET: AttachTarget = {
+  availability: { kind: "unavailable", reason: null },
+  picked: null,
+  pick: () => {},
+};
+
+const AttachTargetContext = createContext<AttachTarget>(NO_ATTACH_TARGET);
+
+export const AttachTargetProvider = AttachTargetContext.Provider;
+
+export function useAttachTarget(): AttachTarget {
+  return useContext(AttachTargetContext);
+}
+
+/**
+ * The open conversation's {@link AttachTarget}, under the space the host shows (`selectedSpaceId`,
+ * `null` in « Tous les espaces »), and a getter of the space a file added now goes to, read by the
+ * attachment adapter. A pick answers the choice offered under the space shown when it was made:
+ * showing another drops it.
+ */
+export function useConversationAttachTarget(
+  scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
+  selectedSpaceId: string | null,
+): { target: AttachTarget; getSpaceId: () => string | null } {
+  const { actingSpaceIds } = useChatHost();
+  const [last, setLast] = useState<{ spaceId: string; under: string | null } | null>(null);
+  const picked = last && last.under === selectedSpaceId ? last.spaceId : null;
+  const { originSpaceId, restricted } = scope;
+  const availability = useMemo(
+    () => attachAvailability({ originSpaceId, restricted }, actingSpaceIds, selectedSpaceId),
+    [originSpaceId, restricted, actingSpaceIds, selectedSpaceId],
+  );
+  const pick = useCallback(
+    (spaceId: string) => setLast({ spaceId, under: selectedSpaceId }),
+    [selectedSpaceId],
+  );
+  const target = useMemo(() => ({ availability, picked, pick }), [availability, picked, pick]);
+  const getTarget = useLatest(target);
+  const getSpaceId = useCallback(() => attachSpaceOf(getTarget()), [getTarget]);
+  return { target, getSpaceId };
 }
 
 /**
