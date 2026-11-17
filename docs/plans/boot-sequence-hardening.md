@@ -77,7 +77,7 @@ A passe en premier (il touche toutes les lignes d'appel). E ne démarre que sur 
   `degraded` (erreur rattrapée par l'appelant) ou `failed` (erreur propagée).
 - `boot.ts` : chaque étape passe par `bootStep`. Aucun changement d'ordre ni de sémantique
   d'erreur. Les `.catch(() => logger.warn(...))` existants restent où ils sont.
-- `index.ts` : la ligne `Server ready` gagne `criticalMs` et `backgroundMs` à côté de `startupMs`.
+- `index.ts` : la ligne `Server ready` porte `startupMs` (depuis le lancement du processus), `criticalMs` et `servingMs` ; `Run capacity ready` porte `runCapacityMs`.
 - Commentaire « ~45 ms » de `initSystemPackages` corrigé ou retiré.
 
 **Tests.** Unitaire sur `bootStep` : durée émise, erreur propagée intacte, `outcome` correct.

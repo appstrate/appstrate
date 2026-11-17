@@ -464,14 +464,14 @@ logger.info("Server listening (starting up)", { port: env.PORT });
 // A rejection anywhere is fatal, matching the previous blocking `await boot()`:
 // the metering retry worker's init is deliberately uncaught upstream because a
 // missing durable recovery channel can lose billable spend permanently.
-const bootStartedAt = Date.now();
 const servingStartedAt = performance.now();
 void bootServing()
   .then(() => {
     markServerReady();
     logger.info("Server ready", {
       port: env.PORT,
-      startupMs: Date.now() - bootStartedAt,
+      // Since the process started (`performance.now()` counts from process start).
+      startupMs: Math.round(performance.now()),
       criticalMs,
       servingMs: Math.round(performance.now() - servingStartedAt),
     });
