@@ -306,7 +306,7 @@ describe("platform MCP surface cache", () => {
     expect(platformMcpSurfaceKey(MCP_URL, [...perms].reverse())).toBe(key);
     expect(platformMcpSurfaceKey(MCP_URL, [...perms, perms[0]!])).toBe(key);
     expect(platformMcpSurfaceKey(MCP_URL, perms.slice(1))).not.toBe(key);
-    // `context=injected` drops get_me server-side, so it is part of the surface.
+    // `context=injected` rewords the server's instructions, so it is part of the surface.
     expect(platformMcpSurfaceKey(`${ORIGIN}/api/mcp/o/org_1`, perms)).not.toBe(key);
     expect(
       platformMcpSurfaceKey("http://other.test/api/mcp/o/org_1?context=injected", perms),

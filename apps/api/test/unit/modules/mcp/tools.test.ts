@@ -37,7 +37,6 @@ const FULL_SURFACE = ["mcp:read", "mcp:invoke", "agents:run", "runs:read", "file
 
 function makeTools(
   permissions: string[],
-  contextInjected = false,
   actor: Actor = { type: "user", id: "user_1" },
   /** What the platform answers the dispatched request with. */
   respond: () => Response = () =>
@@ -65,7 +64,6 @@ function makeTools(
     placeRootAs: async () => null,
     requestId: "req_test",
     followRunLogs: () => () => {},
-    contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, calls };
@@ -149,7 +147,6 @@ describe("credential proxy closed in the space", () => {
     placeRootAs: async () => null,
     requestId: "req_test",
     followRunLogs: () => () => {},
-    contextInjected: false,
   });
 
   for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
@@ -289,7 +286,7 @@ describe("buildMcpTools declarations", () => {
  */
 describe("import_package_file declaration", () => {
   const imports = (permissions: Iterable<string>, actor?: Actor): boolean =>
-    makeTools([...permissions], false, actor).byName.has("import_package_file");
+    makeTools([...permissions], actor).byName.has("import_package_file");
 
   it("withholds it from a package writer without `mcp:invoke`", () => {
     expect(imports(["mcp:read", "agents:write"])).toBe(false);
@@ -474,9 +471,9 @@ describe("describe_operation", () => {
   });
 
   it.each(["runInline", "runAgent"])(
-    "keeps the full %s operation available to context-injected chat",
+    "keeps the full %s operation available on the read-only surface",
     async (operationId) => {
-      const { byName } = makeTools(["mcp:read"], true);
+      const { byName } = makeTools(["mcp:read"]);
       const res = await byName
         .get("describe_operation")!
         .handler({ operation_id: operationId }, noExtra);
@@ -670,7 +667,6 @@ describe("invoke_operation", () => {
   it("round-trips the ETag: a result carries `etag`, `if_match` goes out as If-Match", async () => {
     const { byName, calls } = makeTools(
       ["mcp:invoke"],
-      false,
       undefined,
       () =>
         new Response(JSON.stringify({ id: "@acme/a" }), {
@@ -886,7 +882,6 @@ describe("invoke_operation", () => {
     // which an mcp-only caller does not hold — the shape of a real 403.
     const { byName, calls } = makeTools(
       ["mcp:read", "mcp:invoke"],
-      false,
       { type: "user", id: "user_1" },
       () =>
         new Response(JSON.stringify({ title: "Forbidden" }), {
@@ -915,7 +910,6 @@ describe("invoke_operation", () => {
     // model as a role problem it should stop retrying.
     const { byName } = makeTools(
       ["mcp:read", "mcp:invoke"],
-      false,
       { type: "user", id: "user_1" },
       () => new Response("{}", { status: 500, headers: { "content-type": "application/json" } }),
     );
@@ -935,7 +929,6 @@ describe("invoke_operation", () => {
     // have; the refusal is about THAT package.
     const { byName } = makeTools(
       ["mcp:read", "mcp:invoke"],
-      false,
       { type: "user", id: "user_1" },
       () =>
         new Response(JSON.stringify({ title: "Forbidden" }), {
@@ -966,7 +959,6 @@ describe("invoke_operation", () => {
     const invokeDelete = async (ceiling: ReadonlySet<string>) => {
       const { byName } = makeTools(
         ["mcp:read", "mcp:invoke"],
-        false,
         { type: "user", id: "user_1" },
         forbidden,
         ceiling,
@@ -1139,51 +1131,14 @@ describe("buildOperationIndex", () => {
   });
 });
 
-describe("buildMcpTools contextInjected", () => {
-  it("exposes get_me by default (external MCP clients have no injected context)", () => {
+describe("buildMcpTools read-only surface", () => {
+  it("exposes get_me on the read-only surface", () => {
     const { byName } = makeTools(["mcp:read"]);
     expect(byName.has("get_me")).toBe(true);
   });
 
-  it("drops get_me when the caller already injected its context, keeping the rest", () => {
-    const dispatch: Dispatch = async () =>
-      new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
-    const tools = toolsFor({
-      origin: "https://test.local",
-      authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
-      // The full surface, so this asserts on get_me's absence and nothing
-      // else — every other tool here has a grant of its own.
-      permissions: new Set(FULL_SURFACE),
-      ceiling: undefined,
-      dispatch,
-      contextInjected: true,
-      actor: { type: "user", id: "user_1" },
-      scope: { orgId: "org_1", spaceId: "spc_1" },
-      authorizeBundle: async () => {},
-      placeRootAs: async () => null,
-      requestId: "req_test",
-      followRunLogs: () => () => {},
-    });
-    // The whole registered surface IS the advertised surface: no retired name
-    // is registered, listed or hidden — see "registers no retired name, listed
-    // or hidden" above.
-    const names = tools.map((t) => t.descriptor.name).sort();
-    // get_me is redundant for a context-injected caller; search_operations stays
-    // (its best_match schema is not covered by the injected operation index).
-    expect(names).toEqual([
-      "describe_operation",
-      "get_runtime_capabilities",
-      "invoke_operation",
-      "list_files",
-      "read_file",
-      "run_and_wait",
-      "search_operations",
-      "validate_package_file",
-    ]);
-  });
-
   it("exposes the runtime registry used by package authoring and adapters", async () => {
-    const { byName } = makeTools(["mcp:read"], true);
+    const { byName } = makeTools(["mcp:read"]);
     const result = await byName.get("get_runtime_capabilities")!.handler({}, noExtra);
     const payload = parseResult(result);
     expect(payload).toMatchObject({
@@ -1324,7 +1279,7 @@ describe("structured tool output", () => {
       ["get_runtime_capabilities", {}, fileList],
     ];
     for (const [name, args, respond] of cases) {
-      const { byName } = makeTools(FULL_SURFACE, false, undefined, respond);
+      const { byName } = makeTools(FULL_SURFACE, undefined, respond);
       const result = await byName.get(name)!.handler(args, noExtra);
       expect({ name, isError: result.isError }).toEqual({ name, isError: false });
       expect(result.structuredContent).toEqual(parseResult(result));
@@ -1333,7 +1288,7 @@ describe("structured tool output", () => {
 
   it("carries no structuredContent on a tool error", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
-    const { byName } = makeTools(FULL_SURFACE, false, undefined, () =>
+    const { byName } = makeTools(FULL_SURFACE, undefined, () =>
       Response.json({ title: "nope" }, { status: 500 }),
     );
     const result = await byName

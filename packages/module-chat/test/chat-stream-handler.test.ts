@@ -23,7 +23,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, setSystemTime, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -1159,15 +1159,36 @@ describe("handleChatStream", () => {
    * a newly interpolated per-request value.
    */
   it("hands the engine a byte-identical system prompt across turns", async () => {
-    const first = scriptedEngine();
-    await postChat(mintSessionId(), undefined, first.engine);
-    const second = scriptedEngine();
-    await postChat(mintSessionId(), undefined, second.engine);
+    // The second turn differs in everything a turn may: 45 minutes later on the
+    // clock (same hour), a history ahead of it, another user message. None of it
+    // may reach the system prompt. The clock is frozen per turn, then released —
+    // in the future, so no store reads what the turn wrote as already expired.
+    const turnAt = async (iso: string, overrides: Parameters<typeof postChat>[3]) => {
+      const { engine, calls } = scriptedEngine();
+      setSystemTime(new Date(iso));
+      try {
+        const res = await postChat(mintSessionId(), undefined, engine, overrides);
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+      } finally {
+        setSystemTime();
+      }
+      expect(calls).toHaveLength(1);
+      return calls[0]!.system;
+    };
+    const first = await turnAt("2099-06-25T09:05:00.000Z", {});
+    const second = await turnAt("2099-06-25T09:50:00.000Z", {
+      history: [
+        { id: "u0", role: "user", parts: [{ type: "text", text: "salut" }] },
+        { id: "a0", role: "assistant", parts: [{ type: "text", text: "Bonjour !" }] },
+      ],
+      parts: [{ type: "text", text: "et maintenant ?" }],
+    });
 
-    expect(first.calls).toHaveLength(1);
-    expect(second.calls).toHaveLength(1);
-    expect(second.calls[0]!.system).toBe(first.calls[0]!.system);
-    expect(first.calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
+    expect(second).toBe(first);
+    expect(first).toContain(CONTEXT_ORG_MARKER);
+    // The control: the clock did reach the prompt, floored to the hour both turns share.
+    expect(first).toContain("2099-06-25T09:00:00.000Z");
   }, 20_000);
 
   describe("the composer's package-authoring switch", () => {

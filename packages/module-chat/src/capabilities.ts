@@ -25,6 +25,11 @@ export interface TurnCapabilities {
    * dispatch needed. In the `manual` skill mode, `list_skills` lists them on the user's request.
    */
   readonly readsSkills: boolean;
+  /**
+   * `transport` ∧ `integrations:read`: `get_me` (declared on every platform MCP connection) lists
+   * the caller's connected integrations — `GET /api/me/context` reads the same grant for them.
+   */
+  readonly readsConnections: boolean;
 }
 
 export function turnCapabilities(has: (permission: string) => boolean): TurnCapabilities {
@@ -36,6 +41,7 @@ export function turnCapabilities(has: (permission: string) => boolean): TurnCapa
     ...agentCapabilities(has, invokes),
     authorsPackages: invokes && PACKAGE_WRITE_PERMISSIONS.some(has),
     readsSkills: transport && has("skills:read"),
+    readsConnections: transport && has("integrations:read"),
   };
 }
 

@@ -196,13 +196,7 @@ export function buildServerInstructions(
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
-  // A `contextInjected` caller (the chat module) already injects the get_me
-  // payload into its own system prompt and we drop the get_me tool for it, so
-  // pushing "call get_me first" would point the model at a tool that isn't
-  // there. Tell it the context is already provided instead.
-  const grounding = contextInjected
-    ? `Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent) — is already provided to you; there is no get_me tool, do not look for one.`
-    : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
+  const grounding = `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The
   // chat renders the offer as a card itself, so the model must not restate it;
@@ -310,7 +304,7 @@ ${heavyListBullet}${concurrencyBullet}${
         }
 `
       : ""
-  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
+  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed by get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
 ${orgSpaces ? buildOrgWideOperationIndex(orgSpaces.reachable, ceiling) : buildOperationIndex(permissions, ceiling)}`;
@@ -572,10 +566,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
 
     const reqUrl = new URL(c.req.url);
     const origin = getPublicAppOrigin();
-    // A consumer that injects the caller's identity into its own system prompt
-    // tags the session `?context=injected` so the redundant
-    // get_me tool — and its "call get_me first" instruction — are dropped. Only
-    // the in-process chat sets it; external MCP clients omit it and keep get_me.
+    // The in-process chat tags its session `?context=injected`: it renders a
+    // connect offer as a card of its own and gets `done:false` at the end of its
+    // turn budget, so the instructions word those cases for it
+    // (`buildServerInstructions`). It changes no tool: external MCP clients omit it.
     const contextInjected = reqUrl.searchParams.get("context") === "injected";
     // Set by the space-entry middleware mounted on this exact path; absent
     // means the chain was rewired, not that the caller holds nothing.
@@ -675,7 +669,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       authHeaders,
       dispatch,
       observe,
-      contextInjected,
       actor,
       scope,
       orgSpaces,

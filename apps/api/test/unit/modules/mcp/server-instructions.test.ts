@@ -278,6 +278,16 @@ describe("MCP server instructions — run guidance", () => {
     }
   });
 
+  it("grounds every client, the chat included, on get_me", () => {
+    // The chat prompt lists neither connections nor agents: get_me is where
+    // the chat learns them, so `context=injected` must not take it away.
+    for (const contextInjected of [false, true]) {
+      const instructions = instructionsFor(RUNNER, contextInjected);
+      expect(instructions).toContain("Start by calling get_me");
+      expect(instructions).not.toContain("there is no get_me tool");
+    }
+  });
+
   it("routes the agent's auth_key serving no selected tool to a configuration change", () => {
     const bulletOf = (caller: ReadonlySet<string>) =>
       prose(caller)

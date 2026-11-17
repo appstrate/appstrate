@@ -2675,8 +2675,7 @@ export async function listUsableIntegrationsForActor(
     acc.set(row.integrationId, entry);
   }
 
-  // Sorted on purpose: the chat renders this list into its system prompt, one cache block, and an
-  // unordered SELECT may permute it between identical calls, invalidating the cached prefix.
+  // Sorted on purpose: an unordered SELECT may permute it between identical calls.
   const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
   const ids = [...active].sort();
   if (ids.length === 0) return [];

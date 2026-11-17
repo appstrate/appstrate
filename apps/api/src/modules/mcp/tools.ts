@@ -205,13 +205,6 @@ export interface McpToolContext {
    * tests and any non-HTTP caller need not provide one.
    */
   observe?: McpObserver;
-  /**
-   * The consumer already injects the caller's identity into its own system
-   * prompt, so the redundant get_me tool is dropped. Only the
-   * in-process chat consumer sets this (it injects that block + carries the
-   * server instructions); external MCP clients leave it false and keep get_me.
-   */
-  contextInjected?: boolean;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
 }
@@ -1919,8 +1912,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
           runs: surface.runs,
         })
       : []),
-    // Redundant for a context-injecting caller; search_operations stays for `best_match`.
-    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface)]),
+    buildGetMeTool(ctx, surface),
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;

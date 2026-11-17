@@ -22,27 +22,16 @@ import {
   SKILL_LOCK_VERSION_META_KEY,
   type SkillEntry,
 } from "@appstrate/core/skill-uri";
+import { callerIdentity } from "./caller-identity.ts";
 
 /** The rendered texts; the injected-skills claim has its own cases. */
 const contextText = (...args: Parameters<typeof identityContext>) => identityContext(...args).text;
 
 /** `formatCallerContext` over an identity given loosely: what is not named is not known. */
-function identityContext(
-  raw: { user?: { name?: string; email?: string }; org?: Record<string, string> },
+const identityContext = (
+  raw: Parameters<typeof callerIdentity>[0],
   opts: Parameters<typeof formatCallerContext>[1],
-) {
-  return formatCallerContext(
-    {
-      user: { name: raw.user?.name ?? null, email: raw.user?.email ?? null },
-      org: {
-        role: raw.org?.role ?? null,
-        name: raw.org?.name ?? null,
-        slug: raw.org?.slug ?? null,
-      },
-    },
-    opts,
-  );
-}
+) => formatCallerContext(callerIdentity(raw), opts);
 const blockText = async (...args: Parameters<typeof buildCallerContextBlock>) =>
   (await buildCallerContextBlock(...args)).text;
 
@@ -539,14 +528,14 @@ describe("formatCallerContext", () => {
   });
 
   it("omits the role clause when the role is absent", () => {
-    const out = contextText({ user: { name: "Ada" }, connections: [] }, BASE_OPTS);
+    const out = contextText({ user: { name: "Ada" } }, BASE_OPTS);
     expect(out).toContain("assisting Ada.");
     expect(out).not.toContain("role in this organization");
   });
 
   it("renders each skill line with id, version, URI and description, dropping what says nothing", () => {
     const out = contextText(
-      { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" }, connections: [] },
+      { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" } },
       {
         ...BASE_OPTS,
         skillCatalogue: [
@@ -573,7 +562,7 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("(list truncated)");
   });
 
-  it("renders a context block from skills alone (no identity/connections/agents)", () => {
+  it("renders a context block with no identity known: a generic subject, and the skills", () => {
     const out = contextText(
       {},
       {
@@ -581,6 +570,7 @@ describe("formatCallerContext", () => {
         skillCatalogue: [listedSkill("@appstrate/web-research", "Research", "1.2.0")],
       },
     );
+    expect(out.split("\n")[1]).toBe("You are assisting the user.");
     expect(out).toContain("## Skills");
     expect(out).toContain("`@appstrate/web-research`");
   });
@@ -590,7 +580,6 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        connections: [],
       },
       { ...BASE_OPTS, skillCatalogue: [] },
     );
@@ -602,7 +591,6 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada", email: "ada@acme.com" },
         org: { role: "member", name: "Acme", slug: "acme" },
-        connections: [],
       },
       BASE_OPTS,
     );
@@ -617,8 +605,6 @@ describe("formatCallerContext", () => {
     const ctx = {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
-      connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
@@ -737,7 +723,7 @@ describe("buildCallerContextBlock", () => {
     );
     // The path parameter of every space-scoped operation, as data.
     expect(out).toContain("Current space: `spc_1`");
-    // Neither the integrations nor the agents: the model looks them up with its tools.
+    // Neither the integrations nor the agents: the model reads them with `get_me`.
     expect(out).not.toContain("Integrations the user has connected");
     expect(out).not.toContain("## Existing agents you can run");
   });

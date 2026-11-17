@@ -16,10 +16,11 @@
  * (`/api/mcp/o/:org/s/:space`, the endpoint's one client-side pin), tagged
  * `?context=injected`.
  *
- * The chat injects the caller's identity, role and space into its own system
- * prompt, so the server's get_me tool would only re-fetch what the model
- * already has. The tag tells the server to drop that redundant tool (and its
- * "call get_me first" instruction).
+ * The tag tells the server this client is the chat: it renders a connect offer
+ * as a card of its own and gets `done:false` at the end of its turn budget, so
+ * the server's instructions word those cases for it. It changes no tool: the
+ * chat keeps `get_me`, which is where it learns the caller's connections and
+ * runnable agents.
  */
 export function platformMcpUrl(origin: string, orgId: string, spaceId: string): string {
   return `${origin}/api/mcp/o/${encodeURIComponent(orgId)}/s/${encodeURIComponent(spaceId)}?context=injected`;

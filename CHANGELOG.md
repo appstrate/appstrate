@@ -153,10 +153,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **The chat no longer lists your connected integrations and runnable agents in
   its system prompt.** It used to read them from `GET /api/me/context` on every
-  turn; the assistant now looks them up with its tools (`list_connections`,
-  `listAgents`, `getIntegration`) when a request needs them. Its prompt keeps
-  your identity, the space and your role in it, the turn's permissions and the
-  skills. `GET /api/me/context` and the MCP `get_me` tool are unchanged.
+  turn; the assistant now reads them with the MCP `get_me` tool when a request
+  needs them (and an integration's tools with `getIntegration`). Its prompt
+  keeps your identity, the space and your role in it, the turn's permissions
+  and the skills. `GET /api/me/context` is unchanged, and the chat's MCP
+  connection now declares `get_me` like any other client's.
 
 - **Breaking (AFPS 0.13, API, CLI): a local MCP server is declared inline on
   its integration; the `mcp-server` package type is gone** (#2220). A

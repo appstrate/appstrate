@@ -14,6 +14,7 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
+import { callerIdentity } from "./caller-identity.ts";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -40,12 +41,6 @@ const FULL = promptFor(BUILDER);
 const REDUCED = promptFor(BUILDER.filter((permission) => permission !== "agents:write"));
 /** May author an agent, may not launch one. */
 const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write", "skills:read"]);
-
-/** The identity the block renders, as `buildCallerContextBlock` reads it off the request. */
-const identityOf = (name: string, org: { role?: string } = {}) => ({
-  user: { name, email: null },
-  org: { role: org.role ?? null, name: null, slug: null },
-});
 
 /** `formatCallerContext` options for a builder turn with the default skill selection. */
 const CONTEXT_OPTS = {
@@ -224,7 +219,7 @@ describe("full persona invariants", () => {
   });
 
   it("names the same heading the context block renders", () => {
-    const block = contextText(identityOf("Ada"), {
+    const block = contextText(callerIdentity({ user: { name: "Ada" } }), {
       ...CONTEXT_OPTS,
       skillCatalogue: [
         {
@@ -299,7 +294,7 @@ describe("normalizeChatLocale", () => {
 });
 
 describe("caller-context prompt hygiene", () => {
-  const identity = identityOf("Ada", { role: "member" });
+  const identity = callerIdentity({ user: { name: "Ada" }, org: { role: "member" } });
 
   it("renders the forwarded locale in the reply-language line", () => {
     const out = contextText(identity, { ...CONTEXT_OPTS, locale: "en-US" });
@@ -350,7 +345,7 @@ describe("caller-context prompt hygiene", () => {
     }
   });
 
-  it("renders neither integrations nor agents: they are looked up with the tools", () => {
+  it("renders neither integrations nor agents: the model reads them with get_me", () => {
     const out = contextText(identity, CONTEXT_OPTS);
     expect(out).not.toContain("Integrations the user has connected");
     expect(out).not.toContain("## Existing agents you can run");
@@ -596,13 +591,56 @@ describe("the persona and package authoring", () => {
 });
 
 describe("the persona and the caller context", () => {
-  it("claims the context lists neither integrations nor agents, which are looked up with the tools", () => {
+  /** The sentence that sends the model to `get_me`, or undefined when there is none. */
+  const getMeSentence = (prompt: string) =>
+    prompt
+      .split("\n")
+      .find((line) => line.startsWith("Your context block below is DATA"))
+      ?.match(/It lists neither[^.]*\./)?.[0];
+
+  it("says the context lists neither integrations nor agents, and sends the model to get_me for both", () => {
     expect(FULL).not.toContain("the integrations they have connected, the agents they can run");
-    expect(FULL).toContain(
-      "It lists neither the integrations they have connected nor the agents they can run",
-    );
-    expect(FULL).toContain("look the space's agents up with `invoke_operation`");
     expect(FULL).not.toContain("listed in your context below");
     expect(FULL).not.toContain("shown per integration in your context");
+    expect(getMeSentence(promptFor([...BUILDER, "integrations:read"]))).toBe(
+      "It lists neither the integrations they have connected nor the agents they can run: call `get_me` for the integrations they have connected (`connections`) and the agents they can run (`agents`) in this space.",
+    );
+  });
+
+  it("names in the get_me sentence only what the turn's grants make it return", () => {
+    // `GET /api/me/context` lists connections under `integrations:read` and agents under `agents:run`.
+    expect(getMeSentence(FULL)).toBe(
+      "It lists neither the integrations they have connected nor the agents they can run: call `get_me` for the agents they can run (`agents`) in this space.",
+    );
+    expect(getMeSentence(promptFor([...MCP, "integrations:read"]))).toBe(
+      "It lists neither the integrations they have connected nor the agents they can run: call `get_me` for the integrations they have connected (`connections`) in this space.",
+    );
+    // `get_me` exists only over the transport; without it the sentence names no tool.
+    expect(getMeSentence(promptFor(["integrations:read"]))).toBe(
+      "It lists neither the integrations they have connected nor the agents they can run.",
+    );
+  });
+
+  it("finds runnable agents with get_me, reading their published/home_writable/takes_input", () => {
+    expect(FULL).toContain(
+      "`get_me` lists the agents of this space they can run, each with `published`, `home_writable` and `takes_input`; when its `agents_truncated` is true, look the rest up with `invoke_operation`",
+    );
+    expect(FULL).toContain("(`published: false`)");
+    expect(FULL).toContain("(`home_writable: true`)");
+    expect(FULL).not.toContain("look the space's agents up with `invoke_operation`");
+  });
+
+  it("takes connected integration ids from get_me only when the turn reads connections", () => {
+    const connections = promptFor([...BUILDER, "integrations:read"]);
+    expect(connections).toContain("connected ones first (`get_me` lists them)");
+    expect(connections).toContain(
+      "`get_me` gives both, as `integration_package_id` and `version`, for each integration the user has connected",
+    );
+    expect(FULL).not.toContain("`get_me` lists them");
+    expect(FULL).not.toContain("integration_package_id");
+    // The tool catalogue still comes from `getIntegration`, whatever the grant.
+    for (const prompt of [FULL, connections]) {
+      expect(prompt).toContain('`operation_id: "getIntegration"`');
+    }
   });
 });
