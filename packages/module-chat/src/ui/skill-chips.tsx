@@ -152,7 +152,7 @@ function PinnedPill({
     <Tooltip>
       <TooltipTrigger asChild>
         <RemovableChip
-          icon={<BookOpenIcon aria-hidden="true" />}
+          icon={<BookOpenIcon />}
           open={{
             onClick: onOpen,
             label: t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) }),
@@ -160,9 +160,8 @@ function PinnedPill({
           }}
           removeLabel={t("skills.resetToAuto")}
           onRemove={onReset}
-          removeTestId="skills-reset-auto"
         >
-          <span className="max-w-32 truncate">{pillText(skills, "skills.pinnedCount", t)}</span>
+          {pillText(skills, "skills.pinnedCount", t)}
         </RemovableChip>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
@@ -175,29 +174,30 @@ function PinnedPill({
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
-  /** Absent for a member who cannot pick: the pill is then read-only and enforced-only. */
-  onOpenPicker?: () => void;
-  /** Back to the automatic mode: the X of the pill of a non-automatic mode. */
-  onResetMode: () => void;
+  /**
+   * Who can pick: open the picker, or return to the automatic mode (a pill's X). Absent for a member
+   * who cannot pick: the pill is then read-only and enforced-only.
+   */
+  picker?: { onOpen: () => void; onReset: () => void };
 }
 
 /**
  * The skill pills of the composer's tool row. While no skill is loaded, who can pick gets the
- * picker's summary chip instead (drawn only off the default selection).
+ * picker's summary chip instead (drawn only off the automatic mode).
  */
-export function SkillChips({ transport, selection, onOpenPicker, onResetMode }: SkillChipsProps) {
+export function SkillChips({ transport, selection, picker }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { enforced, pinned, loading } = useLoadedSkills(transport, selection, !!onOpenPicker);
+  const { enforced, pinned, loading } = useLoadedSkills(transport, selection, !!picker);
   if (loading) {
     // A placeholder only where something is sure to be drawn once the read answers (the chip
     // of a non-automatic mode) or is the only thing this row is for (no picker): elsewhere the
     // common case draws nothing, and a placeholder would itself be the shift.
-    const reserve = !onOpenPicker || injectsSkills(selection.skillMode);
+    const reserve = !picker || injectsSkills(selection.skillMode);
     return reserve ? <Skeleton className="h-7 w-28 shrink-0 rounded-full" aria-hidden /> : null;
   }
   if (enforced.length === 0 && pinned.length === 0) {
-    return onOpenPicker ? (
-      <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onResetMode} />
+    return picker ? (
+      <SkillsChip selection={selection} onClick={picker.onOpen} onReset={picker.onReset} />
     ) : null;
   }
 
@@ -208,9 +208,9 @@ export function SkillChips({ transport, selection, onOpenPicker, onResetMode }: 
       data-testid="skill-chips"
       className="flex min-w-0 flex-nowrap items-center gap-1.5"
     >
-      {enforced.length > 0 && <EnforcedPill skills={enforced} onOpen={onOpenPicker} />}
-      {onOpenPicker && pinned.length > 0 && (
-        <PinnedPill skills={pinned} onOpen={onOpenPicker} onReset={onResetMode} />
+      {enforced.length > 0 && <EnforcedPill skills={enforced} onOpen={picker?.onOpen} />}
+      {picker && pinned.length > 0 && (
+        <PinnedPill skills={pinned} onOpen={picker.onOpen} onReset={picker.onReset} />
       )}
     </div>
   );

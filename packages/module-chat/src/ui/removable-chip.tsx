@@ -10,15 +10,15 @@ import { XIcon } from "lucide-react";
 import { badgeVariants } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
 
+const ICON = "[&>svg]:size-3.5 [&>svg]:shrink-0";
+
 interface RemovableChipProps extends Omit<ComponentProps<"span">, "children"> {
   icon: ReactNode;
   children: ReactNode;
   removeLabel: string;
   removeDisabled?: boolean;
   onRemove: () => void;
-  testId?: string;
-  removeTestId?: string;
-  open?: { onClick: () => void; label: string; testId?: string };
+  open?: { onClick: () => void; label: string; testId: string };
 }
 
 export function RemovableChip({
@@ -27,8 +27,6 @@ export function RemovableChip({
   removeLabel,
   removeDisabled = false,
   onRemove,
-  testId,
-  removeTestId,
   open,
   className,
   ...rest
@@ -43,10 +41,10 @@ export function RemovableChip({
     // `rest` carries what a Radix trigger (`asChild`) passes: ref, handlers, data-state.
     <span
       {...rest}
-      data-testid={testId}
       className={cn(
         badgeVariants({ variant: "secondary" }),
-        "text-muted-foreground h-7 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-1 pl-2.5 font-normal [&_svg]:size-3.5 [&_svg]:shrink-0",
+        "text-muted-foreground h-7 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-1 pl-2.5 font-normal",
+        ICON,
         className,
       )}
     >
@@ -56,7 +54,8 @@ export function RemovableChip({
           aria-label={open.label}
           data-testid={open.testId}
           onClick={open.onClick}
-          className="flex min-w-0 items-center gap-1.5 [font:inherit]"
+          // The base layer sets every button to `text-sm font-medium`: the body keeps the chip's type.
+          className={cn("flex min-w-0 items-center gap-1.5 [font:inherit]", ICON)}
         >
           {body}
         </button>
@@ -66,12 +65,11 @@ export function RemovableChip({
       <button
         type="button"
         aria-label={removeLabel}
-        data-testid={removeTestId}
         disabled={removeDisabled}
         onClick={onRemove}
         className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
       >
-        <XIcon className="!size-3" />
+        <XIcon className="size-3" />
       </button>
     </span>
   );

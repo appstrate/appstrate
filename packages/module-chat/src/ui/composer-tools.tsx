@@ -36,6 +36,8 @@ import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
 
+const ICON_BUTTON = "text-muted-foreground size-8 shrink-0 rounded-lg";
+
 const LIMIT_REASON_KEY = {
   generating: "composer.limit.generating",
   "no-space": "composer.limit.noSpace",
@@ -79,14 +81,13 @@ export function ComposerTools({
   const cluster = (
     <div className="flex min-w-0 items-center gap-1.5">
       <AttachButton
-        available={attach.available}
         label={t("composer.attach")}
-        reason={
+        // An upload lands in the working space: where the chat does not act, or off the origin
+        // of a limited conversation.
+        unavailableReason={
           attach.available
             ? null
-            : // An upload lands in the working space: where the chat does not act, or off the
-              // origin of a limited conversation.
-              attach.reason === "limited"
+            : attach.reason === "limited"
               ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
               : t("composer.attachUnavailable")
         }
@@ -97,7 +98,7 @@ export function ComposerTools({
             type="button"
             variant="ghost"
             size="icon"
-            className="text-muted-foreground size-8 shrink-0 rounded-lg"
+            className={ICON_BUTTON}
             aria-label={t("composer.settings")}
             data-testid="composer-settings-trigger"
           >
@@ -172,7 +173,7 @@ export function ComposerTools({
           removeLabel={t("composer.limit.undo", { name: spaceLabel })}
           removeDisabled={scope.generating || scope.pending}
           onRemove={() => scope.setRestricted(false)}
-          testId="composer-limit-chip"
+          data-testid="composer-limit-chip"
         >
           {sentenceWithNode(t, "composer.limitChip", spaceNode)}
         </RemovableChip>
@@ -181,8 +182,14 @@ export function ComposerTools({
         <SkillChips
           transport={transport}
           selection={selection}
-          onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
-          onResetMode={() => onSelectionChange({ ...selection, skillMode: "auto" })}
+          picker={
+            showPicker
+              ? {
+                  onOpen: () => setSkillsOpen(true),
+                  onReset: () => onSelectionChange({ ...selection, skillMode: "auto" }),
+                }
+              : undefined
+          }
         />
       )}
     </div>
@@ -226,49 +233,46 @@ function UnavailableItem({
 }
 
 /**
- * Opens the file dialog. Unavailable, it stays in place, disabled, with the reason in its tooltip:
- * a disabled button fires no pointer events, so the tooltip hangs on a focusable wrapper.
+ * Opens the file dialog. Unavailable (`unavailableReason` set), it stays in place, disabled, with the
+ * reason in a tooltip: a disabled button fires no pointer events, so the tooltip hangs on a
+ * focusable wrapper that also carries the reason for a screen reader.
  */
 function AttachButton({
-  available,
   label,
-  reason,
+  unavailableReason,
 }: {
-  available: boolean;
   label: string;
-  reason: ReactNode;
+  unavailableReason: ReactNode | null;
 }) {
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      disabled={!available}
-      className="text-muted-foreground size-8 shrink-0 rounded-lg"
+      disabled={unavailableReason !== null}
+      className={ICON_BUTTON}
       aria-label={label}
-      data-testid="composer-attach-button"
     >
       <PaperclipIcon />
     </Button>
   );
+  if (unavailableReason === null) {
+    return (
+      <ComposerPrimitive.AddAttachment multiple asChild>
+        {button}
+      </ComposerPrimitive.AddAttachment>
+    );
+  }
   return (
     <Tooltip>
-      {available ? (
-        <ComposerPrimitive.AddAttachment multiple asChild>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-        </ComposerPrimitive.AddAttachment>
-      ) : (
-        <TooltipTrigger asChild>
-          <span tabIndex={0} className="inline-flex shrink-0">
-            {button}
-            <span className="sr-only" data-testid="composer-attach-reason">
-              {reason}
-            </span>
-          </span>
-        </TooltipTrigger>
-      )}
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex shrink-0">
+          {button}
+          <span className="sr-only">{unavailableReason}</span>
+        </span>
+      </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 text-xs">
-        {available ? label : reason}
+        {unavailableReason}
       </TooltipContent>
     </Tooltip>
   );

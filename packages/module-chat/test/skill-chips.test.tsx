@@ -59,8 +59,7 @@ function render({
             <SkillChips
               transport={transport === null ? undefined : transport}
               selection={selection}
-              onOpenPicker={picker ? () => {} : undefined}
-              onResetMode={() => {}}
+              picker={picker ? { onOpen: () => {}, onReset: () => {} } : undefined}
             />
           </TooltipProvider>
         </ConversationScopeProvider>
@@ -151,7 +150,7 @@ describe("SkillChips", () => {
   it("draws the picker's chip, with its X back to automatic, when nothing is loaded off it", () => {
     const html = render();
     expect(html).toContain('data-testid="skills-picker-trigger"');
-    expect(html).toContain('data-testid="skills-reset-auto"');
+    expect(html).toContain('aria-label="skills.resetToAuto"');
   });
 
   it("puts an X back to automatic on the pinned pill", () => {

@@ -61,7 +61,6 @@ export function SkillsChip({
       open={{ onClick, label: t("skills.label"), testId: "skills-picker-trigger" }}
       removeLabel={t("skills.resetToAuto")}
       onRemove={onReset}
-      removeTestId="skills-reset-auto"
       className="shrink-0"
     >
       {t("skills.label")}

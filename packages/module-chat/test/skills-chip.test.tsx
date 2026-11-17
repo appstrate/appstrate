@@ -28,7 +28,7 @@ describe("SkillsChip", () => {
     for (const skillMode of ["manual", "strict"] as const) {
       const out = html({ skillMode, pinnedSkills: [] });
       expect(out).toContain("skills-picker-trigger");
-      expect(out).toContain("skills-reset-auto");
+      expect(out).toContain('aria-label="skills.resetToAuto"');
     }
   });
 });
