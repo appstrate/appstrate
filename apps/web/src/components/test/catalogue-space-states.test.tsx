@@ -41,15 +41,13 @@ const PACKAGE: LibraryPackageItem = {
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
-  published: true,
   activation: [],
   placements: [
-    { space_id: "spc_on", via: "home", state: "active", chat_enforced: false, shared_by: null },
+    { space_id: "spc_on", via: "home", state: "active", shared_by: null },
     {
       space_id: "spc_off",
       via: "shared",
       state: "inactive",
-      chat_enforced: false,
       shared_by: { user_id: "usr_bob", name: "Bob Martin" },
     },
   ],
@@ -106,7 +104,6 @@ describe("the sheet", () => {
       spaces={SPACES}
       placement={PLACEMENT}
       gateOf={() => ALLOWED}
-      mayConfigureIn={() => true}
       integrations={[]}
       agents={[]}
       busy={false}

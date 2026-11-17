@@ -82,7 +82,6 @@ async function strictTurn(
       capabilities: turnCapabilities((p) => permissions.includes(p), []),
       permissions,
       skills: { skillMode: "strict", pinnedSkills: [SKILL_ID] },
-      enforced: Promise.resolve([]),
       // The caller's own permissions, no claim: what `chat-stream.ts` opens.
       openSkillsClient: () =>
         connectPlatformMcp({

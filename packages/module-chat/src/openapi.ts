@@ -15,12 +15,6 @@ const problem = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
 
-/** `enforced_skills_unavailable`, shared by the turn and the names read. */
-const enforcedSkillsUnavailableResponse = (description: string) => ({
-  description: `\`enforced_skills_unavailable\` — ${description} RFC 9457 problem+json.`,
-  content: problem,
-});
-
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -59,7 +53,7 @@ export const chatComponentSchemas = {
         type: "string",
         enum: [...chatSkillModeValues],
         description:
-          "How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the origin space enforces (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
+          "How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
       },
       pinned_skills: {
         type: "array",
@@ -70,7 +64,7 @@ export const chatComponentSchemas = {
       spaceId: {
         type: ["string", "null"],
         description:
-          "The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the enforced skills, the default space of a request naming none, and the space a limited conversation is confined to.",
+          "The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the default space of a request naming none, and the space a limited conversation is confined to.",
       },
       restricted: {
         type: "boolean",
@@ -361,67 +355,6 @@ export const chatPaths = {
       },
     },
   },
-  "/api/orgs/{orgId}/chat/enforced-skills": {
-    get: {
-      operationId: "listChatEnforcedSkills",
-      tags: ["Chat"],
-      summary: "List the skills a space enforces in chat",
-      description:
-        "The skills `spaceId` imposes on the conversations started in it, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. The composer shows them for a new conversation in the selected space, or for an existing conversation's origin space. Names only — the content is never returned here. Sorted by id. `spaceId` is required and must be a space the caller reads chats in (`chat:read`); else a 400 naming the field. Ignores `X-Space-Id`; admitted when some reachable space grants `chat:read`. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403).",
-      parameters: [
-        { $ref: "#/components/parameters/OrgIdPath" },
-        {
-          name: "spaceId",
-          in: "query",
-          required: true,
-          schema: { type: "string", minLength: 1 },
-          description: "The space whose enforced skills are listed.",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Enforced skills",
-          headers: stdHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["id", "name", "version"],
-                      properties: {
-                        id: { type: "string", description: "`@scope/name` package id" },
-                        name: { type: "string", description: "Display name, else the id" },
-                        version: {
-                          type: ["string", "null"],
-                          description:
-                            "Latest published version; null when none can be read now (the turn then tells the model the skill is unavailable).",
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "429": {
-          $ref: "#/components/responses/RateLimited",
-          description: "Rate limited (120/min per caller)",
-        },
-        "503": enforcedSkillsUnavailableResponse(
-          "the skills the space enforces could not be loaded.",
-        ),
-      },
-    },
-  },
   "/api/orgs/{orgId}/chat": {
     post: {
       operationId: "streamChat",
@@ -524,7 +457,7 @@ export const chatPaths = {
         },
         "503": {
           description:
-            "`enforced_skills_unavailable` — the skills the origin space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
+            "`encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
           content: problem,
         },
       },

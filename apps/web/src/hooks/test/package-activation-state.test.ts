@@ -20,7 +20,7 @@ import type { LibraryPackageItem, LibraryPlacement, LibraryResponse } from "../u
 const SPACE = "spc_here";
 
 function placement(state: LibraryPlacement["state"]): LibraryPlacement {
-  return { space_id: SPACE, via: "home", state, shared_by: null, chat_enforced: false };
+  return { space_id: SPACE, via: "home", state, shared_by: null };
 }
 
 function libraryWith(agents: LibraryPackageItem[]): Pick<LibraryResponse, "packages"> {
@@ -38,7 +38,6 @@ function agentRow(placements: LibraryPlacement[]): LibraryPackageItem {
     home_writable: false,
     home_shareable: false,
     home_deletable: false,
-    published: true,
     activation: [],
     placements,
   };

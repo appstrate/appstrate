@@ -48,8 +48,8 @@ export const chatSessions = pgTable(
     /**
      * The conversation's ORIGIN space: the space selected when it was created, NULL when it
      * was created from the overview. It is not an owner: lists, filters and opening do not
-     * depend on it. It gives the enforced skills, the default space of a request naming none,
-     * and the space a limited conversation is confined to. Deleting the space detaches the
+     * depend on it. It gives the default space of a request naming none, and the space a
+     * limited conversation is confined to. Deleting the space detaches the
      * conversation (NULL, and `restricted` false: `deleteSpace` writes both in its transaction).
      */
     spaceId: text("space_id"),

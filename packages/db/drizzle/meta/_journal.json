@@ -757,6 +757,13 @@
       "when": 1794800000000,
       "tag": "0107_chat_session_spaces",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0108_drop_space_packages_chat_enforced",
+      "breakpoints": true
     }
   ]
 }

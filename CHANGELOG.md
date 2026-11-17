@@ -149,6 +149,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   left in place: a non-ephemeral `@inline/` agent is no longer served by the
   persistence read.
 
+- **Drizzle `0108` drops `space_packages.chat_enforced`** (space-enforced chat
+  skills are removed, see Removed). Whatever a space imposed is discarded with
+  the column. The previous release selects the column on every placement read:
+  do not serve both releases at once (deploy with the app stopped), and roll back
+  by restoring the backup. No script to run.
+
 ### Changed
 
 - **The chat no longer lists your connected integrations and runnable agents in
@@ -359,17 +365,6 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   function); without it, the list holds the published skills. A draft's entry
   carries `_meta["dev.appstrate/lock_version"]`, the `lock_version` of the draft its
   files and digests were read from, read under the draft lock.
-
-- **The chat injects an enforced skill as the MCP Skills extension serves it**
-  (#2175). Its `SKILL.md` is the served one (`name` and `metadata.version`
-  normalized), with its `skill://` URI, so it is the bytes `resources/read`
-  answers there. A published version that cannot be served as a skill (over the
-  SEP-2640 limits, no valid name) refuses the turn's enforced skills like an
-  unreadable archive (`version_artifact_unavailable`). Enforcing such a skill is
-  refused with `409 skill_not_servable` (also when another skill already enforced
-  in the space cannot be served), so the turns of the space are never refused for
-  it. The `enforced_skills_budget` check measures each enforced skill by this
-  served `SKILL.md`, the text the chat injects, read from its whole archive.
 
 - **The chat's model reads platform resources with a `read_resource` tool** (#2175).
   It runs `resources/read` on the platform MCP server only, and returns each content
@@ -688,6 +683,22 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   `@appstrate/core/runtime-tool-defs`, `@appstrate/core/runtime-tools-catalog` and
   `@appstrate/core/runtime-event-drain`, and the `runtime_tools` helpers of
   `@appstrate/core/validation`. The full list is in `packages/core/CHANGELOG.md`.
+
+- **BREAKING: space-enforced chat skills are removed** (#2265). A space can no longer
+  impose skills on its chat: a conversation spans several spaces, so a per-space
+  imposition has no single space to read from. Removed: the `chat_enforced` field of
+  `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (now a `400` unknown field, the
+  body is strict), `SpacePackage.chat_enforced`, the library placement's
+  `chat_enforced` and the library package's `published` (it only told whether a skill could
+  be enforced), `GET /api/chat/enforced-skills`, the error codes
+  `chat_enforced_not_skill`, `enforced_skills_limit`, `enforced_skills_budget` and
+  `enforced_skills_unavailable` (`503`), the audit actions `package.chat_enforced` and
+  `package.chat_released`, the catalogue sheet's « Imposé dans le chat » switch and its
+  confirmation, the picker badge « Imposée par l'espace » and
+  the composer's read-only indicator. The column `space_packages.chat_enforced` is dropped
+  by drizzle migration `0108_drop_space_packages_chat_enforced`: whatever a space imposed
+  is discarded; the migration is one-way, roll back by restoring the backup. The core
+  exports removed with it are listed in `packages/core/CHANGELOG.md`.
 
 ### Added
 

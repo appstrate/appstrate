@@ -24,8 +24,6 @@ import type {
   ChatUsageRecord,
   ResolvedChatAttachment,
   ChatModelResolution,
-  EnforcedChatSkill,
-  EnforcedChatSkillRef,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 import type { RunIntegrationUnbound } from "./integration.ts";
@@ -1563,20 +1561,6 @@ export interface PlatformServices {
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
-  /**
-   * The skills a space enforces on its chat: its ACTIVE skills whose placement
-   * is chat-enforced, sorted by id, each at its latest published version. Read
-   * with platform authority, independent of the caller's `skills:*` grants.
-   * `content` is null only when no published version resolves; any read
-   * failure rejects, so the chat refuses the turn rather than running it
-   * without the space's policy.
-   */
-  loadEnforcedChatSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
-  /**
-   * The same set and order as {@link loadEnforcedChatSkills}, names only:
-   * read from the database, no archive is downloaded. Rejects on failure.
-   */
-  listEnforcedChatSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (`chat_session_id = NULL`)
