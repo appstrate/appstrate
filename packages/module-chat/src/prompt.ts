@@ -160,7 +160,7 @@ ${invoke(
   }`,
 )}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
 ${tools(
-  "- If the request needs a connected integration's data or action, call it directly: find the tool with `search_integration_tools` in the space concerned, call it with `call_integration_tool`, and answer from its result. A missing connection comes back as a connect card: offer to connect it.\n",
+  "- If the request needs a connected integration's data or action, call it directly: find the tool with `search_integration_tools` in the space concerned, call it with `call_integration_tool`, and answer from its result. It lists only integrations connected in that space (one to reconnect comes back with a connect card): when the one needed is absent, offer to connect it with `initiateIntegrationConnect`, which shows the user a connect card. Never activate a package the user did not ask for: when connecting needs it activated in the space, ask first.\n",
 )}${runs(
     `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated in the space concerned — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 ${tools(
