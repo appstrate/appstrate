@@ -17,17 +17,34 @@
  *  5. a launch refetching the run lists of the page it is leaving;
  *  6. a skill or integration page reading the lists only an agent page shows.
  *
- * Source-scanned rather than rendered: these modules import the SPA's typed API
- * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
- * runner (the same reason `file-preview.test.ts` scans its component).
+ * Mostly source-scanned: a pattern that is a page's composition (which list
+ * mounts under which) has no observable besides its source. The agent page's
+ * run probe is rendered instead, and read off the query cache it fills.
  */
 
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect, spyOn } from "bun:test";
+import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { broadRunKeys, trackStreamGaps } from "../../hooks/use-global-run-sync.ts";
-import { removeOrgScopedQueries } from "../../lib/query-keys.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+
+// The stores read `localStorage` at module init, and the agent page's hook reads the app config.
+installFakeStorage({
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  location: { origin: "https://app.example.test" },
+  matchMedia: () => ({ matches: false, addEventListener: () => {} }),
+});
+
+const { broadRunKeys, trackStreamGaps } = await import("../../hooks/use-global-run-sync.ts");
+const { ACROSS_SPACES, removeOrgScopedQueries } = await import("../../lib/query-keys.ts");
+const { render } = await import("../../test/render.tsx");
+const { orgStore } = await import("../../stores/org-store.ts");
+const { spaceStore } = await import("../../stores/space-store.ts");
+const { authStore } = await import("../../stores/auth-store.ts");
+const { overviewStore } = await import("../../stores/overview-store.ts");
+const { packageDetailQueryOptions } = await import("../../hooks/use-packages.ts");
+const { useAgentActions } = await import("../package-detail/use-agent-actions.tsx");
 
 type InvalidateCall = { queryKey: readonly unknown[] } | { predicate: unknown };
 
@@ -67,11 +84,9 @@ const DASHBOARD = read("../../pages/dashboard.tsx");
 const RUN_LIST = read("../run-list.tsx");
 const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
 const RUNS_TABLE = read("../runs-table.tsx");
-const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
 const ACTIONS_DROPDOWN = read("../package-detail/package-actions-dropdown.tsx");
-const AGENT_ACTIONS_HOOK = read("../package-detail/use-agent-actions.tsx");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
@@ -101,14 +116,126 @@ describe("dashboard reuses its own runs", () => {
   });
 });
 
+const PACKAGE_ID = "@acme/reporter";
+const RUN_DEEDS = ["agents:read", "agents:run", "runs:delete", "runs:read-all"];
+const agentSpace = (id: string, isDefault = false) => ({
+  id,
+  object: "space",
+  orgId: "org_1",
+  access: "member",
+  permissions: RUN_DEEDS,
+  personal: false,
+  isDefault,
+  name: id,
+  icon: null,
+  color: null,
+  role: null,
+});
+
+let storeStubs: { mockRestore: () => void }[] = [];
+afterEach(() => {
+  for (const stub of storeStubs) stub.mockRestore();
+  storeStubs = [];
+});
+
+/**
+ * Renders the agent page's actions hook over a detail read in `spc_a` (where the agent last ran
+ * when `lastRun`), and returns the cache it filled plus the « Supprimer les runs » verdict.
+ */
+function agentPage({ overview, lastRun }: { overview: boolean; lastRun: boolean }) {
+  storeStubs = [
+    spyOn(orgStore, "getInitialState").mockReturnValue({
+      ...orgStore.getInitialState(),
+      id: "org_1",
+    }),
+    spyOn(spaceStore, "getInitialState").mockReturnValue({
+      ...spaceStore.getInitialState(),
+      id: "spc_a",
+    }),
+    spyOn(authStore, "getInitialState").mockReturnValue({
+      ...authStore.getInitialState(),
+      user: { id: "u_1", email: "u@example.test", emailVerified: true },
+    }),
+    spyOn(overviewStore, "getInitialState").mockReturnValue({
+      ...overviewStore.getInitialState(),
+      chosen: overview ? { "u_1:org_1": true } : {},
+    }),
+  ];
+  const qc = new QueryClient();
+  qc.setQueryData(
+    ["orgs"],
+    [{ id: "org_1", name: "Acme", slug: "acme", role: "member", permissions: [] }],
+  );
+  qc.setQueryData(["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }], {
+    object: "list",
+    hasMore: false,
+    data: [agentSpace("spc_a", true), agentSpace("spc_b"), agentSpace("spc_c")],
+  });
+  qc.setQueryData(
+    packageDetailQueryOptions("agent", { orgId: "org_1", spaceId: "spc_a" }, PACKAGE_ID).queryKey,
+    {
+      id: PACKAGE_ID,
+      source: "local",
+      display_name: "Rapporteur",
+      dependencies: { skills: [], integrations: [] },
+      running_runs: 0,
+      last_run: lastRun ? { id: "run_1", status: "success" } : null,
+      space_ids: ["spc_a", "spc_b", "spc_c"],
+      home_space_id: "spc_a",
+      active: true,
+    },
+  );
+  let clearRunsOffered: boolean | undefined;
+  function Probe() {
+    const { dropdown } = useAgentActions({
+      packageId: PACKAGE_ID,
+      isHistoricalVersion: false,
+      downloadVersion: "1.0.0",
+      downloadPackage: () => {},
+      downloadBundle: () => {},
+      onCreateVersion: () => {},
+    });
+    clearRunsOffered = dropdown?.agent?.clearRuns.offered;
+    return null;
+  }
+  render(createElement(Probe), { queryClient: qc });
+  /** The run queries the hook built: each key, and whether it may fetch. */
+  const runQueries = qc
+    .getQueryCache()
+    .findAll({ queryKey: ["paginated-runs"] })
+    .map((query) => ({
+      key: query.queryKey,
+      enabled: (query.options as { enabled?: unknown }).enabled !== false,
+    }));
+  return { clearRunsOffered, runQueries };
+}
+
 describe("agent page", () => {
-  it("reads whether the agent has runs off the detail it already holds", () => {
+  it("keeps the presentation free of run queries", () => {
     expect(code(AGENT_ACTIONS)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
     expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
-    // With a working space the deed reads the detail; in « Tous les espaces », the spanning reads
-    // the overview shares, never one probe per space.
-    expect(AGENT_ACTIONS_HOOK).toContain("!!detail?.last_run");
-    expect(code(AGENT_ACTIONS_HOOK)).not.toMatch(/useQueries\(|use(FirstRunsPage|Runs)\(/);
+  });
+
+  it("reads whether the agent has runs off the detail it already holds, with a space selected", () => {
+    const ran = agentPage({ overview: false, lastRun: true });
+    expect(ran.clearRunsOffered).toBe(true);
+    // No run list is read to learn it: whatever the hook builds stays switched off.
+    expect(ran.runQueries.filter((query) => query.enabled)).toEqual([]);
+
+    const never = agentPage({ overview: false, lastRun: false });
+    expect(never.clearRunsOffered).toBe(false);
+    expect(never.runQueries.filter((query) => query.enabled)).toEqual([]);
+  });
+
+  it("reads it across spaces in « Tous les espaces », never one probe per space", () => {
+    // The hidden space's detail says it ran; across spaces nothing is known yet, so nothing is
+    // offered on the hidden space's word.
+    const { clearRunsOffered, runQueries } = agentPage({ overview: true, lastRun: true });
+    expect(clearRunsOffered).toBe(false);
+    const enabled = runQueries.filter((query) => query.enabled);
+    // The latest run and the runs in flight, both across spaces: two reads for three spaces.
+    expect(enabled).toHaveLength(2);
+    for (const { key } of enabled) expect(key[2]).toBe(ACROSS_SPACES);
   });
 
   it("marks the run lists stale on launch without refetching the page being left", () => {
@@ -138,17 +265,8 @@ describe("package pages other than an agent's", () => {
 describe("notification freshness", () => {
   // One space's feed: the stream keeps it live, the poll is a backstop. Across spaces the feed
   // polls with the other spanning lists (`across-spaces-polling.test.tsx`).
-  it("polls as a backstop (5 min), on every notification query", () => {
-    expect(NOTIFICATIONS).toContain("const NOTIFICATION_POLL_INTERVAL_MS = 300_000;");
-    const intervals = [...NOTIFICATIONS.matchAll(/refetchInterval:\s*([^,\n]+)/g)].map(
-      (m) => m[1]!,
-    );
-    expect(intervals).toEqual([
-      "scope.refetchInterval ?? NOTIFICATION_POLL_INTERVAL_MS",
-      "scope.refetchInterval",
-      "scope.refetchInterval",
-    ]);
-  });
+  // The poll itself (5 min in one space, the lists' pace across spaces) is read off the queries
+  // the hooks build: `hooks/test/across-spaces-polling.test.tsx`.
 
   // The load-bearing half: without this, slowing the poll down means a missed
   // terminal event leaves the badge wrong for five minutes.

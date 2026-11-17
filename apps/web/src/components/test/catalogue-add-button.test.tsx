@@ -4,6 +4,10 @@
  * The Découvrir card's slot: with a working space it adds there in one click or says « Ajouté »;
  * in « Tous les espaces » it names the space, opens the menu of spaces, and counts where the
  * package already runs.
+ *
+ * Static markup: a click cannot be dispatched and a closed Radix menu renders no entries, so what
+ * a click adds, and which spaces the menu offers or ticks, is driven in the browser
+ * (`e2e/tests/spaces/catalogue-add.ui.spec.ts`). Here: which control the slot draws.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -30,12 +34,12 @@ const space = (id: string, name: string, active: boolean): AddableSpace => ({
   active,
 });
 
-const slot = (spaces: AddableSpace[], workingSpaceId: string | null) =>
+const slot = (spaces: AddableSpace[], workingSpaceId: string | null, busy = false) =>
   render(
     <CatalogueAddButton
       spaces={spaces}
       workingSpaceId={workingSpaceId}
-      busy={false}
+      busy={busy}
       onAdd={() => {}}
     />,
   );
@@ -47,19 +51,23 @@ const addedIn = (count: number) =>
     "{{count}}",
     String(count),
   );
-const alreadyIn = (count: number) =>
-  settingsFr[count === 1 ? "catalogue.alreadyIn_one" : "catalogue.alreadyIn_other"].replace(
-    "{{count}}",
-    String(count),
-  );
 
 describe("with a working space", () => {
-  it("adds to it in one plain click, naming no space and opening no menu", () => {
+  it("draws one plain « Ajouter » button, naming no space and opening no menu", () => {
     const html = slot([space("spc_a", "Alpha", false), space("spc_b", "Beta", true)], "spc_a");
     expect(html).toContain(`</svg>${add}</button>`);
+    expect([...html.matchAll(/<button/g)]).toHaveLength(1);
+    expect(html).not.toContain('disabled=""');
     expect(html).not.toContain("Alpha");
+    // Beta runs it, but the working space is the context: nothing counts elsewhere.
+    expect(html).not.toContain("title=");
     expect(html).not.toContain('aria-haspopup="menu"');
     expect(html).not.toContain(added);
+  });
+
+  it("holds the button while an add is in flight", () => {
+    const html = slot([space("spc_a", "Alpha", false)], "spc_a", true);
+    expect(html).toMatch(/<button[^>]*disabled=""/);
   });
 
   it("says « Ajouté » where it runs, as a state and not a control", () => {
@@ -74,9 +82,13 @@ describe("with a working space", () => {
 });
 
 describe("in « Tous les espaces »", () => {
-  it("names the one space it may be added to", () => {
+  it("names the one space it may be added to, on a plain button", () => {
     const html = slot([space("spc_a", "Alpha", false)], null);
-    expect(html).toContain(settingsFr["catalogue.addTo"].replace("{{space}}", "Alpha"));
+    expect(html).toMatch(
+      new RegExp(
+        `<button[^>]*>[\\s\\S]*${settingsFr["catalogue.addTo"].replace("{{space}}", "Alpha")}`,
+      ),
+    );
     expect(html).not.toContain('aria-haspopup="menu"');
   });
 
@@ -85,9 +97,12 @@ describe("in « Tous les espaces »", () => {
       [space("spc_a", "Alpha", true), space("spc_b", "Beta", true), space("spc_c", "Gamma", false)],
       null,
     );
+    // One trigger, and no space named on it: the spaces are the menu's.
+    expect([...html.matchAll(/<button/g)]).toHaveLength(1);
     expect(html).toContain('aria-haspopup="menu"');
-    expect(html).toContain(`title="${alreadyIn(2)}"`);
-    expect(html).toContain(`<span class="sr-only">${alreadyIn(2)}</span>`);
+    expect(html).not.toMatch(/Alpha|Beta|Gamma/);
+    expect(html).toContain(`title="${addedIn(2)}"`);
+    expect(html).toContain(`<span class="sr-only">${addedIn(2)}</span>`);
   });
 
   it("opens the menu without a count when it runs nowhere yet", () => {

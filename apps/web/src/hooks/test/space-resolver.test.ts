@@ -15,8 +15,15 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const { droppedOnSpaceSwitch, enterableSpaceId } = await import("../use-current-space.ts");
-const { ACROSS_SPACES, agentsKeys, packageKeys, paginatedRunsKeys, scheduleKeys } =
-  await import("../../lib/query-keys.ts");
+const {
+  ACROSS_SPACES,
+  agentsKeys,
+  packageKeys,
+  paginatedRunsKeys,
+  persistenceKeys,
+  scheduleKeys,
+  spansSpaces,
+} = await import("../../lib/query-keys.ts");
 
 const space = (id: string, access: string, isDefault = false, personal = false) => ({
   id,
@@ -124,6 +131,41 @@ describe("droppedOnSpaceSwitch", () => {
     expect(droppedOnSpaceSwitch(agentsKeys.list("org_1", ACROSS_SPACES))).toBe(false);
     expect(droppedOnSpaceSwitch(packageKeys.list("integrations", "org_1", ACROSS_SPACES))).toBe(
       false,
+    );
+  });
+
+  // An agent's memories and schedules: the space sits at index 2 of both keys, the one
+  // `spansSpaces` reads. A key whose space moves elsewhere would be kept on a switch and served
+  // as the next space's rows.
+  it("drops an agent's memories and schedules of the current space, keeps those across spaces", () => {
+    const memories = (spaceId: string) =>
+      persistenceKeys.list("org_1", spaceId, "member", "@acme/agent", { limit: 20 });
+    const schedules = (spaceId: string) =>
+      scheduleKeys.listForAgent("org_1", spaceId, "@acme/agent");
+
+    expect(memories("spc_a")[2]).toBe("spc_a");
+    expect(schedules("spc_a")[2]).toBe("spc_a");
+
+    expect(spansSpaces(memories("spc_a"))).toBe(false);
+    expect(spansSpaces(schedules("spc_a"))).toBe(false);
+    expect(droppedOnSpaceSwitch(memories("spc_a"))).toBe(true);
+    expect(droppedOnSpaceSwitch(schedules("spc_a"))).toBe(true);
+
+    expect(spansSpaces(memories(ACROSS_SPACES))).toBe(true);
+    expect(spansSpaces(schedules(ACROSS_SPACES))).toBe(true);
+    expect(droppedOnSpaceSwitch(memories(ACROSS_SPACES))).toBe(false);
+    expect(droppedOnSpaceSwitch(schedules(ACROSS_SPACES))).toBe(false);
+  });
+
+  it("reads the marker at the space's position only, not in a later segment", () => {
+    // A package id or a scope tag spelling the marker is not a list across spaces.
+    expect(
+      droppedOnSpaceSwitch(
+        persistenceKeys.list("org_1", "spc_a", ACROSS_SPACES, ACROSS_SPACES, null),
+      ),
+    ).toBe(true);
+    expect(droppedOnSpaceSwitch(scheduleKeys.listForAgent("org_1", "spc_a", ACROSS_SPACES))).toBe(
+      true,
     );
   });
 });

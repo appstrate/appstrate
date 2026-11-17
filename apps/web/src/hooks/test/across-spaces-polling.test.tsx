@@ -84,7 +84,11 @@ describe("polling a list spanning spaces", () => {
         "/api/orgs/{orgId}/notifications/unread-count",
       ),
     ).toBe(ACROSS_SPACES_POLL_MS);
-    // One space's feed: the stream keeps it live, the poll is the 5-minute backstop.
+    // One space's feed and its count: the stream keeps them live, the poll is the 5-minute
+    // backstop — both, or a missed share leaves the badge and the bell disagreeing.
     expect(intervalOf(() => useNotifications(), "get", "/api/notifications")).toBe(300_000);
+    expect(intervalOf(() => useUnreadCount(), "get", "/api/notifications/unread-count")).toBe(
+      300_000,
+    );
   });
 });

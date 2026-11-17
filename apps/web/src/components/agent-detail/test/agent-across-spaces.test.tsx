@@ -38,6 +38,7 @@ const { authStore } = await import("../../../stores/auth-store.ts");
 const { overviewStore } = await import("../../../stores/overview-store.ts");
 const { packageDetailQueryOptions } = await import("../../../hooks/use-packages.ts");
 const { ACROSS_SPACES, persistenceKeys, scheduleKeys } = await import("../../../lib/query-keys.ts");
+const { formatDateField } = await import("../../../lib/format-date.ts");
 const { AgentSchedulesTab, AgentMemoryTab } = await import("../../package-detail/agent-tabs.tsx");
 const { AgentOverviewTab } = await import("../agent-overview-tab.tsx");
 const { AgentConfigurationView } = await import("../agent-configuration-view.tsx");
@@ -296,8 +297,11 @@ describe("the overview's figures", () => {
     expect(figure(html, t("detail.overview.activeSchedules"))).toBe("2");
     expect(figure(html, t("detail.overview.archivedItems"))).toBe("2");
     expect(figure(html, t("detail.overview.pinnedItems"))).toBe("2");
-    // The soonest fire among them: Coffre's, on 1 December.
-    expect(figure(html, t("schedule.paramNextRun"))).toContain("1");
+    // The soonest fire among them: Coffre's, on 1 December — not Studio's (2nd), nor the hidden
+    // working space's (3rd).
+    const nextRun = figure(html, t("schedule.paramNextRun"));
+    expect(nextRun).toBe(formatDateField("2026-12-01T09:00:00Z", "datetime", "UTC"));
+    expect(nextRun).not.toBe(formatDateField("2026-12-02T09:00:00Z", "datetime", "UTC"));
   });
 
   it("CONTROL: count the working space's out of the mode", () => {
@@ -306,10 +310,31 @@ describe("the overview's figures", () => {
       <AgentOverviewTab packageId={PACKAGE_ID} detail={DETAIL} isHistorical={false} />,
     );
     expect(figure(html, t("detail.overview.activeSchedules"))).toBe("1");
+    expect(figure(html, t("schedule.paramNextRun"))).toBe(
+      formatDateField("2026-12-03T09:00:00Z", "datetime", "UTC"),
+    );
     expect(figure(html, t("detail.overview.archivedItems"))).toBe("1");
     expect(figure(html, t("detail.overview.pinnedItems"))).toBe("0");
   });
 });
+
+/**
+ * The markup of the configuration's space line (`data-configuration-space`), up to its own closing
+ * tag: an assertion on what the line holds must not be met by a later part of the page.
+ */
+function configurationSpace(html: string): string | null {
+  const marker = html.indexOf("data-configuration-space");
+  if (marker < 0) return null;
+  const start = html.lastIndexOf("<div", marker);
+  const tag = /<(\/?)div\b[^>]*>/g;
+  tag.lastIndex = start;
+  let depth = 0;
+  for (let match = tag.exec(html); match; match = tag.exec(html)) {
+    depth += match[1] ? -1 : 1;
+    if (depth === 0) return html.slice(start, tag.lastIndex);
+  }
+  return null;
+}
 
 describe("the configuration view", () => {
   const label = () => i18n.t("detail.configuration.spaceLabel", { ns: "agents" });
@@ -327,10 +352,9 @@ describe("the configuration view", () => {
       />,
     );
     expect(html).toContain(label());
-    expect(html).toContain("data-configuration-space");
-    expect(html).toContain(">Atelier<");
-    // Studio grants it: the space can be changed.
-    expect(html).toMatch(/data-configuration-space[\s\S]*<button/);
+    const line = configurationSpace(html);
+    // The line names Atelier, on the button that changes it: Studio grants it too.
+    expect(line).toMatch(/<button[^>]*>[\s\S]*>Atelier<[\s\S]*<\/button>/);
     expect(html).toContain(
       i18n.t("detail.configuration.connectionsDescriptionIn", { ns: "agents", space: "Atelier" }),
     );
@@ -347,8 +371,10 @@ describe("the configuration view", () => {
         permission="integrations:read"
       />,
     );
-    expect(html).toContain(i18n.t("detail.configuration.pickSpace", { ns: "agents" }));
-    expect(html).not.toMatch(/data-configuration-space[\s\S]*>Atelier</);
+    const line = configurationSpace(html);
+    expect(line).toContain(i18n.t("detail.configuration.pickSpace", { ns: "agents" }));
+    expect(line).toMatch(/<button/);
+    expect(line).not.toContain(">Atelier<");
   });
 
   it("names no space for the schedules, which span them", () => {
