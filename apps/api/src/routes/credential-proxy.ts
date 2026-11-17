@@ -80,7 +80,7 @@ import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
-import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly, bearerCaller } from "../lib/bearer-only.ts";
 import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -158,14 +158,13 @@ export function createCredentialProxyRouter() {
     // `credential-proxy:call` implies `call-own`; `authorizeProxyCall` requires `call` for a run.
     requirePermission("credential-proxy", "call-own"),
     async (c: Context<AppEnv>) => {
-      // Accept headless API keys and bearer JWTs from the interactive CLI
-      // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
-      // Cookie sessions are refused — they would let a drive-by CSRF
-      // trigger arbitrary upstream calls on behalf of a logged-in user.
+      // Accept headless API keys, bearer JWTs from the interactive CLI
+      // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`), and
+      // server-minted bearers (the chat's MCP tools). Cookie sessions are
+      // refused — they would let a drive-by CSRF trigger arbitrary upstream
+      // calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      assertBearerOnly(authMethod, "Credential proxy", {
-        firstPartyLoopback: c.get("firstPartyLoopback"),
-      });
+      assertBearerOnly(bearerCaller(c), "credential-proxy");
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
       const apiKeyId = c.get("apiKeyId") || null;
@@ -498,9 +497,7 @@ export function createCredentialProxyRouter() {
   // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
   // of calls, and each `tools/call` counts once.
   const remoteToolsCaller = (c: Context<AppEnv>) => {
-    assertBearerOnly(c.get("authMethod"), "Credential proxy", {
-      firstPartyLoopback: c.get("firstPartyLoopback"),
-    });
+    assertBearerOnly(bearerCaller(c), "credential-proxy");
     return {
       scope: getSpaceScope(c),
       actor: getActor(c),

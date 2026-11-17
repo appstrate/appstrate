@@ -677,6 +677,8 @@ export async function handleChatStream(
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
   // permissions (the caller's resolved set, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
+  // It is server-minted, so the integration tools reach the credential proxy
+  // with it, exactly as any MCP client's bearer does.
   const mcpToken = mintMcpLoopbackToken(
     {
       userId: user.id,
@@ -724,7 +726,11 @@ export async function handleChatStream(
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
-          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions),
+          surfaceKey: platformMcpSurfaceKey(
+            mcpUrl,
+            permissions,
+            c.get("space").credentialProxyOpen,
+          ),
           listsSkills,
         },
         // Decoupled from the request connection (see `generation` above).

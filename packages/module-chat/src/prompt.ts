@@ -77,9 +77,11 @@ export type ChatEnv = {
      * Space the router entered (`enterSpaceContext`, mounted on every
      * `/api/chat/*` route). Always set: entering is what makes the space-level
      * `chat:*` guards satisfiable, and a caller that names no space is refused
-     * there before any handler runs.
+     * there before any handler runs. `credentialProxyOpen` is the setting that
+     * withholds the integration tools from the MCP surface, so it keys the
+     * surface cache.
      */
-    space: { id: string };
+    space: { id: string; credentialProxyOpen: boolean };
     orgRole?: string;
     /**
      * Role preview (`X-View-As`), as the platform resolved it. `orgRole` is the
