@@ -4,8 +4,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
+import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
@@ -25,6 +24,10 @@ interface UseRunsOptions {
   search?: string;
   /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
   unread?: boolean;
+  /** Every space the reader reaches instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
+  spanning?: boolean;
+  /** `false` keeps the query from asking (a badge the shell does not show). */
+  enabled?: boolean;
   limit?: number;
 }
 
@@ -57,13 +60,17 @@ export function useRuns({
   status,
   search,
   unread,
+  spanning,
+  enabled = true,
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
   const { can } = usePermissions();
   // Every door guards on `requireRunsRead`; a schedule's runs also on `schedules:read`.
   const canRead = canReadRuns(can) && (!scheduleId || can("schedules:read"));
+  // The org route serves the global view only; inside an agent or a schedule the space is theirs.
+  const acrossSpaces = !scheduleId && !packageId && !!spanning;
+  const scope = useListScope(acrossSpaces, canRead);
+  const { orgId, keySpace } = scope;
 
   // One value in the key: an array keys on identity, so a fresh `["failed"]` each render is a new entry.
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
@@ -78,7 +85,7 @@ export function useRuns({
   // use-global-run-sync and the run mutations invalidate by the key prefix.
   const currentKey = paginatedRunsKeys.list(
     orgId,
-    spaceId,
+    keySpace,
     endpoint,
     user,
     kind,
@@ -90,50 +97,27 @@ export function useRuns({
 
   return useInfiniteQuery({
     queryKey: currentKey,
-    // `user`/`kind`/`unread` exist only on the global /api/runs view.
-    queryFn: async ({ pageParam, signal }): Promise<RunsPage> => {
-      const q = search || undefined;
-      if (scheduleId) {
-        const { data } = await client.GET("/api/schedules/{id}/runs", {
-          params: {
-            path: { id: scheduleId },
-            query: { limit, startingAfter: pageParam, status: statusQuery, q },
-          },
-          signal,
-        });
-        return data!;
-      }
-      if (packageId) {
-        const { scope, name } = splitPackageRef(packageId);
-        const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-          params: {
-            path: { scope, name },
-            query: { limit, startingAfter: pageParam, status: statusQuery, q },
-          },
-          signal,
-        });
-        return data!;
-      }
-      const { data } = await client.GET("/api/runs", {
-        params: {
-          query: {
-            limit,
-            startingAfter: pageParam,
-            user,
-            kind: kind && kind !== "all" ? kind : undefined,
-            status: statusQuery,
-            q,
-            unread: unread || undefined,
-          },
+    queryFn: ({ pageParam, signal }) =>
+      fetchRunPage(
+        {
+          packageId,
+          scheduleId,
+          user,
+          kind,
+          status: statusQuery,
+          search,
+          unread,
+          acrossOrgId: scope.acrossOrgId,
+          limit,
+          startingAfter: pageParam,
         },
         signal,
-      });
-      return data!;
-    },
+      ),
     ...keysetPaging,
     placeholderData: (prev, prevQuery) =>
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
-    enabled: canRead && !!spaceId,
+    enabled: enabled && scope.enabled,
+    refetchInterval: scope.refetchInterval,
   });
 }
 
@@ -141,4 +125,66 @@ export function useRuns({
 export function useFirstRunsPage(options: UseRunsOptions) {
   const query = useRuns(options);
   return { ...query, data: query.data?.pages[0] };
+}
+
+/** One page's question: the hook's filters, the cursor, and the org when it spans its spaces. */
+type RunPageRequest = Omit<UseRunsOptions, "spanning" | "enabled"> & {
+  limit: number;
+  startingAfter?: string;
+  acrossOrgId: string | null;
+};
+
+/**
+ * One page, from the door the request names. `user`/`kind`/`unread` exist only on the global
+ * view; `acrossOrgId` moves it to the org route. Exported for its test.
+ */
+export async function fetchRunPage(
+  {
+    packageId,
+    scheduleId,
+    user,
+    kind,
+    status,
+    search,
+    unread,
+    acrossOrgId,
+    limit,
+    startingAfter,
+  }: RunPageRequest,
+  signal?: AbortSignal,
+): Promise<RunsPage> {
+  const q = search || undefined;
+  if (scheduleId) {
+    const { data } = await client.GET("/api/schedules/{id}/runs", {
+      params: { path: { id: scheduleId }, query: { limit, startingAfter, status, q } },
+      signal,
+    });
+    return data!;
+  }
+  if (packageId) {
+    const { scope, name } = splitPackageRef(packageId);
+    const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
+      params: { path: { scope, name }, query: { limit, startingAfter, status, q } },
+      signal,
+    });
+    return data!;
+  }
+  const query = {
+    limit,
+    startingAfter,
+    user,
+    kind: kind && kind !== "all" ? kind : undefined,
+    status,
+    q,
+    unread: unread || undefined,
+  };
+  if (acrossOrgId) {
+    const { data } = await client.GET("/api/orgs/{orgId}/runs", {
+      params: { path: { orgId: acrossOrgId }, query },
+      signal,
+    });
+    return data!;
+  }
+  const { data } = await client.GET("/api/runs", { params: { query }, signal });
+  return data!;
 }

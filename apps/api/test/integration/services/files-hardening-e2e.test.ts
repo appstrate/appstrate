@@ -34,13 +34,13 @@ import {
   createFileFromUpload,
   createFileFromStream,
   getFileForActor,
-  listFilesForActor,
   deleteFile,
   setOrgFileStorageLimit,
   streamFileContent,
 } from "../../../src/services/files.ts";
 import { assignWorkspaceNames } from "../../../src/services/run-file-naming.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
+import { listFilesIn } from "../../helpers/files.ts";
 import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
 
 type Scope = { orgId: string; spaceId: string };
@@ -215,7 +215,7 @@ describe("files hardening — cross-phase interactions", () => {
     const [doc1] = await db.select().from(files).where(eq(files.name, "keep-1.txt"));
 
     // Existing content stays fully readable (list, resolve, download) over-limit.
-    const listed = await listFilesForActor(scope, userActor, { runId }, NO_GRANTS);
+    const listed = await listFilesIn(scope, userActor, { runId }, NO_GRANTS);
     expect(listed.data).toHaveLength(2);
     const resolved = await getFileForActor(scope, userActor, doc1!.id, NO_GRANTS);
     expect(resolved?.capabilities.download).toBe(true);

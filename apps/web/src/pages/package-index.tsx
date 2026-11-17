@@ -5,34 +5,33 @@
  * for the two, so a fix to one (an error state, the keywords the search reads,
  * the actions menu) lands on both. Integrations have their own page: a source
  * filter and connection columns.
+ *
+ * In « Tous les espaces » it lists every space the reader reaches, each package
+ * once naming its spaces. A row runs in one of its spaces; creating and
+ * importing choose their space in their own menu (`useSpaceAction`).
  */
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { LibraryBig, Plus, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useListParams } from "../lib/list-params";
-import { catalogueHref } from "../lib/catalogue-link";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import { agentCardItem, packageCardItem, type CardItem } from "../lib/package-card-item";
 import { PageHeader } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
 import { usePackageColumns } from "../components/package-columns";
 import { EmptyStateAction } from "../components/page-states";
-import { PageActionsMenu } from "../components/page-actions-menu";
-import type { MenuAction } from "../lib/menu-action";
 import { useListView } from "../stores/list-view-store";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
-import { usePermissions } from "../hooks/use-permissions";
 import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
-import { useCreationHandoff } from "../hooks/use-creation-handoff";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 
 type IndexType = Extract<PackageType, "agent" | "skill">;
 
@@ -42,6 +41,7 @@ function presentation(type: IndexType, t: TFunction) {
     return {
       title: t("common:nav.agents"),
       empty: t("list.empty", { ns: "agents" }),
+      emptyAcross: t("list.emptyAcross", { ns: "agents" }),
       create: t("list.create", { ns: "agents" }),
     };
   }
@@ -49,6 +49,7 @@ function presentation(type: IndexType, t: TFunction) {
   return {
     title: t(`packages.type.${type}s`, { ns: "settings" }),
     empty: t("packages.emptyItems", { ns: "settings", type: typeLabel }),
+    emptyAcross: t("packages.emptyItemsAcross", { ns: "settings", type: typeLabel }),
     create: t("list.createItem", { ns: "agents", type: typeLabel }),
   };
 }
@@ -59,16 +60,34 @@ export function PackageIndexPage({ type }: { type: IndexType }) {
 
 /** Agents also carry their unread runs. */
 function AgentIndex() {
-  const { data: agents, isLoading, error } = useAgents();
+  const { on: spanning } = useOverviewMode();
+  const { data: agents, isLoading, error } = useAgents({ spanning });
   const items = agents?.map((agent) => agentCardItem(agent));
-  return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
+  return (
+    <PackageIndexBody
+      type="agent"
+      spanning={spanning}
+      items={items}
+      isLoading={isLoading}
+      error={error}
+    />
+  );
 }
 
 function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
-  // What works in THIS space; the rest of the org is one action away.
-  const { data: rows, isLoading, error } = usePackageList(type);
+  const { on: spanning } = useOverviewMode();
+  // What works in THIS space (or, spanning, in each); the rest of the org is one action away.
+  const { data: rows, isLoading, error } = usePackageList(type, spanning);
   const items = rows?.map((row) => packageCardItem(row, type));
-  return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
+  return (
+    <PackageIndexBody
+      type={type}
+      spanning={spanning}
+      items={items}
+      isLoading={isLoading}
+      error={error}
+    />
+  );
 }
 
 /** Agents are the org's own work: where each came from is a detail, hidden until asked for. */
@@ -76,32 +95,29 @@ const AGENT_HIDDEN_COLUMNS = ["origin"];
 
 function PackageIndexBody({
   type,
+  spanning,
   items,
   isLoading,
   error,
 }: {
   type: IndexType;
+  spanning: boolean;
   items: CardItem[] | undefined;
   isLoading: boolean;
   error: Error | null;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const { can } = usePermissions();
-  const [importing, setImporting] = useState(false);
   const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
   const { columns, menu } = useColumnVisibility(
     `packages-${type}`,
-    usePackageColumns(type),
+    usePackageColumns(type, spanning),
     type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
   );
-  // Creating — by hand, with the chat or by import — is a write on the package
-  // type, as its routes are. The import names the type, so the server refuses
-  // an archive of another one.
-  const canCreate = can(packagePermission(type, "write"));
-  const canActivate = can(spacePackagePermission(type, "activate"));
-  const creation = useCreationHandoff(type, canCreate);
+  const words = presentation(type, t);
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
+    usePackageIndexActions(type, words.create);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
   const integrationDetail = useIntegrationDetail(
     creation.isOpen ? (creation.integrationId ?? undefined) : undefined,
@@ -113,42 +129,13 @@ function PackageIndexBody({
           name: integrationDetail.manifest.display_name ?? creation.integrationId,
         }
       : undefined;
-  const words = presentation(type, t);
-  const createAction: MenuAction = {
-    id: "create",
-    label: words.create,
-    icon: Plus,
-    onSelect: creation.open,
-    hidden: !canCreate,
-  };
-
   return (
     <>
       <PageHeader
         title={words.title}
         variant="collection"
         breadcrumbs={[{ label: words.title }]}
-        actions={
-          <PageActionsMenu
-            actions={[
-              {
-                id: "catalogue",
-                label: t("catalogue.browse", { ns: "settings" }),
-                icon: LibraryBig,
-                to: catalogueHref(type),
-                hidden: !canActivate,
-              },
-              {
-                id: "import",
-                label: t("nav.import", { ns: "common" }),
-                icon: Upload,
-                onSelect: () => setImporting(true),
-                hidden: !canCreate,
-              },
-              createAction,
-            ]}
-          />
-        }
+        actions={actionsMenu}
       />
       <PackageCollection
         columns={columns}
@@ -159,8 +146,9 @@ function PackageIndexBody({
         error={error}
         holds={type}
         entity={words.title}
-        emptyMessage={words.empty}
-        emptyHint={<SpaceLibraryHint type={type} />}
+        emptyMessage={spanning ? words.emptyAcross : words.empty}
+        emptyHint={spanning ? undefined : <SpaceLibraryHint type={type} />}
+        spanning={spanning}
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={<EmptyStateAction action={createAction} />}
         list={list}

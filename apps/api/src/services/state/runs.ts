@@ -51,7 +51,9 @@ import { listResponse } from "@appstrate/core/list-query";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
-import { recordRunFinished, unreadRunCondition } from "./run-reads.ts";
+import { runReadCondition } from "../../lib/run-visibility.ts";
+import { readsAgentContent, type SpaceGrant } from "../../lib/permissions.ts";
+import { countsByPackage, recordRunFinished, unreadRunCondition } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
@@ -1503,34 +1505,29 @@ export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number>
 }
 
 /**
- * Active runs per package in the space. `visibility` is the caller's run-read
- * predicate — without it the count answers "someone else is running this",
- * which is exactly what `runs:read-all` gates.
+ * Active runs per package across the spaces of `grants`, in one statement. Each
+ * space counts the runs its own grant reads (`runReadCondition`) — without
+ * that the count answers "someone else is running this", which is exactly
+ * what `runs:read-all` gates.
  */
 export async function getRunningRunCounts(
-  scope: SpaceScope,
-  visibility?: SQL,
-): Promise<Record<string, number>> {
+  orgId: string,
+  grants: readonly SpaceGrant[],
+  actor: Actor,
+): Promise<Map<string, number>> {
+  if (grants.length === 0) return new Map();
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
     .where(
-      scopedWhere(runs, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [
-          inArray(runs.status, [...activeRunStatusValues]),
-          ...(visibility ? [visibility] : []),
-        ],
-      }),
+      and(
+        eq(runs.orgId, orgId),
+        inArray(runs.status, [...activeRunStatusValues]),
+        runReadCondition(grants, actor),
+      ),
     )
     .groupBy(runs.packageId);
-
-  const counts: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.packageId) counts[row.packageId] = row.count;
-  }
-  return counts;
+  return countsByPackage(rows);
 }
 
 export async function getRun(scope: SpaceScope, id: string) {
@@ -1664,17 +1661,24 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 
 type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
+/** A cursor of a run list of one space: a run of that space. */
+function spaceCursor(scope: SpaceScope): SQL {
+  return and(eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId))!;
+}
+
 /**
  * The enriched page + total behind all run lists in this module. Module-private: a caller outside
  * builds its WHERE by hand, and a hand-built `runs` predicate is what the
  * `runs:read` visibility rule exists to keep out of the query.
  */
 async function listRunsWithFilter(
-  scope: SpaceScope,
+  /** Where the cursor may be: the runs the caller reaches, so a run it cannot read is no pivot. */
+  cursorScope: SQL,
   filter: SQL,
   page: { limit: number; startingAfter?: string },
   actor: Actor | null,
-  canReadAgentInput: boolean,
+  /** Decided per row, by the row's space: a list may span spaces. */
+  canReadAgentInput: (spaceId: string) => boolean,
 ): Promise<RunListPage> {
   const { limit, startingAfter } = page;
   // Keyset on the sort tuple `(startedAt DESC, id DESC)`, so rows inserted while
@@ -1685,13 +1689,7 @@ async function listRunsWithFilter(
     const [cursor] = await db
       .select({ startedAt: runs.startedAt, id: runs.id })
       .from(runs)
-      .where(
-        and(
-          eq(runs.id, startingAfter),
-          eq(runs.orgId, scope.orgId),
-          eq(runs.spaceId, scope.spaceId),
-        ),
-      )
+      .where(and(eq(runs.id, startingAfter), cursorScope))
       .limit(1);
     if (cursor) {
       pageFilter = and(
@@ -1728,7 +1726,7 @@ async function listRunsWithFilter(
 
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((row) =>
-    mapEnrichedRun(row, canReadAgentInput),
+    mapEnrichedRun(row, canReadAgentInput(row.run.spaceId)),
   );
   return { ...listResponse(data, { hasMore }), total: countRow?.count ?? 0 };
 }
@@ -1764,20 +1762,14 @@ export async function listPackageRuns(
   conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
-    scope,
+    spaceCursor(scope),
     and(...conditions)!,
     { limit, startingAfter },
     actor,
-    canReadAgentInput,
+    () => canReadAgentInput,
   );
 }
 
-/**
- * List runs across all packages in an org+space, paginated, with
- * optional kind / status / date / end-user filters. Powers the global
- * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
- * the inline flag — UI uses it for the "Inline" badge.
- */
 /**
  * The closed set `?kind=` accepts, as a value — the route validates the query
  * parameter against it, so the tuple and the type cannot drift.
@@ -1785,7 +1777,8 @@ export async function listPackageRuns(
 export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
 type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
-interface ListGlobalRunsOptions {
+/** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
+export interface GlobalRunListFilters {
   limit?: number;
   startingAfter?: string;
   kind?: GlobalRunKind;
@@ -1801,20 +1794,28 @@ interface ListGlobalRunsOptions {
   /**
    * Free text: the agent a run executed (its scope and name, as stamped on the
    * run) and the error it ended on; digits also match the run number
-   * (`runSearchCondition`). A substring match inside one space, unindexed.
+   * (`runSearchCondition`). A substring match, unindexed.
    */
   search?: string;
   /** Only the runs the actor has not read (`unreadRunCondition`). */
   unread?: boolean;
-  actor?: Actor | null;
-  /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
-  visibility?: SQL;
-  canReadAgentInput?: boolean;
+  /** `?user=me`: the actor's own runs in every space, even where they read all. */
+  ownOnly?: boolean;
 }
 
+/**
+ * Runs of `orgId` across the spaces of `grants`, paginated, with optional
+ * kind / status / date / chat-session filters. Powers `GET /api/runs` (one
+ * grant, the request's space) and `GET /api/orgs/{orgId}/runs` (one per space
+ * the caller reaches): a space where the caller reads every run contributes
+ * all of them, any other its actor's own (`runReadCondition`), and a row shows
+ * its `input` when its space's grant reads agent content. No grant, no row.
+ * Joins `packages.ephemeral` so the response carries the inline flag.
+ */
 export async function listGlobalRuns(
-  scope: SpaceScope,
-  options: ListGlobalRunsOptions = {},
+  orgId: string,
+  grants: readonly SpaceGrant[],
+  options: GlobalRunListFilters & { actor?: Actor | null } = {},
 ): Promise<RunListPage> {
   const {
     limit = 20,
@@ -1826,14 +1827,12 @@ export async function listGlobalRuns(
     chatSessionId,
     search,
     unread = false,
+    ownOnly = false,
     actor = null,
-    visibility,
-    canReadAgentInput = false,
   } = options;
 
-  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
-  if (visibility) conditions.push(visibility);
-  conditions.push(...runListConditions({ status, search }));
+  const reach = and(eq(runs.orgId, orgId), runReadCondition(grants, actor, ownOnly))!;
+  const conditions = [reach, ...runListConditions({ status, search })];
   if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
@@ -1848,7 +1847,7 @@ export async function listGlobalRuns(
               .where(
                 and(
                   eq(chatSessions.id, chatSessionId),
-                  eq(chatSessions.orgId, scope.orgId),
+                  eq(chatSessions.orgId, orgId),
                   eq(chatSessions.userId, actor.id),
                 ),
               ),
@@ -1870,12 +1869,15 @@ export async function listGlobalRuns(
     conditions.push(or(eq(packages.ephemeral, false), isNull(packages.ephemeral))!);
   }
 
+  const agentInput = new Set(
+    grants.filter((g) => readsAgentContent(g.permissions)).map((g) => g.spaceId),
+  );
   return listRunsWithFilter(
-    scope,
+    reach,
     and(...conditions)!,
     { limit, startingAfter },
     actor,
-    canReadAgentInput,
+    (spaceId) => agentInput.has(spaceId),
   );
 }
 
@@ -1905,7 +1907,7 @@ export async function listScheduleRuns(
   conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
-    scope,
+    spaceCursor(scope),
     scopedWhere(runs, {
       orgId: scope.orgId,
       spaceId: scope.spaceId,
@@ -1913,7 +1915,7 @@ export async function listScheduleRuns(
     })!,
     { limit, startingAfter },
     actor,
-    canReadAgentInput,
+    () => canReadAgentInput,
   );
 }
 

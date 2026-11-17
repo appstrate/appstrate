@@ -15,7 +15,6 @@
 
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
@@ -26,21 +25,20 @@ import { CellDate, CellPlaceholder, CellText } from "./table-cells";
 import { formatDateField } from "../lib/format-date";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
+import { useSpaceColumn } from "./space-column";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
-  agentName,
-  agentPending = false,
   showAgentName = true,
+  spanning = false,
 }: {
-  /** What to call the agent a schedule fires. */
-  agentName: (schedule: EnrichedSchedule) => string;
-  /** The agents list is still loading: the name is not known yet, only the id. */
-  agentPending?: boolean;
   /** Embedded agent detail already supplies this context in the page heading. */
   showAgentName?: boolean;
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }): DataColumn<EnrichedSchedule>[] {
   const { t } = useTranslation(["settings", "agents", "common"]);
+  const spaceColumn = useSpaceColumn<EnrichedSchedule>(spanning);
 
   const columns: DataColumn<EnrichedSchedule>[] = [
     {
@@ -62,15 +60,11 @@ export function useScheduleColumns({
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule
               did not say it at all. */}
-          {showAgentName &&
-            (agentPending ? (
-              <Skeleton className="my-0.5 h-3 w-24" />
-            ) : (
-              <CellText>{agentName(schedule)}</CellText>
-            ))}
+          {showAgentName && <CellText>{schedule.agent_name}</CellText>}
         </div>
       ),
     },
+    ...spaceColumn,
     {
       id: "cron",
       header: t("schedules.column.cron"),

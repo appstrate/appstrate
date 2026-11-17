@@ -13,6 +13,20 @@ import type { paths } from "../api/schema";
 
 type Id = string | null | undefined;
 
+/** What a list across spaces keys where a space-scoped list keys its space. */
+export const ACROSS_SPACES = "across-spaces";
+
+/**
+ * A list across spaces (runs, schedules, agents, a package index): it keys its org, never the
+ * current space, and holds the marker where its family keys the space (after the org; after the
+ * route segment and the org for the package families). Read at that position only: a later
+ * segment (a run search) may hold any text.
+ */
+export function spansSpaces(queryKey: readonly unknown[]): boolean {
+  const spaceAt = queryKey[0] === packageKeys.all[0] ? 3 : 2;
+  return queryKey[spaceAt] === ACROSS_SPACES;
+}
+
 /** A spec path that has a GET operation: the only paths a query key can name. */
 export type GetPath = {
   [P in keyof paths]: paths[P] extends { get: object } ? P : never;

@@ -9,6 +9,8 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { RunStatus } from "@appstrate/core/run-status";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
+import type { SpaceGrant } from "../../lib/permissions.ts";
+import { runReadCondition } from "../../lib/run-visibility.ts";
 import { markRunFailureNotificationsRead, notifyRunFinished } from "./notifications.ts";
 
 // --- Run read state ---
@@ -197,37 +199,45 @@ export async function markAllRunsRead(scope: SpaceScope, actor: Actor): Promise<
   return updated.length;
 }
 
+/** Fold `(packageId, count)` rows into a map; a row with no package is dropped. */
+export function countsByPackage(
+  rows: readonly { packageId: string | null; count: number }[],
+): Map<string, number> {
+  return new Map(
+    rows.flatMap(({ packageId, count: value }) => (packageId ? [[packageId, value]] : [])),
+  );
+}
+
 /**
- * Unread runs per agent for the caller — the agent index's `unread_count`.
- * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
- * the count spans the runs `GET /api/runs?unread=true` lists, never one the
- * caller can no longer open.
+ * Unread runs per agent for the caller across the spaces of `grants`, in one
+ * statement — the agent index's `unread_count`. Each space counts the runs its
+ * own grant reads (`runReadCondition`), so the count spans the runs
+ * `GET /api/runs?unread=true` lists there, never one the caller can no longer
+ * open.
  */
 export async function getUnreadRunCountsByAgent(
-  scope: SpaceScope,
+  orgId: string,
+  grants: readonly SpaceGrant[],
   actor: Actor,
-  visibility?: SQL,
-): Promise<Record<string, number>> {
+): Promise<Map<string, number>> {
+  if (grants.length === 0) return new Map();
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runReads)
     .innerJoin(runs, eq(runs.id, runReads.runId))
     .where(
-      scopedWhere(runReads, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [
-          recipientFilter(actor),
-          isNull(runReads.readAt),
-          ...(visibility ? [visibility] : []),
-        ],
-      }),
+      and(
+        eq(runReads.orgId, orgId),
+        // Implied by `runReadCondition`, stated on `run_reads` for `idx_run_reads_unread`.
+        inArray(
+          runReads.spaceId,
+          grants.map((g) => g.spaceId),
+        ),
+        recipientFilter(actor),
+        isNull(runReads.readAt),
+        runReadCondition(grants, actor),
+      ),
     )
     .groupBy(runs.packageId);
-
-  const result: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.packageId) result[row.packageId] = row.count;
-  }
-  return result;
+  return countsByPackage(rows);
 }

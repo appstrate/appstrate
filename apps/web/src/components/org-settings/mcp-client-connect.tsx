@@ -12,7 +12,7 @@ import { buildMcpClientConfig } from "../../lib/mcp-client-config";
 import { spaceLabel } from "../../lib/space-label";
 import { toSlug } from "../../lib/strings";
 import { useSpaces } from "../../hooks/use-spaces";
-import { isSpaceEnterable } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 
 interface McpClientConnectProps {
   orgId: string;

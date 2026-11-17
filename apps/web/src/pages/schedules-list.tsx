@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useCallback, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
-import { usePermissions } from "../hooks/use-permissions";
-import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { isQueryInFlight } from "../lib/query-state";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
@@ -25,35 +24,24 @@ const STATES = ["enabled", "disabled"] as const;
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  const { data: schedules, isLoading, isError, error } = useAllSchedules();
-  const agentsQuery = useAgents();
-  const { data: agents } = agentsQuery;
-  const agentsPending = isQueryInFlight(agentsQuery);
+  const { on: spanning } = useOverviewMode();
+  const { data: schedules, isLoading, isError, error } = useAllSchedules(spanning);
   const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
+  // A schedule is created in one space: in « Tous les espaces », the one the reader picks in the entry's menu.
+  const create = useSpaceAction({ permission: "schedules:write" });
 
+  const openNew = () => setNewScheduleOpen(true);
   const createAction: MenuAction = {
     id: "create",
     label: t("schedules.create"),
     icon: Plus,
-    onSelect: () => setNewScheduleOpen(true),
-    hidden: !can("schedules:write"),
+    onSelect: () => create.run(openNew),
+    inSpaces: create.choose(t("common:spaceChoice.create"), openNew),
+    hidden: !create.offered,
   };
 
-  // The same cached agents query every other surface holds, keyed by package id.
-  // Memoised on `agents` so the filter below can depend on the lookup itself
-  // rather than on the array it closes over — a fresh function each render
-  // would defeat the `useMemo` it is a dependency of.
-  const agentName = useCallback(
-    (packageId: string) => agents?.find((a) => a.id === packageId)?.display_name ?? packageId,
-    [agents],
-  );
-
-  const allColumns = useScheduleColumns({
-    agentName: (schedule) => agentName(schedule.packageId),
-    agentPending: agentsPending,
-  });
+  const allColumns = useScheduleColumns({ spanning });
   const { columns, menu } = useColumnVisibility("schedules", allColumns);
 
   // Client-side, and honestly so: `GET /api/schedules` returns the list whole,
@@ -71,17 +59,17 @@ export function SchedulesListPage() {
       const enabled = schedule.enabled ?? true;
       const key = enabled ? "enabled" : "disabled";
       if (states.length > 0 && !states.includes(key)) return false;
-      return matchesSearch(query, [schedule.name, agentName(schedule.packageId)]);
+      return matchesSearch(query, [schedule.name, schedule.agent_name]);
     });
-  }, [schedules, query, states, agentName]);
+  }, [schedules, query, states]);
 
   const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (
     <NoMatchState message={t("schedules.noMatch")} onReset={list.reset} />
   ) : (
     <EmptyState
-      message={t("schedules.empty")}
-      hint={t("schedules.emptyHint")}
+      message={spanning ? t("schedules.emptyAcross") : t("schedules.empty")}
+      hint={spanning ? undefined : t("schedules.emptyHint")}
       icon={Calendar}
       compact
     >

@@ -18,6 +18,7 @@ import { PackageIcon } from "./package-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { CountBadge } from "./count-badge";
 import { rowActionsColumn } from "./row-actions-column";
+import { usePackageSpaceColumn } from "./space-column";
 import { CellEmpty, CellPlaceholder, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../lib/package-card-item";
@@ -86,14 +87,19 @@ export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> 
   };
 }
 
-/** Only agents have a run state and a run action. */
-export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
+/**
+ * Only agents have a run state and a run action, which runs in one of the row's spaces.
+ * `spanning`: an index across spaces, each row naming its spaces.
+ */
+export function usePackageColumns(holds: PackageType, spanning = false): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
   const name = usePackageNameColumn(holds);
+  const spaceColumn = usePackageSpaceColumn<CardItem>(spanning, (item) => item);
   const runnable = holds === "agent";
   const origin = useCatalogueOriginColumn<CardItem>(useOrg().currentOrg?.name ?? "");
   const columns: DataColumn<CardItem>[] = [
     name,
+    ...spaceColumn,
     origin,
     {
       id: "keywords",
@@ -129,6 +135,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
         <span className="relative z-10">
           <RunAgentButton
             packageId={item.id}
+            spaceIds={item.spaceIds}
             variant="ghost"
             size="icon"
             className="text-muted-foreground hover:text-primary size-7"

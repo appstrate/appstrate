@@ -23,7 +23,7 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
-import { isSpaceEnterable } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { SpaceName } from "../../components/space-name";
 
 export interface SpaceRow {

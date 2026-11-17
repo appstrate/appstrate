@@ -239,7 +239,7 @@ export function servedSkillsContext(
     // Published: a system skill's stored tree, or a `latest` dist-tag. Draft: any
     // organization skill (a system skill has none).
     listActiveSkillIds: async (spaceId, definition) =>
-      (await listActivePackages(bySpace.get(spaceId)!, "skill"))
+      (await listActivePackages(bySpace.get(spaceId)!.orgId, [spaceId], "skill"))
         .filter((row) =>
           definition === "draft"
             ? row.source !== "system"

@@ -11,6 +11,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -60,6 +61,90 @@ const runSinkGone = {
   description: "`run_sink_closed` | `run_sink_expired`",
   content: problemContent,
 } as const;
+
+/** The query of `GET /api/runs` and `GET /api/orgs/{orgId}/runs` (`parseGlobalRunListQuery`). */
+const runListQueryParameters = [
+  {
+    name: "user",
+    in: "query",
+    schema: { type: "string", enum: ["me"] },
+    description:
+      "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
+  },
+  {
+    name: "limit",
+    in: "query",
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+  },
+  {
+    name: "startingAfter",
+    in: "query",
+    schema: { type: "string" },
+    description:
+      'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
+  },
+  {
+    name: "kind",
+    in: "query",
+    schema: { type: "string", enum: ["all", "package", "inline"] },
+    description:
+      "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
+  },
+  { $ref: "#/components/parameters/RunStatusFilter" },
+  { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
+  { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
+  {
+    name: "chat_session_id",
+    in: "query",
+    schema: { type: "string" },
+    description: "Return only runs launched from this chat session.",
+  },
+  { $ref: "#/components/parameters/RunSearch" },
+  {
+    name: "unread",
+    in: "query",
+    schema: { type: "boolean" },
+    description:
+      "When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`.",
+  },
+];
+
+/** The page and the refusal both run lists answer. */
+const runListPageResponses = {
+  "200": {
+    description: "Paginated run list",
+    headers: {
+      ...STD_RESPONSE_HEADERS,
+      Link: { $ref: "#/components/headers/Link" },
+    },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "total", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Run" },
+            },
+            total: { type: "integer" },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  "400": {
+    description:
+      "Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, …",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
+};
 
 const canonicalRunsPaths = {
   "/api/agents/{scope}/{name}/run": {
@@ -813,83 +898,26 @@ const canonicalRunsPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/AppstrateUser" },
-        {
-          name: "user",
-          in: "query",
-          schema: { type: "string", enum: ["me"] },
-          description:
-            "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org.",
-        },
-        {
-          name: "limit",
-          in: "query",
-          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
-        },
-        {
-          name: "startingAfter",
-          in: "query",
-          schema: { type: "string" },
-          description:
-            'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
-        },
-        {
-          name: "kind",
-          in: "query",
-          schema: { type: "string", enum: ["all", "package", "inline"] },
-          description:
-            "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
-        },
-        { $ref: "#/components/parameters/RunStatusFilter" },
-        { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
-        { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
-        {
-          name: "chat_session_id",
-          in: "query",
-          schema: { type: "string" },
-          description: "Return only runs launched from this chat session.",
-        },
-        { $ref: "#/components/parameters/RunSearch" },
-        {
-          name: "unread",
-          in: "query",
-          schema: { type: "boolean" },
-          description:
-            "When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`.",
-        },
+        ...runListQueryParameters,
       ],
       responses: {
-        "200": {
-          description: "Paginated run list",
-          headers: {
-            ...STD_RESPONSE_HEADERS,
-            Link: { $ref: "#/components/headers/Link" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "total", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Run" },
-                  },
-                  total: { type: "integer" },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "400": {
-          description: "Invalid query parameter (unknown `user` value, malformed date, …)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        ...runListPageResponses,
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/runs": {
+    get: {
+      operationId: "listOrgRuns",
+      tags: ["Runs"],
+      summary: "List runs across the organization's spaces",
+      description:
+        "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. A caller who reads runs in no space gets an empty page. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, ...runListQueryParameters],
+      responses: {
+        ...runListPageResponses,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

@@ -684,6 +684,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   click does not dismiss it); the
   two-pane overlay is `PanelLayout` inside `OverlayFrame`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
+- **An action that needs a space it does not name** in « Tous les espaces » never asks in a
+  dialog: with several eligible spaces its trigger is their menu (`SpaceChoiceDropdown`, or
+  `MenuAction.inSpaces`; the catalogue's « Ajouter à… » is the same menu), with one it acts there
+  (`useSpaceAction`). Its dialog passes `inSpace` to `Modal`/`FormModal`.
 - **Two kinds of modal, nothing in between.**
   - **State** (the default): a `useState` in the component that offers it, mounted
     while open (`{open && <FooModal onClose={() => setOpen(false)} />}`). Creations,

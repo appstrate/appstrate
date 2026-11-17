@@ -15,6 +15,7 @@ import {
 import { errorDetail } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
 import type { MenuAction } from "../lib/menu-action";
+import { SpaceChoiceDropdown } from "./space-choice-menu";
 
 /** The request failed, drawn like the empty state (a bare sentence would read as a rendering failure). Offers no Retry. */
 export function ErrorState({
@@ -150,19 +151,26 @@ export function NoMatchState({
 /**
  * The creation button of an empty collection: it does what the page's Actions menu entry
  * does (one `MenuAction`, handed to both). A `hidden` action renders nothing; a `to` or
- * `href` action has no button here.
+ * `href` action has no button here; one asking for its space opens the menu of them.
  */
 export function EmptyStateAction({
   action,
 }: {
-  action: Pick<MenuAction, "label" | "onSelect" | "hidden">;
+  action: Pick<MenuAction, "label" | "onSelect" | "hidden" | "inSpaces">;
 }) {
   if (action.hidden) return null;
   return (
-    <Button type="button" variant="outline" size="sm" onClick={action.onSelect}>
-      <Plus />
-      {action.label}
-    </Button>
+    <SpaceChoiceDropdown choice={action.inSpaces}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={action.inSpaces ? undefined : action.onSelect}
+      >
+        <Plus />
+        {action.label}
+      </Button>
+    </SpaceChoiceDropdown>
   );
 }
 

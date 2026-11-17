@@ -390,6 +390,11 @@ export interface ScheduleWireDto {
 }
 
 export type EnrichedSchedule = ScheduleWireDto & {
+  /**
+   * Display name of the scheduled agent: its draft manifest's `display_name`,
+   * else its package id — the name the package catalog shows.
+   */
+  agent_name: string;
   /** Display name of the actor (member or end-user) the schedule runs as. */
   actor_name: string | null;
   /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
@@ -570,6 +575,10 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
+  /** The spaces of the index where the agent is active, its home first when it is one of them, then in the order of the space listing. */
+  space_ids: string[];
+  /** The home space when the caller reaches it, `null` otherwise (system package, withheld home). */
+  home_space_id: string | null;
   /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
   icon: string | null;
   /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */
@@ -740,6 +749,8 @@ export interface AgentDetail {
 // --- Organization Package Types ---
 
 export interface OrgPackageItem extends BasePackageListItem {
+  /** The spaces of the index where the package is active, its home first when it is one of them, then in the order of the space listing. */
+  space_ids: string[];
   /** Always a string — `getPackageDisplayName` falls back to the package id. */
   name: string;
   /** Always emitted by the org-package list/detail mappers. */
@@ -814,10 +825,11 @@ export interface IntegrationIndexItem extends OrgPackageItem {
 // dropped from the base via Omit (a sub-interface can't loosen a required
 // field to optional). `icon` and `keywords` go the same way and for the
 // mirror-image reason: they exist so an INDEX row can be drawn without its
-// manifest, and the detail ships `manifest` itself.
+// manifest, and the detail ships `manifest` itself. `space_ids` names the
+// spaces of an index; a detail is read in the request's space.
 export interface OrgPackageItemDetail extends Omit<
   OrgPackageItem,
-  "used_by_agents" | "icon" | "keywords"
+  "used_by_agents" | "icon" | "keywords" | "space_ids"
 > {
   /**
    * WHICH definition `content`, `manifest` and every field projected from it

@@ -27,6 +27,7 @@ export function CreationHandoffModal({
   const { t } = useTranslation("settings");
   return (
     <Modal
+      inSpace
       onClose={onClose}
       title={t(`creation.title.${choices.resource}`)}
       className="sm:max-w-xl"

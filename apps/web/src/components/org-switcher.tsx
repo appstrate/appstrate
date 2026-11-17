@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { requestScopeChange } from "../hooks/use-unsaved-changes";
-
 /**
  * Organization and workspace switcher, at the head of the header trail: two columns, the
  * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
@@ -12,21 +10,25 @@ import { requestScopeChange } from "../hooks/use-unsaved-changes";
  * to its own settings, entering its organization or space first.
  */
 import { useId, useState, type ComponentProps, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLandAfterOrgSwitch, useOpenOverlayAfterOrgSwitch } from "../lib/modal-route";
 import { mayCreateSpaceIn, settingsEntry } from "../lib/switcher-context";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronRight, ChevronsUpDown, Plus, Settings, Star } from "lucide-react";
+import { Check, ChevronRight, ChevronsUpDown, Globe, Plus, Settings, Star } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { spaceLabel } from "../lib/space-label";
 import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
-import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
 import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { useViewer } from "../hooks/use-viewer";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { routeOf } from "../lib/route-match";
+import { holdsOverview, isSpaceEnterable, overviewOffered } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -145,6 +147,21 @@ function RowRole({ children }: { children: string | null | undefined }) {
   );
 }
 
+/** « Tous les espaces »'s tile, in the slot a space's sits: it reads even when the name is truncated. */
+function OverviewTile({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "bg-muted text-muted-foreground flex shrink-0 items-center justify-center",
+        className,
+      )}
+    >
+      <Globe className="size-[65%]" />
+    </span>
+  );
+}
+
 /** Where a space is created: the organization's spaces settings, its creation dialog open. */
 const NEW_SPACE_ADDRESS = `/org-settings/spaces?${NEW_SPACE_PARAM}=1`;
 
@@ -168,6 +185,8 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const canCreateOrg = useCanCreateOrg();
   const viewer = useViewer();
+  const overview = useOverviewMode();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -211,13 +230,29 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
-  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. */
+  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. A real space ends « Tous les espaces » there. */
   const applyContext = (orgId: string, spaceId: string) =>
     requestScopeChange(() => {
+      overview.choose(false, orgId);
       if (enterSpace(orgId, spaceId)) landAfterOrgSwitch();
       closeSwitcherAndSidebar();
     });
 
+  /**
+   * « Tous les espaces » of the explored organization, in one pick. In the current one it keeps
+   * the working space, and a page that does not hold the mode gives way to its home, the
+   * dashboard. In another it switches there (the space resolver enters the space remembered
+   * there, else the default) and lands on that home.
+   */
+  const chooseOverview = () =>
+    requestScopeChange(() => {
+      overview.choose(true, exploredId ?? undefined);
+      if (isExploringElsewhere && exploredId) {
+        switchOrg(exploredId);
+        navigate("/");
+      } else if (!holdsOverview(routeOf(pathname))) navigate("/");
+      closeSwitcherAndSidebar();
+    });
   const maySpaceWrite = mayCreateSpaceIn(orgs, exploredId);
   /**
    * The pick of settings (or of a creation) in another context: enter it, then open them. Over
@@ -236,17 +271,28 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         closeSwitcherAndSidebar();
       });
   };
-  const currentContextLabel = currentSpace ? spaceLabel(currentSpace, t) : undefined;
+  const overviewLabel = t("overview.title");
+  const overviewCurrent = overview.on && !isExploringElsewhere;
+  const offersOverview =
+    overviewOffered(exploredSpaces.data) && matchesSearch(query, [overviewLabel]);
+
+  const currentContextLabel = overview.on
+    ? overviewLabel
+    : currentSpace
+      ? spaceLabel(currentSpace, t)
+      : undefined;
   // The space's tile is a badge on the organization's, ringed in the trigger's background.
-  const spaceBadge: ReactNode = currentSpace ? (
-    <IdentityTile
-      {...spaceTile(currentSpace, viewer)}
-      className={cn(
-        "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
-        variant === "mobile" ? "ring-background" : "ring-sidebar",
-      )}
-    />
-  ) : null;
+  // « Tous les espaces » is no space: no badge, its name on the second line says it.
+  const spaceBadge: ReactNode =
+    currentSpace && !overview.on ? (
+      <IdentityTile
+        {...spaceTile(currentSpace, viewer)}
+        className={cn(
+          "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
+          variant === "mobile" ? "ring-background" : "ring-sidebar",
+        )}
+      />
+    ) : null;
   const spaceName: ReactNode = currentContextLabel ? (
     <span className="truncate" title={currentContextLabel}>
       {currentContextLabel}
@@ -394,14 +440,32 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                 </div>
               ) : exploredSpaces.isError ? (
                 <p className="text-destructive px-2 py-4 text-xs">{t("error.generic")}</p>
-              ) : shownSpaces.length === 0 ? (
+              ) : shownSpaces.length === 0 && !offersOverview ? (
                 <p className="text-muted-foreground px-2 py-4 text-xs">
                   {t("switcher.workspacesEmpty")}
                 </p>
               ) : (
                 <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+                  {/* Not a space: a mode over the working space, set apart above them. */}
+                  {offersOverview && (
+                    <div className="border-b pb-1">
+                      <PickerRow
+                        aria-current={overviewCurrent || undefined}
+                        onClick={chooseOverview}
+                        rowClassName={overviewCurrent && "bg-primary/10 hover:bg-primary/10"}
+                        onNavigate={closeSwitcherAndSidebar}
+                      >
+                        <OverviewTile className="size-6 rounded-md" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {overviewLabel}
+                        </span>
+                        {overviewCurrent && <Check size={15} className="text-primary shrink-0" />}
+                      </PickerRow>
+                    </div>
+                  )}
                   {shownSpaces.map((space) => {
-                    const isCurrent = space.id === currentSpaceId && !isExploringElsewhere;
+                    const isCurrent =
+                      space.id === currentSpaceId && !isExploringElsewhere && !overview.on;
                     const enterable = isSpaceEnterable(space);
                     return (
                       // The end of the pick: org AND workspace applied together. A closed space

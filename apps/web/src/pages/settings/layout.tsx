@@ -29,11 +29,8 @@ import { PanelLayout } from "../../components/panel-layout";
 import { PanelTitleBlock, SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
-import {
-  isSpaceEnterable,
-  useSpaceSwitcher,
-  useCurrentSpaceId,
-} from "../../hooks/use-current-space";
+import { useSpaceSwitcher, useCurrentSpaceId } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { useOrg } from "../../hooks/use-org";
 import { useViewer } from "../../hooks/use-viewer";
 import { useLandAfterOrgSwitch } from "../../lib/modal-route";

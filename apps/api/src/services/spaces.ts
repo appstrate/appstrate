@@ -186,8 +186,6 @@ async function listVisibleSpaces(
   /** `null` joins no row: a preview's overlay replaces them. */
   userId: string | null,
 ) {
-  // Default, then personal, then team spaces, each oldest first; display order
-  // only — the SPA picks by kind (`enterableSpaceId`).
   return db
     .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
     .from(spaces)
@@ -203,12 +201,21 @@ async function listVisibleSpaces(
         ),
       ),
     )
-    .orderBy(
-      desc(spaces.isDefault),
-      asc(isNull(spaces.ownerUserId)),
-      asc(spaces.createdAt),
-      asc(spaces.id),
-    );
+    .orderBy(...spaceListingOrder());
+}
+
+/**
+ * The order of a space listing: default, then personal, then team spaces, each
+ * oldest first. Display order only — the SPA picks by kind (`enterableSpaceId`).
+ * The package indexes name a package's spaces in it too (`activeSpaceIds`).
+ */
+export function spaceListingOrder() {
+  return [
+    desc(spaces.isDefault),
+    asc(isNull(spaces.ownerUserId)),
+    asc(spaces.createdAt),
+    asc(spaces.id),
+  ];
 }
 
 /** Get a single space by ID, verifying org ownership. Throws 404 if not found. */

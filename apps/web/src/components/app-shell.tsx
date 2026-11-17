@@ -15,6 +15,7 @@ import { SidebarCredits } from "@/components/sidebar-credits";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
+import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
@@ -120,7 +121,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { setOpenMobile } = useSidebar();
   const { pathname, search } = useLocation();
   useEffect(() => setOpenMobile(false), [pathname, search, setOpenMobile]);
-  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
+  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`). It names no
+  // space, so « Tous les espaces » opens it as it is: its add menu picks the space per package.
   const canReach = useCanReach();
   const ready = useReachReady();
   const overlayPath = useOverlayPath() ?? "";
@@ -197,7 +199,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
 export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
-  const unreadRuns = useUnreadRunCount();
+  // The working space's badge: « Tous les espaces » neither shows nor asks it.
+  const { on: overview } = useOverviewMode();
+  const unreadRuns = useUnreadRunCount({ enabled: !overview });
   const collapsed = !isMobile && state === "collapsed";
 
   return (
@@ -237,7 +241,7 @@ export function ShellHeader() {
         {collapsed && (
           <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
-            {unreadRuns > 0 && (
+            {!overview && unreadRuns > 0 && (
               <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
             )}
           </SidebarTrigger>

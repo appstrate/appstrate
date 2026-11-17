@@ -13,6 +13,7 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -28,13 +29,20 @@ const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const unreadCount = useUnreadRunCount();
+  const { on: spanning } = useOverviewMode();
+  const runSpaces = useAdmittingSpaces("runs");
+  // « Tout marquer comme lu » marks what the list spans: the working space, or each space
+  // admitting the list.
+  const unreadCount = useUnreadRunCount({ spanning });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();
-  // Without `runs:read-all` the list is already "mine": no scope filter.
-  const canSeeEveryRun = can("runs:read-all");
+  // Without `runs:read-all` the list is already "mine": no scope filter. Across spaces, each
+  // row follows its own space: "mine" narrows as soon as one of them shows others' runs.
+  const canSeeEveryRun = spanning
+    ? runSpaces.some((space) => space.permissions.includes("runs:read-all"))
+    : can("runs:read-all");
 
   const scopes = list.values("user", SCOPES);
   const kinds = list.values("kind", KINDS);
@@ -84,7 +92,8 @@ export function RunsPage() {
                 id: "mark-all-read",
                 label: t("common:notifications.markAllRead"),
                 icon: CheckCheck,
-                onSelect: () => markAllRead.mutate({}),
+                onSelect: () =>
+                  markAllRead.mutate(spanning ? runSpaces.map((space) => space.id) : null),
                 disabled: markAllRead.isPending || !unreadCount,
               },
             ]}
@@ -96,6 +105,7 @@ export function RunsPage() {
         user={user}
         kind={kind}
         status={statuses}
+        spanning={spanning}
         search={search}
         toolbar={({ columns }) => (
           <ListToolbar

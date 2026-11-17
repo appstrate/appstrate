@@ -9,6 +9,7 @@ import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge } from "./file-badges";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellDate, CellText } from "./table-cells";
+import { useSpaceColumn } from "./space-column";
 
 export function useDocumentColumns({
   pendingKeepId,
@@ -16,14 +17,18 @@ export function useDocumentColumns({
   onDownload,
   onKeep,
   onDelete,
+  spanning = false,
 }: {
   pendingKeepId: string | null;
-  showRunLink?: boolean;
+  showRunLink?: (doc: FileDto) => boolean;
   onDownload: (doc: FileDto) => void;
   onKeep: (doc: FileDto) => void;
   onDelete: (doc: FileDto) => void;
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }): DataColumn<FileDto>[] {
   const { t } = useTranslation(["files", "common"]);
+  const spaceColumn = useSpaceColumn<FileDto>(spanning);
 
   return [
     {
@@ -37,6 +42,7 @@ export function useDocumentColumns({
         </span>
       ),
     },
+    ...spaceColumn,
     {
       id: "purpose",
       header: t("column.purpose"),
@@ -83,7 +89,7 @@ export function useDocumentColumns({
       <DocumentRowActions
         doc={doc}
         isPending={pendingKeepId === doc.id}
-        showRunLink={showRunLink}
+        showRunLink={showRunLink?.(doc)}
         onDownload={onDownload}
         onKeep={onKeep}
         onDelete={onDelete}

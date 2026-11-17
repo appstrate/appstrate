@@ -39,6 +39,7 @@ import { serveSpaBuild } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
+import { createCrossSpaceReadsRouter } from "./routes/cross-space-reads.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
@@ -342,6 +343,7 @@ app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
+app.route("/api/orgs", createCrossSpaceReadsRouter());
 
 // User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
 // (it is the prerequisite to setting `X-Org-Id`); the other routes run

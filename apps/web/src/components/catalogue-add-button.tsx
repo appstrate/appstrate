@@ -21,22 +21,15 @@
  * the matrix ("Par espace") is where several spaces are set at once.
  */
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+import { SpaceChoiceDropdown } from "./space-choice-menu";
+import type { SpaceChoiceMenu } from "../lib/menu-action";
 
-export interface AddableSpace {
-  id: string;
-  name: string;
+export type AddableSpace = SpaceChoiceMenu["spaces"][number] & {
   /** Already running there: shown ticked, not offered again. */
   active: boolean;
-}
+};
 
 export function CatalogueAddButton({
   spaces,
@@ -70,40 +63,22 @@ export function CatalogueAddButton({
     );
   }
 
+  const activeIn = new Set(spaces.filter((space) => space.active).map((space) => space.id));
+  // Where it already runs stays in the menu, ticked and inert: the picture is whole, and a space
+  // does not vanish after a click.
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={busy}>
-          <Plus aria-hidden />
-          {t("common:btn.add")}
-          <ChevronDown aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-56">
-        <DropdownMenuLabel className="text-muted-foreground text-xs font-medium">
-          {t("catalogue.addToMenu")}
-        </DropdownMenuLabel>
-        {spaces.map((space) => (
-          // Where it already runs stays in the menu, ticked and inert: the
-          // picture is whole, and a space does not vanish after a click.
-          <DropdownMenuItem key={space.id} disabled={space.active} onSelect={() => onAdd(space.id)}>
-            <Check className={space.active ? "text-success" : "invisible"} aria-hidden />
-            <span className="flex min-w-0 flex-1 items-center gap-1.5">
-              <span className="truncate">{space.name}</span>
-              {space.id === currentSpaceId && (
-                <span className="bg-primary/15 text-primary rounded px-1 text-[10px] leading-4 font-medium">
-                  {t("catalogue.here")}
-                </span>
-              )}
-            </span>
-            {space.active && (
-              <span className="text-muted-foreground shrink-0 text-xs">
-                {t("catalogue.filter.active")}
-              </span>
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SpaceChoiceDropdown
+      choice={{ label: t("catalogue.addToMenu"), spaces, onPick: onAdd }}
+      states={(spaceId) => ({
+        done: activeIn.has(spaceId) ? t("catalogue.filter.active") : undefined,
+        badge: spaceId === currentSpaceId ? t("catalogue.here") : undefined,
+      })}
+    >
+      <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={busy}>
+        <Plus aria-hidden />
+        {t("common:btn.add")}
+        <ChevronDown aria-hidden />
+      </Button>
+    </SpaceChoiceDropdown>
   );
 }

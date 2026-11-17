@@ -82,6 +82,8 @@ export interface PackageCollectionProps {
   extraFilters?: FilterSpec[];
   /** Whether an agent card offers its run button. A catalogue's cannot. */
   cardRun?: boolean;
+  /** The list spans several spaces: each card names its row's spaces. */
+  spanning?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
   /** Above the bar: what this collection is. */
@@ -119,6 +121,7 @@ export function PackageCollection({
   originLabels,
   extraFilters = NO_FILTERS,
   cardRun = true,
+  spanning = false,
   actions,
   header,
   rowAction,
@@ -194,7 +197,7 @@ export function PackageCollection({
   );
 
   const placeholder = cardPlaceholder ?? (
-    <PackageCardSkeleton runnable={cardRun && holds === "agent"} />
+    <PackageCardSkeleton runnable={cardRun && holds === "agent"} spaceName={spanning} />
   );
 
   return (
@@ -254,6 +257,7 @@ export function PackageCollection({
                   renderCard={(item) => (
                     <PackageCard
                       {...item}
+                      showSpace={spanning}
                       showRun={cardRun}
                       onOpen={rowAction ? () => rowAction(item) : undefined}
                     />
@@ -272,6 +276,7 @@ export function PackageCollection({
           renderCard={(item) => (
             <PackageCard
               {...item}
+              showSpace={spanning}
               showRun={cardRun}
               onOpen={rowAction ? () => rowAction(item) : undefined}
             />

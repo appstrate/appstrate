@@ -2,30 +2,28 @@
 
 /**
  * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
- * placed here but switched off, or never switched on, is in the space library.
+ * placed here but switched off, or never switched on, is in the space library. In « Tous
+ * les espaces » it lists every space the reader reaches, each integration once naming its spaces;
+ * creating and importing choose their space in their own menu (`useSpaceAction`).
  */
 
 import { useMemo, useState } from "react";
-import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
-import { Boxes, LibraryBig, Plus, Upload } from "lucide-react";
-import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
+import { Boxes } from "lucide-react";
 import { PageHeader } from "../components/page-header";
 import { CardGrid } from "../components/card-grid";
 import { PackageCard, PackageCardSkeleton } from "../components/package-card";
 import { ListViewTabs } from "../components/list-view-tabs";
 import { packageCardItem } from "../lib/package-card-item";
+import { packageDetailPath } from "../lib/package-paths";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
-import { PageActionsMenu } from "../components/page-actions-menu";
-import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { CreatePackageModal } from "../components/create-package-modal";
-import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_SOURCES,
@@ -35,37 +33,29 @@ import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
-import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { usePackageIndexActions } from "../hooks/use-package-index-actions";
+import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
-  // The server answers the active set of this space: the index route every
-  // type page asks, not the management listing.
-  const { data: active = [], isLoading, error } = usePackageList("integration");
-  const connectionCounts = useConnectionCounts();
+  const { on: spanning } = useOverviewMode();
+  // The server answers the active set of this space (or of each, spanning): the
+  // index route every type page asks, not the management listing.
+  const { data: active = [], isLoading, error } = usePackageList("integration", spanning);
+  const connectionCount = useConnectionCounts();
+  const linkInSpace = useSpaceLink();
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "source"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const [importing, setImporting] = useState(false);
-  // The same grants as every other package index (`PackageIndexPage`): creating,
-  // by import too, is a write on the type.
-  const canCreate = can(packagePermission("integration", "write"));
-  const canBrowse = can(spacePackagePermission("integration", "activate"));
-  const creation = useCreationHandoff("integration", canCreate);
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
+    usePackageIndexActions("integration", t("integrations.create"));
   const [creating, setCreating] = useState(false);
-  const createAction: MenuAction = {
-    id: "create",
-    label: t("integrations.create"),
-    icon: Plus,
-    onSelect: creation.open,
-    hidden: !canCreate,
-  };
 
   const origins = list.values("origin", INTEGRATION_ORIGINS);
   const sources = list.values("source", INTEGRATION_SOURCES);
@@ -77,7 +67,7 @@ export function IntegrationsPage() {
   );
   const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
 
-  const allColumns = useIntegrationListColumns(connectionCounts);
+  const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
@@ -85,8 +75,8 @@ export function IntegrationsPage() {
     <EmptyState
       icon={Boxes}
       compact
-      message={t("integrations.empty.space")}
-      hint={<SpaceLibraryHint type="integration" />}
+      message={spanning ? t("integrations.empty.across") : t("integrations.empty.space")}
+      hint={spanning ? undefined : <SpaceLibraryHint type="integration" />}
     >
       <EmptyStateAction action={createAction} />
     </EmptyState>
@@ -99,27 +89,7 @@ export function IntegrationsPage() {
         variant="collection"
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
-        actions={
-          <PageActionsMenu
-            actions={[
-              {
-                id: "catalogue",
-                label: t("catalogue.browse"),
-                icon: LibraryBig,
-                to: catalogueHref("integration"),
-                hidden: !canBrowse,
-              },
-              {
-                id: "import",
-                label: t("nav.import", { ns: "common" }),
-                icon: Upload,
-                onSelect: () => setImporting(true),
-                hidden: !canCreate,
-              },
-              createAction,
-            ]}
-          />
-        }
+        actions={actionsMenu}
       />
 
       <ListToolbar
@@ -158,7 +128,9 @@ export function IntegrationsPage() {
           columns={columns}
           rows={shown}
           rowKey={(integration) => integration.id}
-          rowHref={(integration) => `/integrations/${integration.id}`}
+          rowHref={(integration) =>
+            linkInSpace(packageDetailPath("integration", integration.id), integration.space_ids)
+          }
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}
           failure={error}
@@ -171,16 +143,17 @@ export function IntegrationsPage() {
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
+              showSpace={spanning}
               meta={
                 <>
                   <IntegrationSourceLabel source={integration.source_kind} />
                   {/* An integration that binds no connection has no count to give. */}
-                  {integration.authenticated && connectionCounts && (
+                  {integration.authenticated && connectionCount && (
                     <>
                       <span aria-hidden>·</span>
                       <span className="shrink-0">
                         {t("connections.connectionCount", {
-                          count: connectionCounts.get(integration.id) ?? 0,
+                          count: connectionCount(integration.id, integration.space_ids),
                         })}
                       </span>
                     </>
@@ -192,7 +165,7 @@ export function IntegrationsPage() {
           isLoading={isLoading}
           failure={error}
           empty={empty}
-          placeholder={<PackageCardSkeleton meta="both" />}
+          placeholder={<PackageCardSkeleton meta="both" spaceName={spanning} />}
         />
       )}
       <ListFooter

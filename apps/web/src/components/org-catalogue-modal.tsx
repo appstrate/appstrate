@@ -12,6 +12,9 @@
  *
  * A row opens HERE, not on the package's page: that page would throw away the
  * panel and its breadcrumb would claim the current space for a package not in it.
+ *
+ * It names no space of its own, so « Tous les espaces » opens it as it is and stays on: there,
+ * nothing is « here » (`useHereSpaceId`) and every deed names its space.
  */
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useState } from "react";
@@ -23,7 +26,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useHereSpaceId } from "../hooks/use-overview-mode";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
@@ -121,7 +124,10 @@ export function OrgCatalogueModal({
   type: PackageType;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const spaceId = useCurrentSpaceId();
+  // « Here »: the working space, none in « Tous les espaces », where the catalogue claims no
+  // space (no « Pas encore dans… » sections, no « ici », no bulk activation): the add menu and
+  // the « Par espace » matrix name the space of every deed.
+  const spaceId = useHereSpaceId();
   const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useCatalogueLibrary();
@@ -306,11 +312,13 @@ export function OrgCatalogueModal({
     const icon = tileOf(item.id, row.displayName);
     // Spaces where it already runs (ticked, so nothing vanishes after a click) or where this reader may add it.
     const addable = spaces
-      .map((space) => ({
-        id: space.id,
-        name: space.name,
-        active: placement?.activeIn.includes(space.id) ?? false,
-      }))
+      // Drawn with its tile: the listing's row, which every space the library names is in.
+      .flatMap((space) => {
+        const listed = grantById.get(space.id);
+        return listed
+          ? [{ ...listed, active: placement?.activeIn.includes(space.id) ?? false }]
+          : [];
+      })
       .filter((space) => space.active || mayActivateIn(item, space.id));
     // Only the placement in the space on screen: another space's share says nothing here.
     const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;

@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packages,
-  runs,
-  spaceMembers,
-  spacePackages,
-  spaceRoles,
-  spaces,
-} from "@appstrate/db/schema";
+import { packages, runs, spacePackages, spaces } from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -33,27 +26,15 @@ import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
-import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
+import type { OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
-import { callerPermissions, type Permission } from "./permissions.ts";
+import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  effectiveInSpace,
-  personaFor,
-  personaMemberships,
-} from "./view-as.ts";
-import {
-  customRoleOn,
-  MEMBERSHIP_COLUMNS,
-  memberFromJoin,
-  membershipOn,
-  resolveSpaceRole,
-} from "./space-role.ts";
+import { callerOrgRole, callerPersonalOwnerId } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
+import { callerReachableSpaces, type ReachableSpace } from "./reachable-spaces.ts";
 import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -63,15 +44,9 @@ import { placementRowJoin } from "../services/package-placement.ts";
  */
 export const requireAgentRead = requireAnyPermission(packageSightPermissions("agent"));
 
-/**
- * `agents:run` without `agents:read` — the caller sees what the launch form
- * needs and nothing an author would call the agent's content.
- *
- * The three routes above answer this ONE question to shape their projection;
- * none of them re-derives the condition.
- */
+/** `readsAgentContent`, negated, for the request's own space. */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
-  return !callerPermissions(c).has("agents:read");
+  return !readsAgentContent(callerPermissions(c));
 }
 
 /**
@@ -104,22 +79,11 @@ export async function assertExistingPackageActivationAccess(
     await makePermissionGuard(spacePackagePermission(type, "activate"))(c, async () => {});
 }
 
-/**
- * One space of the caller's reach, with their effective permissions in it.
- *
- * Written out rather than inferred from the resolver: the memo that returns it
- * lives on the Hono context, so `AppEnv` names this type and inferring it back
- * off the resolver would close the loop through the environment.
- */
-export interface PackageAccessSpace {
-  id: string;
-  name: string;
-  isDefault: boolean;
-  visibility: SpaceVisibility;
-  defaultRole: SpaceRolePreset;
-  ownerUserId: string | null;
-  permissions: ReadonlySet<string>;
-}
+/** One space of the caller's reach, with their effective permissions in it. */
+export type PackageAccessSpace = Pick<
+  ReachableSpace,
+  "id" | "name" | "isDefault" | "visibility" | "defaultRole" | "ownerUserId"
+> & { permissions: ReadonlySet<string> };
 
 /**
  * A package read that crosses into ANOTHER organization, with the standing the
@@ -146,87 +110,30 @@ export interface ForeignOrgStanding {
  * failure is silent and it fails OPEN, which is why the role is not an optional
  * parameter with a default.
  */
-export async function packageAccessSpaces(c: Context<AppEnv>, foreign?: ForeignOrgStanding) {
-  const orgId = foreign?.orgId ?? c.get("orgId");
-  const orgRole = foreign?.orgRole ?? callerOrgRole(c, orgId);
-  // MEMOIZED per request. Every authority and reachability decision needs this
-  // set, so a single route resolved it up to four times over; an optional
-  // `resolvedSpaces` parameter threaded through the signatures instead would
-  // cost a query when forgotten and a wrong answer when stale. The cache lives
-  // on the Hono context, so it dies with the request and cannot outlive the
-  // standing it describes.
-  //
-  // Keyed on the org AND the role, not the org alone: one request can ask about
-  // two organizations (the cross-organization fork), and a key that dropped the
-  // role would let whichever call ran first decide for the other.
-  const cache =
-    c.get("packageAccessSpacesCache") ?? new Map<string, Promise<PackageAccessSpace[]>>();
-  if (!c.get("packageAccessSpacesCache")) c.set("packageAccessSpacesCache", cache);
-  const key = `${orgId}:${orgRole}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  const pending = resolvePackageAccessSpaces(c, orgId, orgRole);
-  cache.set(key, pending);
-  return pending;
-}
-
-/** The read itself — {@link packageAccessSpaces} is the memo in front of it. */
-async function resolvePackageAccessSpaces(
+export async function packageAccessSpaces(
   c: Context<AppEnv>,
-  orgId: string,
-  orgRole: OrgRole,
+  foreign?: ForeignOrgStanding,
 ): Promise<PackageAccessSpace[]> {
-  const callerId = callerPersonalOwnerId(c, orgId);
-  const tokenOnly = Boolean(c.get("endUser")) && !c.get("orgRole");
-  const persona = personaFor(c, orgId);
-  // Spaces and the caller's rows in one statement (RBAC spec §4.4); none under a
-  // preview (the overlay replaces them) or for an end-user token (no org role).
-  const joined = await db
+  const orgId = foreign?.orgId ?? c.get("orgId");
+  // Memoized per request by `callerReachableSpaces`.
+  if (c.get("principalKind") !== "end_user") {
+    return callerReachableSpaces(c, orgId, foreign?.orgRole ?? callerOrgRole(c, orgId));
+  }
+  // An end-user acts in its own space only (RBAC spec §7.2), with the request's set there.
+  const spaceId = c.get("credentialSpaceId");
+  if (spaceId === undefined) return [];
+  const [space] = await db
     .select({
-      space: {
-        id: spaces.id,
-        name: spaces.name,
-        isDefault: spaces.isDefault,
-        visibility: spaces.visibility,
-        defaultRole: spaces.defaultRole,
-        ownerUserId: spaces.ownerUserId,
-      },
-      ...MEMBERSHIP_COLUMNS,
+      id: spaces.id,
+      name: spaces.name,
+      isDefault: spaces.isDefault,
+      visibility: spaces.visibility,
+      defaultRole: spaces.defaultRole,
+      ownerUserId: spaces.ownerUserId,
     })
     .from(spaces)
-    .leftJoin(spaceMembers, membershipOn(tokenOnly || persona ? null : c.get("user").id))
-    .leftJoin(spaceRoles, customRoleOn)
-    .where(
-      and(
-        eq(spaces.orgId, orgId),
-        c.get("authMethod") === "api_key" || c.get("endUser")
-          ? eq(spaces.id, c.get("spaceId"))
-          : undefined,
-        // Someone else's personal space is never even LOADED. `resolveSpaceRole`
-        // would drop it anyway, but with one personal space per member this
-        // query would otherwise grow with the organization's headcount on
-        // every catalog read (RBAC spec §3.6).
-        callerId === null
-          ? isNull(spaces.ownerUserId)
-          : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
-      ),
-    );
-  const overlay = personaMemberships(persona);
-  return joined.flatMap((row) => {
-    const { space } = row;
-    if (tokenOnly) {
-      return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
-    }
-    const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(row);
-    const ref = resolveSpaceRole(orgRole, space, member, callerId);
-    if (!ref) return [];
-    return [
-      {
-        ...space,
-        permissions: effectiveInSpace(c, ref),
-      },
-    ];
-  });
+    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)));
+  return space ? [{ ...space, permissions: callerPermissions(c) }] : [];
 }
 
 /**
@@ -806,6 +713,16 @@ async function refuseHomeAuthority(
   throw forbidden(detail);
 }
 
+/** The home's id when the caller reaches that space, `null` otherwise (never the raw column). */
+export function visibleHomeSpaceId(
+  pkg: { homeSpaceId: string | null },
+  accessible: readonly { id: string }[],
+): string | null {
+  return pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId)
+    ? pkg.homeSpaceId
+    : null;
+}
+
 /**
  * The `home_*` fields EVERY package read emits — one contract, computed once,
  * for `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail` and the library
@@ -843,13 +760,11 @@ export function homeWireForCaller(
   home_deletable: boolean;
   home_shareable: boolean;
 } {
-  const reached =
-    pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId);
   const system = isSystemPackageRow(pkg);
   const holds = (action: "write" | "delete" | "share") =>
     !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, action));
   return {
-    home_space_id: reached ? pkg.homeSpaceId : null,
+    home_space_id: visibleHomeSpaceId(pkg, accessible),
     home_writable: holds("write"),
     home_deletable: holds("delete"),
     home_shareable: holds("share"),

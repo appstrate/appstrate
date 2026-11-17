@@ -13,6 +13,7 @@ import { cn } from "@appstrate/ui/cn";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
+import { SpaceChoiceDropdown } from "../components/space-choice-menu";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -22,7 +23,11 @@ import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
-import { useCanReach } from "../hooks/use-can-reach";
+import { spacesWhere } from "../lib/space-lists";
+import { useSpaceLink } from "../hooks/use-current-space";
+import { useSpaceAction } from "../hooks/use-space-action";
+import { useSpaces } from "../hooks/use-spaces";
+import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
@@ -37,6 +42,8 @@ const CODING_AGENT_SETUP_PROMPT = `Fetch and follow the Appstrate coding-agent s
 
 export interface DashboardData {
   firstName: string;
+  /** « Tous les espaces »: the rows are every space's, each naming its space. */
+  spanning: boolean;
   agents: AgentListItem[];
   runs: EnrichedRun[];
   runTotal: number;
@@ -60,7 +67,11 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
   );
 }
 
-/** The greeting: drawn at once, its running count a placeholder until the runs answer. */
+/**
+ * The greeting: drawn at once, its running count a placeholder until the runs answer. The
+ * assistant names no space; its chat door opens in one, which « Tous les espaces » chooses in the
+ * door's own menu.
+ */
 export function DashboardHeader({
   firstName,
   runningCount,
@@ -69,7 +80,7 @@ export function DashboardHeader({
   runningCount?: number;
 }) {
   const { t, i18n } = useTranslation("agents");
-  const canChat = useCanReach()("/chat");
+  const chat = useSpaceAction({ route: "/chat" });
   const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
   const [assistOpen, setAssistOpen] = useState(false);
@@ -79,9 +90,16 @@ export function DashboardHeader({
     month: "long",
   }).format(new Date());
 
-  const openChat = () => {
+  const toChat = () =>
     navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
+  const openChat = () => {
+    setAssistOpen(false);
+    chat.run(toChat);
   };
+  const chatIn = chat.choose(t("common:spaceChoice.open"), () => {
+    setAssistOpen(false);
+    toChat();
+  });
 
   const copyCodingAgentSetup = async () => {
     if (await copy(CODING_AGENT_SETUP_PROMPT))
@@ -130,13 +148,15 @@ export function DashboardHeader({
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
-            {canChat && (
-              <ChoiceCard
-                icon={MessageSquareText}
-                title={t("dashboard.askAi.chat")}
-                description={t("dashboard.askAi.chatDescription")}
-                onClick={openChat}
-              />
+            {chat.offered && (
+              <SpaceChoiceDropdown choice={chatIn}>
+                <ChoiceCard
+                  icon={MessageSquareText}
+                  title={t("dashboard.askAi.chat")}
+                  description={t("dashboard.askAi.chatDescription")}
+                  onClick={chatIn ? undefined : openChat}
+                />
+              </SpaceChoiceDropdown>
             )}
             <ChoiceCard
               icon={Bot}
@@ -174,7 +194,7 @@ function MetricCard({
   );
 }
 
-function RecentAgents({ agents }: { agents: AgentListItem[] }) {
+function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning: boolean }) {
   const { t } = useTranslation("common");
   return (
     <div
@@ -182,11 +202,15 @@ function RecentAgents({ agents }: { agents: AgentListItem[] }) {
       data-scroll-prev={t("pagination.previous")}
       data-scroll-next={t("pagination.next")}
     >
-      {agents.map((agent) => (
-        <div key={agent.id} className="w-[19rem] shrink-0">
-          <PackageCard {...agentCardItem(agent)} headingLevel={3} />
-        </div>
-      ))}
+      {agents.map((agent) => {
+        const item = agentCardItem(agent);
+        return (
+          // Spanning, a card names its spaces; its run acts in one of them.
+          <div key={item.id} className="w-[19rem] shrink-0">
+            <PackageCard {...item} showSpace={spanning} headingLevel={3} />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -224,10 +248,11 @@ function DashboardScheduleRow({
   agent?: AgentListItem;
 }) {
   const { t } = useTranslation("agents");
+  const linkInSpace = useSpaceLink();
   const nextRunAt = scheduleNextRunAt(schedule);
   return (
     <Link
-      to={scheduleDetailPath(schedule.id)}
+      to={linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       className="hover:bg-muted/50 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
     >
       <PackageIcon
@@ -240,9 +265,7 @@ function DashboardScheduleRow({
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</p>
-        <p className="text-muted-foreground mt-0.5 truncate text-xs">
-          {agent?.display_name ?? schedule.packageId}
-        </p>
+        <p className="text-muted-foreground mt-0.5 truncate text-xs">{schedule.agent_name}</p>
       </div>
       <div className="shrink-0 text-right">
         <ScheduleStateBadges schedule={schedule} />
@@ -341,9 +364,16 @@ function dashboardMetrics(
 export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
+  const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
   // The dashboard is the fallback route and renders for ANY principal: each
-  // section answers to the guard of the query that feeds it.
-  const sections = dashboardSections(can);
+  // section answers to the guard of the query that feeds it — in « Tous les
+  // espaces », granted in some space (the org route lists those).
+  const sections = dashboardSections(
+    data.spanning
+      ? (permission) => spacesWhere(spaces, orgPermissions, (can) => can(permission)).length > 0
+      : can,
+  );
   const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
   // What is DRAWN, not merely readable: a readable section with nothing in it
@@ -386,7 +416,7 @@ export function DashboardContent(data: DashboardData) {
               href="/agents"
               action={t("dashboard.allAgents")}
             />
-            <RecentAgents agents={data.agents} />
+            <RecentAgents agents={data.agents} spanning={data.spanning} />
           </section>
         )}
 

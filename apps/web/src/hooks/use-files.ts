@@ -18,8 +18,10 @@ import {
   invalidatePaths,
   invalidateRunDetails,
 } from "../lib/query-keys";
-import { useOrgScope } from "./use-org-scope";
-import { fileContextHeader, type FileContext } from "../lib/file-link";
+import { useListScope, useOrgScope } from "./use-org-scope";
+import { useCurrentOrgId } from "./use-org";
+import { useCurrentSpaceId } from "./use-current-space";
+import { fileContextHeader, otherSpaceFileContext, type FileContext } from "../lib/file-link";
 import { usePermissions } from "./use-permissions";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
@@ -60,12 +62,15 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/** The gallery's (or one run's) files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
+/** The gallery's (or one run's) files, keyset-paged; `spanning`, every space's the reader reaches. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
 export function useFilesPaged(
-  filters: Pick<FileListFilters, "search" | "purpose" | "runId" | "limit"> = {},
+  filters: Pick<FileListFilters, "search" | "purpose" | "runId" | "limit"> & {
+    spanning?: boolean;
+  } = {},
 ) {
-  const scope = useOrgScope();
-  const { can } = usePermissions();
+  const spanning = !!filters.spanning;
+  const header = useOrgScope().header;
+  const scope = useListScope(spanning, usePermissions().can("files:read"));
   const query = {
     purpose: filters.purpose,
     runId: filters.runId,
@@ -73,20 +78,36 @@ export function useFilesPaged(
     limit: filters.limit ?? 25,
   };
   return useInfiniteQuery({
-    queryKey: pagedQueryKey("/api/files", { params: { header: scope.header, query } }),
-    queryFn: async ({ pageParam, signal }) => {
-      const { data } = await client.GET("/api/files", {
-        params: { query: { ...query, startingAfter: pageParam }, header: scope.header },
-        signal,
-      });
-      if (!data) throw new Error("empty response");
-      return data;
-    },
+    queryKey: spanning
+      ? pagedQueryKey("/api/orgs/{orgId}/files", {
+          params: { path: { orgId: scope.orgId }, query },
+        })
+      : pagedQueryKey("/api/files", { params: { header, query } }),
+    queryFn: ({ pageParam, signal }) =>
+      fetchFilePage(scope.acrossOrgId, { ...query, startingAfter: pageParam }, header, signal),
     ...keysetPaging,
-    enabled: can("files:read") && scope.enabled,
+    enabled: scope.enabled,
     // The previous result stays on screen while a new search or purpose loads.
     placeholderData: keepPreviousData,
+    refetchInterval: scope.refetchInterval,
   });
+}
+
+/** One page of the current space's files, or of every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchFilePage(
+  acrossOrgId: string | null,
+  query: NonNullable<paths["/api/files"]["get"]["parameters"]["query"]>,
+  header: ReturnType<typeof useOrgScope>["header"],
+  signal?: AbortSignal,
+) {
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/files", {
+        params: { path: { orgId: acrossOrgId }, query },
+        signal,
+      })
+    : await client.GET("/api/files", { params: { query, header }, signal });
+  if (!data) throw new Error("empty response");
+  return data;
 }
 
 /**
@@ -108,7 +129,7 @@ export function useFile(id: string, context?: FileContext) {
 
 /** Invalidate the list and single-file paths (different path strings) plus the org detail carrying the storage total. */
 function invalidateFiles(qc: ReturnType<typeof useQueryClient>) {
-  void invalidatePaths(qc, ["/api/files", "/api/files/{id}"]);
+  void invalidatePaths(qc, ["/api/files", "/api/orgs/{orgId}/files", "/api/files/{id}"]);
   void invalidateOrgDetail(qc);
 }
 
@@ -137,11 +158,12 @@ export function useKeepFile() {
  */
 export function useFileDownload(context?: FileContext) {
   return useCallback(
-    (id: string, name: string) =>
+    // `fileContext`: a row of another space, read in its own (a list spanning spaces).
+    (id: string, name: string, fileContext = context) =>
       downloadOrToast(
         () =>
           client.GET("/api/files/{id}/content", {
-            params: { path: { id }, header: fileContextHeader(context) },
+            params: { path: { id }, header: fileContextHeader(fileContext) },
             parseAs: "blob",
           }),
         name,
@@ -184,14 +206,19 @@ const FILE_BLOB_GC_TIME = 5 * 60 * 1000;
  * is no preview (no grant, failed read). THE single implementation for image thumbnails; chat
  * gets it via `ChatPage`'s injection seam.
  */
-export function useFileImageSrc(id: string): string | null | undefined {
+export function useFileImageSrc(id: string, spaceId?: string): string | null | undefined {
   const scope = useOrgScope();
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
   const readsFiles = usePermissions().can("files:read");
+  // A file of another space (a list spanning spaces) is read in its own, which the server judges.
+  const elsewhere = otherSpaceFileContext(spaceId, orgId, currentSpaceId);
+  const header = fileContextHeader(elsewhere) ?? scope.header;
   const query = useQuery({
-    queryKey: fileBlobKeys.detail(id, scope.header),
+    queryKey: fileBlobKeys.detail(id, header),
     queryFn: async ({ signal }): Promise<string | null> => {
       const { data } = await client.GET("/api/files/{id}/content", {
-        params: { path: { id }, header: scope.header },
+        params: { path: { id }, header },
         parseAs: "blob",
         signal,
       });
@@ -199,7 +226,7 @@ export function useFileImageSrc(id: string): string | null | undefined {
       signal.throwIfAborted();
       return data ? URL.createObjectURL(data) : null;
     },
-    enabled: readsFiles && scope.enabled,
+    enabled: !!elsewhere || (readsFiles && scope.enabled),
     // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
     // Only leaving the cache frees it (`lib/query-client.ts`).
     staleTime: Infinity,
@@ -207,6 +234,6 @@ export function useFileImageSrc(id: string): string | null | undefined {
     retry: false,
   });
   // Decorative failures have no preview, but remain errors so reopening retries them.
-  if (!readsFiles || query.isError) return null;
+  if ((!elsewhere && !readsFiles) || query.isError) return null;
   return query.data;
 }

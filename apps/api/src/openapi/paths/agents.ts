@@ -2,6 +2,85 @@
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
+
+/** The responses of both agent indexes: one space's, and the one spanning spaces. */
+const agentListResponses = {
+  "200": {
+    description: "Agent list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/AgentListItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+        example: {
+          object: "list",
+          hasMore: false,
+          data: [
+            {
+              id: "@acme/email-sorter",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              icon: "lucide:mail",
+              color: "blue",
+              display_name: "Email Sorter",
+              description: "Automatically sorts and labels incoming emails",
+              schema_version: "0.1",
+              author: "Acme Corp",
+              keywords: ["email", "automation"],
+              source: "local",
+              scope: "@acme",
+              version: "1.2.0",
+              published: true,
+              type: "agent",
+              running_runs: 1,
+              unread_count: 2,
+              dependencies: {
+                skills: {},
+                integrations: {},
+              },
+            },
+            {
+              id: "@appstrate/code-reviewer",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              icon: null,
+              color: null,
+              display_name: "Code Reviewer",
+              description: "Reviews pull requests and suggests improvements",
+              schema_version: "0.1",
+              author: "Appstrate",
+              keywords: ["code", "review", "github"],
+              source: "system",
+              scope: "@appstrate",
+              version: "2.0.0",
+              published: true,
+              type: "agent",
+              running_runs: 0,
+              unread_count: 0,
+              dependencies: {
+                skills: { "@appstrate/summarize": "^1.0.0" },
+                integrations: { "@appstrate/github": "^2.0.0" },
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
 
 /** Agents paths. */
 export const agentsPaths = {
@@ -17,76 +96,22 @@ export const agentsPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
-        "200": {
-          description: "Agent list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentListItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-              example: {
-                object: "list",
-                hasMore: false,
-                data: [
-                  {
-                    id: "@acme/email-sorter",
-                    icon: "lucide:mail",
-                    color: "blue",
-                    display_name: "Email Sorter",
-                    description: "Automatically sorts and labels incoming emails",
-                    schema_version: "0.1",
-                    author: "Acme Corp",
-                    keywords: ["email", "automation"],
-                    source: "local",
-                    scope: "@acme",
-                    version: "1.2.0",
-                    published: true,
-                    type: "agent",
-                    running_runs: 1,
-                    unread_count: 2,
-                    dependencies: {
-                      skills: {},
-                      integrations: {},
-                    },
-                  },
-                  {
-                    id: "@appstrate/code-reviewer",
-                    icon: null,
-                    color: null,
-                    display_name: "Code Reviewer",
-                    description: "Reviews pull requests and suggests improvements",
-                    schema_version: "0.1",
-                    author: "Appstrate",
-                    keywords: ["code", "review", "github"],
-                    source: "system",
-                    scope: "@appstrate",
-                    version: "2.0.0",
-                    published: true,
-                    type: "agent",
-                    running_runs: 0,
-                    unread_count: 0,
-                    dependencies: {
-                      skills: { "@appstrate/summarize": "^1.0.0" },
-                      integrations: { "@appstrate/github": "^2.0.0" },
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        ...agentListResponses,
+      },
+    },
+  },
+  "/api/orgs/{orgId}/agents": {
+    get: {
+      operationId: "listOrgAgents",
+      tags: ["Agents"],
+      summary: "List agents across the organization's spaces",
+      description:
+        "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...agentListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
       },
     },
   },

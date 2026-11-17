@@ -40,6 +40,8 @@ interface RunListProps {
   status?: RunStatus[];
   /** Free text: the agent a run executed, the error it ended on, its number. */
   search?: string;
+  /** Every space the reader reaches instead of the current one; each row then names its space. */
+  spanning?: boolean;
   /**
    * The bar above the table.
    *
@@ -60,15 +62,21 @@ export function RunList({
   kind,
   status,
   search,
+  spanning = false,
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
-  const agentName = useRunAgentName(fixedAgentName);
-  const agentIdentity = useRunAgentIdentity();
+  const agentName = useRunAgentName({ fixed: fixedAgentName, spanning });
+  const agentIdentity = useRunAgentIdentity(spanning);
   // Inside one agent (its tab, a schedule's history) the « Run » column leads
   // with the number: the agent is the page's title.
   const oneAgent = packageId != null || scheduleId != null;
-  const allColumns = useRunColumns({ agentName, agentIdentity, oneAgent });
+  const allColumns = useRunColumns({
+    agentName,
+    agentIdentity,
+    oneAgent,
+    spanning,
+  });
   // Per TABLE, not per screen: the run list keeps its columns wherever it is
   // shown — the runs page, an agent's tab, a schedule's history.
   const { columns, menu } = useColumnVisibility("runs", allColumns);
@@ -83,6 +91,7 @@ export function RunList({
     user,
     kind,
     status,
+    spanning,
     search: querySearch || undefined,
   });
   const { data, isLoading, isError, error } = query;

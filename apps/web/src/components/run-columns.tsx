@@ -25,6 +25,7 @@ import type { DataColumn } from "./data-table";
 import { RunIdentity } from "./run-identity";
 import { RunStatusBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
+import { useSpaceColumn } from "./space-column";
 
 /**
  * The column set, as a value the caller holds.
@@ -38,6 +39,7 @@ export function useRunColumns({
   agentName,
   agentIdentity,
   oneAgent = false,
+  spanning = false,
 }: {
   /** What to call the agent a run executed — see `use-run-agent-name.ts`. */
   agentName: (run: EnrichedRun) => string;
@@ -49,8 +51,11 @@ export function useRunColumns({
    * number instead.
    */
   oneAgent?: boolean;
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }): DataColumn<EnrichedRun>[] {
   const { t } = useTranslation(["agents"]);
+  const spaceColumn = useSpaceColumn<EnrichedRun>(spanning);
 
   return [
     {
@@ -81,6 +86,7 @@ export function useRunColumns({
         />
       ),
     },
+    ...spaceColumn,
     {
       id: "trigger",
       header: t("runs.column.trigger"),

@@ -8,6 +8,10 @@ import type { AgentListItem } from "@appstrate/shared-types";
 
 export interface CardItem {
   id: string;
+  /** Every space whose index lists it (`space_ids`): where its actions may act. Its link opens in the current one when listed there, else enters the first (`rowSpace`). Absent off an index (the catalogue). */
+  spaceIds?: string[];
+  /** The package's home space when the reader reaches it, `null` when withheld; undefined off an index (the catalogue). */
+  homeSpaceId?: string | null;
   displayName: string;
   description?: string | null;
   type: PackageType;
@@ -35,6 +39,8 @@ export interface CardItem {
 export function agentCardItem(agent: AgentListItem): CardItem {
   return {
     id: agent.id,
+    spaceIds: agent.space_ids,
+    homeSpaceId: agent.home_space_id,
     displayName: agent.display_name ?? agent.id,
     description: agent.description ?? null,
     type: "agent",
@@ -50,6 +56,8 @@ export function agentCardItem(agent: AgentListItem): CardItem {
 /** What every package index row (`usePackageList`) carries, whatever its type. */
 interface PackageIndexRow {
   id: string;
+  space_ids: string[];
+  home_space_id?: string | null;
   name?: string | null;
   description?: string | null;
   source?: "system" | "local";
@@ -64,6 +72,8 @@ interface PackageIndexRow {
 export function packageCardItem(row: PackageIndexRow, type: PackageType): CardItem {
   return {
     id: row.id,
+    spaceIds: row.space_ids,
+    homeSpaceId: row.home_space_id,
     displayName: row.name || row.id,
     description: row.description ?? null,
     type,

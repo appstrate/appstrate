@@ -43,10 +43,6 @@ describe("persona-sensitive call sites", () => {
           "resolves the REAL role the persona's eligibility is judged against",
         ],
         [
-          "apps/api/src/lib/package-access.ts",
-          "distinguishes an end-user (no org role at all) from a member",
-        ],
-        [
           "apps/api/src/lib/permission-audit.ts",
           "a denial trail must name the real role, persona or not",
         ],
@@ -87,10 +83,6 @@ describe("persona-sensitive call sites", () => {
         [
           "apps/api/src/lib/view-as.ts",
           "`callerSpaceAccess` / `callerSpaceAccessById`, the persona-aware accessors",
-        ],
-        [
-          "apps/api/src/lib/package-access.ts",
-          "joins the caller's rows only when no persona is set; the overlay replaces them otherwise",
         ],
         [
           "apps/api/src/routes/realtime.ts",
