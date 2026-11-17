@@ -147,24 +147,22 @@ export interface IntegrationAuthStatus {
    */
   has_system_client: boolean;
   /**
-   * True for an oauth2 auth on a remote MCP integration (`source.kind:
-   * "remote"`). Per the MCP Authorization spec the OAuth client is provisioned
-   * automatically at connect time — the flow discovers the authorization server
-   * (RFC 9728 → RFC 8414) and obtains a client without manual pre-registration
-   * (CIMD when advertised, else RFC 7591 dynamic registration). The UI therefore
-   * treats the auth as connectable even without a pre-registered client. Named
-   * for the capability (auto-provisioned client), not the specific mechanism, so
-   * it stays accurate once CIMD lands alongside DCR.
+   * True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a
+   * remote MCP integration (`source.kind: "remote"`) or with an authorization
+   * server chosen per connection. Its OAuth client is provisioned at connect
+   * time — authorization server discovery (RFC 9728 → RFC 8414), then RFC 7591
+   * dynamic registration of a public client — so the UI treats the auth as
+   * connectable without a pre-registered client.
    */
   client_auto_provisioned: boolean;
 }
 
 /**
  * One entry in the agent-facing tool catalog the picker consumes. Resolved
- * server-side by `resolveIntegrationToolCatalog` from the referenced
- * mcp-server's MCPB `tools[]` minus `hidden_tools` and auto-hidden
+ * server-side by `resolveIntegrationToolCatalog` from a local source's
+ * `source.server.tools` minus `hidden_tools` and auto-hidden
  * connect.tool primitives. Falls back to the integration's sparse
- * `tools_policy{}` keys when the mcp-server is unavailable. Per-tool `policy`
+ * `tools_policy{}` keys when the server declares no `tools`. Per-tool `policy`
  * is attached verbatim from `integration.tools_policy[name]` when declared.
  *
  * Re-exported from `@appstrate/core` rather than duplicated: the resolver
@@ -222,14 +220,19 @@ export interface AccessibleIntegrationConnection extends ConnectionReach {
 }
 
 /**
- * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
- * connections an agent uses for an integration. Wire shape for the
- * `/api/integrations/:packageId/pins` surface.
+ * A connection pin (`integration_pins`). Wire shape for the
+ * `/api/integrations/:packageId/pins` surface (admin pins) and for the
+ * member pin write of `/api/me/integration-pins/...`.
  */
 export interface IntegrationPin {
   agent_package_id: string;
   integration_package_id: string;
+  /** An admin pin's floor, bound by every run of the agent; a member pin's selection. */
   connection_ids: string[];
+  /** Admin pin: whether the run's selection may add to the floor. Never on `[]` nor a member pin. */
+  allow_additional_connections: boolean;
+  /** Whether the pin's agent is active in the space; a pin of an inactive agent still stands. */
+  agent_active: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -275,11 +278,14 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * "which connection does this run use?" logic.
  *
  * The verdict is the resolver's own vocabulary, three fields:
- *  - `source`     — the layer that bound the set, or the layer whose set failed
+ *  - `source`     — the layer that bound the set's FIRST connection (under
+ *                   governance the floor's; per-connection provenance is in the
+ *                   run's `resolved_connections`), or the layer whose set failed
  *                   (an unreachable or unhealthy member); `null` when no layer
  *                   bound anything (the fallback's `not_connected` /
  *                   `must_choose_connection`, `auth_key_mismatch`,
- *                   `auth_key_serves_no_selected_tool`) or when
+ *                   `auth_key_serves_no_selected_tool`,
+ *                   `auth_key_on_unauthenticated_integration`) or when
  *                   there is no verdict.
  *  - `error_code` — why the run would be refused on this integration; `null`
  *                   when the set binds (or there is no verdict).
@@ -287,6 +293,10 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   launch's `warnings[]` item itself, else `null`.
  * All three `null` with nothing resolved: an inert integration nothing binds,
  * or one whose manifest could not be loaded.
+ *
+ * Under governance the floor is `admin_pinned_connection_ids`, else the enforced
+ * `org_default_connection_ids`; any other id of `resolved_connection_ids` is the
+ * member pin's addition.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
@@ -308,6 +318,8 @@ export interface IntegrationAgentResolution {
    */
   org_default_connection_ids: string[] | null;
   org_default_enforced: boolean;
+  /** An admin pin open to additions, with no enforced org default: `false` with nothing imposed. */
+  additional_connections_allowed: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;
   /** Own + shared connections on an auth serving the selected tools, annotated for the dropdown. */

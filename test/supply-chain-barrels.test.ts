@@ -10,13 +10,13 @@
  *
  * This test closes the runtime half: it imports each barrel and asserts the
  * VALUE symbols consumers use are actually reachable at runtime. The
- * `@appstrate/runner-pi` barrel splits that surface: `Type` stays a static
+ * `@appstrate/runner-pi` barrel splits that surface: `unsafeSchema` stays a static
  * value export (used synchronously at tool-registration time), while the five
  * heavy `pi-coding-agent` values (`ModelRuntime`, `createAgentSession`,
  * `DefaultResourceLoader`, `SessionManager`, `SettingsManager`)
  * are reachable only through the `loadPiCodingAgentSdk()` dynamic loader that
  * keeps them out of the eager bundle graph. So the test asserts the static
- * `Type` + `loadPiCodingAgentSdk` handle exist on the barrel, then drives the
+ * `unsafeSchema` + `loadPiCodingAgentSdk` handle exist on the barrel, then drives the
  * loader and asserts every heavy value is defined on the resolved module.
  *
  * Type-only re-exports cannot be checked at runtime (they erase to nothing);
@@ -101,7 +101,10 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
   it("@appstrate/runner-pi barrel exposes its static values and the SDK loader handle", () => {
     const barrel = runnerPiBarrel as Record<string, unknown>;
 
-    expect(barrel.Type, 'runner-pi pi-sdk barrel is missing value export "Type"').toBeDefined();
+    expect(
+      barrel.unsafeSchema,
+      'runner-pi pi-sdk barrel is missing value export "unsafeSchema"',
+    ).toBeDefined();
     expect(
       barrel.InMemoryCredentialStore,
       'runner-pi pi-sdk barrel is missing value export "InMemoryCredentialStore"',
@@ -145,7 +148,7 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
     expect(
       imported,
       "no consumer of the runtime-pi barrel was found — the scan is broken",
-    ).toContain("Type");
+    ).toContain("unsafeSchema");
 
     const barrel = runtimePiBarrel as Record<string, unknown>;
     for (const name of imported) {

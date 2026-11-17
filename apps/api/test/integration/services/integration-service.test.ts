@@ -7,17 +7,11 @@
  * future runtime resolver.
  */
 
-import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import {
-  fetchMcpServerManifest,
-  getIntegration,
-  listIntegrations,
-  readMcpServerTools,
-} from "../../../src/services/integration-service.ts";
-import { logger } from "../../../src/lib/logger.ts";
+import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -56,25 +50,6 @@ describe("integration-service", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
-  });
-
-  describe("fetchMcpServerManifest", () => {
-    it("answers a reference to a non-mcp-server package without a warn line", async () => {
-      // Every read of the referencing integration's draft goes through here.
-      await seedPackage({
-        id: "@testorg/self-ref",
-        orgId: ctx.orgId,
-        type: "integration",
-        draftManifest: validIntegrationManifest("@testorg/self-ref"),
-      });
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        expect(await fetchMcpServerManifest("@testorg/self-ref")).toBeNull();
-        expect(warn).not.toHaveBeenCalled();
-      } finally {
-        warn.mockRestore();
-      }
-    });
   });
 
   describe("getIntegration", () => {
@@ -225,25 +200,5 @@ describe("integration-service", () => {
       const out = await listIntegrations(scopeOf(ctx));
       expect(out).toEqual([]);
     });
-  });
-});
-
-describe("readMcpServerTools", () => {
-  const read = (tools: unknown) =>
-    readMcpServerTools({ tools } as unknown as Parameters<typeof readMcpServerTools>[0]);
-
-  it("is undefined when the manifest declares no tools array", () => {
-    expect(read(undefined)).toBeUndefined();
-    expect(read({ search: {} })).toBeUndefined();
-  });
-
-  it("keeps the named entries, with a description only when it is a string", () => {
-    expect(read([])).toEqual([]);
-    const malformed = [null, { name: 1 }, { name: "c", description: 3 }];
-    expect(read([{ name: "a" }, { name: "b", description: "d" }, ...malformed])).toEqual([
-      { name: "a", description: undefined },
-      { name: "b", description: "d" },
-      { name: "c", description: undefined },
-    ]);
   });
 });

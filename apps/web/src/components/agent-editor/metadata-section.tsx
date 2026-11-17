@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { StringListInput } from "../app-ui/string-list-input";
-import { Label } from "@appstrate/ui/components/label";
+import { FormItem } from "../app-ui/form-item";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
 import { SettingsHeading } from "../settings/settings-heading";
@@ -22,7 +21,6 @@ export interface MetadataState {
 interface MetadataSectionProps {
   value: MetadataState;
   onChange: (value: MetadataState) => void;
-  isEdit: boolean;
   /**
    * Editor-specific fields (e.g. the agent editor's `timeout`), rendered in
    * their own group after the common ones. Each editor binds them to its
@@ -36,21 +34,11 @@ interface MetadataSectionProps {
 export function MetadataSection({
   value,
   onChange,
-  isEdit,
   children,
   identityChildren,
 }: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
-  const [nameEdited, setNameEdited] = useState(isEdit);
-
-  const handleDisplayNameChange = (v: string) => {
-    if (nameEdited) {
-      update({ displayName: v }); // canonical-casing-exempt: MetadataState TS-internal (carve-out)
-    } else {
-      update({ displayName: v, id: toSlug(v) }); // canonical-casing-exempt: MetadataState TS-internal (carve-out)
-    }
-  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -60,7 +48,7 @@ export function MetadataSection({
           label={t("editor.metaDisplayName")}
           required
           value={value.displayName}
-          onChange={handleDisplayNameChange}
+          onChange={(v) => update({ displayName: v })} // canonical-casing-exempt: MetadataState TS-internal (carve-out)
           placeholder={t("editor.metaDisplayNamePlaceholder")}
         />
         <FormField
@@ -68,13 +56,10 @@ export function MetadataSection({
           label={t("editor.metaName")}
           required
           value={value.id}
-          onChange={(v) => {
-            setNameEdited(true);
-            update({ id: toLiveSlug(v) });
-          }}
+          onChange={(v) => update({ id: toLiveSlug(v) })}
           onBlur={() => update({ id: toSlug(value.id) })}
           placeholder={t("editor.metaNamePlaceholder")}
-          description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
+          description={t("editor.metaNameEditDesc")}
         />
         <FormField
           id="meta-scope"
@@ -96,17 +81,13 @@ export function MetadataSection({
           placeholder="1.0.0"
           description={t("editor.metaVersionDesc")}
         />
-        <div className="flex flex-col gap-2">
-          <Label className="mb-0" htmlFor="meta-description">
-            {t("editor.fieldDescLabel")}
-          </Label>
+        <FormItem id="meta-description" label={t("editor.fieldDescLabel")}>
           <Textarea
-            id="meta-description"
             value={value.description}
             onChange={(e) => update({ description: e.target.value })}
             placeholder={t("editor.metaDescPlaceholder")}
           />
-        </div>
+        </FormItem>
         <StringListInput
           label={t("manifest.keywords")}
           labelClassName="mb-0"

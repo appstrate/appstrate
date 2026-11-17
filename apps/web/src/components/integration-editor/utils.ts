@@ -7,7 +7,7 @@
  * return NEW objects so dirty detection (JSON.stringify) stays correct.
  */
 
-import { API_META_KEY } from "@appstrate/core/integration";
+import { API_META_KEY, acquiresByConnectLogin } from "@appstrate/core/integration";
 import { parseUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 
 type Rec = Record<string, unknown>;
@@ -31,12 +31,22 @@ export type SourceKind = "remote" | "local" | "none";
  */
 type RemoteTransport = "streamable-http" | "sse";
 
-interface SourceState {
+/** AFPS `source.server.type`: how the integration's own MCP server is started. */
+export const LOCAL_SERVER_TYPES = ["node", "python", "binary", "uv"] as const;
+
+export interface SourceState {
   kind: SourceKind;
   remoteUrl: string;
   remoteTransport: RemoteTransport;
-  serverName: string;
-  serverVersion: string;
+  /**
+   * The local run declaration (`source.server`); `mcp_config.env` and `tools` are not surfaced here,
+   * only preserved. `serverType` is the stored string as is, a value this form does not list
+   * included: it is rewritten only when the user picks another.
+   */
+  serverType: string;
+  entryPoint: string;
+  command: string;
+  args: string[];
 }
 
 export function getSource(manifest: Rec): SourceState {
@@ -44,13 +54,26 @@ export function getSource(manifest: Rec): SourceState {
   const kind = (source.kind as SourceKind) ?? "remote";
   const remote = asRec(source.remote);
   const server = asRec(source.server);
+  const config = asRec(server.mcp_config);
   return {
     kind: kind === "local" || kind === "none" ? kind : "remote",
     remoteUrl: typeof remote.url === "string" ? remote.url : "",
     remoteTransport: remote.transport === "sse" ? "sse" : "streamable-http",
-    serverName: typeof server.name === "string" ? server.name : "",
-    serverVersion: typeof server.version === "string" ? server.version : "",
+    // A server not declared yet starts as node; a declared type is never second-guessed.
+    serverType: typeof server.type === "string" ? server.type : "node",
+    entryPoint: typeof server.entry_point === "string" ? server.entry_point : "",
+    command: typeof config.command === "string" ? config.command : "",
+    args: asStringArray(config.args),
   };
+}
+
+/** Whether `entryPoint` names a file the package does not hold (`./` prefix and leading `/` ignored); a blank one is not judged. */
+export function entryPointMissing(entryPoint: string, files: readonly string[]): boolean {
+  const path = entryPoint
+    .trim()
+    .replace(/^(\.\/)+/, "")
+    .replace(/^\/+/, "");
+  return path !== "" && !files.includes(path);
 }
 
 /** Whether `url` is an absolute URL or an AFPS §7.12 URL template. */
@@ -83,7 +106,17 @@ export function setSource(manifest: Rec, s: SourceState): Rec {
     source.remote = { ...asRec(base.remote), url: s.remoteUrl, transport: s.remoteTransport };
     delete source.server;
   } else if (s.kind === "local") {
-    source.server = { ...asRec(base.server), name: s.serverName, version: s.serverVersion };
+    // Merge onto the stored declaration: `mcp_config.env`, `platform_overrides`, `tools` and any
+    // key the form does not own survive an edit of the fields it does.
+    const server = asRec(base.server);
+    const config = { ...asRec(server.mcp_config) };
+    delete config.args;
+    source.server = {
+      ...server,
+      type: s.serverType,
+      entry_point: s.entryPoint,
+      mcp_config: { ...config, command: s.command, ...(s.args.length > 0 ? { args: s.args } : {}) },
+    };
     delete source.remote;
   } else {
     delete source.remote;
@@ -182,6 +215,15 @@ export function getAuths(manifest: Rec): AuthState[] {
   return Object.entries(auths).map(([key, raw]) => readAuth(key, asRec(raw), apiKeys.has(key)));
 }
 
+/**
+ * Whether `allow_undeclared_tools` (wildcard) can take effect. An integration declaring no auths
+ * (AFPS §7.2) needs no scope; otherwise some auth must be non-oauth2 or oauth2 with
+ * `default_scopes` (an oauth2 auth without them grants no scope under "*").
+ */
+export function isWildcardUsable(auths: AuthState[]): boolean {
+  return auths.length === 0 || auths.some((a) => a.type !== "oauth2" || a.defaultScopes.length > 0);
+}
+
 /** Merges onto the base entry by `value` to keep `implies` and other per-entry fields. */
 function mergeScopeCatalog(baseRaw: unknown, entries: ScopeCatalogEntry[]): Rec[] {
   const baseArr = Array.isArray(baseRaw) ? baseRaw : [];
@@ -248,7 +290,9 @@ function patchAuth(base: Rec, a: AuthState): Rec {
     if (a.scopeCatalog.length > 0)
       out.scope_catalog = mergeScopeCatalog(base.scope_catalog, a.scopeCatalog);
     else delete out.scope_catalog;
-    delete out.credentials;
+    // A `connect.login` grant (AFPS §7.7) is rendered from `credentials.schema`, which the form does
+    // not surface on oauth2: it survives untouched, like the `connect` block.
+    if (!acquiresByConnectLogin(out)) delete out.credentials;
   } else {
     if (a.credentialFields.length > 0)
       out.credentials = mergeCredentials(base.credentials, a.credentialFields);
@@ -292,6 +336,11 @@ export function setAuths(manifest: Rec, list: AuthState[]): Rec {
   for (const a of list) {
     if (!a.key.trim()) continue;
     auths[a.key] = patchAuth(asRec(existing[a.key]), a);
+  }
+  // AFPS §7.2: no auth is spelled by leaving `auths` out, never as an empty map.
+  if (Object.keys(auths).length === 0) {
+    const { auths: _removed, ...rest } = manifest;
+    return setApiMeta(rest, list);
   }
   return setApiMeta({ ...manifest, auths }, list);
 }

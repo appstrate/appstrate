@@ -50,7 +50,9 @@ describe("route declarations", () => {
   /** Routes outside `MainLayout`, which no declaration covers. */
   const OUTSIDE_MAIN_LAYOUT = new Set(["/onboarding/create"]);
   const links = (text: string) => [...text.matchAll(/\bto(?:=|: )"([^"]+)"/g)].map((m) => m[1]!);
-  const reached = (text: string) => [...text.matchAll(/canReach\("([^"]+)"\)/g)].map((m) => m[1]!);
+  /** A route gated by its declaration: `canReach`, or `useSpaceAction`, which reads it per space in « Tous les espaces ». */
+  const reached = (text: string) =>
+    [...text.matchAll(/(?:canReach\(|useSpaceAction\(\{ route: )"([^"]+)"/g)].map((m) => m[1]!);
 
   it("points every shell link at a declared route", () => {
     const targets = SHELL.flatMap(({ text }) => [
@@ -64,11 +66,11 @@ describe("route declarations", () => {
     expect([...new Set(targets)].sort()).toEqual([
       "/",
       "/agents",
-      "/agents/:scope/:name/runs/:runId",
       "/catalogue",
       "/chat",
       "/files",
       "/integrations",
+      "/onboarding/create",
       "/org-settings",
       "/preferences",
       "/runs",
@@ -208,13 +210,13 @@ describe("routeOf", () => {
   });
 
   it("ranks a concrete URL the way the router does: static segments first", () => {
-    expect(routeOf("/skills/new")).toBe("/skills/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
       "/agents/:scope/:name/runs/:runId",
     );
-    expect(routeOf("/integrations/@acme/gmail#configuration")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/@acme/gmail#settings")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/new/mcp?package=@acme/gmail")).toBe("/integrations/new/mcp");
   });
 
   it("covers no URL outside the declarations", () => {

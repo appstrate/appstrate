@@ -82,12 +82,14 @@ export const integrationConnections = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
-    // Which registered OAuth client minted this connection — a flat client id:
-    // the env id of a system client (SYSTEM_INTEGRATIONS) or the
-    // `integration_oauth_clients.id` of a custom (space or org) client.
-    // Pinned so token refresh resolves the SAME client credentials that minted
-    // the tokens. Resolved system-first then DB-by-id (mirrors the model-provider
-    // credential pattern), so a system id MUST NOT be UUID-shaped.
+    // Which OAuth client minted this connection — a flat client id: the env id
+    // of a system client (SYSTEM_INTEGRATIONS), the `integration_oauth_clients.id`
+    // of a custom (space or org) client, or the URL of this instance's Client ID
+    // Metadata Document (its `client_id`, no row: apps/api
+    // `lib/integration-client-metadata.ts`). Pinned so token refresh resolves
+    // the SAME client credentials that minted the tokens. Resolved system-first,
+    // then document URL, then DB-by-id (mirrors the model-provider credential
+    // pattern), so a system id MUST NOT be UUID-shaped.
     //
     // INVARIANT: NULL ⟺ a non-oauth2 auth (api_key / login_secret), which has no
     // OAuth client. Every oauth2 connection carries a non-null client_ref (set
@@ -332,7 +334,7 @@ export const integrationOauthClients = pgTable(
     // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
     // idempotence now that the global UNIQUE is gone.
     autoProvisioned: boolean("auto_provisioned").notNull().default(false),
-    // Server chosen per connection an auto-provisioned client is bound to (AFPS §7.3); NULL = fixed.
+    // Server an auto-provisioned client is registered at and bound to (AFPS §7.3, RFC 9700 §4.4).
     issuer: text("issuer"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

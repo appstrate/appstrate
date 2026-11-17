@@ -43,21 +43,16 @@ export function trySetHeader(headers: Headers, name: string, value: string): boo
   }
 }
 
-/**
- * Ceiling on inlining a NON-textual file's RAW bytes as base64 in a tool or
- * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the
- * encoded payload (~933 KiB) under the ~1 MB practical MCP response limit. Above
- * it (either kind) the read returns metadata only.
- */
-export const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
-
 /** Why a tool call was refused. Stable machine codes. */
 type RefusalCode =
   | RunAndWaitArgumentCode
   | "unknown_operation"
+  | "unknown_tool"
+  | "ambiguous_tool"
   | "unknown_space"
   | "space_mismatch"
   | "not_granted"
+  | "credential_proxy_closed"
   | "not_found"
   | "too_large";
 
@@ -76,7 +71,10 @@ export interface Refusal {
   accepted?: readonly string[];
   /** Org-wide: the space the call was refused in (same shape as successes). */
   space?: { id: string; name: string };
-  /** Org-wide `not_granted`: reachable space IDS granting it; absent when all do. */
+  /**
+   * Org-wide `not_granted` and `credential_proxy_closed`: reachable space IDS granting it;
+   * absent when all do.
+   */
   granted_in?: readonly string[];
   required_permissions?: readonly string[];
   ceiling_permissions?: readonly string[];

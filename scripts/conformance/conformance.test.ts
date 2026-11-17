@@ -29,12 +29,10 @@ import {
   INVALID_BEARER,
 } from "./identity-endpoint.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
-import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
 import { rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { summarize, exitCode, formatReport } from "./report.ts";
 import {
   conformanceVariables,
@@ -60,8 +58,10 @@ function entry(partial: Partial<SystemPackageEntry>): SystemPackageEntry {
 }
 
 describe("classify", () => {
-  it("maps mcp-server to local", () => {
-    expect(classify(entry({ type: "mcp-server" }))).toBe("mcp-server-local");
+  it("maps a local-source integration to integration-local", () => {
+    expect(classify(entry({ type: "integration", manifest: { source: { kind: "local" } } }))).toBe(
+      "integration-local",
+    );
   });
 
   it("maps remote integration to mcp-remote", () => {
@@ -85,26 +85,45 @@ describe("classify", () => {
 
 describe("declaredTools / serverEntryPoint", () => {
   it("extracts tool names, skipping malformed entries", () => {
-    const manifest = { tools: [{ name: "clone" }, { name: "status" }, { notName: 1 }, "bad"] };
+    const manifest = {
+      source: {
+        kind: "local",
+        server: {
+          type: "bun",
+          entry_point: "server/index.ts",
+          mcp_config: { command: "bun" },
+          tools: [{ name: "clone" }, { name: "status" }, { notName: 1 }, "bad"],
+        },
+      },
+    };
     expect(declaredTools(manifest)).toEqual(["clone", "status"]);
   });
 
   it("returns [] when tools is absent or not an array", () => {
     expect(declaredTools({})).toEqual([]);
-    expect(declaredTools({ tools: "nope" })).toEqual([]);
+    expect(declaredTools({ source: { kind: "local", server: { tools: "nope" } } })).toEqual([]);
   });
 
-  it("reads server.entry_point", () => {
-    expect(serverEntryPoint({ server: { entry_point: "server/index.ts" } })).toBe(
-      "server/index.ts",
-    );
-    expect(serverEntryPoint({ server: {} })).toBeUndefined();
+  it("reads source.server.entry_point", () => {
+    expect(
+      serverEntryPoint({
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.ts",
+            mcp_config: { command: "node" },
+          },
+        },
+      }),
+    ).toBe("server/index.ts");
+    expect(serverEntryPoint({ source: { kind: "local", server: {} } })).toBeUndefined();
     expect(serverEntryPoint({})).toBeUndefined();
   });
 });
 
 describe("diffTools", () => {
-  const id = "@appstrate/github-git-mcp";
+  const id = "@appstrate/github-git";
 
   it("returns no findings on exact parity", () => {
     expect(diffTools(id, ["clone", "status"], ["clone", "status"])).toEqual([]);
@@ -776,36 +795,6 @@ describe("checkAuthLiveness", () => {
     }) as unknown as typeof fetch;
     const f = await checkAuthLiveness(ghEntry, { fetchImpl: boom });
     expect(f[0]!.severity).toBe("warn");
-  });
-});
-
-describe("listAllTools — pagination", () => {
-  function fakeClient(pages: Array<{ tools: { name: string }[]; nextCursor?: string }>) {
-    let call = 0;
-    return {
-      client: {
-        listTools: async () => pages[call++ % pages.length],
-      },
-    } as unknown as AppstrateMcpClient;
-  }
-
-  it("concatenates across cursor pages", async () => {
-    const client = fakeClient([
-      { tools: [{ name: "a" }, { name: "b" }], nextCursor: "p2" },
-      { tools: [{ name: "c" }] },
-    ]);
-    const tools = await listAllTools(client);
-    expect(tools.map((t) => t.name)).toEqual(["a", "b", "c"]);
-  });
-
-  it("returns a single page when no cursor", async () => {
-    const client = fakeClient([{ tools: [{ name: "only" }] }]);
-    expect((await listAllTools(client)).map((t) => t.name)).toEqual(["only"]);
-  });
-
-  it("aborts a runaway cursor via maxPages", async () => {
-    const client = fakeClient([{ tools: [{ name: "x" }], nextCursor: "loops-forever" }]);
-    await expect(listAllTools(client, { maxPages: 3 })).rejects.toThrow(/exceeded 3 pages/);
   });
 });
 

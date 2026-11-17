@@ -31,6 +31,7 @@ import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import { PendingButton } from "./app-ui/pending-button";
 import { Separator } from "@appstrate/ui/components/separator";
 import {
   Command,
@@ -230,7 +231,6 @@ export function ListToolbar({
   onReset,
   columns,
   actions,
-  tabs,
 }: {
   /**
    * The text filter — present only where the screen can answer it truthfully. A list held whole
@@ -249,8 +249,6 @@ export function ListToolbar({
   columns?: ColumnMenuSpec;
   /** The page's own action, at the right end of the bar. */
   actions?: ReactNode;
-  /** `CollectionTabs` splitting the list, drawn first on the bar's line. */
-  tabs?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
@@ -262,7 +260,6 @@ export function ListToolbar({
   return (
     <div className="@container/bar mb-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {tabs}
         {search && (
           <Input
             value={search.value}
@@ -323,5 +320,56 @@ export function ListFooter({ count, children }: { count?: ReactNode; children?: 
       <span className="min-w-0 truncate">{count}</span>
       {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
+  );
+}
+
+/** What `KeysetListFooter` reads off a `useInfiniteQuery` result. */
+interface KeysetQuery {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  isFetchNextPageError: boolean;
+  fetchNextPage: () => unknown;
+}
+
+/**
+ * The footer of a keyset-paged list: what is loaded (of the total when the endpoint knows it) and
+ * the one « Charger plus » button. `count` replaces the default wording where a list has its own.
+ */
+export function KeysetListFooter({
+  query,
+  loaded,
+  total,
+  count,
+  ready = true,
+}: {
+  query: KeysetQuery;
+  loaded: number;
+  total?: number | undefined;
+  count?: ReactNode;
+  /** False while the first page loads or has failed: nothing is claimed about the list. */
+  ready?: boolean;
+}) {
+  const { t } = useTranslation("common");
+  // The default wording stays silent on an empty list: its empty state already says so.
+  const label =
+    count ??
+    (loaded === 0
+      ? undefined
+      : total === undefined
+        ? t("pagination.loaded", { count: loaded })
+        : t("pagination.loadedOf", { count: loaded, total }));
+  return (
+    <ListFooter count={ready ? label : undefined}>
+      {ready && query.hasNextPage && (
+        <PendingButton
+          variant="outline"
+          size="sm"
+          pending={query.isFetchingNextPage}
+          onClick={() => void query.fetchNextPage()}
+        >
+          {query.isFetchNextPageError ? t("btn.retry") : t("pagination.loadMore")}
+        </PendingButton>
+      )}
+    </ListFooter>
   );
 }

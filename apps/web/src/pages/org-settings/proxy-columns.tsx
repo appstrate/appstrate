@@ -42,27 +42,13 @@ export function useProxyColumns({
       header: t("spaces.nameLabel"),
       width: 80,
       elastic: true,
-      cell: (p) => (
-        <div className="min-w-0">
-          <CellText strong>{p.label}</CellText>
-          {testResults[p.id] && (
-            <div className="@xl/table:hidden">
-              <TestResultSpan
-                result={testResults[p.id]!}
-                successKey="credentials.testSuccess"
-                failedKey="credentials.testFailed"
-              />
-            </div>
-          )}
-        </div>
-      ),
+      cell: (p) => <CellText strong>{p.label}</CellText>,
     },
     {
       id: "url",
       header: t("proxies.col.url"),
       width: 72,
       elastic: true,
-      tier: 2,
       cell: (p) => (
         <span className="text-muted-foreground block truncate font-mono text-[0.65rem]">
           {p.urlPrefix}
@@ -73,7 +59,6 @@ export function useProxyColumns({
       id: "type",
       header: t("proxies.col.type"),
       width: 72,
-      tier: 2,
       cell: (p) => (
         <CellText>{p.source === "built-in" ? t("source.builtIn") : t("source.custom")}</CellText>
       ),
@@ -83,7 +68,6 @@ export function useProxyColumns({
       header: t("proxies.col.status"),
       width: 56,
       elastic: true,
-      tier: 2,
       cell: (p) =>
         testResults[p.id] ? (
           <TestResultSpan
@@ -101,9 +85,14 @@ export function useProxyColumns({
       id: "default",
       header: t("proxies.col.default"),
       width: 96,
-      tier: 2,
       cell: (p) =>
-        p.is_default ? <Badge variant="success">{t("models.default")}</Badge> : <CellEmpty />,
+        p.is_default ? (
+          <Badge variant="success" className="whitespace-nowrap">
+            {t("models.default")}
+          </Badge>
+        ) : (
+          <CellEmpty />
+        ),
     },
     rowActionsColumn((p: OrgProxyInfo) => {
       const isTesting = testingIds.has(p.id);

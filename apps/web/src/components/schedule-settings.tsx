@@ -32,8 +32,7 @@ import { InputFieldRow } from "./settings/input-field-row";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { useActorName } from "../hooks/use-actor-name";
-import { SaveBar } from "./save-bar";
-import { UnsavedChangesModal } from "./unsaved-changes-modal";
+import { ManualSave } from "./settings/manual-save";
 import { EmptyState, ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -45,7 +44,6 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
-import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
 import {
   changedInputValues,
   formatInputValue,
@@ -267,28 +265,29 @@ function ScheduleSettingsPanel({
     setDraft({});
     setRefusal(null);
   };
-  const { blocker } = useUnsavedChanges(dirty, discard);
-  const save = () =>
-    update.mutate(
-      { id: schedule.id, ...body },
-      {
-        onSuccess: discard,
-        onError: (err) => {
-          const choices = scheduleConnectionChoices(err);
-          if (choices.length > 0) {
-            setRefusal({
-              actor: draft.actor ?? stored,
-              choices,
-              submitted: body.connection_overrides ?? schedule.connection_overrides ?? {},
-            });
-          }
-          toastScheduleConnectionChoice(err, {
-            label: t("schedule.settings.chooseConnections"),
-            onClick: () => navigate(scheduleSettingsHref(schedule.id, "connections")),
-          });
-        },
-      },
-    );
+  // A refusal rethrows so "save and leave" does not leave over an unsaved draft.
+  const save = async () => {
+    try {
+      await update.mutateAsync({ id: schedule.id, ...body });
+    } catch (err) {
+      const choices = scheduleConnectionChoices(err);
+      if (choices.length > 0) {
+        setRefusal({
+          actor: draft.actor ?? stored,
+          choices,
+          submitted: body.connection_overrides ?? schedule.connection_overrides ?? {},
+        });
+      }
+      if (err instanceof Error) {
+        toastScheduleConnectionChoice(err, {
+          label: t("schedule.settings.chooseConnections"),
+          onClick: () => navigate(scheduleSettingsHref(schedule.id, "connections")),
+        });
+      }
+      throw err;
+    }
+    discard();
+  };
 
   return (
     <section className="min-w-0 p-6">
@@ -311,15 +310,7 @@ function ScheduleSettingsPanel({
             facts={facts}
             refusal={refusal}
           />
-          {dirty && (
-            <SaveBar
-              message={t("schedule.settings.unsaved")}
-              pending={update.isPending}
-              onDiscard={discard}
-              onSave={save}
-            />
-          )}
-          <UnsavedChangesModal blocker={blocker} />
+          <ManualSave dirty={dirty} onSave={save} onDiscard={discard} />
         </>
       ) : (
         <SettingsSkeleton />
@@ -362,7 +353,7 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
         {/* The agent's identity, as its own Général previews it. */}
         <Link
           to={`/agents/${schedule.packageId}`}
-          className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
+          className="border-border bg-muted/40 hover:bg-muted flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
         >
           {agentPending ? (
             <>

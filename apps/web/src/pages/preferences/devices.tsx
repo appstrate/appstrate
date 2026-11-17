@@ -84,6 +84,7 @@ export function PreferencesDevicesPage() {
             icon={Laptop}
             message={t("devices.emptyTitle")}
             hint={t("devices.emptyDescription")}
+            compact
           />
         }
       />

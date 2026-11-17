@@ -1,0 +1,63 @@
+---
+title: Pinterest
+description: Connect Pinterest to your Appstrate agents.
+---
+
+## Overview
+
+Pinterest is a visual discovery platform. The integration lets agents read account data and, with the matching scopes, manage boards and pins.
+
+Integration: `@appstrate/pinterest`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
+
+## Connect Pinterest
+
+An administrator registers an OAuth client once, then members connect their own accounts.
+
+<Steps>
+<Step>
+
+Create an app in the Pinterest developer portal ([open](https://developers.pinterest.com/apps/)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the app's redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/pinterest": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/pinterest": {
+      "tools": ["api_call"],
+      "scopes": ["boards:write", "pins:write"]
+    }
+  }
+}
+```
+
+`api_call` has no per-tool scopes, so scopes beyond the defaults are listed explicitly (here `boards:write`, `pins:write`).
+
+Example prompt:
+
+```
+Create a board named "Spring collection" and add the ten pins from the attached list.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

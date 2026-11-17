@@ -13,7 +13,7 @@
  * run's space. A leaked run token must not be able to enumerate
  * arbitrary integration secrets across the org.
  *
- * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
+ * Mirrors the structure of `internal-integration-bundle.test.ts`. Deep
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
  * narrowed-grant behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
@@ -61,7 +61,6 @@ const app = getTestApp();
 const AGENT = "@credsorg/test-agent";
 const INTEGRATION = "@credsorg/svc";
 const OTHER_INTEGRATION = "@credsorg/other-svc";
-const MCP_SERVER = "@credsorg/svc-server";
 
 function buildAgentManifest(declaredIntegrations: string[]): Record<string, unknown> {
   const deps: Record<string, string> = {};
@@ -84,7 +83,6 @@ function buildAgentManifest(declaredIntegrations: string[]): Record<string, unkn
 function buildIntegrationManifest(id: string) {
   return localIntegrationManifest({
     name: id,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {
@@ -306,14 +304,11 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  // NOTE — a RUN token never gets an empty payload from this endpoint. The
-  // zero-auth branch that used to produce one is gone: `@afps-spec/schema`
-  // requires every integration to declare at least one auth ("integration MUST
-  // declare at least one auth method"), so a zero-auth manifest fails
-  // validation on read and this endpoint answers 500 `invalid_manifest` long
-  // before any resolver code. The one empty payload that remains belongs to the
-  // CONNECT-run branch, which never reaches the resolver — it is covered in
-  // `internal-connect-run-grant.test.ts`.
+  // NOTE — a RUN token never gets an empty payload from this endpoint. An
+  // integration declaring no auths (AFPS §7.2) binds no connection, so its spawn
+  // spec carries none and the sidecar never asks this endpoint for it. The one
+  // empty payload that remains belongs to the CONNECT-run branch, which never
+  // reaches the resolver — it is covered in `internal-connect-run-grant.test.ts`.
 
   // ─── Fail-loud: the three states that used to answer 200-with-empty ───
   //
@@ -754,6 +749,62 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
   });
 
+  it("flags needsReconnection + records run metadata + 410 on the first rejected MCP handshake of a non-OAuth auth", async () => {
+    // The handshake is a request the sidecar writes itself: no agent input can provoke its 401,
+    // so the first one flags the connection instead of counting toward the threshold.
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const revision = await heldRevision(connectionId);
+
+    const res = await app.request(
+      `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${revision}` +
+        `&rejected_request=handshake`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(410);
+    expect(await res.json()).toMatchObject({
+      code: "integration_connection_needs_reconnection",
+      cause: "unrefreshable",
+    });
+
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(true);
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("counts a rejected call of a non-OAuth auth (502) without flagging, and refuses an unknown rejected_request (400)", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const revision = await heldRevision(connectionId);
+    const url = `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${revision}`;
+    const post = (query: string) =>
+      app.request(`${url}${query}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+    const call = await post("");
+    expect(call.status).toBe(502);
+    expect(await streakOf(connectionId)).toBe(1);
+
+    const unknown = await post("&rejected_request=tool_call");
+    expect(unknown.status).toBe(400);
+    expect(await streakOf(connectionId)).toBe(1);
+
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
   it("410 + records the run, without spending the refresh token, once an OAuth2 connection is flagged mid-run", async () => {
     let exchanges = 0;
     const idp = Bun.serve({
@@ -772,7 +823,6 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         source: "local",
         draftManifest: localIntegrationManifest({
           name: INTEGRATION,
-          serverName: MCP_SERVER,
           auths: {
             primary: {
               type: "oauth2",

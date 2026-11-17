@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import type { ModelErrorReason } from "@appstrate/core/model-error";
 import agentsFr from "../../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import type { RunTurnRow } from "../../log-utils.ts";
@@ -18,7 +19,11 @@ import { RunSnapshotInspector } from "../run-snapshot-inspector.tsx";
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-function overview(run: EnrichedRun, turns: RunTurnRow[] = []): string {
+function overview(
+  run: EnrichedRun,
+  turns: RunTurnRow[] = [],
+  errorReason: ModelErrorReason | null = null,
+): string {
   return render(
     <RunSnapshotInspector
       run={run}
@@ -29,6 +34,7 @@ function overview(run: EnrichedRun, turns: RunTurnRow[] = []): string {
       memoryChangeCount={0}
       memoryLoading={false}
       modelFallback={null}
+      errorReason={errorReason}
       onOpenJournal={() => {}}
       onOpenResults={() => {}}
     />,
@@ -98,5 +104,23 @@ describe("RunSnapshotInspector — the run's facts", () => {
     expect(html).toContain(agentsFr["run.usageContext"]);
     expect(html).toContain('role="progressbar"');
     expect(html).toContain("187k / 200k");
+  });
+
+  it("tells a runtime-version refusal from the journal instead of the provider's advice", () => {
+    const run = makeRun({
+      status: "failed",
+      error: "400 Claude Code 2.1.280 does not support this model. Run 'claude update'",
+      model_error: {
+        category: "invalid_request",
+        retryable: false,
+        status: 400,
+        message: "Run 'claude update', or update the Claude desktop app, then try again.",
+      },
+    });
+    const withReason = overview(run, [], "runtime_version_too_old");
+    expect(withReason).toContain(agentsFr["run.error.runtimeVersionTooOld"]);
+    expect(withReason).not.toContain("claude update");
+    // Without the journal's reason, the provider's sentence stays.
+    expect(overview(run)).toContain("claude update");
   });
 });

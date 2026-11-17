@@ -2,108 +2,81 @@
 
 /**
  * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
- * placed here but switched off, or never switched on, is in the space library.
+ * placed here but switched off, or never switched on, is in the space library. In « Tous
+ * les espaces » it lists every space the reader reaches, each integration once naming its spaces;
+ * creating and importing choose their space in their own menu (`useSpaceAction`).
  */
 
-import { useMemo } from "react";
-import { catalogueHref } from "../lib/catalogue-link";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Boxes, LibraryBig, Plus } from "lucide-react";
+import { Boxes } from "lucide-react";
 import { PageHeader } from "../components/page-header";
-import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
-import { PackageCard } from "../components/package-card";
+import { PackageCard, PackageCardSkeleton } from "../components/package-card";
 import { ListViewTabs } from "../components/list-view-tabs";
 import { packageCardItem } from "../lib/package-card-item";
+import { packageDetailPath } from "../lib/package-paths";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
-import { PageActionsMenu } from "../components/page-actions-menu";
-import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
-import { useCreationHandoff } from "../hooks/use-creation-handoff";
+import { CreatePackageModal } from "../components/create-package-modal";
 import {
-  INTEGRATION_EXECUTIONS,
   INTEGRATION_ORIGINS,
-  INTEGRATION_PROTOCOLS,
-  integrationExecution,
-  type IntegrationExecution,
+  INTEGRATION_SOURCES,
   filterIntegrations,
 } from "../lib/integration-collection";
-import { readList, useListParams } from "../lib/list-params";
+import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
-import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { usePackageIndexActions } from "../hooks/use-package-index-actions";
+import { useSpaceLink } from "../hooks/use-current-space";
+import { IntegrationSourceLabel } from "../components/integration-source-label";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
-  // The server answers the active set of this space: the index route every
-  // type page asks, not the management listing.
-  const { data: active = [], isLoading, error } = usePackageList("integration");
-  const connectionCounts = useConnectionCounts();
+  const { on: spanning } = useOverviewMode();
+  // The server answers the active set of this space (or of each, spanning): the
+  // index route every type page asks, not the management listing.
+  const { data: active = [], isLoading, error } = usePackageList("integration", spanning);
+  const connectionCount = useConnectionCounts();
+  const linkInSpace = useSpaceLink();
   const [view, setView] = useListView("integrations");
-  const list = useListParams(["origin", "protocol"]);
+  const list = useListParams(["origin", "source"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const canCreate = can("integrations:write");
-  const canBrowse = can("integrations:install");
-  const creation = useCreationHandoff("integration", canCreate);
-  const createAction: MenuAction = {
-    id: "create",
-    label: t("integrations.create"),
-    icon: Plus,
-    onSelect: creation.open,
-    hidden: !canCreate,
-  };
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
+    usePackageIndexActions("integration", t("integrations.create"));
+  const [creating, setCreating] = useState(false);
 
   const origins = list.values("origin", INTEGRATION_ORIGINS);
-  // The execution is a tab, not a filter: it splits the collection in two
-  // kinds of object, and the columns that make sense differ between them.
-  const execution: IntegrationExecution =
-    list.params.get("execution") === "local" ? "local" : "remote";
-  const protocolParam = list.params.get("protocol");
-  const protocols = useMemo(
-    () =>
-      execution === "remote"
-        ? readList(protocolParam, INTEGRATION_PROTOCOLS)
-        : ([] as (typeof INTEGRATION_PROTOCOLS)[number][]),
-    [execution, protocolParam],
-  );
+  const sources = list.values("source", INTEGRATION_SOURCES);
   const query = list.search;
 
   const shown = useMemo(
-    () =>
-      filterIntegrations(active, {
-        query,
-        origins,
-        executions: [execution],
-        protocols,
-      }),
-    [active, query, origins, execution, protocols],
+    () => filterIntegrations(active, { query, origins, sources }),
+    [active, query, origins, sources],
   );
-  const filtering = query.trim() !== "" || origins.length > 0 || protocols.length > 0;
-  const countOf = (value: IntegrationExecution) =>
-    active.filter((row) => integrationExecution(row.source_kind) === value).length;
+  const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
 
-  const allColumns = useIntegrationListColumns(connectionCounts).filter((column) =>
-    execution === "local" ? column.id !== "protocol" : column.id !== "server",
-  );
+  const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
-    <NoMatchState message={t("integrations.empty.filtered")} />
+    <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
   ) : (
     <EmptyState
       icon={Boxes}
       compact
-      message={t("integrations.empty.space")}
-      hint={<SpaceLibraryHint type="integration" />}
+      message={spanning ? t("integrations.empty.across") : t("integrations.empty.space")}
+      hint={spanning ? undefined : <SpaceLibraryHint type="integration" />}
     >
       <EmptyStateAction action={createAction} />
     </EmptyState>
@@ -116,41 +89,10 @@ export function IntegrationsPage() {
         variant="collection"
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
-        actions={
-          // A reader has no deed here: no menu, rather than an empty one.
-          (canBrowse || canCreate) && (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "catalogue",
-                  label: t("catalogue.browse"),
-                  icon: LibraryBig,
-                  to: catalogueHref("integration"),
-                  hidden: !canBrowse,
-                },
-                createAction,
-              ]}
-            />
-          )
-        }
+        actions={actionsMenu}
       />
 
       <ListToolbar
-        tabs={
-          <CollectionTabs
-            value={execution}
-            label={t("integrations.execution.label")}
-            // One URL update: two in the same tick read the same location and
-            // the second would undo the first (see `useListParams`). A protocol
-            // filter left in the URL is simply not applied on the local tab.
-            onChange={(next) => list.setValues("execution")(next === "local" ? ["local"] : [])}
-            options={INTEGRATION_EXECUTIONS.map((value) => ({
-              value,
-              label: t(`integrations.execution.${value}`),
-              count: isLoading || error ? undefined : countOf(value),
-            }))}
-          />
-        }
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={[
           {
@@ -163,20 +105,16 @@ export function IntegrationsPage() {
               { value: "system", label: t("catalogue.sourceSystem") },
             ],
           },
-          ...(execution === "remote"
-            ? [
-                {
-                  id: "protocol",
-                  label: t("integrations.filter.protocol"),
-                  values: protocols,
-                  onChange: list.setValues("protocol"),
-                  options: INTEGRATION_PROTOCOLS.map((protocol) => ({
-                    value: protocol,
-                    label: t(`integrations.protocol.${protocol}`),
-                  })),
-                },
-              ]
-            : []),
+          {
+            id: "source",
+            label: t("integrations.col.source"),
+            values: sources,
+            onChange: list.setValues("source"),
+            options: INTEGRATION_SOURCES.map((source) => ({
+              value: source,
+              label: t(`integrations.source.${source}`),
+            })),
+          },
         ]}
         onReset={list.reset}
         columns={view === "table" ? menu : undefined}
@@ -190,7 +128,9 @@ export function IntegrationsPage() {
           columns={columns}
           rows={shown}
           rowKey={(integration) => integration.id}
-          rowHref={(integration) => `/integrations/${integration.id}`}
+          rowHref={(integration) =>
+            linkInSpace(packageDetailPath("integration", integration.id), integration.space_ids)
+          }
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}
           failure={error}
@@ -203,30 +143,56 @@ export function IntegrationsPage() {
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
+              showSpace={spanning}
               meta={
-                connectionCounts &&
-                t("connections.connectionCount", {
-                  count: connectionCounts.get(integration.id) ?? 0,
-                })
+                <>
+                  <IntegrationSourceLabel source={integration.source_kind} />
+                  {/* An integration that binds no connection has no count to give. */}
+                  {integration.authenticated && connectionCount && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span className="shrink-0">
+                        {t("connections.connectionCount", {
+                          count: connectionCount(integration.id, integration.space_ids),
+                        })}
+                      </span>
+                    </>
+                  )}
+                </>
               }
             />
           )}
           isLoading={isLoading}
           failure={error}
           empty={empty}
+          placeholder={<PackageCardSkeleton meta="both" spaceName={spanning} />}
         />
       )}
       <ListFooter
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
 
+      {importing && canCreate && (
+        <ImportModal type="integration" onClose={() => setImporting(false)} />
+      )}
       {creation.isOpen && (
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
-          onManual={() => creation.leave("/integrations/new")}
+          onFromUrl={() => creation.leave("/integrations/new/mcp")}
+          onManual={() => {
+            creation.close();
+            setCreating(true);
+          }}
+          onImport={() => {
+            creation.close();
+            setImporting(true);
+          }}
           onChat={creation.openChat}
         />
+      )}
+      {creating && canCreate && (
+        <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
     </div>
   );

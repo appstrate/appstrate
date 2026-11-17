@@ -5,7 +5,7 @@ import { render } from "../../test/render.tsx";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { HeaderActionButton } from "../header-action-button.tsx";
 import { PageActionsMenu } from "../page-actions-menu.tsx";
-import { RunHeaderActions } from "../run-detail/run-header-summary.tsx";
+import { RunHeaderActions } from "../run-detail/run-header-actions.tsx";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 

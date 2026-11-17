@@ -64,12 +64,12 @@ export function HealthCard({
     <section
       aria-labelledby={id}
       className={cn(
-        "border-border bg-muted/35 overflow-hidden rounded-lg border",
+        "border-border bg-muted/40 overflow-hidden rounded-lg border",
         tone === "blocking" && "border-destructive/30",
         tone === "warning" && "border-warning/30",
       )}
     >
-      <div className="bg-muted/35 flex flex-wrap items-center gap-2 px-4 py-3">
+      <div className="bg-muted/40 flex flex-wrap items-center gap-2 px-4 py-3">
         <Icon
           className={cn(
             "size-4 shrink-0",

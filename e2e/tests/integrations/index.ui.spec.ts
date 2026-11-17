@@ -56,8 +56,8 @@ for (const view of ["cards", "table"] as const) {
         response.request().method() === "GET" &&
         new URL(response.url()).pathname === "/api/packages/integrations",
     );
-    // Custom integrations run in a sandbox: they sit under the « Locales » tab.
-    await page.goto("/integrations?execution=local");
+    // The seeded integration ships a local server: the Source filter narrows the list to it.
+    await page.goto("/integrations?source=local");
     await expect(page.getByRole("tab", { name: "Vue cartes", exact: true })).toHaveAttribute(
       "data-state",
       "active",

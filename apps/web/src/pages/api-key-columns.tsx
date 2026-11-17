@@ -55,14 +55,12 @@ export function useApiKeyColumns({
       id: "prefix",
       header: t("spaces.metadataKey"),
       width: 88,
-      tier: 2,
       cell: (key) => <CellText mono>{key.keyPrefix}…</CellText>,
     },
     {
       id: "status",
       header: t("proxies.col.status"),
       width: 80,
-      tier: 2,
       cell: (key) =>
         isApiKeyExpired(key.expiresAt) ? (
           <Badge variant="failed">{t("apiKeys.expired")}</Badge>
@@ -74,7 +72,6 @@ export function useApiKeyColumns({
       id: "expires",
       header: t("apiKeys.expirationColumn"),
       width: 96,
-      tier: 2,
       cell: (key) => (
         <span className="text-muted-foreground text-xs">
           {key.expiresAt ? formatDateField(key.expiresAt, "date") : t("apiKeys.expiresNever")}
@@ -86,7 +83,6 @@ export function useApiKeyColumns({
       header: t("roles.permissionsLabel"),
       width: 112,
       elastic: true,
-      tier: 3,
       cell: (key) => {
         const summary = scopeSummary(key, availableScopes);
         if (summary.kind === "full") return <CellText>{t("apiKeys.fullAccess")}</CellText>;
@@ -102,7 +98,6 @@ export function useApiKeyColumns({
       header: t("apiKeys.lastUsedColumn"),
       width: 104,
       align: "end",
-      tier: 3,
       cell: (key) => <CellDate value={key.lastUsedAt} granularity="date" />,
     },
     {
@@ -110,7 +105,6 @@ export function useApiKeyColumns({
       header: t("apiKeys.createdByColumn"),
       width: 96,
       elastic: true,
-      tier: 3,
       cell: (key) =>
         key.created_by_name ? <CellText>{key.created_by_name}</CellText> : <CellEmpty />,
     },

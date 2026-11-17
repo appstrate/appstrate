@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { fileContextHeader, fileReaderPath, fileReaderUrl, readerContext } from "../file-link.ts";
+import {
+  fileContextHeader,
+  fileReaderPath,
+  fileReaderUrl,
+  otherSpaceFileContext,
+  readerContext,
+} from "../file-link.ts";
 
 const CONTEXT = { orgId: "org_1", spaceId: "spc_1" };
 
@@ -36,6 +42,18 @@ describe("reader link", () => {
     expect(readerContext(new URLSearchParams("org=org_1"))).toBeUndefined();
     expect(readerContext(new URLSearchParams("space=spc_1"))).toBeUndefined();
     expect(readerContext(new URLSearchParams("org=&space=spc_1"))).toBeUndefined();
+  });
+
+  it("reads a file of another space in its own, never one of the current space", () => {
+    expect(otherSpaceFileContext("spc_2", "org_1", "spc_1")).toEqual({
+      orgId: "org_1",
+      spaceId: "spc_2",
+    });
+    expect(otherSpaceFileContext("spc_1", "org_1", "spc_1")).toBeUndefined();
+    // No current space yet, no org yet, or no space on the row: nothing to read elsewhere.
+    expect(otherSpaceFileContext("spc_2", "org_1", null)).toBeUndefined();
+    expect(otherSpaceFileContext("spc_2", null, "spc_1")).toBeUndefined();
+    expect(otherSpaceFileContext(undefined, "org_1", "spc_1")).toBeUndefined();
   });
 
   it("sends the context as the scoping headers, and nothing without one", () => {

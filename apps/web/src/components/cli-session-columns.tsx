@@ -39,7 +39,6 @@ export function useCliSessionColumns({
     header: t("spaceMembers.colMember"),
     width: 60,
     elastic: true,
-    tier: 2,
     cell: (session) => (
       <CellText title={cliSessionUserLabel(session)}>{cliSessionUserLabel(session)}</CellText>
     ),
@@ -70,7 +69,6 @@ export function useCliSessionColumns({
       header: t("devices.userAgentLabel"),
       width: 96,
       elastic: true,
-      tier: 2,
       cell: (session) =>
         session.userAgent ? (
           <CellText mono title={session.userAgent}>
@@ -84,7 +82,6 @@ export function useCliSessionColumns({
       id: "ip",
       header: t("devices.createdIpLabel"),
       width: 110,
-      tier: 3,
       cell: (session) => {
         const ip = displayIp(session.createdIp);
         return ip ? <CellText mono>{ip}</CellText> : <CellEmpty />;
@@ -95,7 +92,6 @@ export function useCliSessionColumns({
       header: t("devices.createdAtLabel"),
       width: 150,
       align: "end",
-      tier: 3,
       cell: (session) => <CellDate value={session.createdAt} />,
     },
     {
@@ -103,7 +99,6 @@ export function useCliSessionColumns({
       header: t("devices.lastUsedLabel"),
       width: 150,
       align: "end",
-      tier: 2,
       cell: (session) =>
         session.lastUsedAt ? (
           <CellDate value={session.lastUsedAt} />

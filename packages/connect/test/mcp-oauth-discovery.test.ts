@@ -5,6 +5,7 @@ import { describe, it, expect } from "bun:test";
 import {
   buildProtectedResourceProbes,
   parseResourceMetadataChallenge,
+  parseScopeChallenge,
   discoverProtectedResourceMetadata,
 } from "../src/mcp-oauth-discovery.ts";
 
@@ -54,6 +55,23 @@ describe("parseResourceMetadataChallenge (RFC 9728 §5.1)", () => {
 
   it("returns undefined when absent", () => {
     expect(parseResourceMetadataChallenge('Bearer realm="x"')).toBeUndefined();
+  });
+});
+
+describe("parseScopeChallenge (RFC 6750 §3)", () => {
+  it("splits the space-delimited scope parameter", () => {
+    const header =
+      'Bearer error="invalid_token", resource_metadata="https://mcp.linear.app/.well-known/oauth-protected-resource/mcp", scope="read write"';
+    expect(parseScopeChallenge(header)).toEqual(["read", "write"]);
+  });
+
+  it("returns undefined without a scope, or with an empty one", () => {
+    expect(parseScopeChallenge('Bearer resource_metadata="https://x/meta"')).toBeUndefined();
+    expect(parseScopeChallenge('Bearer scope=""')).toBeUndefined();
+  });
+
+  it("does not read a parameter merely ending in scope", () => {
+    expect(parseScopeChallenge('Bearer x_scope="admin"')).toBeUndefined();
   });
 });
 
@@ -139,6 +157,26 @@ describe("discoverProtectedResourceMetadata", () => {
       fetchImpl,
     });
     expect(md).toBeNull();
+  });
+
+  it("keeps resource_name and the http(s) documentation and policy links", async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        ...valid,
+        resource: "https://mcp.clickup.com/mcp",
+        resource_name: " ClickUp MCP ",
+        resource_documentation: "https://docs.clickup.com/mcp",
+        resource_policy_uri: "javascript:alert(1)",
+      })) as unknown as typeof fetch;
+
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: "https://mcp.clickup.com/mcp",
+      resourceMetadataUrl: "https://mcp.clickup.com/.well-known/oauth-protected-resource/mcp",
+      fetchImpl,
+    });
+    expect(md?.resourceName).toBe("ClickUp MCP");
+    expect(md?.resourceDocumentation).toBe("https://docs.clickup.com/mcp");
+    expect(md?.resourcePolicyUri).toBeUndefined();
   });
 
   it("prefers an explicit resourceMetadataUrl", async () => {

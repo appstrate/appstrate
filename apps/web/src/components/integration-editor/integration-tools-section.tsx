@@ -31,9 +31,11 @@ import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog, type PackageTool } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
 import { RequiredScopesField } from "./required-scopes-field";
+import { SyncFromServer, type ServerSyncResult } from "./sync-from-server";
 import {
   getAllowUndeclaredTools,
   getAuths,
+  isWildcardUsable,
   getToolsPolicy,
   setAllowUndeclaredTools,
   setToolsPolicy,
@@ -44,6 +46,7 @@ export function IntegrationToolsSection({
   tools,
   allowUndeclaredTools,
   edit,
+  sync,
 }: {
   /** The saved package's effective tool catalog (`tool_catalog`). */
   tools: IntegrationToolCatalogEntry[];
@@ -51,6 +54,13 @@ export function IntegrationToolsSection({
   allowUndeclaredTools?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
+  /** Offered only when the integration can be asked for its tools (remote, connected). */
+  sync?: {
+    run: (connectionId?: string) => void;
+    isPending: boolean;
+    error: unknown;
+    result: ServerSyncResult | null;
+  };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   // The tool being edited, or "new" for a tool added by name.
@@ -77,15 +87,16 @@ export function IntegrationToolsSection({
 
   return (
     <div className="flex flex-col gap-4">
+      {edit && sync && <SyncFromServer {...sync} />}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
         allowUndeclared && (
-          <Alert variant="warning" className="p-3 text-xs">
-            <AlertTitle className="font-medium">
+          <Alert variant="warning" size="sm">
+            <AlertTitle>
               {t("integration.tools.wildcardNotice.title", { ns: "settings" })}
             </AlertTitle>
-            <AlertDescription className="text-muted-foreground text-xs">
+            <AlertDescription>
               {t("integration.tools.wildcardNotice.body", { ns: "settings" })}
             </AlertDescription>
           </Alert>
@@ -234,9 +245,7 @@ function AllowUndeclaredToggle({
 }) {
   const { t } = useTranslation("agents");
   const allowUndeclared = getAllowUndeclaredTools(manifest);
-  const usable = getAuths(manifest).some(
-    (auth) => auth.type !== "oauth2" || auth.defaultScopes.length > 0,
-  );
+  const usable = isWildcardUsable(getAuths(manifest));
   // The grammar of every activation setting (collaborator SSO, for one): a
   // toggle row, its consequence as the description.
   return (

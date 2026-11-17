@@ -9,16 +9,13 @@ import { expect, type Locator, type Page } from "@playwright/test";
 const SETTINGS_ADDRESS: Record<string, [param: string, tab: string]> = {
   agents: ["agentSettings", "settings"],
   skills: ["packageSettings", "settings"],
-  "mcp-servers": ["packageSettings", "settings"],
-  integrations: ["integrationSettings", "configuration"],
+  integrations: ["integrationSettings", "settings"],
 };
 
 /**
- * Page Object for the package file editor, in its two places: Paramètres › Fichiers on a saved
- * package's detail page ({@link goto}), where a file's text is changed in a modal from the file's
- * « Actions » menu ({@link editFile}); and the *Fichiers* tab of a creation page (`/:type/new`,
- * {@link openFilesTab}), where the selected file is open in a pane ({@link typeIntoEditor}).
- * Both stage every change until « Enregistrer ».
+ * Page Object for the package file editor: Paramètres › Fichiers on a saved package's detail page
+ * ({@link goto}), where a file's text is changed in a modal from the file's « Actions » menu
+ * ({@link editFile}). Every change is staged until « Enregistrer ».
  *
  * The surface carries no test ids: it is driven the way an author drives it —
  * the tab by its label, the tree by its ARIA role, the row gestures by the
@@ -45,12 +42,6 @@ export class PackageEditorPage {
   /** Open the saved package's Paramètres › Fichiers section and wait for the tree to render. */
   async goto() {
     await this.page.goto(this.settingsUrl);
-    await expect(this.tree).toBeVisible();
-  }
-
-  /** On a creation page, open the *Fichiers* tab and wait for the tree to render. */
-  async openFilesTab() {
-    await this.page.getByRole("tab", { name: "Fichiers" }).click();
     await expect(this.tree).toBeVisible();
   }
 
@@ -124,17 +115,6 @@ export class PackageEditorPage {
     await this.replaceEditorText(modal, text);
     await modal.getByRole("button", { name: "Appliquer", exact: true }).click();
     await expect(modal).toHaveCount(0);
-  }
-
-  /**
-   * Creation page: replace the text of the Monaco pane showing `path`. The pane is a
-   * labelled region, which is how this waits for the editor to have switched
-   * files before typing into it.
-   */
-  async typeIntoEditor(path: string, text: string) {
-    const pane = this.page.getByRole("region", { name: path });
-    await expect(pane).toBeVisible();
-    await this.replaceEditorText(pane, text);
   }
 
   /**

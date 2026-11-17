@@ -14,10 +14,11 @@
  * `capMs`, so we assert ranges rather than exact delays).
  */
 
-import { describe, it, expect } from "bun:test";
+import { beforeEach, describe, it, expect } from "bun:test";
 import { createMcpHttpClient } from "../src/index.ts";
 import { createMcpServer, type AppstrateToolDefinition } from "../src/index.ts";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { forgetProtocolEras } from "../src/testing.ts";
 
 function noopTool(): AppstrateToolDefinition {
   return {
@@ -84,6 +85,9 @@ function buildFlakyFetch(
 const TARGET_URL = new URL("http://test.invalid/mcp");
 
 describe("createMcpHttpClient — retry", () => {
+  // One attempt per injected failure: a remembered legacy origin would re-probe within an attempt.
+  beforeEach(() => forgetProtocolEras());
+
   it("succeeds on the first attempt with zero retries when the server is healthy", async () => {
     const seen: number[] = [];
     const client = await createMcpHttpClient(TARGET_URL, {

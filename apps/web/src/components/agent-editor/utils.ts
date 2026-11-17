@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceEntry } from "./types";
-import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./types";
 import {
@@ -15,17 +14,9 @@ import {
   type UIHint,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import {
-  AFPS_SCHEMA_URLS,
-  AFPS_SCHEMA_VERSION,
-  dropRetiredRuntimeTools,
-} from "@appstrate/core/validation";
-import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
-import {
-  dropRetiredDependencyKeys,
-  parseManifestIntegrations,
-  writeManifestIntegrations,
-} from "@appstrate/core/dependencies";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
+import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -34,27 +25,25 @@ export function caretRange(version: string): string {
   return `^${version}`;
 }
 
-// ─── Default state ──────────────────────────────────────────
+// ─── Default manifests ──────────────────────────────────────
 
-export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorState {
+export function defaultAgentManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
   return {
-    manifest: {
-      $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: AFPS_SCHEMA_VERSION,
-      type: "agent",
-      name: orgSlug ? `@${orgSlug}/` : "",
-      version: "1.0.0",
-      display_name: "",
-      description: "",
-      author: userEmail ?? "",
-      timeout: 300,
-      dependencies: {},
-    },
-    operations: [{ op: "write", path: "prompt.md", text: "" }],
+    $schema: AFPS_SCHEMA_URLS.agent,
+    schema_version: AFPS_SCHEMA_VERSION,
+    type: "agent",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    display_name: "",
+    description: "",
+    author: userEmail ?? "",
+    timeout: 300,
+    dependencies: {},
   };
 }
-
-// ─── Default manifests for skill/tool ───────────────────────
 
 export function defaultSkillManifest(
   orgSlug?: string,
@@ -71,9 +60,6 @@ export function defaultSkillManifest(
     author: userEmail ?? "",
   };
 }
-
-/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
-export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
 // ─── Default manifest for integration ───────────────────────
 
@@ -104,7 +90,7 @@ export function defaultIntegrationManifest(
             type: "object",
             required: ["api_key"],
             properties: {
-              api_key: { type: "string", description: "API key for this integration." },
+              api_key: { type: "string" },
             },
           },
         },
@@ -119,42 +105,6 @@ export function defaultIntegrationManifest(
       },
     },
   };
-}
-
-// ─── Runtime tools (manifest.runtime_tools) ──────────────────
-
-/** The manifest's `runtime_tools`; tolerates a missing or malformed field and drops ids the platform no longer offers. */
-export function getRuntimeTools(m: Record<string, unknown>): string[] {
-  const raw = m.runtime_tools;
-  return Array.isArray(raw) ? raw.filter(isSelectableRuntimeTool) : [];
-}
-
-/**
- * Strips retired vocabulary (retired `runtime_tools` ids, AFPS 1.x `dependencies` keys) once, when an
- * existing agent is loaded — otherwise the user sees an error for a field the editor cannot display.
- * Delegates to core, the same code the publish path runs, so both serialise identically; core is
- * agent-gated and `package-editor.tsx` calls this only in its agent branch.
- */
-export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
-  return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest);
-}
-
-/** An empty selection drops the field (never mints `runtime_tools: []`), matching `dropRetiredRuntimeTools` so the manifest bytes are the same either way. */
-export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
-  if (tools.length > 0) {
-    m.runtime_tools = tools;
-  } else {
-    delete m.runtime_tools;
-  }
-}
-
-/** The server refuses an output schema without the `output` runtime tool; declaring a schema turns it on. */
-export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
-  const tools = getRuntimeTools(m);
-  if (tools.includes("output")) return m;
-  const next = { ...m };
-  setRuntimeTools(next, [...tools, "output"]);
-  return next;
 }
 
 // ─── Manifest accessors ─────────────────────────────────────
@@ -201,6 +151,27 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
   };
 }
 
+/**
+ * The platform's own integration is offered by every agent the editor shows:
+ * its row is always there, and removing it is not an action. A manifest that
+ * does not declare it reads as this entry — declared, no tool selected — and an
+ * entry left that way is not written, so the manifest names the integration
+ * only once the author picks a tool of it.
+ */
+export function isPlatformEntry(entry: Pick<ResourceEntry, "id">): boolean {
+  return entry.id === PLATFORM_INTEGRATION_ID;
+}
+
+const UNSELECTED_PLATFORM_ENTRY: ResourceEntry = {
+  id: PLATFORM_INTEGRATION_ID,
+  version: PLATFORM_INTEGRATION_RANGE,
+  tools: [],
+};
+
+function selectsNoTool(entry: ResourceEntry): boolean {
+  return Array.isArray(entry.tools) && entry.tools.length === 0;
+}
+
 function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
@@ -211,7 +182,10 @@ export function getResourceEntries(
 ): ResourceEntry[] {
   // Integrations: version from `dependencies.integrations` (§4.1), selection from
   // `integrations_configuration` (§4.4); entries pass through whole, so no key is lost on save.
-  if (type === "integrations") return parseManifestIntegrations(m);
+  if (type === "integrations") {
+    const entries = parseManifestIntegrations(m);
+    return entries.some(isPlatformEntry) ? entries : [UNSELECTED_PLATFORM_ENTRY, ...entries];
+  }
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
   return Object.entries(record).map(([id, version]) => ({ id, version }));
@@ -225,7 +199,9 @@ export function setResourceEntries(
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
-      entries.map((e) => ({ ...e, version: e.version ?? "*" })),
+      entries
+        .filter((e) => !(isPlatformEntry(e) && selectsNoTool(e)))
+        .map((e) => ({ ...e, version: e.version ?? "*" })),
     );
     return;
   }

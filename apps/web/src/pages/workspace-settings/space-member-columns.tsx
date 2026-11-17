@@ -73,7 +73,6 @@ export function useSpaceMemberColumns({
       header: t("orgSettings.emailColumn"),
       width: 100,
       elastic: true,
-      tier: 2,
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },

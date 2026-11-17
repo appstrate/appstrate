@@ -156,7 +156,8 @@ export const connectionCallsPaths = {
       tags: ["Profile"],
       summary: "The credential proxy's calls made with one of the caller's connections",
       description:
-        "Every call the credential proxy (`/api/credential-proxy/proxy`) made with a connection " +
+        "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of " +
+        "`POST /api/integrations/{packageId}/discover`) made with a connection " +
         "the caller owns, whoever made it and from whichever space: a colleague using a " +
         "connection shared into a space, a run, an API key. One row per call that may have sent " +
         "the credential, successful or not. Authorized by ownership, capped by a delegated " +
@@ -198,7 +199,8 @@ export const connectionCallsPaths = {
       tags: ["Integrations"],
       summary: "The credential proxy's calls made in the current space",
       description:
-        "Every call the credential proxy (`/api/credential-proxy/proxy`) made in the current " +
+        "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of " +
+        "`POST /api/integrations/{packageId}/discover`) made in the current " +
         "space, whatever the connection and whoever owns it: who used which connection, against " +
         "which host, with what outcome. One row per call that may have sent a " +
         "credential, successful or not. Requires `integrations:configure`, the permission that " +

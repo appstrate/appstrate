@@ -23,7 +23,6 @@ import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
-  ensureIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   listIntegrationClients,
   promoteIntegrationOAuthClient,
@@ -32,6 +31,7 @@ import {
   setDefaultIntegrationClient,
   updateIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
 import { testCaller } from "../../helpers/connection-shares.ts";
 import {
@@ -187,7 +187,6 @@ describe("org-level integration OAuth clients", () => {
       AUTH_KEY,
       manifest,
       OAUTH2_AUTH,
-      "https://app.example.com/callback",
     );
     return resolveConnectClient(INTEGRATION, AUTH_KEY, manifest, OAUTH2_AUTH, resolved).clientId;
   }
@@ -464,7 +463,8 @@ describe("org-level integration OAuth clients", () => {
         { clientId: "dcr", clientSecret: "", tokenEndpointAuthMethod: "none" },
         { autoProvisioned: true },
       );
-      expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: true });
+      // A machine client is found by its issuer, never the default.
+      expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: false });
     });
 
     it("rejects an integration of another org", async () => {
@@ -663,7 +663,8 @@ describe("org-level integration OAuth clients", () => {
         id,
         spaceId: null,
         autoProvisioned: true,
-        isDefault: true,
+        // Moved, not made default: the auto-provisioned path finds it by its issuer.
+        isDefault: false,
       });
       const [row] = await db
         .select()
@@ -700,7 +701,13 @@ describe("org-level integration OAuth clients", () => {
 
   it("has_oauth_client is true when only an org client exists", async () => {
     await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader(), null);
+    const { auths } = await getIntegrationAuthStatuses(
+      spaceA,
+      INTEGRATION,
+      memberReader(),
+      null,
+      "usable",
+    );
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.has_oauth_client).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.has_oauth_client).toBe(false);
   });
@@ -713,7 +720,13 @@ describe("org-level integration OAuth clients", () => {
     manifest.auths[AUTH_KEY]!._meta = { "dev.appstrate/auth": { required: true } };
     await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
 
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader(), null);
+    const { auths } = await getIntegrationAuthStatuses(
+      spaceA,
+      INTEGRATION,
+      memberReader(),
+      null,
+      "usable",
+    );
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.required).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.required).toBe(false);
   });

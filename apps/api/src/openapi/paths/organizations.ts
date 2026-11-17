@@ -17,6 +17,10 @@ import {
   ICON_MAX_LENGTH,
 } from "@appstrate/core/appearance";
 
+/** The two doors that write an organization slug document it once. */
+const SLUG_DESCRIPTION =
+  "Kebab-case. The scope the organization's uploads, forks and starter agent are created under (`@<slug>/<name>`). The platform's own scopes, `appstrate` (system packages) and `inline` (inline runs' shadow packages), are refused with `400 slug_reserved`; a slug another organization holds with `400 slug_taken`.";
+
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
 const SPACE_ASSIGNMENTS_BODY = {
   type: "array",
@@ -92,7 +96,11 @@ export const organizationsPaths = {
               required: ["name"],
               properties: {
                 name: { type: "string", minLength: 1 },
-                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                  description: SLUG_DESCRIPTION,
+                },
               },
               additionalProperties: false,
             },
@@ -216,7 +224,11 @@ export const organizationsPaths = {
               type: "object",
               properties: {
                 name: { type: "string", minLength: 1 },
-                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                  description: SLUG_DESCRIPTION,
+                },
                 icon: {
                   type: ["string", "null"],
                   maxLength: ICON_MAX_LENGTH,

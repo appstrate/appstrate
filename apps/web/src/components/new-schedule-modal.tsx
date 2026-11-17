@@ -69,6 +69,7 @@ export function NewScheduleModal({
   const navigate = useNavigate();
   return (
     <Modal
+      inSpace
       onClose={onClose}
       title={t("schedule.titleNew")}
       className="max-h-[90svh] overflow-y-auto sm:max-w-xl"
@@ -103,7 +104,7 @@ function NewScheduleForm({
     <div className="flex flex-col gap-5">
       <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
         {agentsPending ? (
-          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-10 w-full" />
         ) : (
           <OptionSelect
             value={agentId ?? ""}
@@ -334,7 +335,7 @@ export function ScheduleFieldsReady({
       {/* Held at the bottom of the scrolling dialog: on a laptop the form is
           taller than the window, and Créer should not wait below the fold. */}
       <div className="bg-background border-border sticky -bottom-6 z-10 -mx-6 -mb-6 flex justify-end gap-2 border-t px-6 py-4">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={create.isPending}>
           {t("btn.cancel")}
         </Button>
         <PendingButton type="submit" pending={create.isPending} disabled={!cron}>

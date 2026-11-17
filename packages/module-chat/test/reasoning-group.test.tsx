@@ -20,8 +20,10 @@ import { renderToString } from "react-dom/server";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { testHost } from "./test-host.ts";
 import { Thread } from "../src/ui/thread.tsx";
+import { createMessageQueue } from "../src/ui/message-queue.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
 type Parts = ChatHelpers["messages"][number]["parts"];
@@ -51,22 +53,13 @@ function chat(parts: Parts, status: ChatHelpers["status"], error?: Error): ChatH
   };
 }
 
-const host: ChatHost = {
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: () => null,
-  t: (key) => key,
-  can: () => true,
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-};
+const host = testHost();
 
 function Turn({ helpers }: { helpers: ChatHelpers }) {
   const runtime = useAISDKRuntime(helpers);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread />
+      <Thread messageQueue={createMessageQueue()} />
     </AssistantRuntimeProvider>
   );
 }

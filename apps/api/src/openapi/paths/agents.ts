@@ -2,6 +2,85 @@
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
+
+/** The responses of both agent indexes: one space's, and the one spanning spaces. */
+const agentListResponses = {
+  "200": {
+    description: "Agent list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/AgentListItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+        example: {
+          object: "list",
+          hasMore: false,
+          data: [
+            {
+              id: "@acme/email-sorter",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              icon: "lucide:mail",
+              color: "blue",
+              display_name: "Email Sorter",
+              description: "Automatically sorts and labels incoming emails",
+              schema_version: "0.1",
+              author: "Acme Corp",
+              keywords: ["email", "automation"],
+              source: "local",
+              scope: "@acme",
+              version: "1.2.0",
+              published: true,
+              type: "agent",
+              running_runs: 1,
+              unread_count: 2,
+              dependencies: {
+                skills: {},
+                integrations: {},
+              },
+            },
+            {
+              id: "@appstrate/code-reviewer",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              icon: null,
+              color: null,
+              display_name: "Code Reviewer",
+              description: "Reviews pull requests and suggests improvements",
+              schema_version: "0.1",
+              author: "Appstrate",
+              keywords: ["code", "review", "github"],
+              source: "system",
+              scope: "@appstrate",
+              version: "2.0.0",
+              published: true,
+              type: "agent",
+              running_runs: 0,
+              unread_count: 0,
+              dependencies: {
+                skills: { "@appstrate/summarize": "^1.0.0" },
+                integrations: { "@appstrate/github": "^2.0.0" },
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
 
 /** Agents paths. */
 export const agentsPaths = {
@@ -11,80 +90,28 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
-        "200": {
-          description: "Agent list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentListItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-              example: {
-                object: "list",
-                hasMore: false,
-                data: [
-                  {
-                    id: "@acme/email-sorter",
-                    icon: "lucide:mail",
-                    color: "blue",
-                    display_name: "Email Sorter",
-                    description: "Automatically sorts and labels incoming emails",
-                    schema_version: "0.1",
-                    author: "Acme Corp",
-                    keywords: ["email", "automation"],
-                    source: "local",
-                    scope: "@acme",
-                    version: "1.2.0",
-                    type: "agent",
-                    running_runs: 1,
-                    dependencies: {
-                      skills: {},
-                      mcp_servers: {},
-                      integrations: {},
-                    },
-                  },
-                  {
-                    id: "@appstrate/code-reviewer",
-                    icon: null,
-                    color: null,
-                    display_name: "Code Reviewer",
-                    description: "Reviews pull requests and suggests improvements",
-                    schema_version: "0.1",
-                    author: "Appstrate",
-                    keywords: ["code", "review", "github"],
-                    source: "system",
-                    scope: "@appstrate",
-                    version: "2.0.0",
-                    type: "agent",
-                    running_runs: 0,
-                    dependencies: {
-                      skills: { "@appstrate/summarize": "^1.0.0" },
-                      mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },
-                      integrations: { "@appstrate/github": "^2.0.0" },
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        ...agentListResponses,
+      },
+    },
+  },
+  "/api/orgs/{orgId}/agents": {
+    get: {
+      operationId: "listOrgAgents",
+      tags: ["Agents"],
+      summary: "List agents across the organization's spaces",
+      description:
+        "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...agentListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
       },
     },
   },
@@ -237,7 +264,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk integration connection readiness for an agent",
       description:
-        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag, so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: its `resolution.warning` says why.",
+        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag and, under an admin pin, whether members may add to the imposed set (`additional_connections_allowed`), so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: its `resolution.warning` says why.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -279,7 +306,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -297,7 +324,8 @@ export const agentsPaths = {
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
-          description: "Admin-only scope override. Defaults to caller's actor scope.",
+          description:
+            "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
         },
         {
           name: "actor_id",
@@ -416,15 +444,15 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["memories_deleted", "checkpoint_deleted"],
+                required: ["memory_count", "checkpoint_count"],
                 properties: {
-                  memories_deleted: {
+                  memory_count: {
                     type: "integer",
                     description: "Number of memory rows deleted",
                   },
-                  checkpoint_deleted: {
-                    type: "boolean",
-                    description: "Whether the checkpoint slot was deleted",
+                  checkpoint_count: {
+                    type: "integer",
+                    description: "Number of checkpoint slots deleted (0 or 1)",
                   },
                 },
               },
@@ -659,7 +687,7 @@ export const agentsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{id}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
         },
         "422": {
           description:

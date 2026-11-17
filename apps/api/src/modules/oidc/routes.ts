@@ -31,7 +31,7 @@ import { markSpaceRescope } from "../../middleware/require-permission.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { logger } from "../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
@@ -1869,14 +1869,8 @@ export function createOidcRouter() {
     verifyUrl.searchParams.set("token", token);
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");
-    // better-auth@1.7's magic-link verify endpoint calls decodeURIComponent()
-    // after its query parser has already decoded the parameter once. Shield the
-    // nested URL for that second pass so `%2B` in OAuth signatures remains `+`
-    // instead of becoming a space (`URLSearchParams` form semantics).
-    if (callbackURL) verifyUrl.searchParams.set("callbackURL", encodeURIComponent(callbackURL));
-    if (errorCallbackURL) {
-      verifyUrl.searchParams.set("errorCallbackURL", encodeURIComponent(errorCallbackURL));
-    }
+    if (callbackURL) verifyUrl.searchParams.set("callbackURL", callbackURL);
+    if (errorCallbackURL) verifyUrl.searchParams.set("errorCallbackURL", errorCallbackURL);
     return c.redirect(verifyUrl.toString(), 302);
   });
 

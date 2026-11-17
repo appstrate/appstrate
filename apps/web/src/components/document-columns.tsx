@@ -9,6 +9,7 @@ import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge } from "./file-badges";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellDate, CellText } from "./table-cells";
+import { useSpaceColumn } from "./space-column";
 
 export function useDocumentColumns({
   pendingKeepId,
@@ -16,14 +17,18 @@ export function useDocumentColumns({
   onDownload,
   onKeep,
   onDelete,
+  spanning = false,
 }: {
   pendingKeepId: string | null;
-  showRunLink?: boolean;
+  showRunLink?: (doc: FileDto) => boolean;
   onDownload: (doc: FileDto) => void;
   onKeep: (doc: FileDto) => void;
   onDelete: (doc: FileDto) => void;
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }): DataColumn<FileDto>[] {
   const { t } = useTranslation(["files", "common"]);
+  const spaceColumn = useSpaceColumn<FileDto>(spanning);
 
   return [
     {
@@ -37,25 +42,23 @@ export function useDocumentColumns({
         </span>
       ),
     },
+    ...spaceColumn,
     {
       id: "purpose",
       header: t("column.purpose"),
       width: 104,
-      tier: 2,
       cell: (doc) => <CellText>{t(`purpose.${doc.purpose}`)}</CellText>,
     },
     {
       id: "type",
       header: t("column.type"),
       width: 92,
-      tier: 2,
       cell: (doc) => <CellText title={doc.mime}>{t(`type.${mimeKind(doc.mime)}`)}</CellText>,
     },
     {
       id: "size",
       header: t("column.size"),
       width: 72,
-      tier: 3,
       align: "end",
       cell: (doc) => (
         <span className="text-muted-foreground text-xs tabular-nums">{formatBytes(doc.size)}</span>
@@ -65,7 +68,6 @@ export function useDocumentColumns({
       id: "created",
       header: t("column.created"),
       width: 120,
-      tier: 3,
       align: "end",
       cell: (doc) => <CellDate value={doc.createdAt} granularity="datetime" />,
     },
@@ -73,7 +75,6 @@ export function useDocumentColumns({
       id: "retention",
       header: t("column.retention"),
       width: 112,
-      tier: 3,
       cell: (doc) => (
         <span className="text-xs">
           {doc.expiresAt ? (
@@ -88,7 +89,7 @@ export function useDocumentColumns({
       <DocumentRowActions
         doc={doc}
         isPending={pendingKeepId === doc.id}
-        showRunLink={showRunLink}
+        showRunLink={showRunLink?.(doc)}
         onDownload={onDownload}
         onKeep={onKeep}
         onDelete={onDelete}

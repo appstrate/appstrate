@@ -4,13 +4,7 @@
 // nothing else from the page it leaves, so a modal open there does not follow.
 export type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
 
-export const AGENT_DEFINITION_SECTIONS = [
-  "general",
-  "schema",
-  "skills",
-  "integrations",
-  "tools",
-] as const;
+export const AGENT_DEFINITION_SECTIONS = ["general", "schema", "skills", "integrations"] as const;
 
 export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
 
@@ -53,13 +47,13 @@ export function agentSettingsHref(pathname: string, section: AgentSettingsSectio
   return sectionHref(pathname, "settings", "agentSettings", section, extra);
 }
 
-/** An integration's Paramètres is its `configuration` tab. */
+/** An integration's Paramètres is its `settings` tab. */
 export function integrationSettingsHref(
   pathname: string,
   section: IntegrationSettingsSection,
   extra?: Extra,
 ) {
-  return sectionHref(pathname, "configuration", "integrationSettings", section, extra);
+  return sectionHref(pathname, "settings", "integrationSettings", section, extra);
 }
 
 /** The editor a Paramètres URL mounts, for `EditorPlaceContext`: the definition sections are one editor, and the `file` remounts it like a section. */

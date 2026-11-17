@@ -26,7 +26,8 @@ import { splitPackageRef } from "../../lib/package-paths";
 import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceGrant } from "../../hooks/use-permissions";
-import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
+import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationsById } from "../../hooks/use-integrations";
 import {
@@ -140,7 +141,6 @@ export function SharePackageDialog({
       { params: { path: splitPackageRef(packageId) }, body: { target: subject } },
       {
         onSuccess: () => {
-          toast.success(t("packages.shareDone"));
           setTarget("");
           setNeedsVersion(null);
         },
@@ -252,11 +252,9 @@ export function SharePackageDialog({
           <Alert
             variant="warning"
             data-testid="share-needs-version"
-            className="bg-warning/10 mt-2 rounded-md p-3"
-          >
-            <AlertDescription className="flex flex-col items-start gap-2">
-              <p>{t("packages.shareNeedsVersion")}</p>
-              {canPublish ? (
+            className="mt-2"
+            action={
+              canPublish && (
                 <PendingButton
                   type="button"
                   size="sm"
@@ -266,7 +264,12 @@ export function SharePackageDialog({
                 >
                   {t("packages.sharePublishAndShare")}
                 </PendingButton>
-              ) : (
+              )
+            }
+          >
+            <AlertDescription>
+              <p>{t("packages.shareNeedsVersion")}</p>
+              {!canPublish && (
                 <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
               )}
             </AlertDescription>

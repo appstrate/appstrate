@@ -2,7 +2,8 @@
 // Copyright 2026 Appstrate
 
 /**
- * Token-aware context budgeting for `api_call` tool outputs.
+ * Token-aware context budgeting for text tool outputs: `api_call`, platform
+ * tools and third-party MCP tools all draw on one budget per run.
  *
  * Background. The byte-based caps in `helpers.ts`
  * (`MAX_RESPONSE_SIZE`, `ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
@@ -231,8 +232,8 @@ export function readPositiveTokenEnv(name: string, defaultValue: number): number
  * Run-scoped cumulative token budget tracker.
  *
  * One instance per sidecar process (each sidecar serves exactly one
- * run). The tracker is consulted by `responseToToolResult` for every
- * provider tool output, and only output paths that actually deliver
+ * run). The tracker is consulted by `spillTextIfOverBudget`
+ * (`./tool-output-spill.ts`) for every text tool output, and only output paths that actually deliver
  * content to the agent (`inline`) are recorded. Spilled content is
  * not recorded — the agent reads bytes from the blob store on demand,
  * and at read time the bytes are tokenised by the LLM's actual

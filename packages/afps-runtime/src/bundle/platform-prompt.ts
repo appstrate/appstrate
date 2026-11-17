@@ -76,9 +76,7 @@ export const UNAVAILABLE_INTEGRATION_REASONS = {
   remote_source_invalid: "its server address is invalid",
   remote_url_unrenderable: "its server address cannot be built from the connection",
   remote_url_blocked: "its server address is blocked",
-  local_server_ref_missing: "its server package is missing",
-  mcp_server_unresolved: "its server package cannot be found",
-  mcp_server_not_runnable: "its server package cannot run",
+  local_server_not_runnable: "its local server cannot run",
   no_delivery: "the connection's credentials cannot be delivered",
   bound_set_incomplete: "another connection bound with it failed to start",
   resolve_error: "it failed to start",
@@ -132,7 +130,8 @@ export interface PlatformPromptOptions {
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
   /**
-   * Output schema — drives the `## Output Format` section. The full JSON
+   * Output schema — drives the `## Output Format` section. Takes what
+   * `readDeclaredOutputSchema` returns: rendered as given when set. The full JSON
    * Schema (as it appears under `manifest.output.schema`) is surfaced in
    * plain text so the LLM sees the constraint in the prompt AND via the
    * `output` tool definition. This belt-and-suspenders is necessary
@@ -441,10 +440,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
-  // set, tier 1). The archive tier is reachable via
-  // tool calls — those instructions live in each tool's MCP descriptor
-  // `description` (`note` for writes, runtime-injected `recall_memory`
-  // for searches, surfaced via `tools/list`). Section omitted when no
+  // set, tier 1). The archive tier is reachable via tool calls — those
+  // instructions live in each tool's MCP descriptor `description` (the
+  // `@appstrate/platform` tools `note` for writes, `recall_memory` for
+  // searches, surfaced via `tools/list`). Section omitted when no
   // memories are pinned.
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
@@ -481,7 +480,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // Rendered LAST so the constraint is freshly in the LLM's context when
   // it reads the agent task prompt below. See `outputSchema` docstring
   // for why this duplicates the tool-level schema.
-  if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
+  if (opts.outputSchema) {
     sections.push("## Output Format\n");
     sections.push(
       "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
@@ -499,7 +498,12 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         )
       : [];
     const props = opts.outputSchema.properties;
-    if (props && typeof props === "object" && !Array.isArray(props)) {
+    if (
+      props &&
+      typeof props === "object" &&
+      !Array.isArray(props) &&
+      Object.keys(props).length > 0
+    ) {
       sections.push("### Required shape\n");
       for (const [key, prop] of Object.entries(props as Record<string, unknown>)) {
         const propRec = (prop as Record<string, unknown>) ?? {};

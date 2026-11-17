@@ -7,14 +7,8 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  effectiveInSpace,
-  personaFor,
-  personaMemberships,
-  resolveListingViewAs,
-} from "../lib/view-as.ts";
+import { resolveListingViewAs } from "../lib/view-as.ts";
+import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -34,7 +28,7 @@ import {
   orgSettingsPatchSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
+import { toSlug, SLUG_REGEX, isReservedScope } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
@@ -42,7 +36,7 @@ import {
   unsupportedApiVersion,
 } from "../lib/api-versions.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import {
   createInvitation,
   InvitationAlreadyPendingError,
@@ -56,7 +50,7 @@ import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { mayCreateOrganization } from "@appstrate/db/auth-policy";
-import { createDefaultSpace, listSpacesForPrincipal } from "../services/spaces.ts";
+import { createDefaultSpace } from "../services/spaces.ts";
 import { listSpacesOfMembers } from "../services/space-members.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
@@ -81,6 +75,31 @@ export const updateOrgSchema = z
     color: appearanceColorSchema.nullable().optional(),
   })
   .strict();
+
+/**
+ * An organization's slug is the scope its uploads, forks and starter agent are
+ * created under (`@<slug>/…`), so a slug must be neither one
+ * the platform owns (`isReservedScope`) nor another organization's. Checked on
+ * create and on rename — the only two doors that write a slug.
+ */
+async function assertSlugClaimable(slug: string): Promise<void> {
+  if (isReservedScope(slug)) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_reserved",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is reserved by the platform`,
+    });
+  }
+  if (!(await isSlugAvailable(slug))) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+    });
+  }
+}
 
 export const addMemberSchema = z
   .object({
@@ -192,14 +211,7 @@ router.post("/", async (c) => {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
-  if (!(await isSlugAvailable(slug))) {
-    throw new ApiError({
-      status: 400,
-      code: "slug_taken",
-      title: "Bad Request",
-      detail: `Slug '${slug}' is already in use`,
-    });
-  }
+  await assertSlugClaimable(slug);
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
@@ -256,20 +268,11 @@ async function memberSpacesForCaller(
   c: Context<AppEnv>,
   orgId: string,
 ): Promise<Map<string, OrganizationMemberSpace[]>> {
-  const entries = await listSpacesForPrincipal(
-    orgId,
-    callerOrgRole(c, orgId),
-    c.get("user").id,
-    callerPersonalOwnerId(c, orgId),
-    personaMemberships(personaFor(c, orgId)),
+  const readable = (await callerReachableSpaces(c, orgId)).flatMap(({ id, permissions }) =>
+    permissions.has("space-members:read")
+      ? [{ spaceId: id, includeImplicit: permissions.has("members:read") }]
+      : [],
   );
-  const pinnedSpaceId = c.get("spaceId");
-  const readable = entries.flatMap(({ space, role }) => {
-    if (pinnedSpaceId && space.id !== pinnedSpaceId) return [];
-    const permissions = effectiveInSpace(c, role);
-    if (!permissions.has("space-members:read")) return [];
-    return [{ spaceId: space.id, includeImplicit: permissions.has("members:read") }];
-  });
   return listSpacesOfMembers(orgId, readable);
 }
 
@@ -348,16 +351,7 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
-  if (data.slug) {
-    if (!(await isSlugAvailable(data.slug))) {
-      throw new ApiError({
-        status: 400,
-        code: "slug_taken",
-        title: "Bad Request",
-        detail: `Slug '${data.slug}' is already in use`,
-      });
-    }
-  }
+  if (data.slug) await assertSlugClaimable(data.slug);
 
   const updates = {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),

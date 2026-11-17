@@ -98,6 +98,24 @@ describe("SessionBridgeHandle.getTerminalError", () => {
     });
   });
 
+  it("carries the structured reason a provider refusal names onto the run trail", () => {
+    const session = createFakeSession();
+    const sink = createInternalCapture();
+    installSessionBridge(session, sink, RUN_ID);
+    endTurn(session, {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage:
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.280 does not support this model","details":{"error_code":"claude_code_version_too_old"}}}',
+      content: [],
+    });
+    expect(errorEventData(sink)).toEqual({
+      error_category: "invalid_request",
+      error_retryable: false,
+      error_reason: "runtime_version_too_old",
+    });
+  });
+
   it("returns a RunError on stopReason 'aborted' (provider abort, not user cancel)", () => {
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID);
@@ -427,8 +445,8 @@ describe("PiRunner.run — timeout watchdog names the cause for a HUMAN", () => 
 });
 
 describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
-  /** Complete a terminal tool, which flips the bridge's early-stop flag. */
-  function completeTerminalTool(session: FakeSession): void {
+  /** Complete `output`, which flips the bridge's early-stop flag. */
+  function completeOutput(session: FakeSession): void {
     session.emit({ type: "tool_execution_end", toolName: "output", toolCallId: "c1" });
   }
 
@@ -438,9 +456,9 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
     // upstream failure would blame a provider that never failed.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
     });
-    completeTerminalTool(session);
+    completeOutput(session);
     endTurn(session, {
       role: "assistant",
       stopReason: "aborted",
@@ -456,7 +474,7 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
     // the cause a watchdog firing later must still be able to report.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
     });
     endTurn(session, {
       role: "assistant",
@@ -464,17 +482,17 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
       errorMessage: "upstream 503",
       content: [],
     });
-    completeTerminalTool(session);
+    completeOutput(session);
     endTurn(session, { role: "assistant", stopReason: "aborted", content: [] });
     expect(handle.getLastUpstreamError()?.message).toBe("upstream 503");
   });
 
-  it("STILL latches a provider-side abort when no terminal tool ran", () => {
-    // The guard is gated on `terminalToolCompleted` — an abort with no
-    // terminal tool behind it is a genuine upstream failure, not our own stop.
+  it("STILL latches a provider-side abort when no `output` ran", () => {
+    // The guard is gated on `outputCompleted` — an abort with no
+    // `output` behind it is a genuine upstream failure, not our own stop.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
     });
     endTurn(session, {
       role: "assistant",

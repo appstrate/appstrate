@@ -101,6 +101,70 @@ Convenience: returns `{ server, client, close }` where both halves are
 already connected via `InMemoryTransport.createLinkedPair()`. Used for
 first-party tools where subprocess overhead is unjustifiable.
 
+### `createMcpHttpClient(url, options?)`
+
+A connected `AppstrateMcpClient` over Streamable HTTP, on the v2 client SDK
+(`@modelcontextprotocol/client`). This section is the reference for how it
+picks a **protocol era**; other documents link here rather than restate it.
+
+- **Negotiation** is the SDK's `'auto'` mode: a `server/discover` probe in the
+  MCP 2026-07-28 shape (stateless; version and identity in each request's
+  `_meta` and `MCP-Protocol-Version` header). A result, or an
+  `UnsupportedProtocolVersion` (-32022) listing a version both sides speak
+  (retried with it), keeps the connection modern. Anything else falls back to
+  the 2025 `initialize` handshake.
+- **Inconclusive probe**: a probe answered 5xx, or unanswered within 10 s (or
+  the caller's `defaultTimeoutMs`, when lower), is no era evidence. The client
+  tries `initialize` once. If that fails too, its error is surfaced when it
+  says more than the probe did (an auth refusal, a fault of the injected
+  `fetch`, a 5xx); otherwise the probe's is, so a transient 5xx stays
+  retryable.
+- **Legacy verdict cache**: an origin found legacy, by the probe or by that
+  fallback, is remembered for 15 minutes. Its next connects skip the probe.
+  The verdict is never renewed by those connects, so a server that upgrades is
+  re-probed when it expires. A remembered origin that refuses `initialize`
+  with a 4xx other than 401/403 is re-probed at once; an outage (refused
+  connection, timeout, 5xx) keeps the verdict and surfaces its own error.
+- **`era: "legacy"`** skips the probe, for a first-party server legacy by
+  construction (the sidecar's `/mcp`, the platform MCP module).
+
+`getProtocol()` says which era was negotiated.
+
+**Tools.** `tools/list` pages are raw requests, never the SDK's `listTools()`
+(which answers `[]` to a server advertising no `tools` capability).
+`listTools()` walks every page, up to 64, and throws past that. On a modern
+connection a tool with an invalid `x-mcp-header` is excluded and reported
+through `onWarning`. A server repeating its cursor throws too, never a
+partial list. The definitions of the session's last complete `listTools()`
+are handed to each `callTool`, installed in one swap once the walk ends: a
+failed walk leaves them untouched, a call made mid-walk sees the previous set,
+and `listToolsPage()` only reads. The SDK validates the output against the
+tool's `outputSchema` in both eras, and on a modern connection mirrors
+`x-mcp-header` parameters. A modern call made before any listing gets both
+only through the SDK's own recovery, so list first (current consumers do). A
+tool whose `outputSchema` cannot compile is refused before the call is sent. A
+`HeaderMismatch` (-32020) on a modern call refreshes the list and resends the
+call once. On a legacy connection -32020 is the server's own error and is
+never resent.
+
+Credentials and egress belong to the injected `fetch` (the credential proxy):
+the SDK is never given an auth provider and leaves redirects to it. A fault
+the injected fetch throws during the connect comes back as itself.
+
+`wrapClient(client, transport)` gives the same surface over a connected v1
+SDK `Client`: in-process pairs, stdio subprocesses, the HTTP+SSE transport.
+Their servers are 2025-era by construction. `listTools()` walks the pages
+there too, and the v1 client validates outputs against every page's tools,
+installed only once the walk completes.
+
+### `@appstrate/mcp-transport/testing`
+
+Fake servers of each era as `Request → Response` handlers, for consumer
+tests: `legacyMcpHandler` (v1 SDK, stateless), `modernMcpHandler` (written
+from the 2026-07-28 spec; `legacy` makes it dual-era, `refuseFirst` answers
+-32022 first), both paginating by `pageSize`, `handlerFetch`, and
+`forgetProtocolEras()` to reset the per-origin era cache between tests.
+
 ### Re-exports from the SDK
 
 ```ts
@@ -108,8 +172,8 @@ import { McpError, ErrorCode } from "@appstrate/mcp-transport";
 import type { CallToolResult, Tool } from "@appstrate/mcp-transport";
 ```
 
-For everything else — transports, request schemas, the `Client` class —
-import directly from `@modelcontextprotocol/sdk`.
+For everything else — server transports, request schemas — import directly
+from `@modelcontextprotocol/sdk` (the server side stays on v1).
 
 ## Stability
 

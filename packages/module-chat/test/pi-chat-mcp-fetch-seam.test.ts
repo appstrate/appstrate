@@ -28,6 +28,7 @@ const RUN_ID = "run_seam_1";
 
 interface RegisteredTool {
   name: string;
+  parameters: { properties?: Record<string, unknown> };
   execute: (
     toolCallId: string,
     params: unknown,
@@ -91,7 +92,10 @@ function seamFetch(forwarded: string[] = []) {
             {
               name: "run_and_wait",
               description: "Launch an Appstrate run and wait for completion.",
-              inputSchema: { type: "object" },
+              inputSchema: {
+                type: "object",
+                properties: { kind: { type: "string" }, wait: { type: "integer" } },
+              },
             },
             ...forwarded.map((name) => ({ name, inputSchema: { type: "object" } })),
           ],
@@ -163,6 +167,31 @@ describe("buildPlatformMcpTools fetch seam", () => {
       expect(
         seen.some((h) => h.method === "GET" && h.url.startsWith(`/api/runs/${RUN_ID}?wait=`)),
       ).toBe(true);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("offers the chat model no `wait` and refuses one without launching", async () => {
+    const transport = seamFetch();
+    const built = await buildTurn(transport);
+
+    try {
+      const { pi, tools } = capturePi();
+      for (const factory of built.extensionFactories) factory(pi);
+      const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
+      // The turn's deadline bounds the chat's wait: the platform's `wait` is dropped.
+      expect(Object.keys(runAndWait.parameters.properties ?? {})).toEqual(["kind"]);
+
+      const result = await runAndWait.execute("call_1", {
+        kind: "agent",
+        scope: "@acme",
+        name: "demo",
+        wait: 600,
+      });
+      const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+      expect(payload).toMatchObject({ code: "unknown_argument", arguments: ["wait"] });
+      expect(transport.seen.some((h) => h.method === "POST" && h.url.includes("/run"))).toBe(false);
     } finally {
       await built.close();
     }

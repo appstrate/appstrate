@@ -310,6 +310,40 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
+  it("a target carrying userinfo is refused before anything is sent, secret never echoed", async () => {
+    const fetchFn = mock(async () => new Response("ok")) as unknown as typeof fetch;
+    const resolveHost = mock(publicResolver);
+    for (const url of [
+      "https://user@api.github.com/user",
+      "https://u:s3cr3tpw@api.github.com/user",
+      "https://@api.github.com/user",
+      "  https://u:s3cr3tpw@api.github.com/user",
+      "https:\\\\u:s3cr3tpw@api.github.com/user",
+    ]) {
+      const err = await gate(url, {
+        authorizedUris: ["https://api.github.com/**"],
+        declaredUris: ["https://api.github.com/**"],
+        credentialFields: { token: "s3cr3tpw" },
+        fetchFn,
+        resolveHost,
+      });
+      expect(err?.kind).toBe("not_authorized");
+      expect(err?.redirect).toBe(false);
+      expect(err?.message).toContain("userinfo");
+      expect(err?.message).not.toContain("s3cr3tpw");
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(resolveHost).not.toHaveBeenCalled();
+    // `@` in the path or query is not userinfo.
+    expect(
+      await gate("https://api.github.com/users/a@b?x=@y", {
+        authorizedUris: ["https://api.github.com/**"],
+        declaredUris: ["https://api.github.com/**"],
+        resolveHost: publicResolver,
+      }),
+    ).toBeNull();
+  });
+
   it("off-allowlist target is refused before any DNS work", async () => {
     const resolveHost = mock(publicResolver);
     const err = await gate("https://evil.example/x", {
@@ -445,15 +479,80 @@ describe("fetchApiCall — credentials across a redirect", () => {
     expect(inside!.get("authorization")).toBe("Bearer tok");
   });
 
-  it("refuses a hop off the allowlist instead of following it", async () => {
-    const err = await hopHeaders("https://evil.example/steal", {
-      authorizedUris: ["https://api.dropboxapi.com/**"],
+  it("returns a redirect off the allowlist unfollowed: the 3xx as sent, nothing to its host", async () => {
+    const signed =
+      "https://productionresultssa5.blob.core.windows.net/actions-results/x/logs.txt?sig=abc";
+    const sent: { url: string; headers: Headers }[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      sent.push({ url, headers: new Headers(init?.headers) });
+      return new Response("redirecting", {
+        status: 302,
+        headers: { location: signed, "x-github-request-id": "r1" },
+      });
+    }) as unknown as typeof fetch;
+    const resolved: string[] = [];
+    const resolveHost = async (host: string) => {
+      resolved.push(host);
+      return publicResolver();
+    };
+    const { response, hops, finalUrl, credentialsForwarded } = await fetchApiCall({
+      url: "https://api.github.com/repos/o/r/actions/jobs/1/logs",
+      init: { method: "GET", headers: { Authorization: "Bearer tok" } },
+      authorizedUris: ["https://api.github.com/**"],
+      declaredUris: ["https://api.github.com/**"],
       allowAllUris: false,
-    }).catch((e: unknown) => e);
-    expect(classifyApiCallFailure(err)).toMatchObject({
-      code: "unauthorized_target",
-      redirect: true,
+      credentialHeaders: ["Authorization"],
+      internalHost: () => false,
+      integrationId: "i",
+      targetHost: "api.github.com",
+      credentialFields: {},
+      fetchFn,
+      resolveHost,
     });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(signed);
+    expect(response.headers.get("x-github-request-id")).toBe("r1");
+    expect(await response.text()).toBe("redirecting");
+    expect(hops).toBe(0);
+    expect(finalUrl).toBe("https://api.github.com/repos/o/r/actions/jobs/1/logs");
+    expect(credentialsForwarded).toBe(true);
+    // One upstream call, to the allowlisted target; the blob host is neither fetched nor resolved.
+    expect(sent.map((s) => s.url)).toEqual([
+      "https://api.github.com/repos/o/r/actions/jobs/1/logs",
+    ]);
+    expect(resolved).toEqual(["api.github.com"]);
+  });
+
+  it("still follows a redirect the allowlist names, credential included", async () => {
+    const [, second] = await hopHeaders("https://pipelines.example.com/logs", {
+      authorizedUris: ["https://api.dropboxapi.com/**", "https://pipelines.example.com/**"],
+      allowAllUris: false,
+    });
+    expect(second!.get("authorization")).toBe("Bearer tok");
+  });
+
+  it("returns a redirect to a metadata address off the allowlist without resolving or sending to it", async () => {
+    // The 3xx is handed back before any DNS or SSRF work on the hop: nothing reaches it.
+    const fetchFn = mock(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "http://169.254.169.254/" } }),
+    ) as unknown as typeof fetch;
+    const { response } = await fetchApiCall({
+      url: "https://api.example.com/x",
+      init: { method: "GET" },
+      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaders: [],
+      internalHost: () => false,
+      integrationId: "i",
+      targetHost: "api.example.com",
+      credentialFields: {},
+      fetchFn,
+      resolveHost: publicResolver,
+    });
+    expect(response.status).toBe(302);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("classifies a hop to a host with no DNS answer as unresolvable, not as SSRF", async () => {
@@ -810,4 +909,55 @@ describe("HOP_BY_HOP_HEADERS", () => {
       expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
     }
   });
+});
+
+describe("fetchApiCall — a refused target", () => {
+  const refusedTarget = {
+    matches: (url: URL) => url.pathname.startsWith("/refused"),
+    message: "refused target",
+  };
+
+  for (const allowAllUris of [false, true]) {
+    it(`refuses it on a redirect hop without sending to it (allowAllUris: ${allowAllUris})`, async () => {
+      const sent: string[] = [];
+      const fetchFn = mock(async (input: string | URL | Request) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        sent.push(url.pathname);
+        return url.pathname === "/start"
+          ? new Response(null, { status: 307, headers: { location: "/refused/x" } })
+          : new Response("ok");
+      }) as unknown as typeof fetch;
+      const err = await fetchApiCall({
+        url: "https://api.example.com/start",
+        init: { method: "POST", body: "{}" },
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        allowAllUris,
+        credentialHeaders: [],
+        internalHost: () => false,
+        integrationId: "i",
+        fetchFn,
+        resolveHost: publicResolver,
+        refusedTarget,
+        credentialFields: {},
+        targetHost: "api.example.com",
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiCallRefusedError);
+      expect((err as ApiCallRefusedError).message).toBe("refused target");
+      expect((err as ApiCallRefusedError).redirect).toBe(true);
+      expect(sent).toEqual(["/start"]);
+    });
+
+    it(`refuses it as the initial target (allowAllUris: ${allowAllUris})`, async () => {
+      const err = await gate("https://api.example.com/refused", {
+        allowAllUris,
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        resolveHost: publicResolver,
+        refusedTarget,
+      });
+      expect(err?.message).toBe("refused target");
+      expect(err?.redirect).toBe(false);
+    });
+  }
 });

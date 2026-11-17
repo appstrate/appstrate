@@ -2,7 +2,7 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
@@ -136,7 +136,7 @@ export const connectionIdSetJsonSchema = {
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
   uniqueItems: true,
   description:
-    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs.",
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound` wherever nothing imposes a set: a 409 item on a launch or a schedule write (`source` `run_override` / `schedule_override`) and a 409 item on the runs a `[]` pin governs. Under an admin pin or an enforced org default a launch override of `[]` means no addition and is accepted.",
 } as const;
 
 /** The org default's set: never empty — none for every agent of the space is deactivation. */
@@ -147,23 +147,36 @@ const orgDefaultConnectionIdSetJsonSchema = {
     "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
+/** How many schedules a governance write or removal disabled. */
+const schedulesDisabledCountSchema = {
+  type: "integer",
+  minimum: 0,
+  description:
+    "How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove.",
+} as const;
+
 /** What removing a pin or an org default answers. */
 export const namingLayerRemovalSchema = {
   type: "object",
   required: ["schedules_disabled_count"],
-  properties: {
-    schedules_disabled_count: {
-      type: "integer",
-      minimum: 0,
-      description:
-        "How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove.",
-    },
-  },
+  properties: { schedules_disabled_count: schedulesDisabledCountSchema },
 } as const;
 
 /** The schedules a pin or org default removal disables, closing each removal's description. */
 export const namingLayerRemovalEffect =
   "The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.";
+
+/** The schedules removing an imposed floor disables, beyond {@link namingLayerRemovalEffect}. */
+const floorRemovalEffect =
+  "Removing a floor (an admin pin, an enforced default, or that enforcement) also disables (`disabled_reason: connection_set_unnamed`), in the same transaction, every enabled schedule it governed — for a pin, on its agent; for an enforced default, on every agent of the space no admin pin governs for this integration — that nothing governs afterwards and whose `connection_overrides` set for this integration strictly narrows the removed floor — names only connections of it, and fewer than it holds (`[]` included; ids compared case-insensitively, repeats counted once): under the floor it added nothing, ungoverned it would bind fewer connections, or none. A set naming the whole floor (in any order) binds the same either way; it, a set naming another connection, and a schedule with no key for this integration keep their meaning and are left alone.";
+
+/** The member pins a governance write or removal deletes — stated in full on `upsertIntegrationPin` only. */
+const memberPinPurgeRule =
+  "A member pin never survives under a governance that admits no addition — a closed admin pin or an enforced default — where it would otherwise come back later as an addition or as a selection nobody chose again. So, in the same transaction: writing an admin pin closed, or over a closed one, deletes every member pin of its agent and integration in the space (writing an open pin where there was none, or rewriting an open one, keeps them); removing a closed pin, or an open one while the space enforces a default for the integration, deletes them too; removing an open pin otherwise deletes only those strictly narrowing its floor (only connections of it, fewer than it holds, `[]` included), which added nothing and would bind fewer connections as written; writing or removing a default that is, or was, enforced deletes every member pin of the integration in the space (a closed admin pin left none, and the enforced default closes an open one). The audit records each one (`memberPinsCleared`: `userId`, `agentPackageId`, `connectionIds`).";
+
+/** The pointer the other governance operations carry to {@link memberPinPurgeRule}. */
+const memberPinPurgeRef =
+  "It deletes the member pins it masks, by the rule stated on `upsertIntegrationPin`; the audit records each one (`memberPinsCleared`).";
 
 /** What a connection delete does to the schedules of a member pin it empties. */
 export const droppedPinEffect =
@@ -194,6 +207,20 @@ const integrationOrgDefaultSchema = {
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+/** What writing an org default answers: the stored default, and the schedules un-enforcing it disabled. */
+const integrationOrgDefaultWriteSchema = {
+  type: "object",
+  required: [...integrationOrgDefaultSchema.required, "schedules_disabled_count"],
+  properties: {
+    ...integrationOrgDefaultSchema.properties,
+    schedules_disabled_count: {
+      ...schedulesDisabledCountSchema,
+      description:
+        "How many schedules the write disabled (`disabled_reason: connection_set_unnamed`): only writing an enforced default back with `enforce: false` disables any; 0 otherwise.",
+    },
   },
 } as const;
 
@@ -356,7 +383,7 @@ export const integrationConnectionSchema = {
     client_ref: {
       type: ["string", "null"],
       description:
-        "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+        "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
     },
     variables: {
       type: ["object", "null"],
@@ -408,7 +435,7 @@ export const integrationClientsListSchema = {
           is_default: {
             type: "boolean",
             description:
-              "True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client.",
+              "True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default.",
           },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },
@@ -578,7 +605,7 @@ const authStatusSchema = {
     client_auto_provisioned: {
       type: "boolean",
       description:
-        'True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required.',
+        'True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance\'s Client ID Metadata Document of that server as a public client (`GET /oauth/client-metadata/{document}`) when the server accepts one and the instance can serve it (see `INTEGRATION_OAUTH_CIMD` in docs/ENV.md), else RFC 7591 dynamic registration of a public client — so no pre-registered client is required.',
     },
   },
 } as const;
@@ -601,6 +628,35 @@ const toolCatalogEntrySchema = {
   },
 } as const;
 
+/**
+ * The verdict of a credential-proxy call outside a run naming no connection
+ * (`proxyConnectionVerdict`): the integration detail's `proxy_connection`, and each
+ * `not_ready` entry of `GET /api/credential-proxy/tools`.
+ */
+export const proxyConnectionVerdictProperties = {
+  status: {
+    type: "string",
+    enum: [
+      "ready",
+      "must_choose",
+      "needs_reconnection",
+      "none",
+      "not_permitted",
+      "default_unavailable",
+      "unusable",
+      "proxy_closed",
+      "not_required",
+    ],
+    description:
+      "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.",
+  },
+  imposed: {
+    type: "boolean",
+    description:
+      "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's.",
+  },
+} as const;
+
 const integrationDetailSchema = {
   type: "object",
   required: [
@@ -611,14 +667,15 @@ const integrationDetailSchema = {
     "active",
     "block_user_connections",
     "platform_redirect_uri",
+    "proxy_connection",
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
     auths: { type: "array", items: authStatusSchema },
     // Effective agent-facing tool catalog. Resolved server-side from the
-    // referenced mcp-server's MCPB `tools[]` (local source) minus
-    // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
-    // to `manifest.tools_policy` keys when the mcp-server is absent.
+    // `source.server.tools` (local source) minus `hidden_tools` and
+    // auto-hidden connect.tool primitives. Falls back to
+    // `manifest.tools_policy` keys when a local server declares no catalog.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
     // AFPS §4.4 — the tool(s) an agent inherits when it declares this
     // integration without an `integrations_configuration.<id>.tools`
@@ -649,6 +706,14 @@ const integrationDetailSchema = {
     // consumer showing "the URI to register at the provider" must still prefer
     // the default client's override when it has one.
     platform_redirect_uri: { type: "string", format: "uri" },
+    proxy_connection: {
+      type: "object",
+      required: ["status", "imposed"],
+      additionalProperties: false,
+      description:
+        "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
+      properties: proxyConnectionVerdictProperties,
+    },
   },
 } as const;
 
@@ -726,15 +791,66 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer.";
+  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
 const CONNECT_LOGIN_502 =
-  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`.";
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none. On an oauth2 auth, `login_upstream_unavailable` also covers any other 4xx (a 403 is often a firewall refusing the client), an unusable 2xx (no `access_token`, or a `token_type` absent or other than `Bearer`, compared case-insensitively), and an `issuer` whose metadata cannot be read, refused before anything is sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. Once an oauth2 token request may have redeemed the grant — a timeout, a 5xx, an unusable 2xx, or any refusal after a successful token request, whatever its status (400, 404, 500 or 502) — the problem carries the extension member `grant_may_be_redeemed: true` and its detail says so; it is absent when the answer was a 4xx or the request was never sent.";
+const CONNECT_LOGIN_403 =
+  "oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one.";
+/** An oauth2 `connect.login` whose chosen OAuth client is gone by the token request, on both connect surfaces. */
+const CONNECT_LOGIN_409 = {
+  description:
+    "oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
+  content: {
+    "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+  },
+} as const;
 const connectLogin502Headers = {
   ...STD_RESPONSE_HEADERS,
   "Retry-After": { $ref: "#/components/headers/RetryAfter" },
 } as const;
 const problemJson = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+const grantMayBeRedeemedProperty = {
+  grant_may_be_redeemed: {
+    type: "boolean",
+    const: true,
+    description:
+      "oauth2 declaring `connect.login`: the token request may have redeemed the submitted grant (a rotating refresh token, say), so a retry may be refused and a new grant needed. Present on any refusal after the token request may have reached the service, whatever its status; absent otherwise.",
+  },
+} as const;
+/** A `connect.login` 502, with the RFC 9457 extension member an oauth2 token request may add. */
+const connectLogin502Json = {
+  "application/problem+json": {
+    schema: {
+      allOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        { type: "object", properties: grantMayBeRedeemedProperty },
+      ],
+    },
+  },
+} as const;
+/** A hosted-form refusal: a `connect.login` 502's members, and whether it ended the page session. */
+const hostedSubmitProblemJson = {
+  "application/problem+json": {
+    schema: {
+      allOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        {
+          type: "object",
+          properties: {
+            ...grantMayBeRedeemedProperty,
+            connect_session_ended: {
+              type: "boolean",
+              const: true,
+              description:
+                "The refusal ended the page session: a resubmission is a 404 and reaches no service, so the connection must be restarted from the application (a new connection link). Present on every refusal that ends it, whatever its status; absent when the form can be submitted again.",
+            },
+          },
+        },
+      ],
+    },
+  },
 } as const;
 
 /** Shared by both connection-edit doors: this one and `PATCH /api/me/connections/{connectionId}`. */
@@ -907,7 +1023,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
-        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
+        "Browser-side OAuth callback of a client a system integration or an administrator registered on it (`platform_redirect_uri`). Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an auto-provisioned (DCR) client must arrive at its authorization server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
       parameters: oauthCallbackQueryParameters,
       responses: oauthCallbackResponses,
     },
@@ -917,9 +1033,9 @@ export const integrationsPaths = {
       operationId: "integrationsOAuthCallbackForServer",
       tags: ["Integrations"],
       summary:
-        "Integration OAuth2 callback of an authorization server chosen per connection (popup)",
+        "Integration OAuth2 callback of an auto-provisioned (DCR) client's authorization server (popup)",
       description:
-        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+        "The redirect URI a dynamically registered (RFC 7591) client is registered with and sends, one per authorization server (`{tag}` derives from its validated issuer): the server a remote MCP manifest fixes, or one chosen per connection (AFPS §7.3: an `issuer` or `source.remote.url` templated over connection variables). One per server is the RFC 9700 §4.4 mix-up defence, so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a flow on the shared `/callback` or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
       parameters: [
         {
           name: "tag",
@@ -932,6 +1048,340 @@ export const integrationsPaths = {
         ...oauthCallbackQueryParameters,
       ],
       responses: oauthCallbackResponses,
+    },
+  },
+  "/api/integrations/callback/cimd/{tag}": {
+    get: {
+      operationId: "integrationsOAuthCallbackForMetadataDocument",
+      tags: ["Integrations"],
+      summary: "Integration OAuth2 callback of a client metadata document (popup)",
+      description:
+        "The redirect URI a Client ID Metadata Document of this instance lists (`GET /oauth/client-metadata/{document}`), one per authorization server, in a namespace dynamic registration never uses: a response here only completes a flow started with a metadata-document client of the server whose tag it carries — never one started with a DCR or administrator client, and never at `/callback` or `/callback/{tag}`. Any server can fetch any document, so such a flow also requires RFC 9207 `iss` naming the server the request was sent to; a response without it, or naming another server, is refused (RFC 9700 §4.4 mix-up defence). Otherwise identical to `integrationsOAuthCallback`.",
+      parameters: [
+        {
+          name: "tag",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9_-]{22}$" },
+          description:
+            "The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata.",
+        },
+        ...oauthCallbackQueryParameters,
+      ],
+      responses: oauthCallbackResponses,
+    },
+  },
+  "/api/integrations/discover": {
+    post: {
+      operationId: "discoverRemoteIntegration",
+      tags: ["Integrations"],
+      summary: "Propose an integration manifest from a remote MCP server URL",
+      description:
+        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an unauthenticated MCP connect (Streamable HTTP, `server/discover` first, the legacy `initialize` when the server gives no modern answer; a 404/405 to every POST falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported` with RFC 9207 `authorization_response_iss_parameter_supported`, when the instance can serve one: see `INTEGRATION_OAUTH_CIMD` in docs/ENV.md) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); a server whose metadata lacks what connect requires carries a warning per lack — `authorization_server_pkce_unsupported` without PKCE S256 in `code_challenge_methods_supported`, and, for a public client, `authorization_server_iss_unsupported` without RFC 9207 `authorization_response_iss_parameter_supported` (connect refuses the first for any MCP server, the second for any integration but a system one); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A server answering the connect and its first `tools/list` without a Bearer challenge serves MCP openly: the proposal is an unauthenticated integration (AFPS §7.2), without `auths`, its `source.remote.url` the request's `url` as given. A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["url"],
+              properties: {
+                url: {
+                  type: "string",
+                  format: "uri",
+                  description:
+                    "The MCP server URL, as it would be `source.remote.url`. A URL carrying a username or password is refused.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The manifest proposal.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["manifest", "icon_source", "provenance", "warnings", "existing"],
+                properties: {
+                  manifest: {
+                    type: "object",
+                    required: ["display_name", "name", "source"],
+                    description:
+                      "A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`; absent for a server answering without a challenge), and when published `description` and `homepage` (from the identity the server gives without a credential, in `server/discover` or `initialize`), `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is: the server's own icon, else its site's).",
+                    properties: {
+                      display_name: { type: "string" },
+                      name: { type: "string" },
+                      description: { type: "string" },
+                      homepage: { type: "string", format: "uri" },
+                      documentation: { type: "string", format: "uri" },
+                      privacy_policies: { type: "array", items: { type: "string", format: "uri" } },
+                      icon: { type: "string" },
+                      source: {
+                        type: "object",
+                        required: ["kind", "remote"],
+                        properties: {
+                          kind: { type: "string", enum: ["remote"] },
+                          remote: {
+                            type: "object",
+                            required: ["url", "transport"],
+                            properties: {
+                              url: { type: "string", format: "uri" },
+                              transport: { type: "string", enum: ["streamable-http", "sse"] },
+                            },
+                          },
+                        },
+                      },
+                      auths: { type: "object", additionalProperties: { type: "object" } },
+                    },
+                  },
+                  icon_source: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's own raster icon (its `icons`, read without a credential), else its site's (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL.",
+                  },
+                  provenance: {
+                    type: "object",
+                    description:
+                      "Per proposed field, keyed by JSON pointer into `manifest` (`/display_name`, `/auths/oauth`, …): `detected` when the server published it, `guessed` when inferred.",
+                    additionalProperties: { type: "string", enum: ["detected", "guessed"] },
+                  },
+                  warnings: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["code", "message"],
+                      properties: {
+                        code: {
+                          type: "string",
+                          enum: [
+                            "manual_client_required",
+                            "authorization_server_blocked",
+                            "authorization_server_iss_unsupported",
+                            "authorization_server_pkce_unsupported",
+                          ],
+                        },
+                        message: { type: "string" },
+                      },
+                    },
+                  },
+                  existing: {
+                    type: "array",
+                    description:
+                      "The integrations already backed by this server: those `GET /api/integrations` lists to the caller in the current space (the organization's and the system's, placed in this space, never an ephemeral one) whose `source` is remote and whose `source.remote.url` equals the request's `url` once both are canonicalized (WHATWG serialization, userinfo and fragment dropped) — nothing looser, no match on name or domain. Never names a package the caller cannot list. Ordered by `integration_package_id`; empty when none.",
+                    items: {
+                      type: "object",
+                      required: ["integration_package_id", "display_name"],
+                      properties: {
+                        integration_package_id: { type: "string" },
+                        display_name: {
+                          type: "string",
+                          description: "The manifest's `display_name`, else the package id.",
+                        },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "422": {
+          description:
+            "`not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server of either protocol era (a 401/403 without a Bearer challenge included).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be reached or read (network failure, timeout, a body cut short, the 25-second bound passed before the auth metadata was read, or a redirect to a refused address).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/discover": {
+    post: {
+      operationId: "syncIntegrationFromServer",
+      tags: ["Integrations"],
+      summary: "Propose manifest fields from the integration's connected MCP server",
+      description:
+        "Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics). Ignored for an integration declaring no auths, whose server is reached without a connection.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The manifest proposal.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["manifest", "icon_source", "instructions", "tools", "warnings"],
+                properties: {
+                  manifest: {
+                    type: "object",
+                    required: ["default_tools", "tools_policy"],
+                    description:
+                      "A partial AFPS integration manifest: only the fields the server reported.",
+                    properties: {
+                      default_tools: {
+                        type: "array",
+                        items: { type: "string" },
+                        description:
+                          "The selection an agent inherits: only the tools the server annotates `readOnlyHint: true` and not `destructiveHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise.",
+                      },
+                      tools_policy: {
+                        type: "object",
+                        additionalProperties: { type: "object" },
+                        description: "Every tool listed, each with an empty policy.",
+                      },
+                      display_name: { type: "string" },
+                      description: { type: "string" },
+                      homepage: { type: "string", format: "uri" },
+                      icon: { type: "string" },
+                    },
+                  },
+                  icon_source: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. A `serverInfo.icons` entry is taken only as a `data:` URI or an https URL of the MCP server's own origin, fetched without credentials and with every redirect kept on that origin; else the site's own icon, over https only.",
+                  },
+                  instructions: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included).",
+                  },
+                  tools: {
+                    type: "array",
+                    description:
+                      "Every tool listed, in server order, one entry per name (the first listed wins), for the editor to show and select from. MCP annotations are the server's untrusted hints: `read_only` only drives the `default_tools` pre-selection.",
+                    items: {
+                      type: "object",
+                      required: ["name", "read_only", "destructive"],
+                      properties: {
+                        name: { type: "string" },
+                        title: {
+                          type: "string",
+                          maxLength: 200,
+                          description:
+                            "The tool's `title` (else `annotations.title`), trimmed, at most 200 characters (a cut ends with `…`); absent when empty.",
+                        },
+                        description: {
+                          type: "string",
+                          maxLength: 1024,
+                          description:
+                            "The tool's `description`, trimmed, at most 1024 characters (a cut ends with `…`); absent when empty.",
+                        },
+                        read_only: {
+                          type: "boolean",
+                          description:
+                            "True only when the server annotates the tool `readOnlyHint: true`.",
+                        },
+                        destructive: {
+                          type: "boolean",
+                          description:
+                            "True only when the server annotates the tool `destructiveHint: true`. An untrusted hint like `read_only`; a destructive tool is never in the proposal's `default_tools`, even when also annotated read-only.",
+                        },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                  warnings: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["code", "message"],
+                      properties: {
+                        code: {
+                          type: "string",
+                          enum: ["tools_truncated", "instructions_truncated"],
+                        },
+                        message: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description:
+            "`validation_failed` — the request body is invalid; `invalid_draft_manifest` — the package's draft manifest does not validate.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "403": {
+          description:
+            "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts are relayed (`needs_reconnection`; `must_choose_connection` when the caller holds several usable connections and the body names none: retry with one of its `candidate_connections` as `connection_id`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "422": {
+          description:
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`; `error=http_protocol_error` with `received-status=<status>` on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` that received an answer (a credential asked of an integration declaring none included), `error=http_protocol_error` alone on any other `bad_gateway`; `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code.",
+          headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
+          content: problemJson,
+        },
+        "504": {
+          description:
+            "`upstream_timeout` — the server did not answer within the sync's 20 s (`Proxy-Status` error `http_response_timeout`).",
+          headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
+          content: problemJson,
+        },
+      },
     },
   },
   "/api/integrations/{packageId}": {
@@ -976,7 +1426,7 @@ export const integrationsPaths = {
         "space may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
-        "(DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.",
+        "(client metadata document or DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1012,7 +1462,7 @@ export const integrationsPaths = {
       description:
         "Updates one of this space's custom clients in place, by its id (an " +
         "org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned " +
-        "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
+        "(DCR) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1089,7 +1539,7 @@ export const integrationsPaths = {
         "Moves one of this space's custom clients to the org level (`spaceId: " +
         "null`), inherited by every space of the org. It keeps its id and secret, " +
         "so the connections it minted keep working; it becomes the org default " +
-        "when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, " +
+        "when the org has none. A space's auto-provisioned (DCR) client moves too, " +
         "unless the org already holds the auto-provisioned client of the same authorization " +
         "server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and " +
         "`org-integrations:configure`, which are never granted to an API key.",
@@ -1197,7 +1647,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Import a connection by submitting credentials directly (programmatic)",
       description:
-        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
+        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths, and for an oauth2 auth declaring `connect.login` (AFPS §7.7): the grant its login renders from the submitted credentials (for example a refresh token) is sent to the token endpoint before the connection is stored, and a grant the server refuses is a 400 `login_rejected`, an OAuth client it refuses a 502 `oauth_client_rejected`. The answer must carry `token_type` `Bearer`; a response without `scope` is granted the `scope` the grant requested, if any; identity comes from the token response and `userinfo_endpoint`, never from an `id_token`, which is not validated. For other OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1239,12 +1689,16 @@ export const integrationsPaths = {
           $ref: "#/components/responses/ValidationError",
           description: `Invalid body or credentials. ${CONNECT_LOGIN_400}`,
         },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description: `Insufficient permissions. ${CONNECT_LOGIN_403}`,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": CONNECT_LOGIN_409,
         "502": {
           description: CONNECT_LOGIN_502,
           headers: connectLogin502Headers,
-          content: problemJson,
+          content: connectLogin502Json,
         },
         ...connectRunResponses,
       },
@@ -1256,7 +1710,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Headless OAuth2 PKCE start — returns an authorize URL (programmatic)",
       description:
-        "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
+        "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the platform callback: the shared `/callback` for a system or administrator client, the authorization server's `/callback/{tag}` for an auto-provisioned (DCR) client, `/callback/cimd/{tag}` for a client metadata document. An oauth2 auth declaring `connect.login` has no authorization flow and is refused with a 400: submit its credentials through `importIntegrationConnection`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1301,7 +1755,15 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
+        "503": {
+          description:
+            "`authorization_server_unreachable` — the metadata (RFC 8414) of an auto-provisioned client's authorization server did not answer (network failure, timeout, 5xx): nothing was registered, and the same request may succeed shortly. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1367,7 +1829,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted connect dispatch (token)",
       description:
-        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
+        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, oauth2 declaring `connect.login`, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
       parameters: [
         {
           name: "token",
@@ -1387,16 +1849,16 @@ export const integrationsPaths = {
         // maps to exactly one status.
         "302": {
           description:
-            "Redirect to the provider OAuth screen, or to the hosted form (non-oauth, or oauth2 with connection variables).",
+            "Redirect to the provider OAuth screen, or to the hosted form (non-oauth, oauth2 declaring `connect.login`, or oauth2 with connection variables).",
         },
         "400": {
           description:
-            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
+            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR), where every refusal burns it.",
           content: htmlErrorPage,
         },
         "403": {
           description:
-            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
           content: htmlErrorPage,
         },
         "410": {
@@ -1480,7 +1942,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:
-        "Persists credentials entered on the hosted form — or, for an oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.",
+        "Persists credentials entered on the hosted form (for an oauth2 auth declaring `connect.login`, the grant they render is sent to the token endpoint first) — or, for another oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session. An oauth2 `connect.login` submission is single-use: the page session is spent before the token request, so a concurrent or repeated submission is a 404 and a grant is presented once. A refusal before the grant leaves the platform (an invalid submission, no usable or an unsupported OAuth client, an `issuer` binding refusal, a token endpoint the egress guard refuses) hands the session back and the form can be submitted again; once the token request may have been sent, any outcome ends it. A refusal that ends the page session carries the RFC 9457 extension member `connect_session_ended: true`, whatever its status: the form must not be offered again, since a resubmission is a 404 that reaches no service.",
       parameters: [
         {
           name: "x-connect-csrf",
@@ -1501,7 +1963,7 @@ export const integrationsPaths = {
                   type: "object",
                   additionalProperties: true,
                   description:
-                    "The credential fields. Required for a non-oauth auth, refused for oauth2.",
+                    "The credential fields. Required for a non-oauth auth and for an oauth2 auth declaring `connect.login`, refused for other oauth2 auths.",
                 },
                 variables: connectionVariablesSchema,
               },
@@ -1544,24 +2006,24 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is \`connection_not_ready\`, with a generic detail. ${CONNECT_LOGIN_400} The page session survives: the form can be submitted again.`,
+          description: `Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is \`connection_not_ready\`, with a generic detail. ${CONNECT_LOGIN_400} The page session survives and the form can be submitted again, unless an oauth2 \`connect.login\` token request was sent (a \`login_rejected\` from the token endpoint, a refusal after it).`,
         },
         "403": {
           description:
-            "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+            "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. " +
+            CONNECT_LOGIN_403,
+          content: hostedSubmitProblemJson,
         },
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
+            "No active connect session (an oauth2 `connect.login` form already submitted included), or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
         },
+        "409": CONNECT_LOGIN_409,
         "502": {
-          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives.`,
+          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives, unless an oauth2 \`connect.login\` token request may have been sent. A refusal that ends the page session carries \`connect_session_ended: true\`.`,
           headers: connectLogin502Headers,
-          content: problemJson,
+          content: hostedSubmitProblemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         ...connectRunResponses,
@@ -1858,7 +2320,12 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Pin a set of shared connections to an agent for all members of the space (admin)",
       description:
-        "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
+        "Impose a floor: every run of the agent binds the pinned set, whoever runs it, and no launch override, member pin, org default or fallback narrows or replaces it. `allow_additional_connections` decides what may add to it. Closed (the default), nothing does: a launch override naming a connection outside the set is `override_outranked`. Open, the run's selection — its launch override, else the member's pin — is bound after the floor (deduplicated, at most " +
+        `${MAX_CONNECTIONS_PER_INTEGRATION} in all, else \`connection_set_too_large\`), from the connections the actor can reach. ` +
+        "Growing an open floor does not judge the member pins already stored: where the floor plus one of them exceeds " +
+        `${MAX_CONNECTIONS_PER_INTEGRATION} connections, that member's runs fail with \`connection_set_too_large\`. ` +
+        memberPinPurgeRule +
+        " Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1878,6 +2345,12 @@ export const integrationsPaths = {
                   description:
                     "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration, reach this space and be shared into it by the member who owns it.",
                 },
+                allow_additional_connections: {
+                  type: "boolean",
+                  default: false,
+                  description:
+                    "Whether the run's selection may add to the pinned set. The write replaces it too: absent is `false`, whatever was stored. Refused over `[]` (an empty floor imposes nothing to add to), and while the space enforces a default for this integration (an enforced default is always closed).",
+                },
               },
               additionalProperties: false,
             },
@@ -1894,7 +2367,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${connectionSetRefusals}, or \`allow_additional_connections: true\` with \`connection_ids: []\` (an error on \`allow_additional_connections\`).`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1902,13 +2375,23 @@ export const integrationsPaths = {
           description:
             "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
+        "409": {
+          description:
+            "`connection_additions_conflict`: `allow_additional_connections: true` while the space enforces a default connection set for this integration. Stop enforcing the default, or keep the pin closed.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
       operationId: "deleteIntegrationPin",
       tags: ["Integrations"],
       summary: "Remove an admin pin (admin)",
-      description: `Removes the agent's admin pin for this integration. ${namingLayerRemovalEffect}`,
+      description: `Removes the agent's admin pin for this integration. ${memberPinPurgeRef} ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1943,7 +2426,8 @@ export const integrationsPaths = {
       ],
       responses: {
         "200": {
-          description: "Org default (bare resource — same shape as PUT)",
+          description:
+            "Org default (bare resource — the shape PUT answers, without its `schedules_disabled_count`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -1969,7 +2453,11 @@ export const integrationsPaths = {
         "the current default rather than adding a second one. Every consuming agent gets the " +
         "default's scopes: bind an agent that needs more to its own connection rather than " +
         "upgrading a default one — a member pin overrides a soft default, and only an admin pin " +
-        "overrides an enforced one.",
+        "overrides an enforced one. " +
+        memberPinPurgeRef +
+        " Writing an enforced default back with `enforce: false` removes the floor it imposed. " +
+        floorRemovalEffect +
+        " Their jobs are removed once it commits; the response counts them (`schedules_disabled_count`) and the audit record lists them (`disabledScheduleIds`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1998,9 +2486,9 @@ export const integrationsPaths = {
       },
       responses: {
         "200": {
-          description: "Default set",
+          description: "Default set: the stored default, and how many schedules the write disabled",
           headers: STD_RESPONSE_HEADERS,
-          content: { "application/json": { schema: integrationOrgDefaultSchema } },
+          content: { "application/json": { schema: integrationOrgDefaultWriteSchema } },
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
@@ -2012,13 +2500,23 @@ export const integrationsPaths = {
           description:
             "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed.",
         },
+        "409": {
+          description:
+            "`connection_additions_conflict`: `enforce: true` while an admin pin of this integration lets members add connections; `detail` names the agents. An enforced default is always closed: close those pins to additions, or keep the default soft.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
       summary: "Remove the space-wide default connection (admin)",
-      description: `Removes the space's default set for this integration, soft or enforced. ${namingLayerRemovalEffect}`,
+      description: `Removes the space's default set for this integration, soft or enforced. ${memberPinPurgeRef} ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

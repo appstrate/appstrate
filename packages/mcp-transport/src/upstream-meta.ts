@@ -125,3 +125,31 @@ export interface ApiCallErrorMeta {
 export function apiCallStatusLine(status: number, code?: string): string {
   return `[api_call status=${status}${code ? ` code=${code}` : ""}]`;
 }
+
+/**
+ * `_meta` key a platform MCP tool sets to `true` on a tool result it relays from a third party
+ * as is — a remote MCP server's own result, through `call_integration_tool`. Nothing in such a
+ * result was written by the platform, so a client that trusts the platform's own payloads (the
+ * chat's connect cards) trusts none of it. The platform's answers beside it (its refusals, an
+ * `api_call` batch) never carry it.
+ */
+const RELAYED_RESULT_META_KEY = "dev.appstrate/relayed";
+
+/** `result` marked {@link RELAYED_RESULT_META_KEY}, its other `_meta` keys kept: a relay's claim to the key is overwritten. */
+export function markRelayedResult<T extends { _meta?: unknown }>(result: T): T {
+  const meta =
+    typeof result._meta === "object" && result._meta !== null && !Array.isArray(result._meta)
+      ? (result._meta as Record<string, unknown>)
+      : {};
+  return { ...result, _meta: { ...meta, [RELAYED_RESULT_META_KEY]: true } };
+}
+
+/** Whether `result` is marked {@link RELAYED_RESULT_META_KEY}. */
+export function isRelayedResult(result: { _meta?: unknown }): boolean {
+  const meta = result._meta;
+  return (
+    typeof meta === "object" &&
+    meta !== null &&
+    (meta as Record<string, unknown>)[RELAYED_RESULT_META_KEY] === true
+  );
+}

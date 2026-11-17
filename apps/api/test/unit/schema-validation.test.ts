@@ -24,11 +24,7 @@ const VALID_MANIFEST = {
   dependencies: {
     integrations: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    mcp_servers: { "@appstrate/web-search": "*" },
   },
-  // Declares an output schema below, so the `output` runtime tool must be
-  // enabled (enforced by agentManifestSchema's superRefine).
-  runtime_tools: ["output"],
   input: {
     schema: {
       type: "object",
@@ -94,13 +90,7 @@ const OUTPUT_SCHEMA: JSONSchemaObject = {
 // =====================================================
 
 describe("validateManifest", () => {
-  it("gives the output-tool rule its own issue code, every other rule none", () => {
-    const noOutputTool = validateManifest({ ...VALID_MANIFEST, runtime_tools: [] });
-    expect(noOutputTool.valid).toBe(false);
-    expect(noOutputTool.valid ? [] : noOutputTool.issues).toEqual([
-      expect.objectContaining({ path: "runtime_tools", code: "output_tool_required" }),
-    ]);
-
+  it("structures a rule failure as an issue without an own code", () => {
     const badVersion = validateManifest({ ...VALID_MANIFEST, version: 12 });
     expect(badVersion.valid).toBe(false);
     if (badVersion.valid) return;

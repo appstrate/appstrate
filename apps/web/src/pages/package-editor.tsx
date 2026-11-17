@@ -8,12 +8,9 @@ import type {
   IntegrationToolCatalogEntry,
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
-import { useAuth } from "../hooks/use-auth";
-import { useOrg } from "../hooks/use-org";
+import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
+import { $api } from "../api/client";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
-import { primaryDisplayFile } from "../lib/package-files";
-import { newPackageContent } from "../lib/package-file-drafts";
-import { skillFrontmatterError } from "../lib/skill-frontmatter";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
 import {
@@ -27,27 +24,25 @@ import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { AgentAppearanceFields } from "../components/agent-editor/agent-appearance-fields";
 import { SchemaFieldList } from "../components/agent-editor/schema-field-list";
 import { ResourceSection } from "../components/agent-editor/resource-section";
-import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
+import { usePackageFileIndex } from "../components/package-files/use-package-file-index";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
+import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import type { ServerSyncResult } from "../components/integration-editor/sync-from-server";
 
 import {
-  defaultSkillManifest,
-  defaultIntegrationManifest,
-  DEFAULT_SKILL_CONTENT,
   manifestToSchemaFields,
   manifestSchemaWrapper,
   getResourceEntries,
   setResourceEntries,
-  getRuntimeTools,
-  setRuntimeTools,
-  withNormalizedManifest,
-  withOutputTool,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
+import { INTEGRATION_DOC, mergeServerSync, serverSyncBody } from "../lib/integration-server-sync";
+import { fileTextOperation } from "../lib/package-file-drafts";
+import { encodeIconDataUri } from "../lib/icon-image";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -58,7 +53,6 @@ function AgentEditorInner({
   packageId,
   effectiveTimeoutSeconds,
   tab,
-  onTabRequest,
 }: {
   initialState: EditorState;
   packageId: string;
@@ -70,7 +64,6 @@ function AgentEditorInner({
   effectiveTimeoutSeconds?: number;
   /** The section is the settings rail's, not the editor's. */
   tab: PackageEditorTab;
-  onTabRequest: (tab: PackageEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
 
@@ -79,7 +72,6 @@ function AgentEditorInner({
     initialState,
     packageId,
     tab,
-    onTabRequest,
   });
   const { state, setState, updateManifest, activeTab } = editor;
 
@@ -108,10 +100,7 @@ function AgentEditorInner({
   const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
     const wrapper = fieldsToSchema(fields, key, manifestSchemaWrapper(state.manifest, key)?.schema);
     if (wrapper) {
-      setState((s) => {
-        const manifest = { ...s.manifest, [key]: wrapper };
-        return { ...s, manifest: key === "output" ? withOutputTool(manifest) : manifest };
-      });
+      setState((s) => ({ ...s, manifest: { ...s.manifest, [key]: wrapper } }));
     } else {
       setState((s) => {
         const { [key]: _, ...rest } = s.manifest;
@@ -119,13 +108,6 @@ function AgentEditorInner({
       });
     }
   };
-
-  const setManifestRuntimeTools = (next: string[]) =>
-    setState((s) => {
-      const m = { ...s.manifest };
-      setRuntimeTools(m, next);
-      return { ...s, manifest: m };
-    });
 
   const resourceTabs = {
     skills: {
@@ -157,22 +139,18 @@ function AgentEditorInner({
         { id: "schema", label: t("editor.tabSchema") },
         { id: "skills", label: t("common:nav.skills") },
         { id: "integrations", label: t("common:nav.integrations") },
-        // The manifest's `runtime_tools`, not integration packages.
-        { id: "tools", label: t("integrationEditor.tabTools") },
       ]}
       descriptions={{
         general: t("editor.description.general"),
         schema: t("editor.description.schema"),
         skills: t("editor.description.skills"),
         integrations: t("editor.description.integrations"),
-        tools: t("editor.runtimeToolsHint"),
       }}
     >
       {activeTab === "general" && (
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit
           identityChildren={
             <AgentAppearanceFields
               packageId={packageId}
@@ -208,12 +186,6 @@ function AgentEditorInner({
             )}
           </div>
         </MetadataSection>
-      )}
-      {activeTab === "tools" && (
-        <RuntimeToolsGroup
-          selected={getRuntimeTools(state.manifest)}
-          onChange={setManifestRuntimeTools}
-        />
       )}
       {activeTab === "schema" && (
         <div className="flex flex-col gap-6">
@@ -284,80 +256,41 @@ function DraftEditorMount({
 export function AgentDefinitionEditor({
   detail,
   section,
-  onSection,
 }: {
   detail: Versioned<AgentDetail>;
   section: AgentDefinitionSection;
-  onSection: (section: AgentDefinitionSection) => void;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
       <AgentEditorInner
         initialState={{
-          manifest: withNormalizedManifest(detail.manifest ?? {}),
+          // The editor has no field for a retired `dependencies` key.
+          manifest: dropRetiredDependencyKeys(detail.manifest ?? {}),
           etag: detail.etag,
         }}
         packageId={detail.id}
         effectiveTimeoutSeconds={detail.effective_timeout_seconds}
         tab={section}
-        onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
       />
     </DraftEditorMount>
   );
 }
 
-// ─── Package (Skill/MCP Server) Editor Inner Form ─────────────────────────
+// ─── Package (Skill) Editor Inner Form ─────────────────────────
 
 function PackageEditorInner({
-  type,
   initialState,
   packageId,
 }: {
-  type: "skill" | "mcp-server";
   initialState: EditorState;
-  /** Undefined on the creation page; set to edit the package in its Package AFPS (Identité). */
-  packageId: string | undefined;
+  packageId: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const isEdit = packageId !== undefined;
-  const editor = usePackageEditor({
-    type,
-    initialState,
-    packageId,
-    validate: (s) => {
-      if (isEdit || type !== "skill") return null;
-      const content = newPackageContent(type, s.operations ?? []);
-      if (!content.trim()) {
-        return { error: t("editor.errorContent"), tab: "files" };
-      }
-      // The same checker the write routes run — fixed here, not via a 400.
-      const frontmatter = skillFrontmatterError(content);
-      if (frontmatter) {
-        return { error: t(frontmatter.key, frontmatter.params), tab: "files" };
-      }
-      return null;
-    },
-  });
+  const editor = usePackageEditor({ type: "skill", initialState, packageId, tab: "general" });
 
   return (
-    <PackageEditorFrame
-      editor={editor}
-      tabs={[
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
-      ]}
-      descriptions={
-        type === "mcp-server" ? { general: t("mcpServerEditor.description.general") } : undefined
-      }
-    >
-      {editor.activeTab === "general" && (
-        <MetadataSection
-          value={editor.metadata}
-          onChange={editor.onMetadataChange}
-          isEdit={isEdit}
-        />
-      )}
+    <PackageEditorFrame editor={editor} tabs={[{ id: "general", label: t("editor.tabGeneral") }]}>
+      <MetadataSection value={editor.metadata} onChange={editor.onMetadataChange} />
     </PackageEditorFrame>
   );
 }
@@ -368,34 +301,80 @@ function IntegrationEditorInner({
   initialState,
   packageId,
   tab,
-  onTabRequest,
   toolCatalog,
+  canSync,
 }: {
   initialState: EditorState;
-  /** Undefined on the creation page; set to edit the integration in its Package AFPS. */
-  packageId: string | undefined;
-  tab?: PackageEditorTab;
-  onTabRequest?: (tab: PackageEditorTab) => void;
-  /** Editing: the saved package's tool catalog, shown with the draft's policy. */
-  toolCatalog?: IntegrationToolCatalogEntry[];
+  packageId: string;
+  tab: PackageEditorTab;
+  /** The saved package's tool catalog, shown with the draft's policy. */
+  toolCatalog: IntegrationToolCatalogEntry[];
+  /** The draft's server can be asked for its tools. */
+  canSync: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const isEdit = packageId !== undefined;
+  // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
+  const [localServerRefused, setLocalServerRefused] = useState(false);
   const editor = usePackageEditor({
     type: "integration",
     initialState,
     packageId,
     tab,
-    onTabRequest,
     validate: (s) => {
       const source = getSource(s.manifest);
+      setLocalServerRefused(false);
       if (source.kind === "remote" && !isRemoteSourceUrl(source.remoteUrl)) {
-        return { error: t("integrationEditor.source.errorRemoteUrl"), tab: "source" };
+        return { error: t("integrationEditor.source.errorRemoteUrl") };
+      }
+      if (source.kind === "local" && (!source.entryPoint.trim() || !source.command.trim())) {
+        setLocalServerRefused(true);
+        return { error: t("integrationEditor.source.errorLocalServer") };
       }
       return null;
     },
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
+  // The saved draft's files: the local server's entry point is checked against them.
+  // Read only for a local source: nothing else checks files.
+  const isLocal = getSource(state.manifest).kind === "local";
+  const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
+  const serverFiles = fileIndex.data?.data.map((file) => file.path);
+  const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
+
+  // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
+  // browser cannot decode is skipped. The encoding is async: the icon lands only if the draft
+  // still has none.
+  const fillIcon = (proposal: { icon_source: string | null; manifest: { icon?: string } }) => {
+    if (!proposal.icon_source || proposal.manifest.icon) return;
+    void encodeIconDataUri(proposal.icon_source)
+      .then((icon) => {
+        editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
+      })
+      .catch(() => {});
+  };
+
+  const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: (proposal) => {
+      editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
+      // `null` when the package already has an `INTEGRATION.md`, which a sync never replaces.
+      const { instructions } = proposal;
+      setSyncResult({
+        count: proposal.tools.length,
+        warnings: proposal.warnings,
+        docProposed: Boolean(instructions),
+      });
+      if (instructions) {
+        const operation = fileTextOperation(INTEGRATION_DOC, instructions);
+        editor.setState((s) =>
+          (s.operations ?? []).some((o) => o.op === "write" && o.path === INTEGRATION_DOC)
+            ? s
+            : { ...s, operations: [...(s.operations ?? []), operation] },
+        );
+      }
+      fillIcon(proposal);
+    },
+  });
 
   return (
     <PackageEditorFrame
@@ -406,8 +385,6 @@ function IntegrationEditorInner({
         { id: "source", label: t("integrationEditor.tabSource") },
         { id: "auths", label: t("integrationEditor.tabAuthMethods") },
         { id: "tools", label: t("integrationEditor.tabTools") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
       ]}
       descriptions={{
         general: t("integrationEditor.description.general"),
@@ -420,12 +397,23 @@ function IntegrationEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit={isEdit}
+          identityChildren={
+            <IntegrationIconField
+              icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
+              onChange={(icon) => editor.updateManifest({ icon })}
+            />
+          }
         />
       )}
 
       {activeTab === "source" && (
-        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
+        <SourceSection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          serverFiles={serverFiles}
+          // A refused save names the empty required fields of the Source tab.
+          showErrors={localServerRefused}
+        />
       )}
 
       {activeTab === "auths" && (
@@ -434,8 +422,22 @@ function IntegrationEditorInner({
 
       {activeTab === "tools" && (
         <IntegrationToolsSection
-          tools={toolCatalog ?? []}
+          tools={toolCatalog}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
+          sync={
+            canSync
+              ? {
+                  run: (connectionId) =>
+                    sync.mutate({
+                      params: { path: { packageId } },
+                      body: serverSyncBody(connectionId),
+                    }),
+                  isPending: sync.isPending,
+                  error: sync.error,
+                  result: syncResult,
+                }
+              : undefined
+          }
         />
       )}
     </PackageEditorFrame>
@@ -448,13 +450,14 @@ export type IntegrationDefinitionSection = "general" | "source" | "auths" | "too
 export function IntegrationDefinitionEditor({
   detail,
   section,
-  onSection,
   toolCatalog,
+  canSync,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
-  onSection: (section: IntegrationDefinitionSection) => void;
   toolCatalog: IntegrationToolCatalogEntry[];
+  /** The draft is served by a Streamable HTTP server at a fixed URL the caller may read. */
+  canSync: boolean;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -462,64 +465,21 @@ export function IntegrationDefinitionEditor({
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
         tab={section}
-        onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
         toolCatalog={toolCatalog}
+        canSync={canSync}
       />
     </DraftEditorMount>
   );
 }
 
-/**
- * A skill's or a local MCP server's definition, edited inside its settings.
- * Identité is the one form: a skill's SKILL.md and references, a server's code,
- * are files, and change in Explorer › Fichiers. `server`, `tools` and
- * `user_config` of a server are authored in the raw manifest, reached from
- * under the form like every other package's.
- */
-export function PackageDefinitionEditor({
-  type,
-  detail,
-}: {
-  type: "skill" | "mcp-server";
-  detail: Versioned<OrgPackageItemDetail>;
-}) {
+/** A skill's definition, edited inside its settings. Identité is the one form: SKILL.md and references are files, changed in Explorer › Fichiers. */
+export function PackageDefinitionEditor({ detail }: { detail: Versioned<OrgPackageItemDetail> }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
       <PackageEditorInner
-        type={type}
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
       />
     </DraftEditorMount>
-  );
-}
-
-// ─── Page Wrapper ───────────────────────────────────────────────────
-
-/** The creation route of a skill or an integration: an existing package is edited in its settings; an agent is created from a dialog. */
-export function PackageEditorPage({ type }: { type: "skill" | "integration" }) {
-  const { user } = useAuth();
-  const { currentOrg } = useOrg();
-
-  if (type === "integration") {
-    return (
-      <IntegrationEditorInner
-        initialState={{ manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) }}
-        packageId={undefined}
-      />
-    );
-  }
-
-  return (
-    <PackageEditorInner
-      type={type}
-      initialState={{
-        manifest: defaultSkillManifest(currentOrg?.slug, user?.email),
-        operations: [
-          { op: "write", path: primaryDisplayFile(type).name, text: DEFAULT_SKILL_CONTENT },
-        ],
-      }}
-      packageId={undefined}
-    />
   );
 }

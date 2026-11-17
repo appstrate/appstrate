@@ -1,6 +1,8 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from "./plain-object.ts";
+
 /** The token counters of a {@link TokenUsage}; the types derive from it. */
 export const TOKEN_USAGE_COUNTERS = [
   "input_tokens",
@@ -45,10 +47,6 @@ export function isTokenCount(value: unknown): value is number {
 }
 
 const TIER_KEYS = new Set<string>(["input_tokens_above", ...TOKEN_USAGE_COUNTERS]);
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** The {@link TokenUsage.tiers} rule: capped, strict keys, unique positive integer thresholds. */
 export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {

@@ -12,6 +12,7 @@ import { usePackageDetail, useVersionDetail } from "../../hooks/use-packages";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
 import { TextSkeleton } from "../loading-skeletons";
+import { ErrorState } from "../page-states";
 
 export function CompareWithDraftModal({
   type,
@@ -27,9 +28,13 @@ export function CompareWithDraftModal({
 }) {
   const { t } = useTranslation("agents");
   const version = compare.value ?? undefined;
-  const { data: draft } = usePackageDetail(type, version && packageId);
+  const { data: draft, error: draftError } = usePackageDetail(type, version && packageId);
   const isLatest = version !== undefined && latestVersion?.version === version;
-  const { data: fetched } = useVersionDetail(type, packageId, isLatest ? undefined : version);
+  const { data: fetched, error: fetchedError } = useVersionDetail(
+    type,
+    packageId,
+    isLatest ? undefined : version,
+  );
   const compared = isLatest ? latestVersion : fetched;
 
   if (version === undefined) return null;
@@ -40,7 +45,9 @@ export function CompareWithDraftModal({
       title={t("detail.files.compareTitle", { version })}
       className="max-w-5xl"
     >
-      {draft && compared ? (
+      {draftError || fetchedError ? (
+        <ErrorState error={draftError ?? fetchedError} />
+      ) : draft && compared ? (
         <DiffTab
           type={type}
           latestVersion={compared}

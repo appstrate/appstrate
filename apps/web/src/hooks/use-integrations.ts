@@ -12,8 +12,6 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { useTranslation } from "react-i18next";
 import type {
   ConsumingAgentSummary,
   IntegrationConnection,
@@ -45,8 +43,6 @@ export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
 export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
@@ -134,12 +130,23 @@ export function useIntegrationNames(): (
 
 /** `GET /api/integrations` answers at most this many ids per request (its `id` filter's bound). */
 const IDS_PER_REQUEST = 100;
+/** The answer for no id, one array so it is the same value from render to render. */
+const NO_ROWS: IntegrationSummaryWire[] = [];
 
-/** The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed here has no row; `undefined` until every request answered. */
+/**
+ * The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed
+ * here has no row; `undefined` until every request answered. When `ids` changes, the previous set's
+ * rows stand in (`isPlaceholderData`) until the new set's answer.
+ */
 export function useIntegrationsById(
   ids: readonly string[],
   options?: { enabled?: boolean },
-): { data: IntegrationSummaryWire[] | undefined; isLoading: boolean; error: unknown } {
+): {
+  data: IntegrationSummaryWire[] | undefined;
+  isLoading: boolean;
+  isPlaceholderData: boolean;
+  error: unknown;
+} {
   const scope = useIntegrationsReadScope();
   // Sorted and unique, so the same set is the same keys whatever order it came in.
   const unique = [...new Set(ids)].sort();
@@ -147,21 +154,34 @@ export function useIntegrationsById(
   for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
     chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
   }
-  return useQueries({
-    queries: chunks.map((chunk) => ({
-      ...$api.queryOptions("get", "/api/integrations", {
-        params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
-      }),
-      enabled: scope.enabled && (options?.enabled ?? true),
-    })),
-    combine: (results) => ({
-      data: results.every((result) => result.data)
-        ? results.flatMap((result) => result.data!.data as IntegrationSummaryWire[])
+  const orgId = scope.header["X-Org-Id"];
+  const spaceId = scope.header["X-Space-Id"];
+  const query = useQuery({
+    queryKey: ["get", "/api/integrations", "by-id", orgId, spaceId, unique],
+    queryFn: async ({ signal }) => {
+      const responses = await Promise.all(
+        chunks.map((chunk) =>
+          client.GET("/api/integrations", {
+            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
+            signal,
+          }),
+        ),
+      );
+      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
+    },
+    enabled: scope.enabled && (options?.enabled ?? true),
+    // One observer retains the combined result; useQueries cannot retain changed keys.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[3] === orgId && previousQuery?.queryKey[4] === spaceId
+        ? previous
         : undefined,
-      isLoading: results.some((result) => result.isLoading),
-      error: results.find((result) => result.error)?.error ?? null,
-    }),
   });
+  return {
+    data: unique.length === 0 ? NO_ROWS : query.data,
+    isLoading: unique.length > 0 && query.isLoading,
+    isPlaceholderData: unique.length > 0 && query.isPlaceholderData,
+    error: query.error,
+  };
 }
 
 export function useIntegrationDetail(packageId: string | undefined) {
@@ -212,8 +232,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
 
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const orgScope = useOrgScope();
   const { can } = usePermissions();
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
@@ -226,13 +245,10 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
       params: {
         path: { scope, name },
         ...(version ? { query: { version } } : {}),
-        header: {
-          "X-Org-Id": orgId ?? undefined,
-          "X-Space-Id": spaceId ?? undefined,
-        },
+        header: orgScope.header,
       },
     },
-    { enabled: Boolean(can("integrations:read") && orgId && spaceId && agentPackageId) },
+    { enabled: Boolean(can("integrations:read") && orgScope.enabled && agentPackageId) },
   );
 }
 
@@ -323,11 +339,9 @@ type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
 /** Refreshes both lists (an org change re-badges the space list). No toast when the table already shows the effect. */
-function useClientMutationSuccess(messageKey?: string) {
-  const { t } = useTranslation("settings");
+function useClientMutationSuccess() {
   const qc = useQueryClient();
   return () => {
-    if (messageKey) toast.success(t(messageKey));
     void invalidatePaths(qc, [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]);
   };
 }
@@ -367,8 +381,10 @@ export function useIntegrationClients(
 
 /** Register a custom (BYO-app) client; only a tier's first becomes its default. */
 export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
+  const onSuccess = useClientMutationSuccess();
   return useMutation({
+    // The client form shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     mutationFn: async (vars: { params: AuthPath; body: CreateOAuthClientBody }) => {
       const { data } =
         tier === "space"
@@ -388,8 +404,9 @@ export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
 
 /** Update one custom client in place, by its id (its `client_id` is immutable). */
 export function useUpdateIntegrationOAuthClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
+  const onSuccess = useClientMutationSuccess();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (vars: { params: ClientPath; body: UpdateOAuthClientBody }) => {
       const { data } =
         tier === "space"
@@ -427,7 +444,7 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
 
 /** Move a space client to the org tier. Its id is unchanged, so existing connections keep working. */
 export function usePromoteIntegrationOAuthClient() {
-  const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
+  const onSuccess = useClientMutationSuccess();
   return $api.useMutation(
     "post",
     "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
@@ -495,23 +512,22 @@ export function useAgentsConsumingIntegration(packageId: string | undefined) {
 }
 
 export function useUpdateIntegrationSettings() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("patch", "/api/integrations/{packageId}/settings", {
     onSuccess: () => {
-      toast.success(t("integration.admin.blockUserConnections.updated"));
       void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
     },
   });
 }
 
 export function useUpsertIntegrationPin() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  // The body is the WHOLE pinned set — this write replaces it.
+  // The body is the WHOLE pin, its set and its additions flag (built by `pinDraftVerdict`): this write
+  // replaces both, an absent flag closing the pin.
   return $api.useMutation("put", "/api/integrations/{packageId}/pins/{agentPackageId}", {
+    // The pin form shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
-      toast.success(t("integration.admin.pin.upserted"));
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
       void invalidateIntegrationQueries(qc);
     },
@@ -519,12 +535,10 @@ export function useUpsertIntegrationPin() {
 }
 
 export function useDeleteIntegrationPin() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
-      else toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -549,12 +563,12 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
 }
 
 export function useUpsertIntegrationOrgDefault() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   // The body is the WHOLE default set — this write replaces it.
   return $api.useMutation("put", "/api/integrations/{packageId}/default", {
-    onSuccess: () => {
-      toast.success(t("integration.admin.orgDefault.updated"));
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      // An enforced default turned soft disables the schedules whose overrides only narrowed it.
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
       // Agent-page picker verdicts depend on the org default.
       void invalidateIntegrationQueries(qc);
     },
@@ -562,12 +576,10 @@ export function useUpsertIntegrationOrgDefault() {
 }
 
 export function useDeleteIntegrationOrgDefault() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/integrations/{packageId}/default", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
-      else toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });

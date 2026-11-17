@@ -13,8 +13,10 @@ export interface RunOverridesValue {
   proxy_id_override?: string;
   /**
    * Per-integration connection sets (the launch-override layer), replayed on every
-   * schedule fire. Beats member pins and the soft default; under an admin pin or an
-   * enforced org default it may only name a subset, else `override_outranked`.
+   * schedule fire. Beats member pins and the soft default. Under an admin pin or an
+   * enforced org default the imposed set always binds and an override only adds to it
+   * (`[]` adds nothing): where the lock is closed to additions, naming a connection
+   * outside it is `override_outranked`.
    */
   connection_overrides?: Record<string, string[]>;
 }

@@ -13,6 +13,7 @@ import {
 } from "../src/ui/auth-offer.ts";
 import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
 import { toPiToolResult } from "../src/pi-chat/mcp-tools.ts";
+import { splitConnectPayload } from "../src/connect-offer.ts";
 
 const BODY = { auth_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1", state: "abc-123" };
 const OFFER = { connect_url: "https://app/api/integrations/connect/start?token=t" };
@@ -192,7 +193,7 @@ describe("extractRunAndWaitAuthOffers", () => {
       steps.push(step.payload);
     }
     return steps.map((payload, i) => ({
-      result: toPiToolResult(payload),
+      result: toPiToolResult(payload, splitConnectPayload),
       isPreliminary: i < steps.length - 1,
     }));
   }

@@ -40,8 +40,8 @@ describe("RunList", () => {
           undefined,
           undefined,
           undefined,
-          20,
-          0,
+          undefined,
+          25,
         ),
       })
       .setState({

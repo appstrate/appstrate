@@ -21,6 +21,7 @@ import { useUrlModal, useUrlModalTarget } from "../../hooks/use-url-modal";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { errorMessage } from "../../lib/mutation-error";
 import { useProxyColumns } from "./proxy-columns";
 
 export function OrgSettingsProxiesPage() {
@@ -39,9 +40,13 @@ export function OrgSettingsProxiesPage() {
   const proxyModalOpen =
     canWrite &&
     (newProxy.value !== null || (editProxy !== null && editProxy.source !== "built-in"));
-  const closeProxyModal = editProxy ? editParam.close : newProxy.close;
   const createMutation = useCreateProxy();
   const updateMutation = useUpdateProxy();
+  const closeProxyModal = () => {
+    createMutation.reset();
+    updateMutation.reset();
+    (editProxy ? editParam.close : newProxy.close)();
+  };
   const deleteMutation = useDeleteProxy();
   const setDefaultMutation = useSetDefaultProxy();
   const testMutation = useTestProxy();
@@ -100,6 +105,11 @@ export function OrgSettingsProxiesPage() {
           onClose={closeProxyModal}
           proxy={editProxy}
           isPending={createMutation.isPending || updateMutation.isPending}
+          error={
+            createMutation.error || updateMutation.error
+              ? errorMessage(createMutation.error ?? updateMutation.error)
+              : null
+          }
           onSubmit={(data) => {
             if (editProxy) {
               // The credential-bearing URL is never returned to the client, so the

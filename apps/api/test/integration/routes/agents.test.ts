@@ -35,9 +35,10 @@ import {
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { packages, runs, schedules } from "@appstrate/db/schema";
-import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
+import { addMemory, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 import { resolveEffectiveInput } from "../../../src/services/input-resolution.ts";
-import { updateSchedule, type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
+import { type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
+import { updateJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const app = getTestApp();
@@ -96,6 +97,7 @@ describe("Agents API", () => {
       const agent = body.data.find((f: { id: string }) => f.id === "@myorg/test-agent");
       expect(agent).toBeDefined();
       expect(agent.source).toBe("local");
+      expect(agent.home_space_id).toBe(ctx.defaultSpaceId);
     });
 
     it("returns scope WITH the @ sigil — directly usable as a {scope} path param (#629)", async () => {
@@ -760,7 +762,7 @@ describe("Agents API", () => {
       expect((await readScheduleRow(second.id)).input).toEqual({ label: "x" });
 
       await expect(
-        updateSchedule(spaceScope(), first, { input: { folder: "inbox" } }, null, undefined),
+        updateJudgedSchedule(spaceScope(), first, { input: { folder: "inbox" } }, null, undefined),
       ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
       expect((await readScheduleRow(first.id)).input).toEqual({});
     });
@@ -1088,6 +1090,36 @@ describe("Agents API", () => {
     });
   });
 
+  describe("GET /api/agents — published", () => {
+    it("is false for a draft-only agent whatever its manifest version, true once a version is cut", async () => {
+      await seedActiveAgent({
+        id: "@myorg/publish-flag",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+      });
+      const listed = async () => {
+        const res = await app.request("/api/agents", { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: { id: string; version: string | null; published: boolean }[];
+        };
+        return body.data.find((agent) => agent.id === "@myorg/publish-flag")!;
+      };
+
+      const draftOnly = await listed();
+      expect(draftOnly.version).not.toBeNull();
+      expect(draftOnly.published).toBe(false);
+
+      await createVersionFromDraft({
+        packageId: "@myorg/publish-flag",
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+      });
+      expect((await listed()).published).toBe(true);
+    });
+  });
+
   // ─── Persistence Routes (pinned slots + memories) ─
 
   describe("GET /api/agents/:scope/:name/persistence", () => {
@@ -1204,22 +1236,20 @@ describe("Agents API", () => {
         userId: ctx.user.id,
         status: "success",
       });
-      await addMemories(
-        "@myorg/persist-runid",
-        ctx.defaultSpaceId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        ["from-r1-a", "from-r1-b"],
-        r1.id,
-      );
-      await addMemories(
-        "@myorg/persist-runid",
-        ctx.defaultSpaceId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        ["from-r2"],
-        r2.id,
-      );
+      for (const [content, runId] of [
+        ["from-r1-a", r1.id],
+        ["from-r1-b", r1.id],
+        ["from-r2", r2.id],
+      ] as const) {
+        await addMemory(
+          "@myorg/persist-runid",
+          ctx.defaultSpaceId,
+          ctx.orgId,
+          { type: "user", id: ctx.user.id },
+          content,
+          runId,
+        );
+      }
 
       const res = await app.request(
         `/api/agents/@myorg/persist-runid/persistence?kind=memory&runId=${r1.id}`,
@@ -1230,6 +1260,99 @@ describe("Agents API", () => {
       expect(body.object).toBe("agent_persistence");
       expect(body.memories).toHaveLength(2);
       expect(body.memories.every((m) => m.runId === r1.id)).toBe(true);
+    });
+
+    it("applies one actor-scope rule to both halves, with or without runId", async () => {
+      const agentId = "@myorg/persist-one-rule";
+      await seedActiveAgent({
+        id: agentId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+      });
+      // A colleague without `persistence:delete` runs the agent; the run
+      // writes a pinned slot and a memory under the colleague's actor.
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id, "member");
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId: colleague.id,
+        presetRole: "operator",
+      });
+      const run = await seedRun({
+        packageId: agentId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: colleague.id,
+        status: "success",
+      });
+      const colleagueActor = { type: "user" as const, id: colleague.id };
+      await upsertPinned(
+        agentId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        colleagueActor,
+        "persona",
+        "colleague",
+        run.id,
+      );
+      await addMemory(
+        agentId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        colleagueActor,
+        "colleague-memory",
+        run.id,
+      );
+      // And one row of each kind under the caller's own actor, outside the run.
+      const ownActor = { type: "user" as const, id: ctx.user.id };
+      await upsertPinned(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, "goals", "own", null);
+      const ownRun = await seedRun({
+        packageId: agentId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await addMemory(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, "own-memory", ownRun.id);
+
+      type Body = {
+        pinned: Array<{ actor_id: string | null }>;
+        memories: Array<{ actor_id: string | null }>;
+      };
+      const read = async (headers: Record<string, string>, query = "") => {
+        const res = await app.request(`/api/agents/${agentId}/persistence${query}`, { headers });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as Body;
+        return {
+          pinned: body.pinned.map((p) => p.actor_id).sort(),
+          memories: body.memories.map((m) => m.actor_id).sort(),
+        };
+      };
+
+      // The admin (holds `persistence:delete`) sees every actor in both
+      // halves; `runId` narrows to the run's rows without changing whose.
+      const everyActor = [ctx.user.id, colleague.id].sort();
+      expect(await read(authHeaders(ctx))).toEqual({ pinned: everyActor, memories: everyActor });
+      expect(await read(authHeaders(ctx), `?runId=${run.id}`)).toEqual({
+        pinned: [colleague.id],
+        memories: [colleague.id],
+      });
+
+      // The colleague holds no `persistence:delete`: own scope, in both halves.
+      const colleagueHeaders = {
+        Cookie: colleague.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+      };
+      expect(await read(colleagueHeaders)).toEqual({
+        pinned: [colleague.id],
+        memories: [colleague.id],
+      });
+      expect(await read(colleagueHeaders, `?runId=${run.id}`)).toEqual({
+        pinned: [colleague.id],
+        memories: [colleague.id],
+      });
     });
   });
 

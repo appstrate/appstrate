@@ -179,7 +179,7 @@ const revokeShare = (headers: Headers, packageId: string, target: string) =>
 
 /**
  * Take up an offer — which is ACTIVATING it, through the one activation door
- * (`POST /api/spaces/{spaceId}/packages`). There is no accept route: in the
+ * (`POST /api/spaces/{id}/packages`). There is no accept route: in the
  * caller's own personal space ownership stands in for the activation grant, so
  * a guest reaches it with the `operator` preset alone.
  */
@@ -330,7 +330,7 @@ beforeEach(async () => {
 describe("authority — `<type>:share` in the home space", () => {
   it("lets the home's builder share", async () => {
     const res = await shareWithUser(author.headers(homeId), AGENT, recipient.userId);
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(201);
     const body = (await res.json()) as { object: string; target: { kind: string; name: string } };
     expect(body.object).toBe("package_share");
     expect(body.target.kind).toBe("user");
@@ -447,7 +447,7 @@ describe("authority — `<type>:share` in the home space", () => {
       // Positive control: the same share, once something is published, does
       // provision the space it places the package in.
       await publish(AGENT, "0.2.0");
-      expect((await shareWithUser(author.headers(homeId), AGENT, stranger.id)).status).toBe(200);
+      expect((await shareWithUser(author.headers(homeId), AGENT, stranger.id)).status).toBe(201);
       const created = await getDbRow(spaces, eq(spaces.ownerUserId, stranger.id));
       expect((await placementsOutside(AGENT, homeId)).map((row) => row.spaceId)).toEqual([
         created.id,
@@ -463,7 +463,7 @@ describe("authority — `<type>:share` in the home space", () => {
       );
       await publish(AGENT, "0.2.0");
       expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(
-        200,
+        201,
       );
     });
 
@@ -481,7 +481,7 @@ describe("authority — `<type>:share` in the home space", () => {
       expect(await placementsOutside(AGENT, homeId)).toEqual([]);
 
       await publish(AGENT, "0.2.0");
-      expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+      expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     });
 
     it("answers the AUTHORITY refusal first: a viewer gets 403, not 409", async () => {
@@ -500,8 +500,8 @@ describe("authority — `<type>:share` in the home space", () => {
   });
 
   it("is idempotent — the same pair twice is one row and one audit event", async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
     expect(await placementsOutside(AGENT, homeId)).toHaveLength(1);
     const events = await db
       .select()
@@ -594,7 +594,7 @@ describe("authority — `<type>:share` in the home space", () => {
   });
 
   it("records the SPACE in the audit trail of a `space` share", async () => {
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     const shared = await getDbRow(auditEvents, eq(auditEvents.action, "package.shared"));
     expect(shared.after).toEqual({ spaceId: teamId, targetKind: "space" });
   });
@@ -620,7 +620,7 @@ describe("authority — `<type>:share` in the home space", () => {
 
 describe("offered is not activated", () => {
   beforeEach(async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
   });
 
   /**
@@ -958,7 +958,7 @@ describe("offered is not activated", () => {
     // pass a row check just as well. The `operator` preset a guest holds in
     // their own space carries none of `agents:configure` / `<type>:write`; what
     // authorizes the activation is that the space is theirs.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
 
     const before = await library(guest.headers());
     // ONE row, one placement, offered and not yet switched on. Nothing else is
@@ -989,7 +989,7 @@ describe("offered is not activated", () => {
     // Asking for a state the system is already in is not an error. Before the
     // two doors this was `409 already_installed`, which made "make sure it is
     // on" a call a client had to special-case.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
     const again = await takeUpOffer(guest.headers(), AGENT);
     expect(again.status, await again.clone().text()).toBe(200);
@@ -1002,7 +1002,7 @@ describe("offered is not activated", () => {
     // `configure` alone: it spends the organization's LLM budget, and ownership
     // does not waive it. Deactivating KEEPS the row and its settings, which is
     // what makes putting a package down cheap.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
 
     const off = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
@@ -1073,7 +1073,7 @@ describe("a share whose version disappeared after the offer", () => {
   // The placement then names nothing to run, and the launch must say so rather
   // than fall back to the author's draft.
   it("activates, then answers 404 `no_published_version` at launch — never the draft", async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
     const activated = await takeUpOffer(recipient.headers(), AGENT);
     expect(activated.status, await activated.clone().text()).toBe(201);
 
@@ -1094,7 +1094,7 @@ describe("a share whose version disappeared after the offer", () => {
 });
 
 describe("activating is the fourth door closed: it needs `share`, or a placement", () => {
-  /** `POST /api/spaces/{spaceId}/packages` — the one activation door. */
+  /** `POST /api/spaces/{id}/packages` — the one activation door. */
   const activate = (headers: Headers, spaceId: string, packageId = AGENT) =>
     app.request(`/api/spaces/${spaceId}/packages`, {
       method: "POST",
@@ -1147,7 +1147,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // Reachable now — but reading is not sharing, and the home's `share` is
     // what this builder does not hold.
     expect((await shareWithUser(author.headers(homeId), AGENT, teamBuilder.userId)).status).toBe(
-      200,
+      201,
     );
     await expectProblem(await activate(teamBuilder.headers(teamId), teamId, AGENT), 403);
     await assertDbMissing(
@@ -1185,7 +1185,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // `operator` preset in their own space, which carries no
     // `integrations:uninstall` and no `<type>:write`. Ownership is the
     // authorization, both ways.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
 
     const removed = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
@@ -1243,7 +1243,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
       orgRole: "member",
       space: { id: teamId, preset: "builder" },
     });
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     // The owner may activate there, so the placement landed switched on and
     // the team's builder finds nothing left to do.
     expect((await activate(teamBuilder.headers(teamId), teamId)).status).toBe(200);
@@ -1273,7 +1273,7 @@ describe("sharing with a team space", () => {
   // offer the package to a closed space they are not in (404, tested below).
   // The organization owner reaches every team space, so they are the sharer here.
   it("shows the package to that space's members and to nobody else", async () => {
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
 
     const lib = await library(teamMember.headers(teamId));
     expect(
@@ -1313,7 +1313,7 @@ describe("sharing with a team space", () => {
     // The index is the set the space can launch. The owner holds the
     // activation grant in the team space, so the placement lands switched on.
     expect(await indexIds()).not.toContain(AGENT);
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     expect(await indexIds()).toContain(AGENT);
   });
 });
@@ -1351,7 +1351,7 @@ describe("nothing leaks about a personal space", () => {
     expect(
       (await shareWithUser(author.headers(author.personalSpaceId), PRIVATE_AGENT, admin.userId))
         .status,
-    ).toBe(200);
+    ).toBe(201);
 
     const res = await app.request(`/api/packages/agents/${PRIVATE_AGENT}`, {
       headers: admin.headers(),
@@ -1386,7 +1386,7 @@ describe("sharing a package does not displace its HOME", () => {
   beforeEach(async () => {
     // `SKILL` is homed in `homeId` and installed nowhere, so the share is the
     // only OTHER placement — the exact shape the regression needed.
-    expect((await shareWithUser(owner(), SKILL, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(owner(), SKILL, recipient.userId)).status).toBe(201);
   });
 
   it("keeps its version list readable from the home", async () => {
@@ -1607,7 +1607,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
-    expect((await shareWithUser(author.headers(homeId), AGENT, viewer.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, viewer.userId)).status).toBe(201);
     expect((await takeUpOffer(viewer.headers(), AGENT)).status).toBe(201);
     const launched = await app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",
@@ -1636,7 +1636,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
  * block skips with that as its reason (`test/helpers/tier.ts`).
  */
 describe("who switches a placement on (R3)", () => {
-  /** `POST /api/spaces/{spaceId}/packages` — the one activation door. */
+  /** `POST /api/spaces/{id}/packages` — the one activation door. */
   const activate = (headers: Headers, spaceId: string) =>
     app.request(`/api/spaces/${spaceId}/packages`, {
       method: "POST",
@@ -1674,7 +1674,7 @@ describe("who switches a placement on (R3)", () => {
     // A row switched off — placed by a sharer who may not activate in Team —
     // is the space's to switch on: the same call now updates it.
     const sharer = await sharerWith("operator");
-    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await rowIn(teamId)).toMatchObject({ enabled: false, sharedBy: sharer.userId });
     const switched = await activate(teamBuilder.headers(teamId), teamId);
     expect(switched.status, await switched.clone().text()).toBe(201);
@@ -1696,13 +1696,13 @@ describe("who switches a placement on (R3)", () => {
 
   it("lands ON for a sharer who may activate in the target", async () => {
     const sharer = await sharerWith("builder");
-    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await rowIn(teamId)).toMatchObject({ enabled: true, sharedBy: sharer.userId });
   });
 
   it("lands OFF for a sharer who may not activate in the target", async () => {
     const sharer = await sharerWith("operator");
-    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await rowIn(teamId)).toMatchObject({ enabled: false, sharedBy: sharer.userId });
   });
 
@@ -1715,49 +1715,21 @@ describe("who switches a placement on (R3)", () => {
 
   it("audits a share landing ON as an activation, as the activation door does", async () => {
     const sharer = await sharerWith("builder");
-    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await activations()).toEqual([{ after: { spaceId: teamId } }]);
     // A repeat creates nothing and records nothing.
-    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await activations()).toHaveLength(1);
   });
 
   it("records no activation for a share landing OFF", async () => {
     const sharer = await sharerWith("operator");
-    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
     expect(await activations()).toEqual([]);
   });
 
-  it("refuses an unexecutable mcp-server landing ON (422), as the activation door does", async () => {
-    const MCP = "@shares/unbuildable-mcp";
-    await seedPackage({
-      id: MCP,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      homeSpaceId: homeId,
-      draftManifest: { name: MCP, version: "0.1.0", type: "mcp-server" },
-    });
-    await seedPublishedVersion(MCP, "0.1.0");
-    const mcpRowIn = (spaceId: string) =>
-      db
-        .select()
-        .from(spacePackages)
-        .where(and(eq(spacePackages.packageId, MCP), eq(spacePackages.spaceId, spaceId))!);
-
-    const builder = await sharerWith("builder");
-    await expectProblem(await shareWithSpace(builder.headers(homeId), MCP, teamId), 422, {
-      code: "bundle_invalid",
-    });
-    expect(await mcpRowIn(teamId)).toEqual([]);
-
-    // Landing OFF activates nothing, so it is not refused.
-    const operator = await sharerWith("operator");
-    expect((await shareWithSpace(operator.headers(homeId), MCP, teamId)).status).toBe(200);
-    expect(await mcpRowIn(teamId)).toMatchObject([{ enabled: false }]);
-  });
-
   it("lands ON in the sharer's own personal space", async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, author.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, author.userId)).status).toBe(201);
     expect(await rowIn(author.personalSpaceId)).toMatchObject({
       enabled: true,
       sharedBy: author.userId,
@@ -1765,7 +1737,7 @@ describe("who switches a placement on (R3)", () => {
   });
 
   it("lands OFF in another member's personal space", async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
     expect(await rowIn(recipient.personalSpaceId)).toMatchObject({
       enabled: false,
       sharedBy: author.userId,

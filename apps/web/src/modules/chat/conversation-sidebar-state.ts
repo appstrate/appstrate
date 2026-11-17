@@ -34,6 +34,10 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
  * State behind the chat's context panel. A file shows in the Files tab over its
  * list: closing it closes the panel when opened from the thread, goes back to
  * the list when opened from the list. Choosing a tab shows that tab's own content.
+ *
+ * Opening the panel always shows its tabs: a file is shown by a "show-file",
+ * never restored. Collapsing keeps it, so it stays drawn while the panel slides
+ * out, and the next opening drops it.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,
@@ -41,7 +45,9 @@ export function conversationSidebarReducer(
 ): ConversationSidebarState {
   switch (action.type) {
     case "toggle":
-      return { ...state, expanded: !state.expanded };
+      return state.expanded
+        ? { ...state, expanded: false }
+        : { ...state, expanded: true, selectedFile: null };
     case "select-tab":
       return { ...state, expanded: true, activeTab: action.tab, selectedFile: null };
     case "show-file":

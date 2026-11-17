@@ -3,13 +3,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { listResponse } from "../lib/list-response.ts";
-import {
-  parseListPagination,
-  parseFieldSelection,
-  paginate,
-  projectFields,
-} from "../lib/list-query.ts";
+import { listResponse } from "@appstrate/core/list-query";
+import { parseListPagination } from "@appstrate/core/list-query";
+import { parseFieldSelection, paginate, projectFields } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
@@ -265,10 +261,22 @@ async function resolveTestTarget(
  * (Pi's records of its Pi provider on its `apiShape`), ids in
  * `featuredModels` flagged `featured: true`. A gateway offers nothing: the
  * picker falls back to a typed model id or its own live-search UI.
+ *
+ * A subscription (OAuth) provider's live-catalog records are flagged
+ * `subscription_unverified`: the producer proves their request builds
+ * offline, which cannot show that the vendor serves them to a subscription
+ * (`docs/architecture/MODEL_CATALOG.md`, "What it does not do"). They stay
+ * offered; an API-key provider's are not flagged.
  */
 function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
   const featuredSet = new Set(p.featuredModels);
-  return listCatalogModels(p).map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
+  const bundledIds =
+    p.authMode === "oauth2" ? new Set(listCatalogModels(p, "bundled").map((m) => m.id)) : null;
+  return listCatalogModels(p).map((m) => ({
+    ...m,
+    featured: featuredSet.has(m.id),
+    ...(bundledIds && !bundledIds.has(m.id) ? { subscription_unverified: true as const } : {}),
+  }));
 }
 
 export function createModelProviderCredentialsRouter() {

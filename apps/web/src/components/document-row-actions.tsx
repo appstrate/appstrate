@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Download, ExternalLink, Eye, Pin, Trash2 } from "lucide-react";
 import type { FileDto } from "../hooks/use-files";
 import { fileRunHref } from "../lib/files";
+import { useSpaceLink } from "../hooks/use-current-space";
 import { TableRowActions } from "./table-row-actions";
 
 /**
@@ -29,7 +30,9 @@ export function DocumentRowActions({
   onDelete: (doc: FileDto) => void;
 }) {
   const { t } = useTranslation(["files", "common"]);
-  const runHref = showRunLink ? fileRunHref(doc) : undefined;
+  const linkInSpace = useSpaceLink();
+  const runPath = showRunLink ? fileRunHref(doc) : undefined;
+  const runHref = runPath && linkInSpace(runPath, doc.spaceId);
 
   return (
     <TableRowActions

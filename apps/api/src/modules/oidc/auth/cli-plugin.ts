@@ -75,7 +75,7 @@ import {
   type DeviceMetadata,
 } from "../services/cli-tokens.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { listResponse } from "../../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 
 /** Header the CLI uses to declare a human-friendly device label
  *  (mirrors `gh auth login --hostname`). Optional — when absent, the UI

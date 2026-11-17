@@ -57,9 +57,17 @@ const { run: RUN, daemon } = resolveContainerE2eGate("inference-container.e2e", 
 
 const RID = "run_inference_e2e";
 // In Pi's `openai-codex` offer, so the container resolves the registry record
-// exactly as it does for a run the platform launches.
-const MODEL_ID = "gpt-5.5";
-const RECORD = getPiModel("openai-codex", MODEL_ID, "openai-codex-responses")!;
+// exactly as it does for a run the platform launches, with reasoning enabled.
+const MODEL_ID = "gpt-5.6-sol";
+const RECORD = getPiModel("openai-codex", MODEL_ID, "openai-codex-responses");
+// Fail loudly at load, gate or not: a Pi bump that drops the model must name
+// it here, not surface later as a `piModelDialect(undefined)` TypeError.
+if (!RECORD) {
+  throw new Error(
+    `openai-codex/${MODEL_ID} (openai-codex-responses) is absent from Pi's registry: ` +
+      "pick another model of Pi's `openai-codex` offer for this test",
+  );
+}
 const ACCOUNT_ID = "acct_inference_e2e";
 const CREDENTIAL_ID = "cred_inference_e2e";
 const SINK_SECRET = "inference-e2e-secret-0123456789";
@@ -81,12 +89,10 @@ interface CapturedRequest {
  * The canned Codex SSE completion — enough for the Pi run loop to finish its
  * one turn and finalize `success`. Same frame as `pi-runner-transport.test.ts`.
  *
- * `output: []` is load-bearing, not just brevity: the sidecar advertises
- * `run_history` and `recall_memory` to the model (`runtime-pi/sidecar/mcp.ts`),
- * so a frame carrying a tool call would send the agent to
- * `GET /internal/run-history` or `/internal/memories`, which the stub below
- * deliberately does not serve — a surprise call must stay a failure, and it
- * shows up as the offending path in `unmatchedRequests`.
+ * `output: []` is load-bearing, not just brevity: a frame carrying a tool call
+ * would send the agent to a sidecar tool, and from there possibly to a platform
+ * route the stub below deliberately does not serve — a surprise call must stay
+ * a failure, and it shows up as the offending path in `unmatchedRequests`.
  */
 function completedSseBody(): string {
   return `data: ${JSON.stringify({
@@ -289,12 +295,13 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(request.headers["openai-beta"]).toBe("responses=experimental");
         expect(request.headers.accept).toBe("text/event-stream");
         expect(request.headers["content-type"]).toStartWith("application/json");
-        // Pi's own UA, `getPiUserAgent()`: `pi (<platform> <release>; <arch>)`,
-        // or `pi (browser)` off Node. Assert the prefix rather than mere
-        // presence — Bun's fetch supplies a `Bun/<version>` UA when a request
-        // carries none, so `toBeTruthy()` would hold even had the header never
-        // crossed the container boundary.
-        expect(request.headers["user-agent"]).toStartWith("pi (");
+        // Pi's own UA, `formatUserAgent()` in its default `detailed` mode:
+        // `pi/<version> (<platform>; <runtime>/<version>; <arch>)`. Assert the
+        // prefix rather than mere presence — Bun's fetch supplies a
+        // `Bun/<version>` UA when a request carries none, so `toBeTruthy()`
+        // would hold even had the header never crossed the container boundary.
+        // The version is left out so a Pi bump does not redden this gate.
+        expect(request.headers["user-agent"]).toStartWith("pi/");
 
         // The container→sidecar-only header must stop at the sidecar: the
         // agent's own auth token has no business reaching the model provider.

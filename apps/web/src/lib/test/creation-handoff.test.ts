@@ -4,13 +4,14 @@ import { describe, expect, it } from "bun:test";
 import settingsEn from "../../locales/en/settings.json";
 import settingsFr from "../../locales/fr/settings.json";
 import {
+  agentCreationWithIntegrationPath,
   buildChatCreationDraft,
   chatDraftNavigationState,
   readChatComposerDraft,
   type CreationResource,
 } from "../creation-handoff.ts";
 
-const resources: CreationResource[] = ["agent", "skill", "integration", "mcp-server"];
+const resources: CreationResource[] = ["agent", "skill", "integration"];
 const frenchChatDrafts: Record<CreationResource, string> = {
   agent:
     "Aide-moi à créer un nouvel agent Appstrate. Commence par me poser les questions nécessaires.",
@@ -18,8 +19,6 @@ const frenchChatDrafts: Record<CreationResource, string> = {
     "Aide-moi à créer un nouveau skill Appstrate. Commence par me poser les questions nécessaires.",
   integration:
     "Aide-moi à créer une nouvelle intégration Appstrate. Commence par me poser les questions nécessaires.",
-  "mcp-server":
-    "Aide-moi à créer un nouveau serveur MCP Appstrate. Commence par me poser les questions nécessaires.",
 };
 const dictionaries = { en: settingsEn, fr: settingsFr } as const;
 
@@ -45,5 +44,22 @@ describe("creation handoff", () => {
     expect(readChatComposerDraft(state)).toBe("Create an agent");
     expect(readChatComposerDraft({ composerDraft: "" })).toBeUndefined();
     expect(readChatComposerDraft({ composerDraft: 42 })).toBeUndefined();
+  });
+
+  it("mentions the preselected integration in the agent draft only", () => {
+    const gmail = { id: "@acme/gmail", name: "Gmail" };
+    expect(buildChatCreationDraft("agent", translator("fr"), gmail)).toBe(
+      `${frenchChatDrafts.agent} Il utilise l’intégration Gmail (@acme/gmail).`,
+    );
+    expect(buildChatCreationDraft("skill", translator("fr"), gmail)).toBe(frenchChatDrafts.skill);
+    expect(buildChatCreationDraft("agent", translator("en"), gmail)).toEndWith(
+      "It uses the Gmail integration (@acme/gmail).",
+    );
+  });
+
+  it("builds the agent creation address with the integration encoded", () => {
+    expect(agentCreationWithIntegrationPath("@scope/name")).toBe(
+      "/agents?create=agent&integration=%40scope%2Fname",
+    );
   });
 });

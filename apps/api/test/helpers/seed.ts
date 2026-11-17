@@ -31,7 +31,6 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
-import { mcpServerManifest } from "./integration-manifests.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
@@ -225,44 +224,6 @@ export async function seedPackageVersion(
   return version!;
 }
 
-// ─── MCP Servers ──────────────────────────────────────────
-
-type McpServerInsert = {
-  /** Scoped AFPS id (`@scope/name`) an integration's `server_name` references. */
-  id: string;
-  orgId: string | null;
-  version?: string;
-  serverType?: "node" | "python" | "binary" | "uv";
-  entryPoint?: string;
-  /** The space that HOMES it — one of the two placements. */
-  homeSpaceId?: string;
-};
-
-/**
- * Seed an `mcp-server` package AND the published version that goes with it —
- * the pair the integration spawn resolver needs to turn a `server_name`
- * reference into a spawn spec. Seeding only the package leaves the reference
- * unresolvable, which is a different (and easy to seed by accident) fixture.
- */
-export async function seedMcpServer(overrides: McpServerInsert): Promise<void> {
-  const version = overrides.version ?? "1.0.0";
-  const manifest = mcpServerManifest({
-    name: overrides.id,
-    version,
-    serverType: overrides.serverType ?? "node",
-    entryPoint: overrides.entryPoint ?? "./server.js",
-  });
-  await seedPackage({
-    id: overrides.id,
-    orgId: overrides.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: manifest,
-    ...(overrides.homeSpaceId ? { homeSpaceId: overrides.homeSpaceId } : {}),
-  });
-  await seedPackageVersion({ packageId: overrides.id, version, manifest });
-}
-
 // ─── Runs ─────────────────────────────────────────────────
 
 type RunInsert = Partial<InferInsertModel<typeof runs>> & {
@@ -396,6 +357,22 @@ export async function seedSpaceMember(
     .values({ presetRole: "viewer", ...overrides })
     .returning();
   return row!;
+}
+
+/** Grant `userId` a custom space role holding exactly `permissions` in `spaceId`. */
+export async function seedSpaceGrant(args: {
+  orgId: string;
+  spaceId: string;
+  userId: string;
+  permissions: string[];
+}): Promise<void> {
+  const role = await seedSpaceRole({ orgId: args.orgId, permissions: args.permissions });
+  await seedSpaceMember({
+    spaceId: args.spaceId,
+    userId: args.userId,
+    presetRole: null,
+    customRoleId: role.id,
+  });
 }
 
 // ─── End Users ────────────────────────────────────────────

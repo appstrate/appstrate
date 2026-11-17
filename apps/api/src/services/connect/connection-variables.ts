@@ -14,16 +14,12 @@ import {
   unrenderableUrlTemplateVariables,
   variableRefs,
 } from "@appstrate/afps-shared/connection-variables";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import { getRemoteSource, type IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { validationFailed } from "../../lib/errors.ts";
 import { checkEgressUrl } from "../../lib/egress-host-guard.ts";
 import { validateConnectionCredentials } from "../schema.ts";
-import {
-  getRemoteSource,
-  getVariablesSchema,
-  type AfpsManifestAuth,
-} from "../integration-manifest-helpers.ts";
+import { getVariablesSchema, type AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 /** A connection's variables (AFPS §7.12) as the run-time renderers substitute them. */
 export type ConnectionVariables = Readonly<Record<string, string>>;

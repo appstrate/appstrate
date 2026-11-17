@@ -253,6 +253,34 @@ describe("describeModelFailure", () => {
     expect(failure).toEqual(classifyModelError({ message: "fetch failed" }));
   });
 
+  it("names the runtime-version refusal by its structured code, keeping the category", () => {
+    // The exact refusal a subscription credential met on a model its announced
+    // client version predates (#2148).
+    const refusal =
+      '400 {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.280 does not support this model; version 2.1.290 or newer is required. Run \'claude update\', or update the Claude desktop app, then try again.","details":{"error_code":"claude_code_version_too_old"}}}';
+    expect(describeModelFailure(refusal)).toMatchObject({
+      category: "invalid_request",
+      retryable: false,
+      status: 400,
+      reason: "runtime_version_too_old",
+    });
+    expect(classifyModelError({ message: refusal })).toEqual({
+      category: "invalid_request",
+      retryable: false,
+      reason: "runtime_version_too_old",
+    });
+  });
+
+  it("reads the reason from the structured code only, never from the prose", () => {
+    const prose =
+      "400 claude_code_version_too_old: Claude Code 2.1.280 does not support this model";
+    expect(describeModelFailure(prose)).not.toHaveProperty("reason");
+    const unknownCode = '400 {"error":{"message":"no","details":{"error_code":"something_else"}}}';
+    expect(describeModelFailure(unknownCode)).not.toHaveProperty("reason");
+    const inherited = '400 {"error":{"details":{"error_code":"toString"}}}';
+    expect(describeModelFailure(inherited)).not.toHaveProperty("reason");
+  });
+
   it("names every category the retryable table knows", () => {
     expect<string[]>([...MODEL_ERROR_CATEGORIES].sort()).toEqual(
       Object.keys(MODEL_ERROR_RETRYABLE_BY_CATEGORY).sort(),

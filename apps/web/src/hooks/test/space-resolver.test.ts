@@ -14,7 +14,9 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 // The space store reads `localStorage` at module init.
 installFakeStorage();
 
-const { enterableSpaceId, isSpaceEnterable } = await import("../use-current-space.ts");
+const { droppedOnSpaceSwitch, enterableSpaceId } = await import("../use-current-space.ts");
+const { ACROSS_SPACES, agentsKeys, packageKeys, paginatedRunsKeys, scheduleKeys } =
+  await import("../../lib/query-keys.ts");
 
 const space = (id: string, access: string, isDefault = false, personal = false) => ({
   id,
@@ -64,10 +66,64 @@ describe("enterableSpaceId", () => {
   });
 });
 
-describe("isSpaceEnterable", () => {
-  it("enters on member access only", () => {
-    expect(isSpaceEnterable({ access: "member" })).toBe(true);
-    // A closed space the caller may ask to join, an orphaned personal space.
-    expect(isSpaceEnterable({ access: "none" })).toBe(false);
+describe("enterableSpaceId with a link naming a space (`?enterSpace=`)", () => {
+  it("takes the linked space first while it is enterable, so a cold load scopes once", () => {
+    expect(enterableSpaceId("spc_default", spaces, "spc_marketing")).toBe("spc_marketing");
+  });
+
+  it("keeps the remembered space when the linked one cannot be entered — not the default", () => {
+    expect(enterableSpaceId("spc_marketing", spaces, "spc_closed")).toBe("spc_marketing");
+    expect(enterableSpaceId("spc_marketing", spaces, "spc_deleted")).toBe("spc_marketing");
+  });
+
+  it("is unchanged without a link", () => {
+    expect(enterableSpaceId("spc_marketing", spaces, null)).toBe("spc_marketing");
+    expect(enterableSpaceId(null, spaces, null)).toBe("spc_default");
+  });
+});
+
+describe("droppedOnSpaceSwitch", () => {
+  const runs = (spanning = false) =>
+    paginatedRunsKeys.list(
+      "org_1",
+      spanning ? ACROSS_SPACES : "spc_a",
+      "/runs",
+      null,
+      null,
+      null,
+      false,
+      "",
+      15,
+    );
+
+  it("drops the current space's run, schedule, agent and package lists", () => {
+    expect(droppedOnSpaceSwitch(runs())).toBe(true);
+    expect(droppedOnSpaceSwitch(scheduleKeys.list("org_1", "spc_a"))).toBe(true);
+    expect(droppedOnSpaceSwitch(agentsKeys.list("org_1", "spc_a"))).toBe(true);
+    expect(droppedOnSpaceSwitch(packageKeys.list("skills", "org_1", "spc_a"))).toBe(true);
+  });
+
+  it("drops a run list of the current space whatever its search says", () => {
+    const searched = paginatedRunsKeys.list(
+      "org_1",
+      "spc_a",
+      "/runs",
+      null,
+      null,
+      null,
+      false,
+      "across-spaces",
+      15,
+    );
+    expect(droppedOnSpaceSwitch(searched)).toBe(true);
+  });
+
+  it("keeps the lists across spaces, which key no space", () => {
+    expect(droppedOnSpaceSwitch(runs(true))).toBe(false);
+    expect(droppedOnSpaceSwitch(scheduleKeys.list("org_1", ACROSS_SPACES))).toBe(false);
+    expect(droppedOnSpaceSwitch(agentsKeys.list("org_1", ACROSS_SPACES))).toBe(false);
+    expect(droppedOnSpaceSwitch(packageKeys.list("integrations", "org_1", ACROSS_SPACES))).toBe(
+      false,
+    );
   });
 });

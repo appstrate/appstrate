@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useForm } from "react-hook-form";
+import { useAppForm } from "../../hooks/use-app-form";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
-import { toast } from "sonner";
 import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -17,6 +15,8 @@ import {
   lockedReads,
   withRequiredReads,
 } from "../../lib/role-permission-dependencies";
+import { useQueryTab } from "../../hooks/use-query-tab";
+import { useRolesView } from "../../stores/list-view-store";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
@@ -54,8 +54,7 @@ import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ViewAsPreset } from "../../lib/view-as-preset";
 
-type RoleView = "list" | "matrix";
-type RoleTab = "org" | "space";
+const ROLE_TABS = ["org", "space"] as const;
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -68,19 +67,10 @@ export function OrgSettingsRolesPage() {
   const [creating, setCreating] = useState(false);
   // The preview dialog, open on a preset or on none.
   const [preview, setPreview] = useState<{ preset?: ViewAsPreset } | null>(null);
-  // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
-  // and Back undoes a switch. Each defaults to its first option, which is
-  // then left out of the URL.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab: RoleTab = searchParams.get("tab") === "space" ? "space" : "org";
-  const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
-  const setParam = (name: "tab" | "view", value: string, fallback: string) =>
-    setSearchParams((prev) => {
-      const out = new URLSearchParams(prev);
-      if (value === fallback) out.delete(name);
-      else out.set(name, value);
-      return out;
-    });
+  // The tab is a place (`?tab=space`, Back undoes a switch); list-or-matrix is a presentation of
+  // the same roles, a preference like every list's cards-or-table.
+  const [tab, setTab] = useQueryTab("tab", ROLE_TABS);
+  const [view, setView] = useRolesView();
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -122,10 +112,7 @@ export function OrgSettingsRolesPage() {
     deleteRole.mutate(
       { params: { path: { id: role.id } } },
       {
-        onSuccess: () => {
-          setConfirmDelete(null);
-          toast.success(t("roles.deleted", { name: role.name }));
-        },
+        onSuccess: () => setConfirmDelete(null),
         onError: (err) => {
           // 409 `role_in_use` reports two holders — live memberships and
           // PENDING invitations that assign the role. Reporting only the first
@@ -184,14 +171,14 @@ export function OrgSettingsRolesPage() {
         <CollectionTabs
           value={tab}
           label={t("roles.tabTitle")}
-          onChange={(next) => setParam("tab", next, "org")}
+          onChange={setTab}
           options={[
             { value: "org", label: t("roles.tabOrg") },
             { value: "space", label: t("roles.tabSpace") },
           ]}
         />
-        <Tabs value={view} onValueChange={(next) => setParam("view", next, "list")}>
-          <TabsList className="h-9">
+        <Tabs value={view} onValueChange={(next) => setView(next === "matrix" ? "matrix" : "list")}>
+          <TabsList className="h-8 shrink-0 p-0.5">
             <TabsTrigger value="list" aria-label={t("roles.viewList")}>
               <Rows3 className="size-4" />
             </TabsTrigger>
@@ -356,8 +343,9 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   const {
     register,
     handleSubmit,
+    showError,
     formState: { errors },
-  } = useForm({
+  } = useAppForm({
     defaultValues: {
       key: role?.key ?? "",
       name: role?.name ?? "",
@@ -427,7 +415,11 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       error={formError}
       formProps={{ noValidate: true, onChange: () => setFormError(null) }}
     >
-      <FormItem id="role-name" label={t("spaces.nameLabel")} error={errors.name?.message}>
+      <FormItem
+        id="role-name"
+        label={t("spaces.nameLabel")}
+        error={showError("name") ? errors.name?.message : undefined}
+      >
         <Input
           maxLength={100}
           disabled={isPending}
@@ -442,7 +434,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
         id="role-key"
         label={t("roles.keyLabel")}
         hint={t("roles.keyHint")}
-        error={errors.key?.message}
+        error={showError("key") ? errors.key?.message : undefined}
       >
         <Input
           maxLength={64}

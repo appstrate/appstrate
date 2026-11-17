@@ -9,7 +9,7 @@
  */
 
 import {
-  canAuthorAgents,
+  canAuthorPackages,
   reaches,
   turnCapabilities,
   type TurnCapabilities,
@@ -22,7 +22,7 @@ export interface ChatAccessContext {
   can: (permission: GateablePermission) => boolean;
   /** The caller's standing in the current space; `undefined` while it loads. */
   spaceGrant: SpaceGrant | undefined;
-  /** The composer's agent-authoring switch. */
+  /** The composer's package-authoring switch. */
   authoring: boolean;
 }
 
@@ -31,7 +31,7 @@ export interface ChatCapability {
   /** Spelled in full, not built from `id`, so the locale guard checks it. */
   labelKey: string;
   held: (ctx: ChatAccessContext, turn: TurnCapabilities) => boolean;
-  /** A row the agent-authoring switch turns off: held, but not used this turn. */
+  /** A row the package-authoring switch turns off: held, but not used this turn. */
   authoring?: true;
 }
 
@@ -49,9 +49,9 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   },
   {
     // Creating only: editing is authorized by the agent's HOME space.
-    id: "createAgents",
-    labelKey: "access.capability.createAgents",
-    held: (ctx) => canAuthorAgents(ctx.can),
+    id: "createPackages",
+    labelKey: "access.capability.createPackages",
+    held: (ctx) => canAuthorPackages(ctx.can),
     authoring: true,
   },
   {

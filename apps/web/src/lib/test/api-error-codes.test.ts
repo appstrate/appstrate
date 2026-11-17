@@ -25,8 +25,6 @@ import type { CompanionViolationReason } from "@appstrate/afps-shared/companion-
 import type { FieldErrorCode } from "@appstrate/core/api-errors";
 import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
 import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
-import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
-import { OUTPUT_TOOL_REQUIRED } from "@appstrate/core/validation";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import { ApiError } from "../../api/errors.ts";
@@ -34,7 +32,6 @@ import { errorField, errorMessage, refusalMessage, REFUSAL_ERROR_KEYS } from "..
 import fr from "../../locales/fr/common.json";
 import en from "../../locales/en/common.json";
 import agentsFr from "../../locales/fr/agents.json";
-import agentsEn from "../../locales/en/agents.json";
 
 await i18nReady;
 
@@ -116,7 +113,7 @@ const FORWARDED = [
     SKILL_INVALID_FRONTMATTER_NAME: true,
     SKILL_MISSING_FRONTMATTER_DESCRIPTION: true,
     SKILL_INVALID_FRONTMATTER_DESCRIPTION: true,
-    MCP_SERVER_MISSING_ENTRY_POINT: true,
+    LOCAL_SERVER_MISSING_ENTRY_POINT: true,
   }),
 ];
 
@@ -148,15 +145,17 @@ const EMITTED_OUT_OF_SIGHT = [
   "missing_content",
   "invalid_content",
   // The per-connection authorization server's refusals (`refuse(code, …)` in
-  // `services/integration-connections.ts`), on a `variables.<name>` field.
+  // `services/integration-oauth-provisioning.ts`), on a `variables.<name>` field.
   "authorization_server_unavailable",
   "authorization_server_mismatch",
+  // The provisioning refusals, `code: problem` of `provisionabilityProblems`
+  // (`lib/integration-client-metadata.ts`, `services/integration-oauth-provisioning.ts`).
+  "authorization_server_pkce_unsupported",
+  "authorization_server_iss_unsupported",
   // An `authorized_uris` entry a credential field leaves unrenderable (`services/connect/fields-strategy.ts`).
   "unrenderable_authorized_uri",
   // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).
   "credential_change_revocation_failed",
-  // A manifest rule's own item code, carried by its Zod issue (`@appstrate/core/validation`).
-  OUTPUT_TOOL_REQUIRED,
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */
@@ -206,6 +205,13 @@ const NOT_SURFACED = new Set([
   "signup_configuration_invalid",
   // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
   "integration_unbound",
+  // Warnings of integration discovery and server sync (`POST /api/integrations/discover`,
+  // `POST /api/integrations/{packageId}/discover`), never a refusal: `agents.json` words them
+  // under `integrationEditor.discover.warning.*`.
+  "manual_client_required",
+  "authorization_server_blocked",
+  "tools_truncated",
+  "instructions_truncated",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",
@@ -299,17 +305,6 @@ describe("API refusal codes ↔ locale files", () => {
   });
 });
 
-describe("runtime tool descriptions", () => {
-  it("exist in both locales for every tool of the catalog", () => {
-    const missing = RUNTIME_TOOL_CATALOG.flatMap((tool) =>
-      [agentsFr, agentsEn]
-        .filter((bundle) => !(`editor.runtimeTool.${tool.id}` in bundle))
-        .map(() => tool.id),
-    );
-    expect(missing).toEqual([]);
-  });
-});
-
 describe("errorMessage", () => {
   it("names a refusal by its code", async () => {
     await i18n.changeLanguage("fr");
@@ -357,18 +352,6 @@ describe("errorMessage", () => {
       ],
     });
     expect(errorMessage(dependency)).toBe(agentsFr["error.dependencyOverridesRefused"]);
-  });
-
-  it("tells an output schema without the output tool what to turn on", async () => {
-    await i18n.changeLanguage("fr");
-    const message =
-      "The 'output' runtime tool must be enabled when an output schema is defined — an agent must return its result.";
-    const err = await problem({
-      code: "validation_failed",
-      detail: `manifest.runtime_tools: ${message}`,
-      errors: [{ field: "manifest.runtime_tools", code: "output_tool_required", message }],
-    });
-    expect(errorMessage(err)).toBe(agentsFr["error.outputToolRequired"]);
   });
 
   it("words a 'no connection' override on a required integration as the pin's refusal", async () => {

@@ -12,18 +12,21 @@
  *
  * A row opens HERE, not on the package's page: that page would throw away the
  * panel and its breadcrumb would claim the current space for a package not in it.
+ *
+ * It names no space of its own, so « Tous les espaces » opens it as it is and stays on: there,
+ * nothing is « here » (`useHereSpaceId`) and every deed names its space.
  */
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, ExternalLink, LibraryBig } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useHereSpaceId } from "../hooks/use-overview-mode";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
@@ -63,14 +66,11 @@ import {
 } from "../lib/catalogue-placement";
 import { useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
 import { useListParams } from "../lib/list-params";
-import {
-  INTEGRATION_EXECUTIONS,
-  integrationExecution,
-  integrationProtocol,
-  type IntegrationExecution,
-} from "../lib/integration-collection";
+import { INTEGRATION_SOURCES } from "../lib/integration-collection";
+import { IntegrationSourceLabel } from "./integration-source-label";
 import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
+import { PackageCardSkeleton } from "./package-card";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
 import { CatalogueAddButton } from "./catalogue-add-button";
@@ -82,7 +82,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { FilterSpec } from "./list-toolbar";
 import {
   useCatalogueActionsColumn,
-  useCatalogueProtocolColumn,
+  useCatalogueSourceColumn,
   useCatalogueOriginColumn,
   useCatalogueSpaceColumns,
   useCatalogueSelectColumn,
@@ -94,7 +94,6 @@ import { SettingsHeading } from "./settings/settings-heading";
 const TITLE_KEY: Record<PackageType, string> = {
   agent: "packages.type.agents",
   skill: "packages.type.skills",
-  "mcp-server": "packages.type.mcp-servers",
   integration: "packages.type.integrations",
 };
 
@@ -125,12 +124,15 @@ export function OrgCatalogueModal({
   type: PackageType;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const spaceId = useCurrentSpaceId();
+  // « Here »: the working space, none in « Tous les espaces », where the catalogue claims no
+  // space (no « Pas encore dans… » sections, no « ici », no bulk activation): the add menu and
+  // the « Par espace » matrix name the space of every deed.
+  const spaceId = useHereSpaceId();
   const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
-  const list = useListParams(["state", "origin"]);
+  const list = useListParams(["state", "origin", "source"]);
   // Découvrir is BROWSING (cards); Par espace is MANAGING (a table of per-space state). No toggle.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // A tick belongs to one list: another view or kind starts with none.
@@ -157,9 +159,25 @@ export function OrgCatalogueModal({
   const { data: agentsHere, isLoading: agentsHerePending } = useAgents();
   const agentLook = new Map((agentsHere ?? []).map((agent) => [agent.id, agent] as const));
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
+  // One tile per package, the card's and the sheet's alike; it waits for the read that carries it.
+  const iconPending =
+    (active === "agent" && agentsHerePending) ||
+    (active === "integration" && integrationsQuery.isLoading);
+  const tileOf = (id: string, name: string) =>
+    iconPending ? (
+      <Skeleton className="size-10 rounded-[10px]" />
+    ) : (
+      <PackageIcon
+        type={active}
+        id={id}
+        name={name}
+        icon={active === "agent" ? agentLook.get(id)?.icon : integrationById.get(id)?.manifest.icon}
+        color={agentLook.get(id)?.color}
+      />
+    );
   const librarySpaces = library?.spaces ?? [];
-  // The current space leads (not the server's default-first order): it is the column that
-  // survives a narrow width (tier 2, in `useCatalogueSpaceColumns`).
+  // The current space leads (not the server's default-first order): it is the first space
+  // column a reader sees before scrolling sideways.
   const spaces = [...librarySpaces].sort(
     (a, b) => Number(b.id === spaceId) - Number(a.id === spaceId),
   );
@@ -179,12 +197,11 @@ export function OrgCatalogueModal({
     return { ...base, here: "active", activeIn: [...base.activeIn, spaceId] };
   };
 
-  const [execution, setExecution] = useState<IntegrationExecution>("remote");
   const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
   // The read has an address of its own: reload lands on it, Back leaves it.
   // Looked up in the whole library, not the kind shown nor the rows the filters leave: a link
-  // to a package (a share notification) opens its sheet whatever the list shows, the other
-  // execution's integrations included. An id the library does not hold drops from the address.
+  // to a package (a share notification) opens its sheet whatever the list shows, a
+  // filtered-out integration included. An id the library does not hold drops from the address.
   const preview = useUrlModalTarget(
     CATALOGUE_PACKAGE_PARAM,
     library ? CATALOGUE_KINDS.flatMap((kind) => library.packages[kind]) : undefined,
@@ -198,10 +215,14 @@ export function OrgCatalogueModal({
   }, [sheetAddress, navigate, location.state]);
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
   const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
+  const sources = list.values("source", INTEGRATION_SOURCES);
+  // A source filter judges a row by its integration read: until it lands the list is loading, not empty.
+  const listLoading =
+    isLoading || (active === "integration" && sources.length > 0 && integrationsQuery.isLoading);
   const all = ofKind.filter((item) => {
-    if (active === "integration") {
-      const row = integrationById.get(item.id);
-      if (row && integrationExecution(row.manifest.source.kind) !== execution) return false;
+    if (active === "integration" && sources.length > 0) {
+      const kind = integrationById.get(item.id)?.manifest.source.kind;
+      if (!kind || !sources.includes(kind)) return false;
     }
     // Découvrir is the WHOLE catalogue, not the complement of the placed half: otherwise
     // agents and skills (placed by their home) would empty it.
@@ -268,6 +289,16 @@ export function OrgCatalogueModal({
     ],
     onChange: list.setValues("state"),
   };
+  const sourceFilter: FilterSpec = {
+    id: "source",
+    label: t("integrations.col.source"),
+    values: sources,
+    options: INTEGRATION_SOURCES.map((source) => ({
+      value: source,
+      label: t(`integrations.source.${source}`),
+    })),
+    onChange: list.setValues("source"),
+  };
   const offered: CardItem[] = rows.map((item) => {
     const look = agentLook.get(item.id);
     const row: CardItem = {
@@ -278,30 +309,21 @@ export function OrgCatalogueModal({
     if (layout !== "cards") return row;
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
-    const iconPending =
-      (active === "agent" && agentsHerePending) ||
-      (active === "integration" && integrationsQuery.isLoading);
-    const icon = iconPending ? (
-      <Skeleton className="size-10 rounded-[10px]" />
-    ) : (
-      <PackageIcon
-        type={active}
-        id={item.id}
-        name={row.displayName}
-        icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
-        color={look?.color}
-      />
-    );
+    const icon = tileOf(item.id, row.displayName);
     // Spaces where it already runs (ticked, so nothing vanishes after a click) or where this reader may add it.
     const addable = spaces
-      .map((space) => ({
-        id: space.id,
-        name: space.name,
-        active: placement?.activeIn.includes(space.id) ?? false,
-      }))
+      // Drawn with its tile: the listing's row, which every space the library names is in.
+      .flatMap((space) => {
+        const listed = grantById.get(space.id);
+        return listed
+          ? [{ ...listed, active: placement?.activeIn.includes(space.id) ?? false }]
+          : [];
+      })
       .filter((space) => space.active || mayActivateIn(item, space.id));
     // Only the placement in the space on screen: another space's share says nothing here.
     const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;
+    const sourceKind =
+      active === "integration" ? integrationById.get(item.id)?.manifest.source.kind : undefined;
     return {
       ...row,
       icon,
@@ -323,6 +345,12 @@ export function OrgCatalogueModal({
           <span className="truncate">
             {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
+          {sourceKind && (
+            <>
+              <span aria-hidden>·</span>
+              <IntegrationSourceLabel source={sourceKind} />
+            </>
+          )}
           {sharer && (
             <span className="bg-primary/10 text-primary shrink-0 truncate rounded px-1.5 text-[11px] leading-5 font-medium">
               {t("catalogue.sheet.sharedBy", { name: sharer })}
@@ -426,10 +454,9 @@ export function OrgCatalogueModal({
     busy: activate.isPending,
     onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
   });
-  const protocolColumn = useCatalogueProtocolColumn((item) => {
-    const row = integrationById.get(item.id);
-    return row ? integrationProtocol(row.manifest.source.kind) : undefined;
-  });
+  const sourceColumn = useCatalogueSourceColumn(
+    (item) => integrationById.get(item.id)?.manifest.source.kind,
+  );
   const actionsColumn = useCatalogueActionsColumn({
     isPending: activate.isPending,
     deedsOf,
@@ -448,28 +475,12 @@ export function OrgCatalogueModal({
     { id: "spaces", label: t("catalogue.viewSpaces") },
   ];
   const viewSwitcher = (
-    <div
-      role="tablist"
-      aria-label={t("catalogue.viewLabel")}
-      className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
-    >
-      {views.map((option) => (
-        <Link
-          key={option.id}
-          to={catalogueListAddress(active, option.id, location.search)}
-          role="tab"
-          aria-selected={view === option.id}
-          className={cn(
-            "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
-            view === option.id
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {option.label}
-        </Link>
-      ))}
-    </div>
+    <CollectionTabs
+      value={view}
+      label={t("catalogue.viewLabel")}
+      hrefOf={(id) => catalogueListAddress(active, id, location.search)}
+      options={views.map(({ id, label }) => ({ value: id, label }))}
+    />
   );
   const kindRows = CATALOGUE_KINDS.map((type) => (
     <RailLink
@@ -541,6 +552,7 @@ export function OrgCatalogueModal({
         <CataloguePreview
           item={previewed}
           type={active}
+          icon={tileOf(previewed.id, previewed.name || previewed.id)}
           spaces={librarySpaces}
           placement={placementOf(previewed)}
           gateOf={(targetSpaceId, next) => activationGate(previewed, targetSpaceId, next)}
@@ -551,9 +563,9 @@ export function OrgCatalogueModal({
           agents={library?.packages.agent ?? []}
           pinnedVersion={pinnedVersion}
           onUnpin={unpin}
-          protocol={
-            active === "integration" && integrationById.get(previewed.id)
-              ? integrationProtocol(integrationById.get(previewed.id)!.manifest.source.kind)
+          source={
+            active === "integration"
+              ? integrationById.get(previewed.id)?.manifest.source.kind
               : undefined
           }
           actionsMenu={
@@ -588,7 +600,8 @@ export function OrgCatalogueModal({
         <PackageCollection
           columnMenu={columnMenu}
           items={offered}
-          isLoading={isLoading || (active === "integration" && integrationsQuery.isLoading)}
+          // Icons wait on their own (`iconPending`): the rows never do.
+          isLoading={listLoading}
           error={
             error instanceof Error
               ? error
@@ -605,22 +618,6 @@ export function OrgCatalogueModal({
           list={list}
           view={layout}
           header={<SettingsHeading className="mb-4" title={t(titleKey)} />}
-          tabs={
-            active === "integration" ? (
-              <CollectionTabs
-                value={execution}
-                label={t("integrations.execution.label")}
-                onChange={(next) => {
-                  setSelected(new Set());
-                  setExecution(next);
-                }}
-                options={INTEGRATION_EXECUTIONS.map((value) => ({
-                  value,
-                  label: t(`integrations.execution.${value}`),
-                }))}
-              />
-            ) : undefined
-          }
           // The library says where a package is placed, not what uses it: an activity filter would match nothing.
           activityFilter={false}
           originLabels={{
@@ -628,14 +625,18 @@ export function OrgCatalogueModal({
             local: t("catalogue.sourceOrg", { name: orgName }),
             system: t("catalogue.sourceSystem"),
           }}
-          extraFilters={discovering ? [] : [stateFilter]}
+          extraFilters={[
+            ...(discovering ? [] : [stateFilter]),
+            ...(active === "integration" ? [sourceFilter] : []),
+          ]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
+          cardPlaceholder={<PackageCardSkeleton meta="line" keywords={false} />}
           columns={[
             selectColumn,
             ...nameColumns,
             originColumn,
-            ...(active === "integration" && execution === "remote" ? [protocolColumn] : []),
+            ...(active === "integration" ? [sourceColumn] : []),
             ...spaceColumns,
             actionsColumn,
           ]}

@@ -27,6 +27,22 @@ they start with `packages/` or `e2e/`.
 - **Surfaces**: the page is `bg-canvas` (off-white), cards and dialogs are
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
+- **One frame per block**: a card (`Card`, `DetailSectionCard`, a `DataTable`) is
+  `bg-card rounded-lg border`, with no shadow (shadows are for what floats:
+  popovers, menus, dialogs). A table draws its own card on a page, a detail tab
+  included; inside a surface that is already framed (every overlay: settings and
+  the catalogue, every `Modal`, a `framed` `DetailTabPanel`) it draws none,
+  because that surface spreads `INTEGRATED_TABLE_SURFACE`. Never choose a
+  table's frame at the call site. A detail tab lays its content on the page:
+  a list tab (runs, memory, connections, usage, a run's journal) is its
+  `ListToolbar` over the list's own card, at the panel's edge; only a rail split
+  (settings, a run's results) is a `framed` panel. A toolbar's buttons are its
+  32px (`lib/toolbar-button.ts`), never a stock `size="sm"` beside them.
+- **Grey has two values**: a static muted surface (inset, notice, header band,
+  read-only field, code block) is `bg-muted/40` (insets add `rounded-lg border`);
+  hovering a row, a list item or a card is `hover:bg-muted/50`, the table row's
+  hover. A tinted surface that is itself clickable hovers to `bg-muted`. Buttons,
+  menus and the org switcher keep the primitives' `accent`.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
   `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
@@ -49,6 +65,16 @@ they start with `packages/` or `e2e/`.
   control (a button, a row being saved), never content on its way; no centred
   spinner, no « Chargement… » sentence. `BootScreen` is the one exception: before
   the shell exists there is no page to draw.
+- **A structure change updates its skeletons in the same change**: any change to
+  a screen's structure (frames, sections, toolbar or footer, header lines, tabs,
+  cards, row heights, a surface turning integrated) updates, in that same change,
+  every skeleton that stands for it — the page skeletons of
+  `loading-skeletons.tsx`, the per-component `*Skeleton`s, the `placeholder`
+  props of `DataColumn`/`CardGrid`/`ItemList`, the `skeletonOf` fallbacks and
+  tables of `app.tsx` — so the skeleton and the loaded page keep one shape.
+  Review checks both; a skeleton that keeps an old frame, shadow, tint, radius
+  or line is a defect of the change that left it. A detail page's skeleton draws the
+  tab the address opens on (`#runs`, `#settings`…), not always the first one.
 
 ## 2. The shell
 
@@ -127,9 +153,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
    `className` (`text-primary`, `text-destructive`). A link that loses its label
    under `lg` becomes a square icon (`max-lg:w-8 max-lg:px-0`).
-   `PageHeader` with `variant="collection"` is for level-one list pages only:
-   title and actions, no descriptive subtitle, followed by the toolbar at the
-   same spacing on every list. Explanations belong in the content or empty state.
+   `PageHeader` with `variant="collection"` is for level-one pages only (lists and the
+   dashboard): title and actions, followed by the toolbar at the same spacing on every list.
+   `description` is a status line (the dashboard's date and running count), never an
+   explanation: those belong in the content or empty state.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
    List, settings and detail pages use `PageActionsMenu`
@@ -142,14 +169,16 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`
-   (`packages/ui`; variants `destructive`, `warning`, `info`, `success`), its
-   icon on the first line of text; a button inside it sits on that first line
-   (`-my-1.5`). What _happened_ (a run's failure, an integration that lost its
+   (`packages/ui`) — see § 8 « Notice »; its button goes in `action`. What _happened_ (a run's failure, an integration that lost its
    connection mid-run, files not saved) is never a band: it opens the run's
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
 4. **Tabs**: `HeaderTabBar` (`components/detail-tabs.tsx`, passed to `DetailBar`
    as `tabs`), underlined, an icon each, the tab kept in the URL hash
-   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
+   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string and pushes, so Back
+   undoes a switch). The summary tab is `overview`, the settings one `settings`. A tab that splits
+   a COLLECTION (`CollectionTabs`) is `useQueryTab(name, options)` (`hooks/use-query-tab.ts`, the
+   first option leaves the URL, also pushed); `CollectionTabs` with `hrefOf` draws links when the
+   router owns more than one param (the catalogue's views).
    When the list is wider than its container (a phone) it scrolls sideways and a
    fade marks each edge that hides tabs, nothing when they all fit. **The same
    tabs for every role** (a package's « Utilisé par » included): what a role may
@@ -247,43 +276,58 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   reason (section 11), not for a setting the object cannot have.
 - "Inherit" is always an explicit option and names what it inherits
   (« Hériter (Mistral Medium) »).
-- **Choosing connections: one component, everywhere** (`ConnectionChoiceMenu`,
-  `components/integration-connect/connection-choice-menu.tsx`). A trigger that reads the
-  current choice like a select (« Hériter (12****oken) », the same form as the model and proxy
-  « Hériter (Mistral Medium) », the name, « 2 connexions », « Aucune connexion »; never a « + »,
-  which means add and belongs to the « Ajouter une connexion » entry), and a menu in **three
-  exclusive modes, first-level radios** so that « Hériter » reads as an alternative to the
-  choice below it, not a row of it: ( ) **Hériter** / « Utilise 12****oken, la connexion par
-  défaut de l'espace » (the layer in the server's words, `run.connSource.*`), ( ) **Choisir des
-  connexions** / « Cochez celles à utiliser », with the connections indented under it as
-  **checkboxes** (one connection is still a box; capped at `MAX_CONNECTIONS_PER_INTEGRATION`;
-  ticking one moves the mode to « Choisir »), ( ) **Aucune connexion** / « L'agent s'exécute
-  sans cette intégration » (absent for a required integration); then « Ajouter une
-  connexion » and « Gérer les connexions ». Each connection row is a name and one line of the
-  same form (« Clé API · connectée depuis Default »), listed in the order the SERVER ranked them (`scope_fit`
-  then least privilege: the client never sorts them again). What is ticked is what is CHOSEN, never a
-  second tick for what the cascade would give. A mode a usage cannot answer is left out; with
-  the list alone the menu shows the boxes without a radio. Where it serves, and how it writes:
-  - the **agent's** and a **schedule's** Connexions (`PickerMenu`, fed by the readiness verdict):
-    all three modes, « Valider » writes the ticked set, « Hériter » and « Aucune connexion »
-    write at once, a lone connection writes when ticked (unticking it goes back to « Hériter »);
-  - the **organisation default** of an integration page (`OrgDefaultSection`): the list alone
-    (an empty set is « no default », which its own select says), the set and its enforcement
-    mode saved together by the section's save bar;
-  - **pins** of an integration page (`NewPinForm`): « Choisir » and « Aucune connexion », no
-    « Hériter » (a pin is the exception, its absence is the delete button), a form value;
+- **Choosing connections: text plus a modal, two lists of boxes.** No menu of modes.
+  - the **agent's** and a **schedule's** Connexions (`IntegrationConnectionPicker`, fed by the
+    readiness verdict, rules in `use-connection-picker.ts`): the cell reads what binds as text
+    (« web · db », « Hériter (web) », « Aucune connexion », imposed connections first behind a
+    padlock), one amber line per problem, and « Modifier » opens `ConnectionPickerModal`
+    (`integration-connect/connection-picker-modal.tsx`, a `FormModal`): the candidates as
+    `CheckboxField`s in the order the SERVER ranked them (`scope_fit` then least privilege; the
+    client never sorts them again), imposed ones ticked and disabled (« Imposée par un admin »),
+    the cap (`MAX_CONNECTIONS_PER_INTEGRATION`), one line per problem with its way out (renew,
+    upgrade behind a `ConfirmModal`, connect a new account). « Enregistrer » writes the ticks,
+    « Revenir au choix par défaut » writes `null`, « Aucune connexion » writes `[]` (optional
+    integration, no lock). A closed imposed set (specific connections in « Exactement ces
+    connexions », an enforced space default) is read-only with its reason, no « Modifier ». Under
+    « Ces connexions, plus celles de l’utilisateur » (`additional_connections_allowed`) the UI
+    writes the additions only: an imposed id is never part of an override or a member pin, and
+    unticking every addition means « no addition » (`null` for the member's pin, `[]` in an
+    override), never « no connection »;
+  - the sets an admin imposes on an integration page (the space default and the agents' specific
+    connections): `ConnectionCheckboxList` (`integration-detail/connection-checkbox-list.tsx`, the
+    shared connections, capped, a stored member no longer shared listed as « Connexion
+    indisponible »: ticked it can be unticked, never ticked again). The space default
+    (`OrgDefaultSection`) lists it beside its usage select (an empty set is « no default », which
+    the select says), the set and its enforcement mode saved together by the section's save bar.
+    The **specific connections per agent** (`PinManagementSection`) are a read-only `DataTable`
+    (Agent, Connexions, Mode in words) whose « … » holds « Modifier » and « Supprimer »; « Ajouter »
+    and « Modifier » open one `FormModal`: Agent (an `OptionSelect` of the agents without any,
+    fixed when editing), the boxes (none ticked: « Aucune connexion »), Mode (an `OptionSelect`,
+    « Exactement ces connexions » by default, « Ces connexions, plus celles de l’utilisateur »
+    disabled with its reason under the field), then the one sentence saying whom saving affects.
+    « Supprimer » only opens its `ConfirmModal`, which says what the members and the schedules
+    lose. **The same connections are edited from the agent's Connexions**: for a caller holding
+    `integrations:configure`, the « … » of a row whose integration is active in the space holds
+    « Définir des connexions spécifiques » (none yet, and only for an agent active in the space) or
+    « Modifier les connexions spécifiques » and « Retirer les connexions spécifiques », which open
+    that same form, its Agent fixed to the agent, and that same confirmation. Both screens go
+    through one hook (`usePinEditor`, `integration-detail/use-pin-editor.tsx`: the specific
+    connections, the shared connections, the agents using the integration, the default's
+    enforcement, the two dialogs), so a write on either refreshes both and the readiness the
+    connections cell reads; a read it needs that fails is shown as an error where « Ajouter »
+    would be, never as an empty list. A member sees no menu, and the cell stays their view
+    (padlock, « Épinglée par un admin »), never a link to the specific connections; a schedule's
+    rows have no menu (they bind the agent);
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
-    the creation modal): after a 409 the candidates and « Aucune connexion » when optional, no
-    « Hériter » (the server just said the actor's own resolution cannot decide); an optional
-    integration nothing refused keeps « Hériter » (the absence of a pick) and « Aucune connexion ».
-  - Usages over a plain list go through `ConnectionSetPicker` (same file, a controlled value:
-    `null` no choice, `[]` none, each tick handed to `onChange`).
+    the creation modal): after a 409 the refused candidates as boxes and « Aucune connexion » as a
+    box of its own when optional; where nothing was refused, a line says the identity's usual
+    resolution applies.
 
-  What turns a trigger amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
+  What turns the cell amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
   while nothing is chosen (an unset override included, which inherits the cascade), the pick itself
   once a set is chosen (an under-scoped, dead or unavailable member, or « Aucune connexion » for a
-  required integration). An override reaching outside an admin lock says so under the locked
-  picker (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
+  required integration). An override reaching outside a closed imposed set says so under the
+  read-only cell (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
   whose connections nobody named. When the caller arms a schedule that runs as themself and holds
   a single connection for an integration, the server names that connection on the write
   (`withScheduleFallback`); the SPA sends only the user's picks (`savedScheduleOverrides`) and
@@ -315,7 +359,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                                                                                                                                                                                          |
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
 | A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
-| Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                                                                                                                                                                                                      |
+| Which connections of one integration                                 | The connections cell and `ConnectionPickerModal` (`integration-connect/`), or `ConnectionCheckboxList` for a set an admin imposes: section 4. Never a menu of modes                                                                                                                                                                                                                         |
 | A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's                                                                                                                                                                          |
 | A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                                                                                                                                                                                                     |
 | A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                                                                                                                                                                                              |
@@ -369,8 +413,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `DataTable` (aligned columns, needs width), `CardGrid` (`components/card-grid.tsx`,
   `auto-fill`, no breakpoints) and `ItemList` (`components/item-list.tsx`, stacked
   self-contained blocks, asks nothing of its container: use it in a panel, a modal
-  or a narrow tab). A settings list is a table, not cards (except a list that never exceeds a handful of
-  rows, such as an agent's connections: plain rows). A matrix (packages by
+  or a narrow tab). A settings list is a table, not cards, except a list that never exceeds a handful of rows and
+  whose rows hold a control that needs the width: an agent's and a schedule's Connexions are an
+  `ItemList` (`package-detail/agent-integrations-block.tsx`: one block per integration, with name,
+  id and access on the left, status and the admin's « … » on the right, and the connections cell
+  under them at full width), so a phone keeps every part without scrolling. A matrix (packages by
   workspace) is the one raw shadcn `Table`.
 - `DataTable` (`components/data-table.tsx`, the shadcn `Table`) under a `ListToolbar`
   (`components/list-toolbar.tsx`: search, filters behind one button, column menu;
@@ -378,30 +425,29 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   or with `elastic` the floor of a column that shares what is left. A header that
   truncates at 1440 px is a column too narrow, fix the width. Text a cell truncates
   carries its full value in `title` (a name, an email, a list); a column that holds
-  a name has a floor that fits a usual one. Every column is drawn and the table
-  scrolls sideways, unless the table is `tiered` (a narrow panel, a modal, a detail
-  tab): then a READ column waits for room by its `tier`.
+  a name has a floor that fits a usual one. A column whose cells say what they are
+  (a status badge) sets `hideHeader`: its head is read by screen readers and named
+  in the column menu, but not drawn. Every column the reader keeps is drawn,
+  at every width, and a table too wide for its container scrolls sideways: the
+  width never hides a column, the column menu does.
   Its required `tableId` is the stable key for column widths, independent of its
   translated accessible `label`; occurrences of the same table share that key.
   `PackageCollection` callers compose their columns and visibility menu directly,
   sharing `usePackageNameColumn` for the identity column (its second line is the
   description, else the package id in mono, so every row keeps one height).
 - **Three rules for every table** (both live in `DataTable`, no caller opts in):
-  1. **A column that can be acted on never disappears.** A column declares what it
-     is in its definition: a READ column (text, badge, date) may carry a `tier`
-     and wait for room in a `tiered` table (tier `2` for a 36rem table, `3` for a
-     56rem one); a CONTROL column (`control: true`: a select, a switch, a tick, a
-     button, a link that does something) has no tier and is always drawn. The type
-     forbids a `tier` on a control, and `DataTable` itself drops any tier given to a
-     control or to the row's « … » column (`components/test/data-table.test.tsx`), so
-     mark every column that holds a control. When a table does not fit, it scrolls
-     sideways and holds its name column (the first read column, with the ticks before it)
-     and its row's end (the headerless « … » column) in place (`sticky`), so a row
-     is always named and its actions are always in reach. A scroll is better than
+  1. **No column disappears on its own.** A column declares what it is in its
+     definition: a READ column (text, badge, date) or a CONTROL column
+     (`control: true`: a select, a switch, a tick, a button, a link that does
+     something). The row's name is the read column marked `identity`, else the first
+     read column; the column menu cannot hide it. When a table does not fit, it
+     scrolls sideways and holds its name column (with the fixed-width columns before
+     it) and its row's end (the headerless « … » column) in place (`sticky`), so a
+     row is always named and its actions are always in reach. A scroll is better than
      a lost control, and a « … » menu is not the place for a dropdown: a control
      that is the setting (role, share, default) stays in its own column.
   2. **A row is a link.** The cover link stretches over the row; the named link
-     lives in the first read cell.
+     lives in the name cell.
   3. **Columns resize.** Drag the right edge of a head; a double-click gives the
      column back its declared width. The width is kept per table (its `label`) in
      `localStorage`, never goes under the declared one, and the table works without
@@ -525,9 +571,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     puis « Réglages avancés ») avant de supprimer la clé. ») and offers only Annuler. Only a key
     no model uses is deleted. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
-- **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
+- **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
+- **An integration's source** (API · MCP distant · MCP local) is worded in one place,
+  `IntegrationSourceLabel` (`components/integration-source-label.tsx`): the table column, the
+  card line, the catalogue sheet and the detail all draw it, and a local one says « indisponible ici »
+  (a focusable hint with its explanation) when this instance cannot run local servers.
 - **A row has ONE way to act** (`TableRowActions`, `components/table-row-actions.tsx`):
   the « … » menu holds EVERY action of the row, and nothing else sits at the
   row's end. No pencil, download, reconnect or gear icon beside it, in any
@@ -587,6 +637,14 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `packages/ui` `Badge`: `ScheduleStatusBadge`, `ModelUnavailableBadge`,
   `HealthIssueBadge`. The status tones (`success`, `warning`, `running`, `pending`, `failed`…) are variants
   of the `packages/ui` `Badge`, and `info` / `warning` / `success` of `Alert`: no wrapper.
+- **Notice**: every inline notice is the `packages/ui` `Alert` — never a hand-built
+  tinted `div`. One anatomy: the tone's icon (drawn by `Alert`; `icon` swaps it,
+  `icon={false}` drops it), the text (`AlertTitle` over `AlertDescription`, or a
+  description alone, which then reads in the foreground colour), and at most one
+  control in `action`, centred at the end of the row. Tones: `default` (neutral:
+  a role limit, a fact), `info`, `warning`, `destructive`, `success`; the tone
+  tints the surface, border and icon, never the text. `size="sm"` inside a form
+  or a dialog. A static fact passes `role="note"` (`RoleLimitNotice`).
   `MetaBadge` (same file) is the outline badge that says WHAT
   a row is (Inline, Supprimé), not how it ended. A version is a `secondary` badge
   with `font-mono`; an agent whose working copy differs from its last published
@@ -626,6 +684,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   click does not dismiss it); the
   two-pane overlay is `PanelLayout` inside `OverlayFrame`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
+- **An action that needs a space it does not name** in « Tous les espaces » never asks in a
+  dialog: with several eligible spaces its trigger is their menu (`SpaceChoiceDropdown`, or
+  `MenuAction.inSpaces`; the catalogue's « Ajouter à… » is the same menu), with one it acts there
+  (`useSpaceAction`). Its dialog passes `inSpace` to `Modal`/`FormModal`.
 - **Two kinds of modal, nothing in between.**
   - **State** (the default): a `useState` in the component that offers it, mounted
     while open (`{open && <FooModal onClose={() => setOpen(false)} />}`). Creations,
@@ -671,11 +733,15 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   only what it needs to exist, opened from every entry point
   with the context preselected, then the object's page takes the rest
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
-  (agent, skill, integration, MCP server): the creation hand-off modal
+  (agent, skill, integration): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
-  manual / chat / coding agent), then, for the manual way, the editor page: an agent
-  is created from `components/create-agent-modal.tsx` (name, identifier, description, prompt)
-  and edited on its own page; skills and integrations keep a creation page.
+  url (when offered) / manual / chat / import), then, for the manual way, `components/create-package-modal.tsx`
+  (name, identifier, description, plus an agent's prompt or an integration's server URL), after
+  which the new package's page takes the rest, its files included. A local integration (one that ships its own MCP server) is written in the editor or imported (`.afps`). An integration is also added
+  from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
+  `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
+  in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the
+  package exists, and the step is read from the package (`integrationWizardStep`).
 
 ## 10. Feedback
 
@@ -701,7 +767,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   cannot decide (« Choisissez la connexion Telegram pour e2e-C Membre » / « e2e-C
   Membre a plusieurs connexions Telegram. Une planification se lance seule : elle ne peut pas
   demander laquelle utiliser au moment de l'exécution. »); the choice is the
-  `ConnectionChoiceMenu` under it. A refusal that is a fault (a connection the
+  connections cell under it. A refusal that is a fault (a connection the
   identity no longer reaches) is the one destructive list. Any other refusal puts
   the control back on the stored value and is toasted, with no inline error under
   it (`ActorSelect` in a schedule's identity).
@@ -760,8 +826,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   bar sends them in one write; `useUnsavedChanges` blocks navigation while dirty.
 - **An agent's input and output schemas** are edited one way: `SchemaFieldList`
   (`components/agent-editor/schema-field-list.tsx`, a table and a modal at
-  `?field-input=` / `?field-output=`), in Paramètres › Schémas and on the creation
-  page.
+  `?field-input=` / `?field-output=`), in Paramètres › Schémas.
 - **Code and JSON editors** are Monaco, only through the lazy facade
   `components/monaco/index.tsx` (`CodeEditor`, `CodeDiff`: the one theme and base options; self-hosted,
   never import `monaco-editor` elsewhere). `JsonEditor` for a JSON value,
@@ -773,7 +838,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 ## 13. Chat
 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
-on assistant-ui) inside the shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
+on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
+is shared by the route fallback and the history wait. The chat sits inside the
+shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a

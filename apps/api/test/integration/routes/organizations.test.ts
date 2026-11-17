@@ -17,6 +17,7 @@ import {
   seedApiKey,
   seedInvitation,
   seedPackage,
+  seedRun,
   seedSchedule,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
@@ -28,6 +29,7 @@ import {
   auditEvents,
   apiKeys,
   notifications,
+  runReads,
   schedules,
   spaceMembers,
   spaces,
@@ -237,6 +239,40 @@ describe("Organizations API", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
       expect(body.code).toBe("slug_taken");
+    });
+
+    // An org's slug scopes its own uploads: `appstrate` would own every system
+    // package (`isOwnedByOrg`), `inline` could publish into the namespace of
+    // inline runs' shadow packages.
+    for (const slug of ["appstrate", "inline"]) {
+      it(`refuses the platform-reserved slug '${slug}' with 400 slug_reserved`, async () => {
+        const testUser = await createTestUser();
+
+        const res = await app.request("/api/orgs", {
+          method: "POST",
+          headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Squatter", slug }),
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as any;
+        expect(body.code).toBe("slug_reserved");
+        await assertDbMissing(organizations, eq(organizations.slug, slug));
+      });
+    }
+
+    it("refuses a reserved slug derived from the name, not only an explicit one", async () => {
+      const testUser = await createTestUser();
+
+      const res = await app.request("/api/orgs", {
+        method: "POST",
+        headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Inline" }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).code).toBe("slug_reserved");
+      await assertDbMissing(organizations, eq(organizations.slug, "inline"));
     });
 
     it("pins api_version in settings at creation", async () => {
@@ -469,6 +505,20 @@ describe("Organizations API", () => {
   });
 
   describe("PATCH /api/orgs/:orgId", () => {
+    it("refuses renaming the slug to a platform-reserved one", async () => {
+      const ctx = await createTestContext({ orgSlug: "would-be-inline" });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PATCH",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: "inline" }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).code).toBe("slug_reserved");
+      await assertDbHas(organizations, eq(organizations.slug, "would-be-inline"));
+    });
+
     it("returns the bare OrgDetail (same serializer as GET /api/orgs/:orgId)", async () => {
       const ctx = await createTestContext({ orgSlug: "renameorg" });
 
@@ -1469,8 +1519,22 @@ describe("Organizations API", () => {
         spaceId: ctx.defaultSpaceId,
         recipientType: "user",
         recipientId: leaver.id,
-        type: "run_completed",
-        payload: { packageId: pkg.id, status: "success" },
+        type: "run_failed",
+        payload: { packageId: pkg.id, agent_name: null, status: "failed" },
+      });
+      const leaverRun = await seedRun({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: leaver.id,
+        status: "success",
+      });
+      await db.insert(runReads).values({
+        runId: leaverRun.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: leaver.id,
       });
       const key = await seedApiKey({
         orgId: ctx.orgId,
@@ -1494,6 +1558,9 @@ describe("Organizations API", () => {
       expect(
         await db.select().from(notifications).where(eq(notifications.recipientId, leaver.id)),
       ).toEqual([]);
+      expect(await db.select().from(runReads).where(eq(runReads.recipientId, leaver.id))).toEqual(
+        [],
+      );
       const [revoked] = await db.select().from(apiKeys).where(eq(apiKeys.id, key.id));
       expect(revoked!.revokedAt).not.toBeNull();
       expect((await app.request("/api/orgs", { headers: bearer })).status).toBe(401);

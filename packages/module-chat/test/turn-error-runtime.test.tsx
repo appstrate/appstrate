@@ -58,6 +58,7 @@ const member: ChatHost = {
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
+  onPackagesChanged: () => {},
 };
 
 /** Holds `billing:manage`: billing refusals link to the billing page instead. */

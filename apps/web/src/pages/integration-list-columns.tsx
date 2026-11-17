@@ -4,25 +4,32 @@ import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
+import { usePackageSpaceColumn } from "../components/space-column";
 import {
   useCatalogueOriginColumn,
-  useCatalogueProtocolColumn,
+  useCatalogueSourceColumn,
 } from "../components/catalogue-columns";
 import { useOrg } from "../hooks/use-org";
-import { integrationProtocol } from "../lib/integration-collection";
+import { packageCardItem } from "../lib/package-card-item";
 
 /**
- * One comparable integration fact per column. `connectionCounts` is the caller's own connections
- * per integration here (`useConnectionCounts`); `undefined` while unknown, drawn as « — ».
+ * One comparable integration fact per column. `connectionCount` is the caller's own connections
+ * of an integration in a row's spaces (`useConnectionCounts`); `undefined` while unknown, when the
+ * cell stays empty. An integration that binds no connection (`authenticated: false`) has no count
+ * at all, drawn « — » like every other fact that does not apply. `spanning`: an index across
+ * spaces, each row naming its spaces.
  */
 export function useIntegrationListColumns(
-  connectionCounts?: ReadonlyMap<string, number>,
+  connectionCount: ((sourceId: string, spaceIds: readonly string[]) => number) | undefined,
+  spanning: boolean,
 ): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
+  const spaceColumn = usePackageSpaceColumn<IntegrationIndexItem>(spanning, (integration) =>
+    packageCardItem(integration, "integration"),
+  );
   const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
-  // Remote tab only: API or MCP.
-  const protocol = useCatalogueProtocolColumn<IntegrationIndexItem>((integration) =>
-    integrationProtocol(integration.source_kind),
+  const source = useCatalogueSourceColumn<IntegrationIndexItem>(
+    (integration) => integration.source_kind,
   );
 
   return [
@@ -38,32 +45,28 @@ export function useIntegrationListColumns(
         </div>
       ),
     },
+    ...spaceColumn,
     origin,
-    protocol,
-    {
-      // Local tab only: the server package the sandbox runs.
-      id: "server",
-      header: t("integrations.col.server"),
-      width: 140,
-      elastic: true,
-      tier: 3,
-      cell: ({ server }) => (
-        <span className="text-muted-foreground truncate font-mono text-xs">
-          {server ? `${server.name} ${server.version}` : "—"}
-        </span>
-      ),
-    },
+    source,
     {
       id: "connections",
       header: t("integrations.col.connections"),
       width: 112,
       align: "end",
-      tier: 2,
       cell: (integration) => {
-        const count = connectionCounts && (connectionCounts.get(integration.id) ?? 0);
+        if (!integration.authenticated) {
+          return (
+            <span className="text-muted-foreground" title={t("integrations.connectionNotRequired")}>
+              <span aria-hidden>—</span>
+              <span className="sr-only">{t("integrations.connectionNotRequired")}</span>
+            </span>
+          );
+        }
+        if (!connectionCount) return null;
+        const count = connectionCount(integration.id, integration.space_ids);
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
-            {count ?? "—"}
+            {count}
           </span>
         );
       },
@@ -72,7 +75,6 @@ export function useIntegrationListColumns(
       id: "version",
       header: t("integrations.col.version"),
       width: 88,
-      tier: 3,
       cell: (integration) => (
         <span className="text-muted-foreground truncate font-mono text-xs">
           {integration.version ?? "—"}

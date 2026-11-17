@@ -4,8 +4,17 @@ import { describe, it, expect } from "bun:test";
 import {
   buildLogEntries,
   buildTurnRows,
+  filterJournal,
+  journalGroupElapsedMs,
+  journalIntegrationIds,
   journalLevel,
+  expandedJournalGroups,
+  journalRows,
+  journalSearchText,
+  toolLabel,
   type ExecutionEntry,
+  type JournalFilters,
+  type JournalRow,
   type RawLog,
   type ToolExecutionEntry,
 } from "../log-utils";
@@ -511,5 +520,415 @@ describe("journalLevel — what the run overview counts and the journal filters"
     expect(journalLevel(tool("success"))).toBe("info");
     expect(journalLevel(tool("running"))).toBe("info");
     expect(journalLevel({ id: "w", kind: "log", level: "warn", message: "slow" })).toBe("warn");
+  });
+});
+
+describe("buildLogEntries — the integration a call reached", () => {
+  const github = { id: "@acme/github", tool: "list.issues", title: "List issues" };
+  const start = (data: Record<string, unknown>): RawLog => ({
+    type: "progress",
+    level: "debug",
+    message: "Tool: acme_github__list_issues_1a2b3c4d",
+    data: { tool: "acme_github__list_issues_1a2b3c4d", toolCallId: "call-1", ...data },
+  });
+  const end = (data: Record<string, unknown>): RawLog => ({
+    type: "progress",
+    level: "debug",
+    message: "Tool result: acme_github__list_issues_1a2b3c4d",
+    data: {
+      tool: "acme_github__list_issues_1a2b3c4d",
+      toolCallId: "call-1",
+      result: "[]",
+      isError: false,
+      ...data,
+    },
+  });
+
+  it("carries the identity from the start when only it has one", () => {
+    const { entries } = buildLogEntries([start({ args: {}, integration: github }), end({})]);
+    expect(toolEntry(entries).integration).toEqual(github);
+  });
+
+  it("carries the identity from the end when only it has one, the start arriving late", () => {
+    const { entries } = buildLogEntries([end({ integration: github }), start({ args: {} })]);
+    expect(toolEntry(entries)).toMatchObject({ integration: github, args: {} });
+  });
+
+  it("keeps the exposed name as the tool, whatever the identity says", () => {
+    const { entries } = buildLogEntries([start({ args: {}, integration: github })]);
+    expect(toolEntry(entries).tool).toBe("acme_github__list_issues_1a2b3c4d");
+  });
+
+  it("records no identity for a call that carries none, nor a malformed one", () => {
+    const { entries } = buildLogEntries([
+      start({ args: { q: "bug" } }),
+      end({ integration: { id: "@acme/github" } }),
+    ]);
+    expect(toolEntry(entries)).not.toHaveProperty("integration");
+    expect(toolEntry(entries).detail).toBe("q: bug");
+  });
+
+  it("lists the integrations reached, once each, in order of first call", () => {
+    const platform = { id: "@appstrate/platform", tool: "note" };
+    const { entries } = buildLogEntries([
+      start({ toolCallId: "a", args: {}, integration: github }),
+      start({ toolCallId: "b", args: {}, integration: platform }),
+      start({ toolCallId: "c", args: {}, integration: github }),
+      start({ toolCallId: "d", args: {} }),
+    ]);
+    expect(journalIntegrationIds(entries)).toEqual(["@acme/github", "@appstrate/platform"]);
+  });
+});
+
+describe("buildLogEntries — an api_call reads as its request", () => {
+  const apiCall = (tool: string, args: Record<string, unknown>, integration = true): RawLog => ({
+    type: "progress",
+    level: "debug",
+    message: "Tool: acme_github__api_call",
+    data: {
+      tool: "acme_github__api_call",
+      toolCallId: "call-1",
+      args,
+      ...(integration ? { integration: { id: "@acme/github", tool } } : {}),
+    },
+  });
+
+  it("reads the request's method and target", () => {
+    const { entries } = buildLogEntries([
+      apiCall("api_call", { method: "GET", target: "https://api.github.com/repos" }),
+    ]);
+    expect(toolEntry(entries).detail).toBe("GET https://api.github.com/repos");
+  });
+
+  it("flattens the arguments of a call missing the method its schema requires", () => {
+    const { entries } = buildLogEntries([
+      apiCall("api_call", { target: "https://api.github.com/repos" }),
+    ]);
+    expect(toolEntry(entries).detail).toBe("target: https://api.github.com/repos");
+  });
+
+  it("reads the method and a templated target of an auth-scoped api_call", () => {
+    const { entries } = buildLogEntries([
+      apiCall("api_call__default", { target: "{{base}}/issues", method: "POST", body: "{}" }),
+    ]);
+    expect(toolEntry(entries).detail).toBe("POST {{base}}/issues");
+  });
+
+  it("flattens the arguments of a call without identity", () => {
+    const { entries } = buildLogEntries([
+      apiCall("api_call", { target: "https://api.github.com/repos" }, false),
+    ]);
+    expect(toolEntry(entries).detail).toBe("target: https://api.github.com/repos");
+  });
+});
+
+describe("buildLogEntries — the platform log tool", () => {
+  const log = { id: "@appstrate/platform", tool: "log" };
+  const logStart: RawLog = {
+    type: "progress",
+    level: "debug",
+    message: "Tool: appstrate_platform__log",
+    data: {
+      tool: "appstrate_platform__log",
+      toolCallId: "call-1",
+      args: { level: "info", message: "Trois factures" },
+      integration: log,
+    },
+  };
+  const logLine: RawLog = {
+    type: "progress",
+    level: "info",
+    event: "log",
+    message: "Trois factures",
+  };
+  const logEnd = (isError: boolean): RawLog => ({
+    type: "progress",
+    level: "debug",
+    message: "Tool result: appstrate_platform__log",
+    data: {
+      tool: "appstrate_platform__log",
+      toolCallId: "call-1",
+      result: "",
+      isError,
+      integration: log,
+    },
+  });
+
+  it("shows the journal line alone for a call that completed", () => {
+    const { entries } = buildLogEntries([logStart, logLine, logEnd(false)]);
+    expect(entries.map((entry) => entry.kind)).toEqual(["log"]);
+  });
+
+  it("shows nothing of a call still running, so its row never appears then goes", () => {
+    const { entries } = buildLogEntries([logStart]);
+    expect(entries).toEqual([]);
+  });
+
+  it("keeps the tool row of a call that failed, which wrote no journal line", () => {
+    const { entries } = buildLogEntries([logStart, logEnd(true)]);
+    expect(toolEntry(entries).status).toBe("failed");
+  });
+
+  it("keeps the tool row of a call the run's end interrupted", () => {
+    const { entries } = buildLogEntries([logStart], { isRunTerminal: true });
+    expect(toolEntry(entries).status).toBe("interrupted");
+  });
+
+  it("keeps a call of the same exposed name recorded without identity", () => {
+    const { integration: _, ...data } = logStart.data!;
+    const { entries } = buildLogEntries([{ ...logStart, data }]);
+    expect(toolEntry(entries).tool).toBe("appstrate_platform__log");
+  });
+});
+
+describe("toolLabel and journalSearchText — the names a tool call goes by", () => {
+  const t = (key: string) => `t(${key})`;
+  const call = (
+    tool: string,
+    integration?: ToolExecutionEntry["integration"],
+  ): ToolExecutionEntry => ({
+    id: "tool:call-1",
+    kind: "tool",
+    tool,
+    status: "success",
+    ...(integration ? { integration } : {}),
+  });
+  const github = call("acme_github__list_issues_1a2b3c4d", {
+    id: "@acme/github",
+    tool: "list.issues",
+    title: "List issues",
+  });
+
+  it("names a call by its server's title, else by the tool's name on its server", () => {
+    expect(toolLabel(github, t)).toBe("List issues");
+    expect(toolLabel(call("acme_github__get_me", { id: "@acme/github", tool: "get_me" }), t)).toBe(
+      "get_me",
+    );
+  });
+
+  it("names the runner's own tools by their label", () => {
+    expect(toolLabel(call("output"), t)).toBe("t(log.harness.output)");
+    expect(toolLabel(call("publish_file"), t)).toBe("t(log.harness.publish_file)");
+    expect(toolLabel(call("bash"), t)).toBe("t(log.harness.bash)");
+  });
+
+  it("keeps the name the model called for a call without identity", () => {
+    expect(toolLabel(call("pierre_cabriere_gith__api_call"), t)).toBe(
+      "pierre_cabriere_gith__api_call",
+    );
+  });
+
+  it("finds a call by its exposed name, its label, its integration's id and name", () => {
+    const text = journalSearchText(github, t, (id) => (id === "@acme/github" ? "GitHub" : id));
+    for (const term of [
+      "acme_github__list_issues_1a2b3c4d",
+      "List issues",
+      "list.issues",
+      "@acme/github",
+      "GitHub",
+    ]) {
+      expect(text).toContain(term);
+    }
+  });
+});
+
+describe("filterJournal — what the journal shows", () => {
+  const t = (key: string) => key;
+  const integrations = (id: string) => ({
+    name: id === "@acme/github" ? "GitHub" : id,
+    pending: false,
+  });
+  const tool = (id: string, integrationId?: string, level?: string): ToolExecutionEntry => ({
+    id,
+    kind: "tool",
+    tool: `${id}_exposed`,
+    status: "success",
+    ...(level ? { level } : {}),
+    ...(integrationId ? { integration: { id: integrationId, tool: id } } : {}),
+  });
+  const entries: ExecutionEntry[] = [
+    { id: "m", kind: "agent", level: "debug", message: "Je lis les tickets." },
+    tool("list_issues", "@acme/github"),
+    tool("get_me", "@acme/github"),
+    tool("note", "@appstrate/platform"),
+    tool("output"),
+    { id: "j", kind: "log", level: "info", message: "Trois tickets trouvés" },
+  ];
+  const none: JournalFilters = {
+    levels: [],
+    types: [],
+    integrations: [],
+    showTools: true,
+    query: "",
+    locale: "fr",
+  };
+  const ids = (filters: Partial<JournalFilters>) =>
+    filterJournal(entries, { ...none, ...filters }, t, integrations).map((entry) => entry.id);
+
+  it("keeps every entry when nothing filters", () => {
+    expect(ids({})).toEqual(["m", "list_issues", "get_me", "note", "output", "j"]);
+  });
+
+  it("keeps only the tool calls of the chosen integration", () => {
+    expect(ids({ integrations: ["@acme/github"] })).toEqual(["list_issues", "get_me"]);
+    expect(ids({ integrations: ["@acme/github", "@appstrate/platform"] })).toEqual([
+      "list_issues",
+      "get_me",
+      "note",
+    ]);
+  });
+
+  it("combines the integration filter with the type and the search", () => {
+    expect(ids({ integrations: ["@acme/github"], types: ["journal"] })).toEqual([]);
+    expect(ids({ integrations: ["@acme/github"], types: ["tool"] })).toEqual([
+      "list_issues",
+      "get_me",
+    ]);
+    expect(ids({ integrations: ["@acme/github"], query: "get_me" })).toEqual(["get_me"]);
+  });
+
+  it("finds a call by its integration's display name", () => {
+    expect(ids({ query: "github" })).toEqual(["list_issues", "get_me"]);
+  });
+
+  it("hides every tool call when tools are hidden", () => {
+    expect(ids({ showTools: false })).toEqual(["m", "j"]);
+  });
+
+  it("keeps the entries of the chosen levels", () => {
+    expect(ids({ levels: ["info"], types: ["journal"] })).toEqual(["j"]);
+  });
+});
+
+describe("journalRows — runner lines fold into one row", () => {
+  const system = (id: string, level = "info"): ExecutionEntry => ({
+    id,
+    kind: "runtime",
+    level,
+    message: id,
+    sourceType: "progress",
+  });
+  const say = (id: string): ExecutionEntry => ({ id, kind: "agent", level: "debug", message: id });
+  const none = { levels: [], types: [], query: "" };
+  const shape = (rows: JournalRow[]) =>
+    rows.map((row) =>
+      row.kind === "group" ? `${row.id}[${row.entries.map((e) => e.id).join(",")}]` : row.id,
+    );
+
+  it("folds runs of two or more at the start, in the middle and at the end", () => {
+    const entries = [
+      system("a"),
+      system("b", "debug"),
+      say("m1"),
+      system("c"),
+      system("d"),
+      system("e"),
+      say("m2"),
+      system("f"),
+      system("g"),
+    ];
+    expect(shape(journalRows(entries, none))).toEqual([
+      "group:a[a,b]",
+      "m1",
+      "group:c[c,d,e]",
+      "m2",
+      "group:f[f,g]",
+    ]);
+  });
+
+  it("leaves a single runner line as a row of its own", () => {
+    expect(shape(journalRows([say("m1"), system("a"), say("m2")], none))).toEqual([
+      "m1",
+      "a",
+      "m2",
+    ]);
+  });
+
+  it("never folds a warning or an error, which ends the run", () => {
+    const entries = [
+      system("a"),
+      system("w", "warn"),
+      system("b"),
+      system("c"),
+      system("x", "error"),
+      system("d"),
+    ];
+    expect(shape(journalRows(entries, none))).toEqual(["a", "w", "group:b[b,c]", "x", "d"]);
+  });
+
+  it("folds nothing but the runner's lines", () => {
+    const line: ExecutionEntry = { id: "j", kind: "log", level: "info", message: "j" };
+    expect(shape(journalRows([say("m1"), say("m2"), line, { ...line, id: "k" }], none))).toEqual([
+      "m1",
+      "m2",
+      "j",
+      "k",
+    ]);
+  });
+
+  it("keeps a group's id as its run grows", () => {
+    const first = journalRows([system("a"), system("b")], none);
+    const grown = journalRows([system("a"), system("b"), system("c")], none);
+    expect(first[0]?.id).toBe(grown[0]!.id);
+  });
+
+  it("folds nothing while a search or a level or type filter is in force", () => {
+    const entries = [system("a"), system("b")];
+    for (const filters of [
+      { ...none, query: "a" },
+      { ...none, levels: ["info"] },
+      { ...none, types: ["system"] },
+    ]) {
+      expect(shape(journalRows(entries, filters))).toEqual(["a", "b"]);
+    }
+  });
+
+  it("measures a group from its first line to its last, 0 when undated", () => {
+    const dated = (id: string, at: string) => ({ ...system(id), createdAt: at });
+    const [group] = journalRows(
+      [dated("a", "2026-07-01T10:00:00.000Z"), dated("b", "2026-07-01T10:00:02.500Z")],
+      none,
+    );
+    const [undated] = journalRows([system("a"), system("b")], none);
+    if (group?.kind !== "group" || undated?.kind !== "group") throw new Error("not grouped");
+    expect(journalGroupElapsedMs(group)).toBe(2500);
+    expect(journalGroupElapsedMs(undated)).toBe(0);
+  });
+});
+
+describe("expandedJournalGroups — a group is open while its lines arrive", () => {
+  const system = (id: string): ExecutionEntry => ({
+    id,
+    kind: "runtime",
+    level: "info",
+    message: id,
+    sourceType: "progress",
+  });
+  const say = (id: string): ExecutionEntry => ({ id, kind: "agent", level: "debug", message: id });
+  const none = { levels: [], types: [], query: "" };
+  const boot = [system("a"), system("b")];
+  const later = [...boot, say("m"), system("c"), system("d")];
+  const open = (entries: ExecutionEntry[], state: Parameters<typeof expandedJournalGroups>[1]) => [
+    ...expandedJournalGroups(journalRows(entries, none), state),
+  ];
+
+  it("opens a live run's last group, then folds it once another event follows", () => {
+    expect(open(boot, { open: {}, live: true })).toEqual(["group:a"]);
+    expect(open([...boot, say("m")], { open: {}, live: true })).toEqual([]);
+  });
+
+  it("does the same for a group later in the run, and folds every group when the run ends", () => {
+    expect(open(later, { open: {}, live: true })).toEqual(["group:c"]);
+    expect(open(later, { open: {}, live: false })).toEqual([]);
+  });
+
+  it("keeps a group as the reader set it", () => {
+    expect(open(later, { open: { "group:a": true, "group:c": false }, live: true })).toEqual([
+      "group:a",
+    ]);
+  });
+
+  it("keeps the group holding the open row open", () => {
+    expect(open(later, { open: {}, live: false, selectedEntryId: "b" })).toEqual(["group:a"]);
   });
 });

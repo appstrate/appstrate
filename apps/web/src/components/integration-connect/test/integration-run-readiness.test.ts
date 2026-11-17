@@ -61,6 +61,7 @@ function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgent
     member_pinned_connection_ids: null,
     org_default_connection_ids: null,
     org_default_enforced: false,
+    additional_connections_allowed: false,
     can_add_connection: true,
     candidates: [],
     ...over,
@@ -114,6 +115,24 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
     );
     expect(view.lockedBy).toBe("admin_pin");
     expect(view.lockedConnectionIds).toEqual([]);
+  });
+
+  it("reads whether the lock takes additions off the server's verdict, never off the pin alone", () => {
+    const open = describeResolution(
+      resolution({ admin_pinned_connection_ids: ["a"], additional_connections_allowed: true }),
+    );
+    expect(open).toMatchObject({ lockedBy: "admin_pin", additionsAllowed: true });
+    // An enforced default closes the pin: the server says so, the view follows.
+    const closed = describeResolution(
+      resolution({
+        admin_pinned_connection_ids: ["a"],
+        org_default_connection_ids: ["d"],
+        org_default_enforced: true,
+        additional_connections_allowed: false,
+      }),
+    );
+    expect(closed).toMatchObject({ lockedBy: "admin_pin", additionsAllowed: false });
+    expect(describeResolution(resolution({})).additionsAllowed).toBe(false);
   });
 
   it("a soft org default does not lock", () => {
@@ -185,6 +204,8 @@ describe("describeResolution — empty picker prompt", () => {
       ["auth_key_mismatch", "connect"],
       // The agent's own auth_key serves none of its selected tools: no connection clears it.
       ["auth_key_serves_no_selected_tool", "reconfigure"],
+      // It names an auth on an integration declaring none (AFPS §4.4).
+      ["auth_key_on_unauthenticated_integration", "reconfigure"],
       [null, "connect"],
     ] as const;
     for (const [error_code, prompt] of cases) {

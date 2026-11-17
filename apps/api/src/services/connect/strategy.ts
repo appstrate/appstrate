@@ -51,6 +51,11 @@ export interface ConnectContext {
    * minting client can, so only the strategy passing a `clientRef` forwards it.
    */
   onScopeWidened?: (widened: WidenedConnection) => void;
+  /**
+   * Told once an oauth2 `connect.login` grant may have reached the token endpoint: from then on
+   * a refusal may follow a redemption, so the hosted form's single-use page session stays spent.
+   */
+  onGrantPresented?: () => void;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */
@@ -134,14 +139,32 @@ export function assertCredentialsMatchSchema(
   return result.data ?? credentials;
 }
 
+/**
+ * What a `login_rejected` refused, as the RFC 9457 extension member `login_refusal`, so a client
+ * words it without parsing the detail: `grant` — an oauth2 token request refused the submitted
+ * grant; `integration` — the integration's login tool refused, saying why in `integration_diagnostic`
+ * (its own text, untranslated). Absent: the service refused the submitted credentials.
+ */
+type LoginRefusal = { kind: "grant" } | { kind: "integration"; diagnostic: string };
+
 /** Credentials the service refused: a 400 naming the remedy. `diagnostic` never holds a value. */
-export function loginRejected(diagnostic: string): ApiError {
+export function loginRejected(diagnostic: string, refusal?: LoginRefusal): ApiError {
   return new ApiError({
     status: 400,
     code: "login_rejected",
     title: "Login Rejected",
     detail: `${diagnostic} Check the credentials you submitted and try again.`,
     param: "credentials",
+    ...(refusal
+      ? {
+          extensions: {
+            login_refusal: refusal.kind,
+            ...(refusal.kind === "integration"
+              ? { integration_diagnostic: refusal.diagnostic }
+              : {}),
+          },
+        }
+      : {}),
   });
 }
 

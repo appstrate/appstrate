@@ -35,7 +35,6 @@ interface Options {
   onSelect: (path: string) => void;
   /** Another write is in flight. */
   disabled: boolean;
-  onBusyChange?: (busy: boolean) => void;
 }
 
 export function useStagedPackageFiles({
@@ -46,7 +45,6 @@ export function useStagedPackageFiles({
   onChange,
   onSelect,
   disabled,
-  onBusyChange,
 }: Options) {
   const { t } = useTranslation(["agents", "common"]);
   const [naming, setNaming] = useState(false);
@@ -95,7 +93,6 @@ export function useStagedPackageFiles({
       return;
     }
     setUploading(true);
-    onBusyChange?.(true);
     try {
       const added = await Promise.all(
         files.map((file) => uploadedFileOperation(target ?? file.name, file)),
@@ -106,7 +103,6 @@ export function useStagedPackageFiles({
       toast.error(t("files.errorGeneric"));
     } finally {
       setUploading(false);
-      onBusyChange?.(false);
     }
   };
 

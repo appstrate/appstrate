@@ -126,26 +126,6 @@ export interface AcceptedAdvisory {
 }
 
 /**
- * Reasons that are one situation shared by many advisories, named once.
- *
- * Six `protobufjs` advisories are the same dependency edge reported per
- * affected range; writing the edge out six times would make a change to it six
- * edits, five of which get missed.
- */
-const REASONS = {
-  /**
-   * `@google/genai` is an optional peer of `@earendil-works/pi-ai` and is
-   * imported by pi-ai only on the Google provider path. Nothing in this repo
-   * imports it, and no api shape the platform maps (`MODEL_API_SHAPES`,
-   * `@appstrate/core/sidecar-types`) selects that path. It still ships in the
-   * product tree, so it is treated as product code.
-   */
-  googleGenai:
-    "Product tree via @google/genai ← @earendil-works/pi-ai. Loaded only on pi-ai's Google " +
-    "provider path, which no platform api shape selects; no in-repo import of @google/genai.",
-} as const;
-
-/**
  * Seeded 2026-09-07 as a day-one baseline, NOT as a clean bill of health.
  *
  * The gate landed on a lockfile that already carried 38 high/critical
@@ -179,23 +159,21 @@ const REASONS = {
  * those five `bun.lock` entries in place — deleting them instead made
  * `bun install` re-resolve ~350 unrelated packages.
  *
+ * Re-measured 2026-11-11 (#2151): the 2026-10-31 product-tree tier expired. `defu`
+ * (6.1.4 → 6.1.7), `protobufjs` (7.5.4 → 7.6.6, also clearing the new critical
+ * 1244633), `ws` (8.20.0 → 8.22.2), `body-parser`, `systeminformation` and the
+ * 6.x/7.x `undici` copies were moved to patched releases inside their consumers'
+ * ranges by editing those `bun.lock` entries in place; `dompurify`, pinned
+ * exactly to a vulnerable 3.4.15 by `monaco-editor` (latest 0.57.0), is lifted
+ * to 3.4.17 by a root `overrides` entry. The `braces` entry was deleted: its
+ * advisory no longer matches the installed 3.0.3.
+ *
  * The rest are pinned by transitive semver ranges — an exact pin in one case
  * (`js-yaml` below) — and forcing them with root `overrides` is a separate
  * change with its own blast radius: bun applies an override to every copy, so
  * it cannot lift one major without dragging a consumer of another.
  */
 const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
-  // ── braces — no patched release exists (latest is 3.0.3) ──
-  {
-    id: 1240992,
-    packageName: "braces",
-    reason:
-      "Dev tree only — micromatch ← fast-glob ← type-coverage-core ← type-coverage, the " +
-      "`verify:type-coverage` gate. The patterns it expands are that script's own arguments " +
-      "and apps/web's tsconfig `include`, never untrusted input; stack-exhaustion DoS only.",
-    expires: "2026-12-31",
-  },
-
   // ── browserslist ──
   {
     id: 1153171,
@@ -213,17 +191,6 @@ const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
       "eslint-plugin-react-hooks. The untrusted browserslist-stats.json the advisory needs is " +
       "not a file this repo has.",
     expires: "2026-12-31",
-  },
-
-  // ── defu ──
-  {
-    id: 1116102,
-    packageName: "defu",
-    reason:
-      "Product tree — sole consumer is better-auth, which uses defu to merge its own option " +
-      "objects. Whether any request-controlled value reaches that merge is NOT established; " +
-      "short expiry for that reason.",
-    expires: "2026-10-31",
   },
 
   // ── ip-address ──
@@ -266,17 +233,6 @@ const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
       "own OpenAPI spec and commitlint config at build time; CPU DoS only.",
     expires: "2026-12-31",
   },
-
-  // ── protobufjs — all six via the same optional Google provider path ──
-  { id: 1117571, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
-  { id: 1118641, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
-  { id: 1118928, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
-  { id: 1118930, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
-  { id: 1118932, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
-  { id: 1123488, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
-
-  // ── ws ──
-  { id: 1123259, packageName: "ws", reason: REASONS.googleGenai, expires: "2026-10-31" },
 ];
 
 /** Advisory counts by severity, plus the three verdict counts. */

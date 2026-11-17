@@ -30,6 +30,7 @@ import {
 } from "../../../../../test/helpers/auth.ts";
 import { seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
+import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../../../../lib/audiences.ts";
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
@@ -169,6 +170,9 @@ describe("space-pinned MCP endpoint as its own protected resource", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
+    // `truncateAll` wipes the signing keys, so every test mints under a new
+    // `kid`; drop the cached key set rather than wait out the refetch cooldown.
+    overrideJwks(null);
     ctx = await createTestContext();
     s1 = (await seedSpace({ orgId: ctx.orgId, name: "S1", visibility: "closed" })).id;
     s2 = (await seedSpace({ orgId: ctx.orgId, name: "S2", visibility: "closed" })).id;

@@ -5,6 +5,7 @@ import type { CollectionState } from "./collection";
 import { DataTable, type DataColumn } from "./data-table";
 import { packageDetailPath } from "../lib/package-paths";
 import type { CardItem } from "../lib/package-card-item";
+import { useSpaceLink } from "../hooks/use-current-space";
 
 export function PackagesTable({
   tableId,
@@ -12,7 +13,6 @@ export function PackagesTable({
   columns,
   rowAction,
   label,
-  surface,
   ...state
 }: {
   tableId: string;
@@ -28,9 +28,9 @@ export function PackagesTable({
   /** What the table lists, for assistive technology; a package list by default. */
   label?: string;
   /** `integrated` where the table already sits on a panel. */
-  surface?: "framed" | "integrated";
 } & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
+  const linkInSpace = useSpaceLink();
 
   // The same state `CardGrid` takes, forwarded whole: the two bodies answer it
   // through the same `collectionVerdict`, so a caller can hand either one the
@@ -42,10 +42,13 @@ export function PackagesTable({
       columns={columns}
       rows={items}
       rowKey={(item) => item.id}
-      rowHref={rowAction ? undefined : (item) => packageDetailPath(item.type, item.id)}
+      rowHref={
+        rowAction
+          ? undefined
+          : (item) => linkInSpace(packageDetailPath(item.type, item.id), item.spaceIds)
+      }
       rowAction={rowAction}
       rowLabel={(item) => item.displayName}
-      surface={surface}
       {...state}
     />
   );

@@ -180,7 +180,7 @@ function extensionOf(path: string): string {
  * kept — the one the editor and the CLI ask too, so a file is text or binary
  * the same way on every side of the wire.
  */
-export function classifyPackageFile(
+function classifyPackageFile(
   path: string,
   bytes: Uint8Array,
 ): { kind: PackageFileMediaKind; text: string | null } {
@@ -252,14 +252,13 @@ export function archiveEtag(snapshotId: string): string {
  * whether that entry is mandatory — both come from `PACKAGE_CONTENT_ENTRY`:
  * this overlay is the exact inverse of the extraction that populates the
  * column, so the two read one declaration instead of mirroring each other's
- * switch. `null` there = the column is a redundant copy of the manifest, not a
- * file of its own, and must not be materialized as a phantom entry.
+ * switch.
  */
 export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: PackageFileSource): void {
   const encoder = new TextEncoder();
 
   const entry = PACKAGE_CONTENT_ENTRY[pkg.type];
-  if (entry !== null && pkg.draftContent !== null) {
+  if (pkg.draftContent !== null) {
     // An OPTIONAL entry (`required: false`, i.e. INTEGRATION.md) is overlaid
     // only on top of one that already exists AND only when the column actually
     // holds it: when a bundle ships without one, `parsePackageZip` falls back
@@ -301,7 +300,7 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
  * Resolve the public content field for the optional integration companion.
  * A manifest-shaped value refreshes a manifest copy, but cannot replace stored
  * documentation. Explicit file operations bypass this overloaded field.
- * Required primary files and MCP manifest copies accept the supplied value.
+ * Required primary files accept the supplied value.
  */
 export function resolveDraftContent(
   type: PackageType,
@@ -309,10 +308,9 @@ export function resolveDraftContent(
   incoming: string,
 ): string {
   const entry = PACKAGE_CONTENT_ENTRY[type];
-  // REQUIRED (prompt.md / SKILL.md): `incoming` IS that file. `null`
-  // (mcp-server): the column is a redundant manifest copy by definition. In
-  // neither case can the column mean two things, so neither is guarded.
-  if (entry === null || entry.required) return incoming;
+  // REQUIRED (prompt.md / SKILL.md): `incoming` IS that file, so the column
+  // cannot mean two things and is not guarded.
+  if (entry.required) return incoming;
   // Nothing to protect — and returning `stored` here would hand back the very
   // `null` / `""` the signature promises never to produce.
   if (!stored) return incoming;
@@ -335,8 +333,7 @@ export function optionalContentEntryPath(
   content: string | undefined,
 ): string | null {
   const entry = PACKAGE_CONTENT_ENTRY[type];
-  if (!entry || entry.required || content === undefined || isManifestTextFallback(content))
-    return null;
+  if (entry.required || content === undefined || isManifestTextFallback(content)) return null;
   return entry.path;
 }
 
@@ -553,22 +550,18 @@ export function validateAuthoredPackageFiles(
   validateBundle: boolean,
 ): string {
   const entry = PACKAGE_CONTENT_ENTRY[type];
-  const bytes = entry ? files[entry.path] : undefined;
-  const content = bytes
-    ? decodePackageFileText(bytes)
-    : entry
-      ? ""
-      : JSON.stringify(manifest, null, 2);
+  const bytes = files[entry.path];
+  const content = bytes ? decodePackageFileText(bytes) : "";
   if (content === null) {
     throw new PackageFileWriteError(
       "invalid_bundle",
-      entry?.path ?? null,
+      entry.path,
       "Package content must be valid UTF-8 text",
     );
   }
   assertArchiveContentConforms(type, files, "file");
   assertTreeSize(files);
-  if (entry?.required && !content.trim()) {
+  if (entry.required && !content.trim()) {
     throw new PackageFileWriteError(
       "content_entry_immovable",
       entry.path,
@@ -617,8 +610,7 @@ export type MutateDraftFilesInput = {
   /**
    * `packages.draft_content` to persist. Defaults to the resulting tree's
    * content entry, decoded — which is what the column IS for a type whose entry
-   * is a real file. A type whose `content` is a manifest copy (`integration`,
-   * `mcp-server`) resolves the column on its own terms and passes it here; see
+   * is a real file. An `integration`, whose `content` is a manifest copy, resolves the column on its own terms and passes it here; see
    * {@link resolveDraftContent}.
    */
   draftContent?: string;
@@ -692,9 +684,7 @@ export async function mutatePackageDraftFiles(
     const entry = PACKAGE_CONTENT_ENTRY[target.type];
     const content =
       "imported" in input.precondition
-        ? entry
-          ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(mutated[entry.path])
-          : (row.draftContent ?? "")
+        ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(mutated[entry.path])
         : validateAuthoredPackageFiles(
             mutated,
             target.type,

@@ -13,6 +13,7 @@ import {
   ASSISTANT_MESSAGE_PROGRESS_EVENT,
   buildProgress,
   buildToolResultProgress,
+  buildToolStartProgress,
   buildTurnProgress,
   TURN_PROGRESS_EVENT,
 } from "../../src/runner/event-builders.ts";
@@ -68,6 +69,48 @@ describe("buildToolResultProgress — durationMs", () => {
     });
 
     expect((ev.data as { durationMs: number }).durationMs).toBe(0);
+  });
+});
+
+describe("tool progress — integration", () => {
+  const integration = { id: "@acme/github", tool: "list.issues", title: "List issues" };
+
+  it("carries the integration tool on the start and the result event", () => {
+    const start = buildToolStartProgress(BASE, {
+      tool: "acme_github__list_issues",
+      args: {},
+      toolCallId: "c1",
+      integration,
+    });
+    const end = buildToolResultProgress(BASE, {
+      tool: "acme_github__list_issues",
+      result: "[]",
+      isError: false,
+      toolCallId: "c1",
+      integration,
+    });
+    expect(start.data).toEqual({
+      tool: "acme_github__list_issues",
+      args: {},
+      toolCallId: "c1",
+      integration,
+    });
+    expect(end.data).toEqual({
+      tool: "acme_github__list_issues",
+      result: "[]",
+      isError: false,
+      toolCallId: "c1",
+      integration,
+    });
+  });
+
+  it("omits the key for a tool no integration serves", () => {
+    expect(buildToolStartProgress(BASE, { tool: "output", args: {} }).data).not.toHaveProperty(
+      "integration",
+    );
+    expect(
+      buildToolResultProgress(BASE, { tool: "output", result: "", isError: false }).data,
+    ).not.toHaveProperty("integration");
   });
 });
 

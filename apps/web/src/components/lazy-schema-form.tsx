@@ -18,10 +18,16 @@ const SchemaFormInner = lazy(() =>
   import("@appstrate/ui/schema-form").then((m) => ({ default: m.SchemaForm })),
 );
 
+/** One row per top-level field, so the form replaces its wait at its own height (capped). */
+function waitingRows(wrapper: SchemaFormProps["wrapper"]): number {
+  const fields = Object.keys(wrapper.schema.properties ?? {}).length;
+  return Math.min(Math.max(fields, 1), 6);
+}
+
 export const LazySchemaForm = forwardRef<RjsfForm, SchemaFormProps>(
   function LazySchemaForm(props, ref) {
     return (
-      <Suspense fallback={<SettingsSkeleton rows={2} />}>
+      <Suspense fallback={<SettingsSkeleton rows={waitingRows(props.wrapper)} />}>
         <SchemaFormInner ref={ref} {...props} />
       </Suspense>
     );

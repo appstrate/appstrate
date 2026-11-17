@@ -12,9 +12,10 @@
  * reimplemented here — one implementation, one set of error semantics.
  *
  * THREE contexts, no more:
- *  - `getHeaders` — the OAuth connect card (`oauth-connect-card.tsx`) opens a
- *    card-local SSE stream to `/api/realtime`, and building that URL needs the
- *    caller's `X-Org-Id` / `X-Space-Id`, which only the host knows.
+ *  - `ChatTransport` — `getHeaders` (the scoping headers: the space keys every
+ *    query, and the card-local SSE stream to `/api/realtime` needs the caller's
+ *    `X-Org-Id` / `X-Space-Id`, which only the host knows) and `request`, the ONE
+ *    function every REST call of the chat goes through.
  *  - `selectConversation` — navigation, see below.
  *  - `ChatHost` — ONE bag of host services, memoized by `ChatPage` from its
  *    props. Deliberately not one context per service: every member is
@@ -33,12 +34,36 @@ import type { PickerCredential } from "@appstrate/ui/components/model-picker-gro
 
 export type GetHeaders = () => Record<string, string>;
 
-const ChatHeadersContext = createContext<GetHeaders | null>(null);
+/**
+ * The host's `fetch` for the platform API: same-origin, credentialed, scoping headers added,
+ * and a non-2xx answer THROWN as the host's own error (RFC 9457 problem details: `status`,
+ * `code`, the server's `detail`), so the shell's global error handling renders a failure in the
+ * user's language instead of a bare "HTTP 500". Streaming bodies stay readable on the response.
+ */
+export type ChatRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
-export const ChatHeadersProvider = ChatHeadersContext.Provider;
+export interface ChatTransport {
+  getHeaders: GetHeaders;
+  request: ChatRequest;
+}
 
-export function useChatHeaders(): GetHeaders | null {
-  return useContext(ChatHeadersContext);
+const ChatTransportContext = createContext<ChatTransport | null>(null);
+
+export const ChatTransportProvider = ChatTransportContext.Provider;
+
+export function useChatTransport(): ChatTransport | null {
+  return useContext(ChatTransportContext);
+}
+
+/** The HTTP status a thrown request error carries (`ApiError.status`), when it carries one. */
+export function errorStatus(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
+/** A JSON write: the body serialized, the content type set. */
+export function jsonInit(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
 /**
@@ -139,6 +164,13 @@ export interface ChatHost {
   modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
+  /**
+   * The assistant created or imported a package: the host refreshes what lists
+   * packages, as its own editor and import dialog do after a write.
+   */
+  onPackagesChanged: () => void;
+  /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
+  firstName?: string | null;
 }
 
 /**

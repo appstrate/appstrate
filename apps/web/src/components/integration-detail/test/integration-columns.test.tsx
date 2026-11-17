@@ -14,7 +14,12 @@ import type {
 } from "../../../hooks/use-integrations.ts";
 import type { ClientRow } from "../../../lib/integration-clients.ts";
 import type { DataColumn } from "../../data-table.tsx";
-import { clientDeeds, clientLevelKey, useConnectionColumns } from "../integration-columns.tsx";
+import {
+  clientDeeds,
+  clientLevelKey,
+  useConnectionColumns,
+  useIntegrationClientColumns,
+} from "../integration-columns.tsx";
 
 await i18nReady;
 afterAll(() => i18n.changeLanguage("fr"));
@@ -65,26 +70,97 @@ function clientRow(level: ClientRow["level"], autoProvisioned = false): ClientRo
 }
 
 describe("an OAuth client's level", () => {
-  it("names the tier, and an auto-provisioned space client apart", () => {
+  it("names the tier, and an auto-provisioned client apart at any tier", () => {
     expect(clientLevelKey(clientRow("system"))).toBe("source.builtIn");
     expect(clientLevelKey(clientRow("org"))).toBe("source.org");
     expect(clientLevelKey(clientRow("space"))).toBe("source.space");
     expect(clientLevelKey(clientRow("space", true))).toBe("source.autoProvisioned");
+    expect(clientLevelKey(clientRow("org", true))).toBe("source.autoProvisioned");
   });
 });
 
 describe("what may be done to an OAuth client", () => {
   it("edits a space's own client, an org one only for an org admin, the system's never", () => {
-    expect(clientDeeds(clientRow("space"), false)).toEqual({ ownLevel: true, editable: true });
-    expect(clientDeeds(clientRow("org"), false)).toEqual({ ownLevel: false, editable: false });
-    expect(clientDeeds(clientRow("org"), true)).toEqual({ ownLevel: true, editable: true });
-    expect(clientDeeds(clientRow("system"), true)).toEqual({ ownLevel: false, editable: false });
+    expect(clientDeeds(clientRow("space"), false)).toMatchObject({
+      ownLevel: true,
+      editable: true,
+    });
+    expect(clientDeeds(clientRow("org"), false)).toMatchObject({
+      ownLevel: false,
+      editable: false,
+    });
+    expect(clientDeeds(clientRow("org"), true)).toMatchObject({ ownLevel: true, editable: true });
+    expect(clientDeeds(clientRow("system"), true, true)).toEqual({
+      ownLevel: false,
+      editable: false,
+      deletable: false,
+    });
   });
 
   it("deletes an auto-provisioned client but never edits it", () => {
     expect(clientDeeds(clientRow("space", true), true)).toEqual({
       ownLevel: true,
       editable: false,
+      deletable: true,
     });
+  });
+
+  it("lets an org integrations admin delete the org's auto-provisioned client of an auto auth", () => {
+    // An auto-provisioned auth grants no `canManageOrg`; deletion of its org machine client rides
+    // on `org-integrations:configure` alone — and on nothing for a manual org client.
+    expect(clientDeeds(clientRow("org", true), false, true)).toEqual({
+      ownLevel: false,
+      editable: false,
+      deletable: true,
+    });
+    expect(clientDeeds(clientRow("org", true), false, false).deletable).toBe(false);
+    expect(clientDeeds(clientRow("org"), false, true).deletable).toBe(false);
+  });
+});
+
+/** The row's action menu entries, by id, with whether each is offered. */
+function offeredActions(
+  row: ClientRow,
+  flags: { canManageOrg: boolean; canDeleteOrgMachineClients: boolean },
+) {
+  let columns: DataColumn<ClientRow>[] = [];
+  function Probe(): ReactElement | null {
+    columns = useIntegrationClientColumns({
+      canUseHere: true,
+      canChooseOrgDefault: true,
+      pendingClientRef: null,
+      onUseHere: () => {},
+      onUseForOrg: () => {},
+      onEdit: () => {},
+      onPromote: () => {},
+      onDelete: () => {},
+      ...flags,
+    });
+    return null;
+  }
+  render(<Probe />);
+  const cell = columns.find((column) => column.id === "actions")!.cell(row);
+  const actions = (cell as ReactElement<{ actions: Array<{ id: string; hidden?: boolean }> }>).props
+    .actions;
+  return Object.fromEntries(actions.map((a) => [a.id, !a.hidden]));
+}
+
+describe("the actions of an auto-provisioned org client, for an org integrations admin", () => {
+  it("offers Delete, never use-here, use-for-org, edit or promote", () => {
+    const row = { ...clientRow("org", true), inSpaceList: true, inOrgList: true };
+    expect(offeredActions(row, { canManageOrg: false, canDeleteOrgMachineClients: true })).toEqual({
+      "use-here": false,
+      "use-for-org": false,
+      promote: false,
+      edit: false,
+      delete: true,
+    });
+  });
+
+  it("CONTROL: offers nothing to a caller without org-integrations:configure", () => {
+    const row = clientRow("org", true);
+    expect(
+      offeredActions(row, { canManageOrg: false, canDeleteOrgMachineClients: false }).delete,
+    ).toBe(false);
   });
 });

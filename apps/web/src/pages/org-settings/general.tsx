@@ -5,10 +5,11 @@ import { Alert } from "@appstrate/ui/components/alert";
 import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Building, HardDrive } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { Building, HardDrive } from "lucide-react";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonLine } from "../../components/skeleton-line";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
@@ -27,6 +28,7 @@ import { fieldWriteState } from "../../lib/field-write-state";
 import { OrgSettingToggle } from "../../components/settings/org-setting-toggle";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { EmptyState } from "../../components/page-states";
+import { errorMessage } from "../../lib/mutation-error";
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { AppearancePicker } from "../../components/appearance-picker";
@@ -63,7 +65,7 @@ export function OrgSettingsGeneralPage() {
   const leaveHintId = useId();
 
   // Owners always get the member list.
-  const { data: orgDetail } = useOrgDetail();
+  const { data: orgDetail, isLoading: orgDetailLoading, error: orgDetailError } = useOrgDetail();
   const orgDetailPending = !orgDetail;
   const ownerCount = orgDetail?.members?.filter((m) => m.role === "owner").length ?? 0;
   // Under a preview `orgRole` is the persona's, not the real membership.
@@ -167,7 +169,17 @@ export function OrgSettingsGeneralPage() {
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("orgStorage.section")}
           </div>
-          <Skeleton className="mb-4 h-24 w-full rounded-lg" />
+          {/* The storage card's head (icon, title, usage) — its unlimited case. */}
+          <Card className="mb-4 p-5">
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-[18px] shrink-0" />
+              <div className="flex-1">
+                <SkeletonLine className="w-28 text-sm font-semibold" />
+                {/* The usage is an inline span on the card's own 16px line, not a text-sm block. */}
+                <SkeletonLine className="w-48" inline="text-sm" />
+              </div>
+            </div>
+          </Card>
         </>
       )}
       {storage && (
@@ -192,7 +204,6 @@ export function OrgSettingsGeneralPage() {
                 </div>
                 {storageNearLimit && (
                   <Alert variant="warning" className="mt-3">
-                    <AlertTriangle size={16} />
                     <AlertDescription>{t("orgStorage.nearLimitWarning")}</AlertDescription>
                   </Alert>
                 )}
@@ -233,22 +244,30 @@ export function OrgSettingsGeneralPage() {
           variant="action"
           label={t("orgSettings.leaveOrg")}
           description={
-            orgDetailPending && !previewing ? (
-              <Skeleton className="h-3.5 w-64" />
+            previewing ? (
+              <span id={leaveHintId}>{leaveHint}</span>
+            ) : orgDetailLoading ? (
+              <SkeletonLine className="w-64 max-w-full" />
+            ) : orgDetailError ? (
+              // The guard cannot be evaluated: leaving stays off, and the reason is said.
+              <span id={leaveHintId} className="text-destructive">
+                {errorMessage(orgDetailError)}
+              </span>
             ) : (
               <span id={leaveHintId}>{leaveHint}</span>
             )
           }
         >
-          <Button
+          <PendingButton
             data-testid="leave-org-button"
-            aria-describedby={orgDetailPending && !previewing ? undefined : leaveHintId}
+            aria-describedby={orgDetailLoading && !previewing ? undefined : leaveHintId}
             variant="destructive"
-            disabled={!canLeave || leaveOrgMutation.isPending}
+            pending={leaveOrgMutation.isPending}
+            disabled={!canLeave}
             onClick={() => setConfirmLeave(true)}
           >
-            {leaveOrgMutation.isPending ? t("orgSettings.leaving") : t("orgSettings.leaveOrg")}
-          </Button>
+            {t("orgSettings.leaveOrg")}
+          </PendingButton>
         </SettingRow>
         {can("org:delete") && (
           <SettingRow
@@ -256,14 +275,14 @@ export function OrgSettingsGeneralPage() {
             label={t("orgSettings.deleteOrg")}
             description={t("orgSettings.deleteOrgDesc")}
           >
-            <Button
+            <PendingButton
               data-testid="delete-org-button"
               variant="destructive"
-              disabled={deleteOrgMutation.isPending}
+              pending={deleteOrgMutation.isPending}
               onClick={() => setConfirmDelete(true)}
             >
-              {deleteOrgMutation.isPending ? t("spaces.deleting") : t("btn.delete")}
-            </Button>
+              {t("btn.delete")}
+            </PendingButton>
           </SettingRow>
         )}
       </SettingsGroup>
@@ -273,6 +292,7 @@ export function OrgSettingsGeneralPage() {
         onClose={() => setConfirmDelete(false)}
         title={t("orgSettings.deleteOrg")}
         description={t("orgSettings.deleteConfirm", { name: currentOrg.name })}
+        confirmLabel={t("btn.delete")}
         isPending={deleteOrgMutation.isPending}
         onConfirm={() => deleteOrgMutation.mutate({ params: { path: { orgId: currentOrg.id } } })}
       />

@@ -144,6 +144,17 @@ export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 // runtime validation in execute() from these definitions. Aligned with `apps/api/AGENTS.md`
 // § "Validation (Zod)": every JSON body is read through a schema, never cast.
 
+/**
+ * The request-body rule both `api_call` surfaces state in their `body`
+ * description (this file and `runtime-pi/sidecar/mcp.ts`): a model that
+ * re-types a long generated string into tool arguments truncates it, and the
+ * upstream accepts the truncated value.
+ */
+export const API_CALL_BODY_FROM_FILE_RULE =
+  "Never re-type file contents or base64 into the body: retyped long strings get silently " +
+  "corrupted. Write the complete request body to a workspace file and pass { fromFile } (set " +
+  "Content-Type in headers) — also for a JSON body embedding a file's base64.";
+
 const fromFileBodySchema = z.object({
   fromFile: z.string().describe("Workspace-relative path to a file to send as the request body"),
 });
@@ -170,7 +181,7 @@ const fromBytesBodySchema = z.object({
   fromBytes: z
     .string()
     .describe(
-      `Base64-encoded body bytes (for inline binary uploads up to ${MAX_REQUEST_BODY_DISPLAY}). ` +
+      `Base64-encoded body bytes (small inline payloads only; hard cap ${MAX_REQUEST_BODY_DISPLAY}). ` +
         "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
         "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
     ),
@@ -310,8 +321,8 @@ export const apiCallRequestSchema = z.object({
   body: requestBodySchema
     .optional()
     .describe(
-      "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
-        `{ fromBytes, encoding: 'base64' } for inline binary payloads up to ${MAX_REQUEST_BODY_DISPLAY} (standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
+      `Request body. ${API_CALL_BODY_FROM_FILE_RULE} Use { fromFile: 'path' } (workspace-relative) for a body in a file, ` +
+        `{ fromBytes, encoding: 'base64' } for small inline binary payloads (hard cap ${MAX_REQUEST_BODY_DISPLAY}; standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
         "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
     ),
   substituteBody: z

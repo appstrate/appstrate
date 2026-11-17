@@ -64,7 +64,6 @@ export function usePersonalServiceColumns({
       header: t("providers.col.keys"),
       width: 100,
       elastic: true,
-      tier: 2,
       cell: (row) => {
         const text = row.holders.length > 0 ? holdersText(row, t("credentials.you")) : null;
         return text ? (
@@ -83,7 +82,6 @@ export function usePersonalServiceColumns({
       header: t("providers.col.state"),
       width: 100,
       elastic: true,
-      tier: 2,
       cell: (row) => (
         <RowStateCell
           states={rowStates({ ...row, noKey: row.holders.length === 0 })}

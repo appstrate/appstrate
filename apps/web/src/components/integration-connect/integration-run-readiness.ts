@@ -1,19 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ConnectionResolutionWarningCode } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionWarningCode,
+  MissingIntegrationConnectionCode,
+} from "@appstrate/core/integration";
 import type { components } from "../../api/schema";
 import i18n from "../../i18n";
 import { noneChosenBy } from "../../lib/launch-warnings";
 
 type IntegrationAgentResolution = components["schemas"]["IntegrationAgentResolution"];
 
-/** `reconfigure`: the agent's `auth_key` serves none of its selected tools; no pick clears it. */
+/** `reconfigure`: the agent's `auth_key` is at fault (see below); no pick clears it. */
 type EmptyPickerPrompt = "choose" | "connect" | "reconfigure";
+
+/** The agent's `auth_key` serves none of its selected tools, or names an auth the integration lacks. */
+const RECONFIGURE_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
+  "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
+]);
 
 interface ResolutionView {
   /** The admin pin's set (`[]` pins none), else an enforced org default's. */
   lockedConnectionIds: string[];
   lockedBy: "admin_pin" | "org_default" | null;
+  /**
+   * The locked set always binds, and the run's pick (a launch override, else the member's pin)
+   * adds to it: only under an admin pin open to additions. Closed, nothing adds to a lock.
+   */
+  additionsAllowed: boolean;
   /** The soft org default's whole stored set, incl. members candidates hide. */
   softDefaultIds: string[];
   /** Connection health, not run relevance (the server's `run_blocking`): bound, with no error. */
@@ -34,12 +48,13 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
   return {
     lockedConnectionIds: lock?.ids ?? [],
     lockedBy: lock?.by ?? null,
+    additionsAllowed: resolution.additional_connections_allowed,
     softDefaultIds: source === "org_default" ? orgDefault : [],
     resolved: code === null && resolution.resolved_connection_ids.length > 0,
     emptyPickerPrompt:
       code === "must_choose_connection" || resolution.warning?.code === "must_choose_connection"
         ? "choose"
-        : code === "auth_key_serves_no_selected_tool"
+        : code !== null && RECONFIGURE_CODES.has(code)
           ? "reconfigure"
           : "connect",
   };

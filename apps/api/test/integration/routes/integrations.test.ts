@@ -24,7 +24,7 @@ import {
 import { seedPackage, seedSpace, seedUnreachableSpace } from "../../helpers/seed.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {} from "../../helpers/integration-manifests.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
@@ -39,6 +39,8 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
+import { withRunToolDescriptions } from "../../../src/services/run-tools-mcp.ts";
 
 const app = getTestApp();
 
@@ -50,8 +52,15 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
     version: "0.1.0",
     display_name: "Gmail",
     description: "Gmail integration",
-    // AFPS: local server → mcp-server reference (separate package).
-    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+    // AFPS: the local server is declared inline on the integration.
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     // AFPS §4.4 — the tool an agent inherits without an explicit selection.
     // Surfaced by the detail endpoint so an agent-builder sees the default.
     default_tools: ["api_call"],
@@ -311,8 +320,8 @@ describe("GET /api/integrations/:packageId", () => {
     // Local-source oauth2 → no auto-provisioning (endpoints are manifest-
     // declared and a client must be pre-registered).
     expect(google?.client_auto_provisioned).toBe(false);
-    // The gmail fixture has no referenced mcp-server seeded → resolver
-    // falls back to the integration's `tools` keys. Shape assertion keeps
+    // The gmail fixture declares no `source.server.tools` → the catalog
+    // falls back to the integration's `tools_policy` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
     expect(Array.isArray(body.tool_catalog)).toBe(true);
     // AFPS §4.4 — the manifest's declared default_tools is surfaced verbatim
@@ -320,18 +329,11 @@ describe("GET /api/integrations/:packageId", () => {
     expect(body.default_tools).toEqual(["api_call"]);
   });
 
-  it("builds a local integration's tool catalog from its mcp-server's tools", async () => {
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await seedPackage({
-      id: "@myorg/gmail-server",
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: {
-        ...mcpServerManifest({ name: "@myorg/gmail-server", version: "0.1.0" }),
-        tools: [{ name: "search", description: "Search threads" }, { name: "send" }],
-      },
-    });
+  it("builds a local integration's tool catalog from its own source.server.tools", async () => {
+    const manifest = gmailManifest("@myorg/gmail");
+    const source = manifest.source as { server: Record<string, unknown> };
+    source.server.tools = [{ name: "search", description: "Search threads" }, { name: "send" }];
+    await seedIntegration(ctx.orgId, manifest);
     const res = await app.request("/api/integrations/@myorg/gmail", {
       headers: authHeaders(ctx),
     });
@@ -341,6 +343,32 @@ describe("GET /api/integrations/:packageId", () => {
       { name: "search", description: "Search threads" },
       { name: "send" },
     ]);
+  });
+
+  it("describes each tool of the platform integration, whose server is the platform", async () => {
+    const restore = await installRuntimeBoundSystemPackages();
+    try {
+      const res = await app.request("/api/integrations/@appstrate/platform", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        tool_catalog: Array<{ name: string; description?: string }>;
+      };
+      expect(body.tool_catalog.map((tool) => tool.name)).toContain("log");
+      for (const tool of body.tool_catalog) expect(tool.description).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the description of a catalog entry the run tools do not define", () => {
+    const detail = withRunToolDescriptions({
+      manifest: { _meta: { "dev.appstrate/platform": {} } },
+      tool_catalog: [{ name: "log" }, { name: "elsewhere", description: "Kept as written" }],
+    });
+    expect(detail.tool_catalog[0]!.description).toBeTruthy();
+    expect(detail.tool_catalog[1]!.description).toBe("Kept as written");
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
@@ -890,7 +918,14 @@ describe("importConnectionSchema — non-string credential values (R8b)", () => 
       name,
       version: "0.1.0",
       display_name: "Mixed",
-      source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         api: {
           type: "api_key",
@@ -1471,7 +1506,7 @@ describe("OAuth2 connect initiate", () => {
     expect(res.status).toBe(403);
   });
 
-  it("remote MCP oauth2 with no pre-registered client takes the auto-DCR path (403 when discovery fails)", async () => {
+  it("remote MCP oauth2 with no pre-registered client takes the auto-DCR path (503 when discovery cannot reach the AS)", async () => {
     // A remote MCP integration self-registers its client at connect time, so
     // connect is attempted even with no pre-registered client (unlike a classic
     // oauth2 auth, which the UI gates earlier). Discovery against the
@@ -1487,12 +1522,9 @@ describe("OAuth2 connect initiate", () => {
         body: "{}",
       },
     );
-    expect(res.status).toBe(403);
-    // The error names the specific provisioning failure (no registration
-    // endpoint discovered against the unreachable AS) and carries its remedy.
-    const body = (await res.json()) as { detail: string };
-    expect(body.detail).toContain("did not advertise dynamic client registration");
-    expect(body.detail).toContain("register an OAuth client manually");
+    // An unresolvable host may be an outage: a retryable 503, not a "register manually" 403.
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("authorization_server_unreachable");
   });
 
   it("returns a PKCE-protected authorize URL after registering OAuth client", async () => {
@@ -1728,17 +1760,17 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       {
         action: "integration.org_default.upserted",
         before: null,
-        after: { connectionIds: [a], enforce: false },
+        after: { connectionIds: [a], enforce: false, memberPinsCleared: [] },
       },
       {
         action: "integration.org_default.upserted",
         before: { connectionIds: [a], enforce: false },
-        after: { connectionIds: [b], enforce: true },
+        after: { connectionIds: [b], enforce: true, memberPinsCleared: [] },
       },
       {
         action: "integration.org_default.deleted",
         before: { connectionIds: [b], enforce: true },
-        after: null,
+        after: { memberPinsCleared: [] },
       },
     ]);
   });

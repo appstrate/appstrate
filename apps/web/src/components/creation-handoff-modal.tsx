@@ -1,51 +1,80 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { MessageSquareText, PencilLine } from "lucide-react";
+import { Link2, MessageSquareText, PencilLine, Upload } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ChoiceCard } from "./choice-card";
 import { Modal } from "./modal";
 
-interface CreationHandoffModalProps {
+interface CreationHandoffChoicesProps {
   resource: CreationResource;
-  onClose: () => void;
   onManual: () => void;
   onChat: (prompt: string) => void;
+  /** Importing a type takes the same grant as creating it, so whoever opens this may import. */
+  onImport: () => void;
+  /** The integration an agent starts with (its id and display name), mentioned in the Chat draft. */
+  integration?: { id: string; name: string };
+  /** The guided way from an MCP server URL, offered first when set (integrations). */
+  onFromUrl?: () => void;
 }
 
-const TITLE_KEYS: Record<CreationResource, string> = {
-  agent: "creation.title.agent",
-  skill: "creation.title.skill",
-  integration: "creation.title.integration",
-  "mcp-server": "creation.title.mcpServer",
-};
-
 export function CreationHandoffModal({
-  resource,
   onClose,
+  ...choices
+}: CreationHandoffChoicesProps & { onClose: () => void }) {
+  const { t } = useTranslation("settings");
+  return (
+    <Modal
+      inSpace
+      onClose={onClose}
+      title={t(`creation.title.${choices.resource}`)}
+      className="sm:max-w-xl"
+    >
+      <CreationHandoffChoices {...choices} />
+    </Modal>
+  );
+}
+
+/**
+ * The ways to make a package, the same for every type: by hand, with the chat, or from an
+ * archive, and for an integration first the guided way from an MCP server URL. The chat, when it is out of
+ * reach, stays listed, disabled, with the reason.
+ */
+export function CreationHandoffChoices({
+  resource,
   onManual,
   onChat,
-}: CreationHandoffModalProps) {
+  onImport,
+  onFromUrl,
+  integration,
+}: CreationHandoffChoicesProps) {
   const { t } = useTranslation("settings");
   const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
-  const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
-  const manualIsImport = resource === "mcp-server";
+  const chatPrompt = buildChatCreationDraft(resource, translatePrompt, integration);
   // The chat route gate covers both the feature flag and the `chat:read` permission.
   const chatAvailable = canReach("/chat");
 
   const methods = [
+    ...(onFromUrl
+      ? [
+          {
+            id: "url",
+            icon: Link2,
+            title: t("creation.fromUrl.title"),
+            description: t("creation.fromUrl.description"),
+            onClick: onFromUrl,
+          },
+        ]
+      : []),
     {
       id: "manual",
       icon: PencilLine,
-      title: t(manualIsImport ? "creation.manual.importTitle" : "creation.manual.title"),
-      description: t(
-        manualIsImport ? "creation.manual.importDescription" : "creation.manual.description",
-      ),
+      title: t("creation.manual.title"),
+      description: t("creation.manual.description"),
       onClick: onManual,
-      disabled: false,
     },
     {
       id: "chat",
@@ -57,19 +86,24 @@ export function CreationHandoffModal({
       onClick: () => onChat(chatPrompt),
       disabled: !chatAvailable,
     },
+    {
+      id: "import",
+      icon: Upload,
+      title: t("creation.import.title"),
+      description: t("creation.import.description"),
+      onClick: onImport,
+    },
   ];
 
   return (
-    <Modal onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
-      <div className="flex flex-col gap-2">
-        {methods.map(({ id, ...method }) => (
-          <ChoiceCard
-            key={id}
-            {...method}
-            adornment={id === "chat" ? <Badge variant="secondary">Appstrate</Badge> : undefined}
-          />
-        ))}
-      </div>
-    </Modal>
+    <div className="flex flex-col gap-2">
+      {methods.map(({ id, ...method }) => (
+        <ChoiceCard
+          key={id}
+          {...method}
+          adornment={id === "chat" ? <Badge variant="secondary">Appstrate</Badge> : undefined}
+        />
+      ))}
+    </div>
   );
 }

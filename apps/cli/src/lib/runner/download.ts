@@ -100,7 +100,7 @@ export async function resolveDaemonReleaseVersion(
     if (err instanceof MinisignMissingError) throw err;
     // Only a dev CLI gets here: a release CLI pins the daemon to its own
     // version, so the escape hatch is running one. The bootstrap uses the tag
-    // verbatim (hence the `v`) and elevates with `sudo -E` itself — no outer sudo.
+    // verbatim (hence the `v`) and elevates with sudo itself — no outer sudo.
     throw new Error(
       `${(err as Error).message}\n` +
         `A dev CLI resolves the runner daemon to the latest release; a release CLI pins it ` +

@@ -31,7 +31,7 @@ import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
@@ -553,7 +553,7 @@ describe("mcp file-backed package workflow", () => {
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
-    headers = await apiKeyHeaders(ctx, ["mcp-servers:write"]);
+    headers = await apiKeyHeaders(ctx, ["integrations:write"]);
   });
 
   it("hides private catalog conflicts and rejects importing a package confined to another space", async () => {
@@ -564,7 +564,7 @@ describe("mcp file-backed package workflow", () => {
     await seedPackage({
       id: "@mcppkgdoc/file-server",
       orgId: ctx.orgId,
-      type: "mcp-server",
+      type: "integration",
       homeSpaceId: hidden.id,
     });
     await seedSpacePackage(hidden.id, "@mcppkgdoc/file-server");
@@ -612,7 +612,7 @@ describe("mcp file-backed package workflow", () => {
     await seedPackage({
       id: packageId,
       orgId: ctx.orgId,
-      type: "mcp-server",
+      type: "integration",
       homeSpaceId: elsewhere.id,
     });
 
@@ -653,10 +653,11 @@ describe("mcp file-backed package workflow", () => {
 
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
     const packageId = "@mcppkgdoc/file-server";
-    const manifest = mcpServerManifest({
+    const manifest = localIntegrationManifest({
       name: packageId,
       version: "1.0.0",
-      entryPoint: "main.js",
+      server: { entryPoint: "main.js" },
+      auths: { api: { type: "api_key" } },
     });
     const entries: Record<string, Uint8Array> = {
       "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
@@ -723,6 +724,41 @@ describe("mcp file-backed package workflow", () => {
     expect(result.isError).toBe(true);
     expect(result.data).toMatchObject({ valid: false, importable: false });
     expect(String(result.data.error)).toContain("description");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  // The preflight is the import's own: a reserved scope must not read as
+  // importable here and then be refused by `import_package_file`.
+  it("reports a package under a platform-reserved scope as not importable", async () => {
+    const manifest = {
+      name: "@inline/evil",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Squatter",
+      description: "Claims the inline scope.",
+    };
+    const bytes = zipSync({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      "prompt.md": new TextEncoder().encode("You are a squatter."),
+    } as unknown as Parameters<typeof zipSync>[0]);
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "evil.afps", "application/zip", bytes);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_file",
+        arguments: { file_uri: `appfile://${docId}` },
+      },
+    });
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({ valid: false, importable: false });
+    expect(String(result.data.error)).toContain("reserved scope");
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
   });
 

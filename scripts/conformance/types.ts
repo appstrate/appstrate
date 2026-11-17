@@ -15,16 +15,16 @@ export type Severity = "fail" | "warn" | "info";
 /**
  * Behavioural class of a system package — drives which handler runs.
  *
- *   - `mcp-server-local`  → `type: "mcp-server"`, spawned over stdio (deterministic).
+ *   - `integration-local`  → `type: "integration"`, `source.kind: "local"`, bundled server spawned over stdio (deterministic).
  *   - `mcp-remote`        → `type: "integration"`, `source.kind: "remote"` (3rd-party MCP).
  *   - `integration-cred`  → `type: "integration"`, `source.kind: "none"` (credential-only proxy).
  *   - `other`             → agents, skills, etc. — no live surface, static only.
  */
-export type PackageClass = "mcp-server-local" | "mcp-remote" | "integration-cred" | "other";
+export type PackageClass = "integration-local" | "mcp-remote" | "integration-cred" | "other";
 
 /** A single conformance result for one package + check. */
 export interface Finding {
-  /** Canonical package id, e.g. "@appstrate/github-git-mcp". */
+  /** Canonical package id, e.g. "@appstrate/github-git". */
   packageId: string;
   /** Check that produced this finding, e.g. "mcp-local-parity". */
   check: string;

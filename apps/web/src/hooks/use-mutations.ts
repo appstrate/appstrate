@@ -24,7 +24,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
   invalidatePackageCaches,
-  versionKeys,
+  invalidateVersionInfo,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -150,12 +150,29 @@ export function useRunLauncher(packageId: string) {
 
 export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
+/** What every import door answers, a bundle included: the package to open (its root). */
+export interface ImportedPackage {
+  packageId: string;
+  type: string;
+  version?: string;
+  warnings?: string[];
+}
+
 /** After an import: refresh every package cache and surface the non-blocking import-time warnings. */
 function afterImport(qc: QueryClient, data: { type: string; warnings?: string[] }) {
+  refreshPackageLists(qc, data.type);
+  for (const message of data.warnings ?? []) toast.warning(message);
+}
+
+/**
+ * After a package write made outside an editor (an import, the chat): refresh
+ * every package cache, the integration ones when it may be an integration
+ * (`type` unknown: refresh them too), and the libraries.
+ */
+export function refreshPackageLists(qc: QueryClient, type?: string) {
   // An import REPLACES the draft artifact: without the file caches the explorer shows the pre-import index.
   invalidatePackageCaches(qc);
-  if (data.type === "integration") void invalidateIntegrationQueries(qc);
-  for (const message of data.warnings ?? []) toast.warning(message);
+  if (type === undefined || type === "integration") void invalidateIntegrationQueries(qc);
   // The library feeds the integration editor's picker, which imports in place.
   void invalidateLibraries(qc);
 }
@@ -168,10 +185,13 @@ export function useImportPackage(meta?: MutationMeta) {
     mutationFn: async ({
       file,
       force,
+      type,
     }: {
       file: File;
       force?: boolean;
-    }): Promise<{ packageId: string; type: string; version?: string; warnings?: string[] }> => {
+      /** The type imported for: an archive of another type is refused before anything is written. */
+      type?: PackageType;
+    }): Promise<ImportedPackage> => {
       const fd = new FormData();
       fd.append("file", file);
       // Multi-package bundles route to a different endpoint; the
@@ -179,18 +199,20 @@ export function useImportPackage(meta?: MutationMeta) {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const { data } = await client.POST("/api/packages/import-bundle", {
+          params: { query: { type } },
           // Multipart gap: the generated body types the binary part as `string`; FormData passes through the serializer.
           body: { file },
           bodySerializer: () => fd,
         });
         return {
           packageId: data!.root_package_id,
-          type: "agent" as const,
+          type: data!.root_type,
+          version: data!.root_version,
           warnings: data!.warnings,
         };
       }
       const { data } = await client.POST("/api/packages/import", {
-        params: { query: force ? { force: true } : undefined },
+        params: { query: { force: force || undefined, type } },
         // Multipart gap — see above.
         body: { file },
         bodySerializer: () => fd,
@@ -205,8 +227,11 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    mutationFn: async (url: string) => {
-      const { data } = await client.POST("/api/packages/import-github", { body: { url } });
+    mutationFn: async ({ url, type }: { url: string; type?: PackageType }) => {
+      const { data } = await client.POST("/api/packages/import-github", {
+        params: { query: { type } },
+        body: { url },
+      });
       return data!;
     },
     onSuccess: (data) => afterImport(qc, data),
@@ -239,7 +264,6 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      toast.success(i18n.t("agents:detail.runsDeleted"));
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
@@ -280,31 +304,37 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/tool) create/update mutations ---
 
-export function useCreatePackage(type: PackageType) {
+/**
+ * Exactly the keys the creation dialog sends: the create schemas are `.strict()`, so an unmodelled
+ * key is a 400. An integration's content is optional and it alone may skip its initial version.
+ */
+type CreatePackageBody<T extends PackageType> = T extends "integration"
+  ? { manifest: Record<string, unknown>; content?: string; publish?: false }
+  : { manifest: Record<string, unknown>; content: string };
+
+export function useCreatePackage<T extends PackageType>(type: T) {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    // Exactly the keys the editor sends: the branches forward `body` whole and the create schemas are `.strict()`, so an unmodelled key is a 400.
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      content: string;
-      operations?: components["schemas"]["PackageFileWriteOperation"][];
-    }): Promise<{ id: string; version_count?: number }> => {
+    mutationFn: async (
+      body: CreatePackageBody<T>,
+    ): Promise<{ id: string; version_count?: number }> => {
       switch (type) {
-        case "mcp-server":
-          throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
+          const agentBody = body as CreatePackageBody<"agent">;
           const { data } = await client.POST("/api/packages/agents", {
             // Assert only the manifest across the dynamic-object → strict `AgentManifest` boundary; the server validates it.
             body: {
-              ...body,
-              manifest: body.manifest as components["schemas"]["AgentManifest"],
+              ...agentBody,
+              manifest: agentBody.manifest as components["schemas"]["AgentManifest"],
             },
           });
           return data!;
         }
         case "skill": {
-          const { data } = await client.POST("/api/packages/skills", { body });
+          const { data } = await client.POST("/api/packages/skills", {
+            body: body as CreatePackageBody<"skill">,
+          });
           return data!;
         }
         case "integration": {
@@ -313,9 +343,11 @@ export function useCreatePackage(type: PackageType) {
         }
       }
     },
-    onSuccess: (data) => {
-      // The create route skips the initial version when the publish gate would refuse it.
-      if (data.version_count === 0) toast.warning(i18n.t("agents:editor.createdUnpublished"));
+    onSuccess: (data, body) => {
+      // The create route skips the initial version when the publish gate would refuse it; a
+      // create that asked for no version expects none.
+      if (data.version_count === 0 && !("publish" in body && body.publish === false))
+        toast.warning(i18n.t("agents:editor.createdUnpublished"));
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
@@ -356,7 +388,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }
-      qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+      void invalidateVersionInfo(qc);
     },
   });
 }

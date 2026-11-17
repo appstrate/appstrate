@@ -11,6 +11,8 @@ import {
 } from "@appstrate/ui/components/dialog";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { useDialogFocus } from "../hooks/use-dialog-focus";
+import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
+import { WorkingSpaceName } from "./space-name";
 
 interface ModalProps {
   onClose: () => void;
@@ -18,6 +20,12 @@ interface ModalProps {
   title: string;
   /** What the dialog does, read by assistive technology after the title. */
   description?: string;
+  /**
+   * The dialog acts in the working space (a creation, an import, a launch): in « Tous les
+   * espaces » a line under its description names that space, the one the action that opened it
+   * chose.
+   */
+  inSpace?: boolean;
   children: ReactNode;
   actions?: ReactNode;
   className?: string;
@@ -28,6 +36,7 @@ export function Modal({
   preventClose = false,
   title,
   description,
+  inSpace = false,
   children,
   actions,
   className,
@@ -37,6 +46,7 @@ export function Modal({
     <Dialog open onOpenChange={(v) => !v && !preventClose && onClose()}>
       <DialogContent
         {...focus}
+        {...INTEGRATED_TABLE_SURFACE}
         className={className}
         onEscapeKeyDown={keepOpenWhileRenaming}
         {...(description ? {} : { "aria-describedby": undefined })}
@@ -44,6 +54,7 @@ export function Modal({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
+          {inSpace && <WorkingSpaceName size="sm" className="text-muted-foreground" />}
         </DialogHeader>
         {children}
         {actions && <DialogFooter>{actions}</DialogFooter>}

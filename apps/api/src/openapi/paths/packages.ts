@@ -5,16 +5,21 @@ import {
   STD_RESPONSE_HEADERS,
   REQUEST_ID_ONLY_HEADERS,
 } from "../headers.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
+
+/** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
+const SCOPE_RESERVED_RULE =
+  "A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.";
 
 /**
- * Shared tail of the four per-type list descriptions (skills / agents /
- * integrations / mcp-servers) — only the leading noun differs.
+ * Shared tail of the three per-type list descriptions (skills / agents /
+ * integrations) — only the leading noun differs.
  */
 const listPackagesSharedDescription =
   "ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system " +
   "package, or one placed here (homed here, or holding a row here) and switched on. A " +
   "package placed here and switched OFF is NOT on it — that is " +
-  "the space library's subject (`GET /api/spaces/{spaceId}/library`), which names " +
+  "the space library's subject (`GET /api/spaces/{id}/library`), which names " +
   "each placement's origin and state and carries the switch that activates it. For " +
   "the organization-wide map of placements, use `GET /api/library`.";
 
@@ -42,8 +47,8 @@ const importConflictProblem = {
 } as const;
 
 /**
- * The `?version` selector of the three generic package detail routes (skill /
- * integration / mcp-server), and the two answers that come with it.
+ * The `?version` selector of the two generic package detail routes (skill /
+ * integration), and the two answers that come with it.
  *
  * ONE wording for the three, because it is ONE rule — the same rule the agent
  * detail and the file explorer apply, from the same two functions
@@ -144,8 +149,8 @@ function versionRestoreResponseSchema(detailRef: string) {
 /**
  * The authority sentence EVERY mutation of an EXISTING package carries — five
  * verbs (draft update, delete, version create, version restore, version delete)
- * times four types, twenty descriptions off ONE definition. Same reason
- * `PACKAGE_HOME_PROPERTIES` (`../schemas.ts`) is one object rather than four
+ * times three types, fifteen descriptions off ONE definition. Same reason
+ * `PACKAGE_HOME_PROPERTIES` (`../schemas.ts`) is one object rather than three
  * copies: the rule is single (`packages.home_space_id`, RBAC spec §6.9) and
  * hand-copied prose drifts the moment it changes. It answered nothing at all
  * before — a reader could not tell from these descriptions that the space in
@@ -162,7 +167,199 @@ const fileOperationsProperty = {
     "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations.",
 } as const;
 
+/** `?type=` on the three import doors: refuse an archive of another package type before writing. */
+const importTypeParameter = {
+  name: "type",
+  in: "query",
+  required: false,
+  description:
+    "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+  schema: { type: "string", enum: ["agent", "skill", "integration"] },
+} as const;
+
+const skillEntrySchema = {
+  type: "object",
+  description:
+    "A skill as the MCP Skills extension (SEP-2640) serves it: the entry of `skills/list` and " +
+    "`skills/get`.",
+  properties: {
+    uri: {
+      type: "string",
+      description:
+        "`skill://` URI of the skill's `SKILL.md`: " +
+        "`skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md` for the published " +
+        "definition, `<package-name>@draft` in place of `<package-name>` for the draft.",
+    },
+    frontmatter: {
+      type: "object",
+      description:
+        "The YAML frontmatter of the served `SKILL.md`, verbatim. `metadata.version` is the " +
+        "package version: the semver of a published definition; a draft has none.",
+      properties: { name: { type: "string" }, description: { type: "string" } },
+      required: ["name", "description"],
+      additionalProperties: true,
+    },
+    resources: {
+      type: "array",
+      description: "Every file of the skill, `SKILL.md` included.",
+      items: {
+        type: "object",
+        properties: {
+          uri: { type: "string", description: "`skill://` URI of the file." },
+          digest: {
+            type: "string",
+            description: "`sha256:<hex>` of the bytes `resources/read` serves for `uri`.",
+          },
+          size: { type: "integer", description: "Size of the file in bytes." },
+        },
+        required: ["uri", "digest", "size"],
+      },
+    },
+    _meta: {
+      type: "object",
+      description:
+        "Present on a draft's entry only: `dev.appstrate/lock_version` is the `lock_version` of " +
+        "the draft whose files `resources` describes.",
+      properties: { "dev.appstrate/lock_version": { type: "integer" } },
+      required: ["dev.appstrate/lock_version"],
+    },
+  },
+  required: ["uri", "frontmatter", "resources"],
+} as const;
+
+const SERVED_SKILLS_DESCRIPTION =
+  "Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP " +
+  "endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. " +
+  "Requires `skills:read` in that space. Rate-limited to 50 requests/minute.";
+
+const servedSkillErrors = {
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "429": { $ref: "#/components/responses/RateLimited" },
+} as const;
+
+/** The responses of both skill indexes: one space's, and the one spanning spaces. */
+const skillListResponses = {
+  "200": {
+    description: "Skill list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OrgPackageItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+        example: {
+          object: "list",
+          hasMore: false,
+          data: [
+            {
+              id: "@acme/summarize",
+              space_ids: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+              name: "Summarize",
+              description: "Summarizes long text into key points",
+              icon: "lucide:file-text",
+              keywords: ["summary", "text"],
+              source: "local",
+              version: "1.0.0",
+              created_by: "usr_cm3abc123",
+              used_by_agents: 2,
+              auto_installed: false,
+              forked_from: null,
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              home_writable: true,
+              home_deletable: true,
+              home_shareable: true,
+              createdAt: "2026-01-10T08:00:00Z",
+              updatedAt: "2026-01-10T08:00:00Z",
+            },
+          ],
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
+
+/** The responses of both integration package indexes: one space's, and the one spanning spaces. */
+const integrationPackageListResponses = {
+  "200": {
+    description: "Integration package list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/IntegrationIndexItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
+
+/**
+ * The description of a package index spanning the spaces of an organization;
+ * `noun` names the type, `permission` its read grant.
+ */
+function orgPackageIndexDescription(noun: string, single: string, permission: string): string {
+  return (
+    `Read-only index of the ${noun} of every space of the organization where the caller holds \`${permission}\`: the rows of \`${single}\`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). ` +
+    "`space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. " +
+    ORG_READ_REACH
+  );
+}
+
 export const packagesPaths = {
+  "/api/orgs/{orgId}/packages/skills": {
+    get: {
+      operationId: "listOrgSkills",
+      tags: ["Packages"],
+      summary: "List skills across the organization's spaces",
+      description: orgPackageIndexDescription("skills", "GET /api/packages/skills", "skills:read"),
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...skillListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/packages/integrations": {
+    get: {
+      operationId: "listOrgIntegrationPackages",
+      tags: ["Packages"],
+      summary: "List integration packages across the organization's spaces",
+      description: orgPackageIndexDescription(
+        "integration packages",
+        "GET /api/packages/integrations",
+        "integrations:read",
+      ),
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...integrationPackageListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
+    },
+  },
   "/api/packages/import-bundle": {
     post: {
       operationId: "importBundle",
@@ -173,6 +370,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
       ],
       requestBody: {
         required: true,
@@ -212,6 +410,7 @@ export const packagesPaths = {
                   "root_active",
                   "root_package_id",
                   "root_version",
+                  "root_type",
                   "warnings",
                 ],
                 properties: {
@@ -238,7 +437,7 @@ export const packagesPaths = {
                         type: {
                           type: "string",
                           description:
-                            "Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only.",
+                            "Package type (agent, skill, integration). Present on `inserted` entries only.",
                         },
                       },
                     },
@@ -250,6 +449,11 @@ export const packagesPaths = {
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
+                  root_type: {
+                    type: "string",
+                    enum: ["agent", "skill", "integration"],
+                    description: "The root package's type.",
+                  },
                   warnings: {
                     type: "array",
                     items: { type: "string" },
@@ -263,7 +467,9 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy." +
+            " " +
+            SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -295,6 +501,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
         {
           name: "force",
           in: "query",
@@ -335,7 +542,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/mcp-server/integration)",
+                    description: "Package type (agent/skill/integration)",
                   },
                   version: {
                     type: "string",
@@ -356,7 +563,9 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy." +
+            " " +
+            SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -388,6 +597,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
       ],
       requestBody: {
         required: true,
@@ -421,7 +631,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/mcp-server/integration)",
+                    description: "Package type (agent/skill/integration)",
                   },
                   version: {
                     type: "string",
@@ -441,7 +651,9 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy." +
+            " " +
+            SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -821,55 +1033,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
-      responses: {
-        "200": {
-          description: "Skill list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-              example: {
-                object: "list",
-                hasMore: false,
-                data: [
-                  {
-                    id: "@acme/summarize",
-                    name: "Summarize",
-                    description: "Summarizes long text into key points",
-                    icon: "lucide:file-text",
-                    keywords: ["summary", "text"],
-                    source: "local",
-                    version: "1.0.0",
-                    created_by: "usr_cm3abc123",
-                    used_by_agents: 2,
-                    auto_installed: false,
-                    forked_from: null,
-                    home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                    home_writable: true,
-                    home_deletable: true,
-                    home_shareable: true,
-                    createdAt: "2026-01-10T08:00:00Z",
-                    updatedAt: "2026-01-10T08:00:00Z",
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: skillListResponses,
     },
     post: {
       operationId: "createSkill",
@@ -926,7 +1090,8 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. " +
+            SCOPE_RESERVED_RULE,
         },
         "404": {
           $ref: "#/components/responses/NotFound",
@@ -946,6 +1111,86 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/skills/served": {
+    get: {
+      operationId: "listServedSkills",
+      tags: ["Packages"],
+      summary: "List skills as the MCP Skills extension serves them",
+      description:
+        "The entries of `skills/list`: the published definition of each active skill of the " +
+        "space that the caller may read and the server can serve whole. With " +
+        "`definition=draft`, the drafts of the space that the caller may read (only a caller " +
+        "who may write a package reads its draft), at their `@draft` URIs, as `skills/list` " +
+        'lists them with the request `_meta` `{"dev.appstrate/definition": "draft"}`. ' +
+        SERVED_SKILLS_DESCRIPTION,
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "definition",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["published", "draft"], default: "published" },
+          description: "The definition listed.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Skill entries",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: skillEntrySchema },
+                  hasMore: { type: "boolean" },
+                },
+                required: ["object", "data", "hasMore"],
+              },
+            },
+          },
+        },
+        ...servedSkillErrors,
+      },
+    },
+  },
+  "/api/packages/skills/served/archive": {
+    get: {
+      operationId: "getServedSkillArchive",
+      tags: ["Packages"],
+      summary: "Download every file of a skill as the MCP Skills extension serves it",
+      description:
+        "A ZIP of every file `resources/read` serves for the skill whose `SKILL.md` is at the " +
+        "`skill://` URI `uri`, at its path inside the skill directory; each file's `sha256` is " +
+        "the `digest` of its entry. " +
+        SERVED_SKILLS_DESCRIPTION,
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "uri",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "`skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`).",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "ZIP archive of the skill's files",
+          content: {
+            "application/zip": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        ...servedSkillErrors,
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "No skill the caller may read in this space is served at `uri`.",
+        },
       },
     },
   },
@@ -1057,7 +1302,7 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`.",
         },
         "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -1109,7 +1354,7 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`.",
         },
         "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -1254,7 +1499,7 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1379,7 +1624,10 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: "Validation error. " + SCOPE_RESERVED_RULE,
+        },
         "404": {
           $ref: "#/components/responses/NotFound",
           description: "A file operation refers to a missing file.",
@@ -1407,7 +1655,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get agent detail",
       description:
-        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills the agent is built from (`dependencies.skills`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1787,7 +2035,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1852,28 +2100,6 @@ export const packagesPaths = {
             },
           },
         },
-        // The destination is activated through the activation door, which
-        // refuses an mcp-server whose `latest` archive does not parse. The move
-        // fails with it rather than landing the package switched on in a space
-        // that cannot execute it.
-        "422": {
-          description:
-            "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
-          headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "about:blank",
-                title: "Invalid MCP Server Bundle",
-                status: 422,
-                detail: "MCP-server package '@myorg/tools' has no activatable published version.",
-                code: "bundle_invalid",
-                request_id: "req_abc123",
-              },
-            },
-          },
-        },
       },
     },
   },
@@ -1924,7 +2150,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a person or a space",
       description:
-        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{spaceId}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{spaceId}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: an mcp-server whose `latest` archive does not parse is refused (`422 bundle_invalid`), and the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
+        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1945,7 +2171,7 @@ export const packagesPaths = {
         },
       },
       responses: {
-        "200": {
+        "201": {
           description: "The placement, new or already present.",
           headers: STD_RESPONSE_HEADERS,
           content: {
@@ -1961,16 +2187,6 @@ export const packagesPaths = {
         "409": {
           description:
             "The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "422": {
-          description:
-            "The share would land ON and the package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). RFC 9457 problem+json.",
-          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -2122,37 +2338,14 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
-      responses: {
-        "200": {
-          description: "Integration package list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/IntegrationIndexItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: integrationPackageListResponses,
     },
     post: {
       operationId: "createIntegrationPackage",
       tags: ["Packages"],
       summary: "Create an integration package, including a remote MCP",
       description:
-        'Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; use an MCP-server package only for a local executable referenced by `source.kind: "local"`.',
+        'Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; a local MCP server (`source.kind: "local"`) ships its server payload inside the integration archive, so it is created by importing that archive (`POST /api/packages/import`), not by this JSON form.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2176,6 +2369,12 @@ export const packagesPaths = {
                   type: "string",
                   description: "Primary package file content (manifest file).",
                 },
+                publish: {
+                  type: "boolean",
+                  default: true,
+                  description:
+                    "`false` skips the initial version snapshot of `manifest.version`: the package is created as a draft only (`version_count: 0`), and still activated in its home space (the current space), so it can be connected and its draft synchronized from its server. The manifest is validated exactly as with `true`, `version` included. Until a version is published, a run declaring the integration fails with `422 dependency_unresolved`. Omitted or `true`, the version is published when the manifest allows it, and the package is activated only when it was.",
+                },
               },
               additionalProperties: false,
             },
@@ -2192,7 +2391,10 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: "Validation error. " + SCOPE_RESERVED_RULE,
+        },
         "404": {
           $ref: "#/components/responses/NotFound",
           description: "A file operation refers to a missing file.",
@@ -2545,437 +2747,6 @@ export const packagesPaths = {
         "409": {
           description:
             "Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  // --- MCP-server package CRUD routes ---
-
-  "/api/packages/mcp-servers": {
-    get: {
-      operationId: "listMcpServerPackages",
-      tags: ["Packages"],
-      summary: "List MCP-server packages",
-      description: "List the MCP-server packages " + listPackagesSharedDescription,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
-      responses: {
-        "200": {
-          description: "MCP-server package list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-    post: {
-      operationId: "createMcpServerPackage",
-      tags: ["Packages"],
-      summary: "Create a local MCP-server executable package",
-      description:
-        'Create a local executable MCP-server package referenced by an integration with `source.kind: "local"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: "remote"` instead.',
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
-      requestBody: {
-        required: true,
-        description:
-          "Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`.",
-        content: {
-          "multipart/form-data": {
-            schema: {
-              type: "object",
-              required: ["file"],
-              properties: {
-                file: {
-                  type: "string",
-                  format: "binary",
-                  description:
-                    "Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          description: "MCP-server package created",
-          headers: ETAG_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "409": {
-          description: "A package with this name already exists (`code: name_collision`).",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "415": { $ref: "#/components/responses/UnsupportedMediaType" },
-      },
-    },
-  },
-  "/api/packages/mcp-servers/{scope}/{name}/versions/info": {
-    get: {
-      operationId: "getMcpServerPackageVersionInfo",
-      tags: ["Packages"],
-      summary: "Get version info for an MCP-server package (latest published + draft)",
-      description:
-        "Returns the latest published version and the current draft version from the manifest.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Version info",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  latest_published_version: { type: ["string", "null"] },
-                  active_version: { type: ["string", "null"] },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/packages/mcp-servers/{scope}/{name}/versions": {
-    get: {
-      operationId: "listMcpServerPackageVersions",
-      tags: ["Packages"],
-      summary: "List MCP-server package versions",
-      description: "List all published versions for an MCP-server package.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Version list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: versionListResponseSchema(),
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    post: {
-      operationId: "createMcpServerPackageVersion",
-      tags: ["Packages"],
-      summary: "Create a version from draft",
-      description:
-        "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden." +
-        PACKAGE_MUTATION_AUTHORITY,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        { $ref: "#/components/parameters/IfMatch" },
-      ],
-      requestBody: {
-        required: false,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                version: {
-                  type: "string",
-                  minLength: 1,
-                  description: "Optional semver version override (e.g. from bump selector)",
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          description: "Version created",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: versionCreateResponseSchema(),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "409": {
-          description:
-            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore": {
-    post: {
-      operationId: "restoreMcpServerPackageVersion",
-      tags: ["Packages"],
-      summary: "Restore an MCP-server package version into the draft",
-      description:
-        "Restore a previously published version into the MCP-server package draft. Does not create a new version." +
-        PACKAGE_MUTATION_AUTHORITY,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        { $ref: "#/components/parameters/IfMatch" },
-        {
-          name: "version",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Version to restore (exact, dist-tag, or semver range)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Version restored",
-          headers: ETAG_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
-            },
-          },
-        },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
-      },
-    },
-  },
-  "/api/packages/mcp-servers/{scope}/{name}/versions/{version}": {
-    get: {
-      operationId: "getMcpServerPackageVersionDetail",
-      tags: ["Packages"],
-      summary: "Get MCP-server package version detail",
-      description:
-        "Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Version query — exact version, dist-tag, or semver range",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Versioned MCP-server package detail",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/PackageVersionDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
-      },
-    },
-    delete: {
-      operationId: "deleteMcpServerPackageVersion",
-      tags: ["Packages"],
-      summary: "Delete an MCP-server package version",
-      description:
-        "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version." +
-        PACKAGE_MUTATION_AUTHORITY,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        { name: "version", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "204": {
-          description: "Version deleted",
-          headers: REQUEST_ID_ONLY_HEADERS,
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/packages/mcp-servers/{scope}/{name}": {
-    get: {
-      operationId: "getMcpServerPackage",
-      tags: ["Packages"],
-      summary: "Get MCP-server package detail",
-      description: "Get an MCP-server package's full details including content.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        PACKAGE_DETAIL_VERSION_PARAM,
-      ],
-      responses: {
-        "200": {
-          description: "MCP-server package detail",
-          headers: ETAG_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
-      },
-    },
-    patch: {
-      operationId: "updateMcpServerPackage",
-      tags: ["Packages"],
-      summary: "Update an MCP-server package",
-      description:
-        "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified." +
-        PACKAGE_MUTATION_AUTHORITY,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        { $ref: "#/components/parameters/IfMatchRequired" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                manifest: {
-                  type: "object",
-                  additionalProperties: true,
-                  description: "Package manifest",
-                },
-                content: { type: "string" },
-                operations: fileOperationsProperty,
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "MCP-server package updated",
-          headers: ETAG_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
-        "428": { $ref: "#/components/responses/PreconditionRequired" },
-        "413": {
-          description: "Written file or resulting tree exceeds its byte/count limit",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-      },
-    },
-    delete: {
-      operationId: "deleteMcpServerPackage",
-      tags: ["Packages"],
-      summary: "Delete an MCP-server package",
-      description:
-        "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted." +
-        PACKAGE_MUTATION_AUTHORITY,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "204": {
-          description: "MCP-server package deleted",
-          headers: REQUEST_ID_ONLY_HEADERS,
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

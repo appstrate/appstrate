@@ -11,7 +11,6 @@ import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
 import { registerSessionCheck } from "../lib/stale-authority";
 import i18n from "../i18n";
-import type { SpaceViewer } from "../lib/identity-tile-props";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
   try {
@@ -114,21 +113,12 @@ export async function refreshAuth(): Promise<void> {
   }
 }
 
-/** The signed-in person as the UI names and draws them; null while no session is known. */
-export function useViewer(): SpaceViewer | null {
-  const user = useStore(authStore, (s) => s.user);
-  const displayName = useStore(authStore, (s) => s.profile?.displayName);
-  return user ? { id: user.id, name: displayName || user.email } : null;
-}
-
 /** `can_create_org`; `true` while the profile is unknown, so a failed read strands nobody on the waiting page. */
 export function useCanCreateOrg(): boolean {
   return useStore(authStore, (s) => s.profile?.canCreateOrg ?? true);
 }
 
 export function useAuth() {
-  initAuth();
-
   const state = useStore(authStore);
 
   // Email/password login (OSS form, invite acceptance). In OIDC mode these forms never render

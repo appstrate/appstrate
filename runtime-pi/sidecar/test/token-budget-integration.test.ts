@@ -7,8 +7,8 @@
  * These tests exercise the full path:
  *
  *   agent → POST /mcp (JSON-RPC) → mountMcp → tools/call →
- *     api_call / run_history / recall_memory →
- *       executeApiCall (or platform fetchFn) →
+ *     api_call →
+ *       executeApiCall →
  *         responseToToolResult — the function under test, where the
  *         token-budget tracker is consulted.
  *
@@ -20,8 +20,6 @@
  *     per-call cap (issue #390 secondary scenario).
  *   - the budget tracker's own accounting (`consumedTokens`) reflects
  *     what was inlined and what was spilled.
- *   - `run_history` and `recall_memory` honour the same gate as
- *     `api_call`.
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -33,6 +31,12 @@ import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
 import { TokenBudget, estimateTokens } from "../token-budget.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import {
+  createInProcessPair,
+  McpError,
+  wrapClient,
+  type AppstrateToolDefinition,
+} from "@appstrate/mcp-transport";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -93,6 +97,8 @@ async function buildTestApp(opts: {
   deps: AppDeps;
   tokenBudget: TokenBudget;
   blobStore?: BlobStore;
+  /** Untrusted third-party upstream registered under the `fs` namespace. */
+  thirdParty?: AppstrateToolDefinition[];
 }): Promise<Hono> {
   const app = new Hono();
   const blobStore =
@@ -120,11 +126,17 @@ async function buildTestApp(opts: {
     ],
     { proxyDeps, blobStore, tokenBudget: opts.tokenBudget },
   );
+  if (opts.thirdParty) {
+    const pair = await createInProcessPair(opts.thirdParty);
+    await host.register({
+      integrationId: "fs",
+      namespace: "fs",
+      client: wrapClient(pair.client, { close: () => pair.close() }),
+    });
+  }
   mountMcp(app, {
     blobStore,
-    tokenBudget: opts.tokenBudget,
-    additionalToolsProvider: () => host.buildTools(),
-    proxyDeps,
+    toolsProvider: () => host.buildTools(),
   });
   return app;
 }
@@ -161,7 +173,7 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     });
     const result = res.json.result as CallToolResult;
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/tool-output\//);
 
     // Spilled because this single body exceeds the per-call inline cap,
     // not because the run budget was under pressure.
@@ -342,60 +354,8 @@ describe("token-aware spill — run-budget accounting", () => {
   });
 });
 
-describe("token-aware spill — applied to all platform tools", () => {
-  it("run_history is gated by the token budget", async () => {
-    const oversized = "y".repeat(60_000); // ~17 K tokens
-    const fetchFn = mock(
-      async () =>
-        new Response(oversized, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-      tokenBudget,
-    });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "run_history", arguments: { limit: 1 } },
-    });
-    const result = res.json.result as CallToolResult;
-    expect(result.content[0]!.type).toBe("resource_link");
-    // Spilled on the per-call cap; nothing recorded against the run budget.
-    expect(estimateTokens(oversized)).toBeGreaterThan(4_000);
-    expect(tokenBudget.consumedTokens()).toBe(0);
-  });
-
-  it("recall_memory is gated by the token budget", async () => {
-    const oversized = "z".repeat(60_000);
-    const fetchFn = mock(
-      async () =>
-        new Response(oversized, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-      tokenBudget,
-    });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "recall_memory", arguments: { q: "foo" } },
-    });
-    const result = res.json.result as CallToolResult;
-    expect(result.content[0]!.type).toBe("resource_link");
-    expect(tokenBudget.consumedTokens()).toBe(0);
-  });
-});
-
-describe("token-aware spill — env-var configuration via createApp", () => {
-  // `createApp` reads the env vars at boot; verify the wiring runs.
+describe("token-aware spill — env-var configuration via buildSidecarRuntimeDeps", () => {
+  // `buildSidecarRuntimeDeps` reads the env vars at boot; verify the wiring runs.
   // The actual TokenBudget constructor invariants are tested in
   // token-budget.test.ts.
 
@@ -434,8 +394,8 @@ describe("token-aware spill — env-var configuration via createApp", () => {
       );
       const app = createTestApp({
         ...appDeps,
-        runtimeDeps,
-        additionalMcpToolsProvider: () => host.buildTools(),
+        blobStore: runtimeDeps.blobStore,
+        mcpToolsProvider: () => host.buildTools(),
       });
       const res = await rpc(app, {
         method: "tools/call",
@@ -461,11 +421,11 @@ describe("token-aware spill — env-var configuration via createApp", () => {
     }
   });
 
-  it("createApp throws at boot when env vars are malformed", () => {
+  it("throws at boot when env vars are malformed", () => {
     const original = process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
     process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = "not-a-number";
     try {
-      expect(() => createTestApp(makeDeps())).toThrow(/positive integer/);
+      expect(() => buildSidecarRuntimeDeps(makeDeps())).toThrow(/positive integer/);
     } finally {
       if (original === undefined) delete process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
       else process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = original;
@@ -513,7 +473,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
 });
 
 describe("token-aware spill — fallback when blob store is full", () => {
-  it("falls back to inline and records the tokens when the blob store is full", async () => {
+  it("cuts the body to the inline cap and records what it delivers when the store is full", async () => {
     // Blob store with cumulative cap of 100 bytes; first put exhausts.
     const blobStore = new BlobStore("run-test", { maxTotalBytes: 100 });
     blobStore.put(new Uint8Array(95)); // leave only 5 bytes
@@ -544,11 +504,146 @@ describe("token-aware spill — fallback when blob store is full", () => {
       },
     });
     const result = res.json.result as CallToolResult;
-    // Spill failed → forced inline.
-    expect(result.content[0]!.type).toBe("text");
-    // The forced-inline tokens ARE recorded against the budget — the
-    // agent paid the context cost. This is what separates a failed spill
-    // from a successful one, which records nothing.
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toHaveLength(1);
+    const text = result.content[0]!.text!;
+    expect(text).toContain("characters removed (spill unavailable: blob store full)");
+    expect(payload.startsWith(text.slice(0, text.indexOf("\n\n[… output cut")))).toBe(true);
+    expect(estimateTokens(text)).toBeLessThanOrEqual(4_000);
+    // What reached the context is recorded, not the whole body.
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens(text));
+  });
+});
+
+describe("token-aware spill — third-party MCP tool results", () => {
+  const textTool = (text: () => string): AppstrateToolDefinition => ({
+    descriptor: { name: "directory_tree", description: "tree", inputSchema: { type: "object" } },
+    handler: async () => ({ content: [{ type: "text", text: text() }] }),
+  });
+  const callTree = (app: Hono) =>
+    rpc(app, { method: "tools/call", params: { name: "fs__directory_tree", arguments: {} } });
+  const callApi = (app: Hono) =>
+    rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://api.example.com/items", method: "GET" },
+      },
+    });
+
+  it("keeps tiny outputs inline once the run budget is spent, and spills larger ones", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    let treeText = "Clicked";
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 4_000 });
+    tokenBudget.record(4_000);
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      thirdParty: [textTool(() => treeText)],
+    });
+
+    const tiny = (await callTree(app)).json.result as CallToolResult;
+    expect(tiny.content).toEqual([{ type: "text", text: "Clicked" }]);
+    const api = (await callApi(app)).json.result as CallToolResult;
+    expect(api.content[0]!.type).toBe("text");
+    expect(api.content[0]!.text).toBe('{"ok":true}');
+
+    treeText = "z".repeat(2_000); // 572 tokens: above the always-inline floor
+    const larger = (await callTree(app)).json.result as CallToolResult;
+    expect(larger.content[0]!.type).toBe("resource_link");
+  });
+
+  it("bounds a huge upstream JSON-RPC error on the /mcp wire, keeping its code", async () => {
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
+    const app = await buildTestApp({
+      deps: makeDeps(),
+      tokenBudget,
+      thirdParty: [
+        {
+          descriptor: {
+            name: "directory_tree",
+            description: "tree",
+            inputSchema: { type: "object" },
+          },
+          handler: async () => {
+            throw new McpError(-32001, "E".repeat(100_000));
+          },
+        },
+      ],
+    });
+    const res = await callTree(app);
+    const error = res.json.error as { code: number; message: string; data?: unknown };
+    expect(error.code).toBe(-32001);
+    expect(error.message).toContain("characters removed (upstream error over the inline cap)");
+    expect(estimateTokens(error.message)).toBeLessThanOrEqual(4_000);
+  });
+
+  it("spills an oversized text result readable back through resources/read", async () => {
+    const tree = "dir/sub/file.txt\n".repeat(5_000);
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
+    const app = await buildTestApp({
+      deps: makeDeps(),
+      tokenBudget,
+      thirdParty: [textTool(() => tree)],
+    });
+
+    const result = (await callTree(app)).json.result as CallToolResult;
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]!.type).toBe("resource_link");
+    const read = await rpc(app, {
+      method: "resources/read",
+      params: { uri: result.content[0]!.uri },
+    });
+    const contents = (read.json.result as { contents: Array<{ text?: string; mimeType?: string }> })
+      .contents;
+    expect(contents[0]!.text).toBe(tree);
+    expect(contents[0]!.mimeType).toBe("text/plain");
+    expect(tokenBudget.consumedTokens()).toBe(0);
+  });
+
+  it("api_call consumption forces the next third-party result to spill", async () => {
+    const payload = JSON.stringify({ rows: "x".repeat(10_000) });
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const small = "y".repeat(5_000); // 1429 tokens: fits the cap, not what api_call left
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 4_000 });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      thirdParty: [textTool(() => small)],
+    });
+
+    expect(((await callApi(app)).json.result as CallToolResult).content[0]!.type).toBe("text");
+    // Recorded once: the host does not budget the trusted api_call upstream a second time.
     expect(tokenBudget.consumedTokens()).toBe(estimateTokens(payload));
+    const tree = (await callTree(app)).json.result as CallToolResult;
+    expect(tree.content[0]!.type).toBe("resource_link");
+  });
+
+  it("third-party consumption forces the next api_call to spill", async () => {
+    const payload = JSON.stringify({ rows: "x".repeat(3_000) });
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 4_000 });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      thirdParty: [textTool(() => "y".repeat(13_000))],
+    });
+
+    expect(((await callTree(app)).json.result as CallToolResult).content[0]!.type).toBe("text");
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens("y".repeat(13_000)));
+    const api = (await callApi(app)).json.result as CallToolResult;
+    expect(api.content[0]!.type).toBe("resource_link");
   });
 });

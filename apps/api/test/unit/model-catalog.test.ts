@@ -98,8 +98,10 @@ describe("toCatalogEntry", () => {
     expect(entry.label).toBe("Claude Opus 5");
     expect(entry.capabilities).toEqual(["text", "image", "reasoning"]);
     expect(entry.generation?.reasoning.adaptive).toBe(true);
+    // Pi 1.5.2's record dropped `thinkingLevelMap.off: null` (1.1.0 carried
+    // `{ off: null, xhigh, max }`, 1.5.2 `{ xhigh, max }`): `off` is offered.
     expect(entry.generation?.reasoning.levels).toEqual({
-      off: "unsupported",
+      off: "supported",
       minimal: "supported",
       low: "supported",
       medium: "supported",
@@ -123,7 +125,7 @@ describe("toCatalogEntry", () => {
     expect(gpt.generation?.temperature).toBe("unsupported");
     expect(gpt.generation?.reasoning.temperature_compatible).toBeUndefined();
     expect(gpt.generation?.reasoning.adaptive).toBeNull();
-    const codex = toCatalogEntry(record("openai-codex", "gpt-5.5", "openai-codex-responses"));
+    const codex = toCatalogEntry(record("openai-codex", "gpt-5.6-sol", "openai-codex-responses"));
     expect(codex.generation?.temperature).toBe("unsupported");
     // A non-reasoning Responses model keeps it.
     const gpt4o = toCatalogEntry(record("openai", "gpt-4o", "openai-responses"));
@@ -187,7 +189,9 @@ describe("toCatalogEntry", () => {
 
   it("leaves OpenRouter's variably priced router unpriced", () => {
     const auto = record("openrouter", "openrouter/auto", "openai-completions");
-    expect(auto.cost.input).toBeLessThan(0);
+    // Pi 1.1.0 priced the router at -1e6 (variable); Pi 1.5.2 records all
+    // zeros. Either reads as unpriced (negative rates: the synthetic case above).
+    expect(auto.cost.input).toBeLessThanOrEqual(0);
     expect(toCatalogEntry(auto).cost).toBeNull();
   });
 

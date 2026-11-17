@@ -14,6 +14,7 @@ import type {
   ObjectFieldTemplateProps,
   MultiSchemaFieldTemplateProps,
 } from "@rjsf/utils";
+import { useState } from "react";
 import { getInputProps } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../cn.ts";
@@ -21,6 +22,35 @@ import { Button } from "../components/button.tsx";
 import { Input } from "../components/input.tsx";
 import { Label } from "../components/label.tsx";
 import type { SchemaFormContext } from "./context.ts";
+import { describeDateValue, type DateEcho } from "./date-echo.ts";
+
+const echoId = (id: string) => `${id}-echo`;
+const warningId = (id: string) => `${id}-year-warning`;
+
+export function DateHints({
+  id,
+  echo,
+  showWarning,
+  labels,
+}: {
+  id: string;
+  echo: DateEcho;
+  showWarning: boolean;
+  labels?: SchemaFormContext["labels"];
+}) {
+  return (
+    <>
+      <p id={echoId(id)} className="text-muted-foreground text-xs">
+        {echo.text}
+      </p>
+      {showWarning && (
+        <p id={warningId(id)} className="text-warning text-xs">
+          {labels?.unusualYear?.(echo.year) ?? `Unusual year (${echo.year}): check the entry.`}
+        </p>
+      )}
+    </>
+  );
+}
 
 export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>) {
   const {
@@ -38,7 +68,10 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
     autofocus,
     placeholder,
     rawErrors,
+    registry,
   } = props;
+  const labels = ((registry.formContext ?? {}) as SchemaFormContext).labels;
+  const [focused, setFocused] = useState(false);
 
   const formatType =
     schema.format === "email"
@@ -64,10 +97,20 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
   const isConst = schema && "const" in schema;
   const isReadOnly = readonly || isConst;
 
-  return (
+  const echo =
+    schema.format === "date" || schema.format === "date-time"
+      ? describeDateValue(value, schema.format, labels?.locale)
+      : null;
+  // Typing a year segment by segment passes through 0002, 0020, 0202: warn once the input is left.
+  const showWarning = !!echo?.unusualYear && !focused;
+
+  const input = (
     <Input
       id={id}
       type={inputType}
+      aria-describedby={
+        echo ? (showWarning ? `${echoId(id)} ${warningId(id)}` : echoId(id)) : undefined
+      }
       step={inputType === "number" ? "any" : undefined}
       // RJSF keeps a `number` as text under a comma-decimal locale.
       inputMode={isNumeric && inputType === "text" ? "decimal" : undefined}
@@ -80,7 +123,7 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
       className={cn(
         // Form fields stay h-9 (the shadcn Input defaults to h-10).
         "h-9",
-        isReadOnly && "bg-muted/50 cursor-not-allowed",
+        isReadOnly && "bg-muted/40 cursor-not-allowed",
         rawErrors && rawErrors.length > 0 && "border-destructive",
       )}
       onChange={(e) =>
@@ -88,9 +131,23 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
           e.target.value === "" ? (options?.emptyValue as T) : (e.target.value as unknown as T),
         )
       }
-      onBlur={(e) => onBlur?.(id, e.target.value)}
-      onFocus={(e) => onFocus?.(id, e.target.value)}
+      onBlur={(e) => {
+        setFocused(false);
+        onBlur?.(id, e.target.value);
+      }}
+      onFocus={(e) => {
+        setFocused(true);
+        onFocus?.(id, e.target.value);
+      }}
     />
+  );
+  if (!echo) return input;
+
+  return (
+    <>
+      {input}
+      <DateHints id={id} echo={echo} showWarning={showWarning} labels={labels} />
+    </>
   );
 }
 
@@ -206,7 +263,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
     onRemoveItem,
   } = buttonsProps;
   return (
-    <div className="border-border bg-muted/30 relative flex flex-col gap-2 rounded-md border p-3">
+    <div className="border-border bg-muted/40 relative flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex flex-col gap-3">{children}</div>
       {hasToolbar && (hasMoveUp || hasMoveDown || hasRemove) && !disabled && (
         <div className="flex justify-end gap-1">

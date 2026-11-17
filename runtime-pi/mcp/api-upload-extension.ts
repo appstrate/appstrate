@@ -31,9 +31,13 @@
  *     api_call tool from the `_meta` marker payload and hands it in.
  */
 
-import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { piToolResultOrThrow, type RuntimeEventEmitter } from "@appstrate/runner-pi";
+import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
+import { readToolIntegration, type AppstrateMcpClient } from "@appstrate/mcp-transport";
+import {
+  piToolResultOrThrow,
+  registerIntegrationTool,
+  type RuntimeEventEmitter,
+} from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
 import { UPLOAD_PROTOCOLS, type UploadProtocol } from "./upload-adapters/index.ts";
 
@@ -53,7 +57,12 @@ function readDeclaredProtocols(inputSchema: unknown): UploadProtocol[] {
 
 interface BuildApiUploadFactoryOptions {
   /** The advertised `{ns}__api_upload` tool from the sidecar's `tools/list`. */
-  tool: { name: string; description?: string; inputSchema?: unknown };
+  tool: {
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    _meta?: Record<string, unknown>;
+  };
   /**
    * Advertised name of the sibling api_call tool each chunk is dispatched
    * through. Resolved by `direct.ts` from the upload descriptor's
@@ -91,7 +100,7 @@ function makeExtension(
 
   return (pi: ExtensionAPI) => {
     const resolver = new McpApiUploadResolver(opts.mcp);
-    pi.registerTool({
+    registerIntegrationTool(pi, readToolIntegration(opts.tool), {
       name: toolName,
       label: toolName,
       description:
@@ -102,7 +111,7 @@ function makeExtension(
           "ETag, etc.) plus a SHA-256 of the bytes uploaded so post-upload verification is " +
           "possible.",
       // Non-empty `protocols` guarantees the advertised schema is an object.
-      parameters: Type.Unsafe<Record<string, unknown>>(
+      parameters: unsafeSchema<Record<string, unknown>>(
         opts.tool.inputSchema as Record<string, unknown>,
       ),
       async execute(toolCallId, params, signal) {

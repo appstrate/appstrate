@@ -13,6 +13,20 @@ import type { paths } from "../api/schema";
 
 type Id = string | null | undefined;
 
+/** What a list across spaces keys where a space-scoped list keys its space. */
+export const ACROSS_SPACES = "across-spaces";
+
+/**
+ * A list across spaces (runs, schedules, agents, a package index): it keys its org, never the
+ * current space, and holds the marker where its family keys the space (after the org; after the
+ * route segment and the org for the package families). Read at that position only: a later
+ * segment (a run search) may hold any text.
+ */
+export function spansSpaces(queryKey: readonly unknown[]): boolean {
+  const spaceAt = queryKey[0] === packageKeys.all[0] ? 3 : 2;
+  return queryKey[spaceAt] === ACROSS_SPACES;
+}
+
 /** A spec path that has a GET operation: the only paths a query key can name. */
 export type GetPath = {
   [P in keyof paths]: paths[P] extends { get: object } ? P : never;
@@ -58,7 +72,7 @@ export function invalidateRunDetails(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
-/** Cursor/offset-paginated run tables (runs page, agent runs tab). */
+/** Keyset-paged run lists (runs page, agent runs tab, schedule runs tab). */
 export const paginatedRunsKeys = {
   all: ["paginated-runs"] as const,
   list: (
@@ -68,9 +82,9 @@ export const paginatedRunsKeys = {
     user: string | null | undefined,
     kind: string | null | undefined,
     status: string | null | undefined,
+    unread: boolean | undefined,
     search: string | null | undefined,
     limit: number,
-    offset: number,
   ) =>
     [
       "paginated-runs",
@@ -80,10 +94,10 @@ export const paginatedRunsKeys = {
       user,
       kind,
       status,
+      unread,
       search,
-      // The OFFSET stays last: `placeholderData` keeps rows only when everything before it matched (paging vs a changed question).
+      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
       limit,
-      offset,
     ] as const,
 };
 
@@ -110,18 +124,20 @@ export function invalidatePackageFiles(qc: QueryClient) {
   ]);
 }
 
-/** Package versions: the published list, one version's detail, and the latest/active summary. */
-export const versionKeys = {
-  detailAll: ["version-detail"] as const,
-  listAll: ["package-versions"] as const,
-  infoAll: ["version-info"] as const,
-  detail: (orgId: Id, spaceId: Id, type: string, packageId: Id, version: string | undefined) =>
-    ["version-detail", orgId, spaceId, type, packageId, version] as const,
-  list: (orgId: Id, spaceId: Id, type: string, packageId: Id) =>
-    ["package-versions", orgId, spaceId, type, packageId] as const,
-  info: (orgId: Id, spaceId: Id, type: string, packageId: Id) =>
-    ["version-info", orgId, spaceId, type, packageId] as const,
-};
+/** Typed-client keys of the version reads (list, detail, info), whose path carries the type's route segment. */
+const VERSION_PATH = /^\/api\/packages\/[^/]+\/\{scope\}\/\{name\}\/versions(\/|$)/;
+const VERSION_INFO_PATH = /^\/api\/packages\/[^/]+\/\{scope\}\/\{name\}\/versions\/info$/;
+
+function pathMatching(re: RegExp) {
+  return (queryKey: readonly unknown[]) =>
+    queryKey[0] === "get" && typeof queryKey[1] === "string" && re.test(queryKey[1]);
+}
+
+/** The latest/active summary of every package's versions. */
+export function invalidateVersionInfo(qc: QueryClient) {
+  const matches = pathMatching(VERSION_INFO_PATH);
+  return qc.invalidateQueries({ predicate: (q) => matches(q.queryKey) });
+}
 
 /** Agent catalog list (sidebar, agent list page). */
 export const agentsKeys = {
@@ -139,9 +155,8 @@ export function invalidatePackageCaches(qc: QueryClient) {
 
 /** A version appeared or vanished: the version caches, and a pinned Files tab or dist-tag read with them. */
 export function invalidateVersionCaches(qc: QueryClient) {
-  for (const queryKey of [versionKeys.listAll, versionKeys.detailAll, versionKeys.infoAll]) {
-    void qc.invalidateQueries({ queryKey });
-  }
+  const matches = pathMatching(VERSION_PATH);
+  void qc.invalidateQueries({ predicate: (q) => matches(q.queryKey) });
   invalidatePackageCaches(qc);
 }
 
@@ -159,19 +174,6 @@ export const scheduleKeys = {
     ["schedule-runs", orgId, spaceId, scheduleId] as const,
 };
 
-function agentSettingKeys<K extends string>(kind: K) {
-  return {
-    all: [kind] as const,
-    detail: (orgId: Id, spaceId: Id, packageId: Id) => [kind, orgId, spaceId, packageId] as const,
-  };
-}
-
-/** Per-agent effective model resolution. */
-export const agentModelKeys = agentSettingKeys("agent-model");
-
-/** Per-agent effective proxy resolution. */
-export const agentProxyKeys = agentSettingKeys("agent-proxy");
-
 /** Organization list (preserved across org switch). */
 export const orgKeys = {
   all: ["orgs"] as const,
@@ -187,4 +189,11 @@ export const persistenceKeys = {
   all: ["agent-persistence"] as const,
   list: (scopeTag: string, orgId: Id, spaceId: Id, packageId: Id, query: unknown) =>
     ["agent-persistence", scopeTag, orgId, spaceId, packageId, query] as const,
+};
+
+/** A stored file's bytes as an object URL (`useFileImageSrc`); `query-client.ts` revokes the URL when the entry leaves the cache. */
+export const fileBlobKeys = {
+  root: "file-blob",
+  detail: (id: string, scope: Record<string, string | undefined>) =>
+    ["file-blob", id, scope] as const,
 };

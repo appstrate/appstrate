@@ -8,6 +8,7 @@
 import { useTranslation } from "react-i18next";
 import { ORG_ROLES, type OrgRole, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { DataTable } from "../../components/data-table";
+import { ErrorState } from "../../components/page-states";
 import { PermissionMark } from "../../components/permission-mark";
 import { PermissionMatrix } from "../../components/permission-matrix";
 import { roleI18nKey } from "../../hooks/use-permissions";
@@ -33,7 +34,8 @@ export function OrgRolesList({ onPreview }: { onPreview?: (role: ViewAsOrgRole) 
 
 export function OrgRolesMatrix() {
   const { t } = useTranslation(["settings", "common"]);
-  const grants = useOrgRoleGrants();
+  const { grants, error } = useOrgRoleGrants();
+  if (error) return <ErrorState error={error} />;
   return (
     <PermissionMatrix<OrgRole>
       ariaLabel={t("orgRolesGuide.matrixLabel")}

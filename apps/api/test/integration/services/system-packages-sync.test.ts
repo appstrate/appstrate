@@ -52,7 +52,7 @@ function enc(s: string): Uint8Array {
 interface FixtureOpts {
   id: string;
   version: string;
-  type?: "agent" | "skill" | "integration" | "mcp-server";
+  type?: "agent" | "skill" | "integration";
   /** Optional extra file bytes to perturb integrity in drift tests. */
   contentBytes?: string;
 }

@@ -98,9 +98,10 @@ export function OnboardingCreateStep() {
     },
     onError: (err) => {
       const message = errorMessage(err);
-      // A taken slug, or a slug the body validation refused: the field is folded by default.
+      // A taken or reserved slug, or a slug the body validation refused: the field is folded by default.
       const aboutSlug =
-        (err instanceof ApiError && err.code === "slug_taken") || errorField(err) === "slug";
+        (err instanceof ApiError && (err.code === "slug_taken" || err.code === "slug_reserved")) ||
+        errorField(err) === "slug";
       if (aboutSlug) {
         setSlugOpen(true);
         setError("slug", { message });

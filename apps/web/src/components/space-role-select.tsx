@@ -41,7 +41,7 @@ export function SpaceRoleSelect({
   placeholder?: string;
   className?: string;
 }) {
-  if (loading) return <Skeleton className={cn("h-9 w-full", className)} />;
+  if (loading) return <Skeleton className={cn("h-10 w-full", className)} />;
 
   return (
     <OptionSelect

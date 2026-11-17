@@ -57,9 +57,6 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       header: t("settings:webhooks.eventsColumn"),
       width: 100,
       elastic: true,
-      // Tier 2, not 3: this list is a full page, but it is also reachable in
-      // the settings dialog, which never crosses the 56rem threshold.
-      tier: 2,
       cell: (wh) => (
         <span
           className="text-muted-foreground truncate font-mono text-xs"
@@ -74,14 +71,12 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       header: t("settings:integration.admin.pinManagement.colAgent"),
       width: 80,
       elastic: true,
-      tier: 2,
       cell: (wh) => <CellText>{wh.packageId || t("settings:webhooks.allAgents")}</CellText>,
     },
     {
       id: "payload",
       header: t("settings:webhooks.payloadColumn"),
       width: 88,
-      tier: 2,
       // The mode's short name; the sentence that says what it carries on hover.
       cell: (wh) => {
         const full = wh.payloadMode === "full";

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mutations on the caller's member-scope integration pins (`/api/me/integration-pins`), cascade
- * layer 4 of the resolver. One pin per (agent, integration, member-scope) holding the WHOLE
+ * Mutations on the caller's member-scope integration pins (`/api/me/integration-pins`): the
+ * member's own choice of connections for an agent. One pin per (agent, integration, member-scope) holding the WHOLE
  * bound set: `PUT` replaces it, `DELETE` clears it. Write-only: the picker reads pin state off
  * the agent-resolution verdict (`member_pinned_connection_ids`) and refetches it itself.
  */
@@ -22,6 +22,8 @@ interface UpsertMemberPinInput {
 
 export function useUpsertMemberIntegrationPin() {
   return useMutation({
+    // The connections modal shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     mutationFn: async (input: UpsertMemberPinInput) => {
       const { data } = await client.PUT(MEMBER_PIN_PATH, {
         params: {
@@ -45,6 +47,7 @@ interface DeleteMemberPinInput {
 export function useDeleteMemberIntegrationPin() {
   const qc = useQueryClient();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (input: DeleteMemberPinInput) => {
       const { data } = await client.DELETE(MEMBER_PIN_PATH, {
         params: {

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
+import { Link, useNavigate, type To } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { ShellHeaderTabs } from "@/components/shell-header-slots";
+import { INTEGRATED_TABLE_SURFACE } from "@/lib/table-surface";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
 const FADE_EDGE = {
@@ -126,20 +128,25 @@ export function HeaderTabBar<T extends string>({
   );
 }
 
-/** One tab's card; `flush` for content that draws its own padding. */
+/**
+ * One tab's content, laid on the page: its blocks (tables, sections, notices) draw
+ * their own surfaces, so a wrapping card would only nest them. `framed` is for a
+ * two-pane surface (a settings rail beside its section) whose frame is the surface.
+ */
 export function DetailTabPanel({
   value,
-  flush,
+  framed,
   children,
 }: {
   value: string;
-  flush?: boolean;
+  framed?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <TabsContent
       value={value}
-      className={cn("bg-card mt-0 overflow-hidden rounded-lg border shadow-sm", !flush && "p-6")}
+      className={cn("mt-0", framed && "bg-card overflow-hidden rounded-lg border")}
+      {...(framed ? INTEGRATED_TABLE_SURFACE : {})}
     >
       {children}
     </TabsContent>
@@ -163,26 +170,59 @@ export function CollectionTabs<T extends string>({
   options,
   label,
   onChange,
+  hrefOf,
+  countsPending = false,
 }: {
   value: T;
   options: CollectionTabOption<T>[];
   /** Names the tab list for screen readers. */
   label: string;
-  onChange: (value: T) => void;
+  /** Absent when `hrefOf` is given: the parts are then addresses. */
+  onChange?: (value: T) => void;
+  /** Draws each part as a link to its own address, for a split the router owns beyond one param. */
+  hrefOf?: (value: T) => To;
+  /** The counts are on their way: each tab holds a digit's room, so the bar does not widen when they land. */
+  countsPending?: boolean;
 }) {
+  const navigate = useNavigate();
   return (
-    <Tabs value={value} onValueChange={(next) => onChange(next as T)}>
+    <Tabs
+      value={value}
+      // A link tab is activated by arrow keys as well: follow it like a click.
+      onValueChange={(next) => (hrefOf ? void navigate(hrefOf(next as T)) : onChange?.(next as T))}
+    >
       <TabsList aria-label={label} className="h-8 shrink-0 p-0.5">
-        {options.map((option) => (
-          <TabsTrigger key={option.value} value={option.value} className="h-7 px-2.5 text-sm">
-            {option.label}
-            {option.count !== undefined && (
-              <span className="text-muted-foreground ml-1.5 text-xs tabular-nums">
-                {option.count}
-              </span>
-            )}
-          </TabsTrigger>
-        ))}
+        {options.map((option) => {
+          const content = (
+            <>
+              {option.label}
+              {option.count !== undefined ? (
+                <span className="text-muted-foreground ml-1.5 text-xs tabular-nums">
+                  {option.count}
+                </span>
+              ) : (
+                countsPending && (
+                  <span
+                    aria-hidden
+                    className="bg-muted ml-1.5 animate-pulse rounded-sm text-xs text-transparent tabular-nums"
+                  >
+                    0
+                  </span>
+                )
+              )}
+            </>
+          );
+          return (
+            <TabsTrigger
+              key={option.value}
+              value={option.value}
+              asChild={hrefOf !== undefined}
+              className="h-7 px-2.5 text-sm"
+            >
+              {hrefOf ? <Link to={hrefOf(option.value)}>{content}</Link> : content}
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
     </Tabs>
   );

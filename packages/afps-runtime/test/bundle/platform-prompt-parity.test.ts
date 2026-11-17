@@ -68,15 +68,17 @@ function makeFixtureBundle(): Bundle {
   const mcp = pkg(
     "@fixture/search@1.0.0",
     {
-      manifest_version: "0.3",
       name: "@fixture/search",
       version: "1.0.0",
-      type: "mcp-server",
+      type: "integration",
       schema_version: "0.1",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
       },
     },
     { "server/index.js": "//" },
@@ -144,10 +146,7 @@ describe("cross-path prompt parity", () => {
     buildPlatformPromptInputs(bundle, context, {
       platformName: "Appstrate",
       availableIntegrationIds,
-      // Platform-specific: DB-backed uploads. Run history used to be
-      // rendered as a `## Run History` section here; it is now surfaced
-      // via the runtime-wired `run_history` tool instead so the prompt
-      // never mentions the sidecar URL.
+      // Platform-specific: DB-backed uploads.
       uploads: [
         { name: "brief.pdf", path: "./files/brief.pdf", size: 12345, type: "application/pdf" },
       ],

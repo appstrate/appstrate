@@ -34,7 +34,7 @@ import {
 } from "../../helpers/seed.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import { closeRedis, flushRedis } from "../../helpers/redis.ts";
-import { createSchedule } from "../../../src/services/scheduler.ts";
+import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
 const app = getTestApp();
@@ -152,8 +152,8 @@ describe("the recipient side may withdraw", () => {
   beforeEach(async () => {
     expect(
       (await share(author.headers(homeId), { kind: "user", userId: recipient.userId })).status,
-    ).toBe(200);
-    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(200);
+    ).toBe(201);
+    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
   });
 
   it("from their own personal space, by its id, with no grant at all", async () => {
@@ -258,7 +258,7 @@ describe("the recipient side learns nothing about an unreachable package", () =>
 
 describe("withdrawing disables the package's schedules in that space", () => {
   beforeEach(async () => {
-    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(200);
+    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
   });
 
   it("disables every schedule there, whoever armed it, and nothing elsewhere", async () => {
@@ -345,8 +345,8 @@ describeRequiresRedis("the disabled schedules' jobs", () => {
   });
 
   it("are removed once the withdrawal commits", async () => {
-    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(200);
-    const schedule = await createSchedule(
+    expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(201);
+    const schedule = await createJudgedSchedule(
       { orgId: ctx.orgId, spaceId: teamId },
       AGENT,
       { type: "user", id: ctx.user.id },

@@ -130,10 +130,10 @@ describe("Pi chat model binding", () => {
   // OpenCode Go is unknown to Pi's provider-level detection: the dialect comes
   // from Pi's record for the upstream model, never the wire id.
   it("takes the dialect the platform listed, under the preset id", () => {
-    const pi_dialect = dialectOf("opencode-go", "deepseek-v4-flash", "openai-completions");
+    const pi_dialect = dialectOf("opencode-go", "deepseek-v4.1-flash", "openai-completions");
     const bind = (listed: Partial<OrgModel>) =>
       proxyBinding(
-        orgModel({ providerId: "opencode-go", modelId: "deepseek-v4-flash", ...listed }),
+        orgModel({ providerId: "opencode-go", modelId: "deepseek-v4.1-flash", ...listed }),
         "opencode-go",
       )!.model;
 
@@ -143,7 +143,7 @@ describe("Pi chat model binding", () => {
       reasoning: true,
       compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
     });
-    expect(JSON.stringify(bind({ pi_dialect }))).not.toContain("deepseek-v4-flash");
+    expect(JSON.stringify(bind({ pi_dialect }))).not.toContain("deepseek-v4.1-flash");
     // The chat reads no registry: a recorded id listed without a dialect gets none.
     expect(bind({}).compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
   });
@@ -228,10 +228,10 @@ describe("Pi chat model binding", () => {
   });
 
   it("gives a codex subscription the openai-codex record's compat", () => {
-    const record = getPiModel("openai-codex", "gpt-5.5", "openai-codex-responses")!;
+    const record = getPiModel("openai-codex", "gpt-5.6-sol", "openai-codex-responses")!;
     const model = createPiOAuthModelBinding(
       oauthModel({
-        modelId: "gpt-5.5",
+        modelId: "gpt-5.6-sol",
         apiShape: "openai-codex-responses",
         baseUrl: "https://chatgpt.com/backend-api",
       }),

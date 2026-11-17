@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Plus, Settings, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavOrg } from "@/components/nav-org";
@@ -12,9 +12,10 @@ import { ProductTabs } from "@/components/product-tabs";
 import { HeaderSlotOutlet } from "@/components/shell-header-slots";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { SidebarCredits } from "@/components/sidebar-credits";
-import { useUnreadCount } from "@/hooks/use-notifications";
+import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
+import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
@@ -115,7 +116,13 @@ function OverlayEntry({
  */
 export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { t } = useTranslation();
-  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
+  // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
+  // the sheet would only hide where they went. Desktop keeps its own, remembered, open state.
+  const { setOpenMobile } = useSidebar();
+  const { pathname, search } = useLocation();
+  useEffect(() => setOpenMobile(false), [pathname, search, setOpenMobile]);
+  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`). It names no
+  // space, so « Tous les espaces » opens it as it is: its add menu picks the space per package.
   const canReach = useCanReach();
   const ready = useReachReady();
   const overlayPath = useOverlayPath() ?? "";
@@ -192,7 +199,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
 export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
-  const { data: unreadCount } = useUnreadCount();
+  // The working space's badge: « Tous les espaces » neither shows nor asks it.
+  const { on: overview } = useOverviewMode();
+  const unreadRuns = useUnreadRunCount({ enabled: !overview });
   const collapsed = !isMobile && state === "collapsed";
 
   return (
@@ -232,7 +241,7 @@ export function ShellHeader() {
         {collapsed && (
           <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
-            {(unreadCount ?? 0) > 0 && (
+            {!overview && unreadRuns > 0 && (
               <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
             )}
           </SidebarTrigger>

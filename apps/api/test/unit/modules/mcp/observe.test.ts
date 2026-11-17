@@ -49,8 +49,8 @@ function makeTools(permissions: string[], status = 200) {
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
-    readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
+    followRunLogs: () => () => {},
   };
   const tools = toolsFor(ctx);
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));

@@ -47,7 +47,6 @@ import {
 const app = getTestApp();
 
 const INTEGRATION = "@visorg/svc";
-const MCP_SERVER = "@visorg/svc-server";
 
 interface ConnectionDTO {
   id: string;
@@ -137,7 +136,6 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
       source: "local",
       draftManifest: localIntegrationManifest({
         name: INTEGRATION,
-        serverName: MCP_SERVER,
         version: "1.0.0",
         auths: {
           primary: {

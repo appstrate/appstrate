@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { errorMessage } from "../lib/mutation-error";
@@ -40,14 +40,17 @@ export function RoleCatalogState({
 
   if (error)
     return (
-      <Alert variant="destructive" className={className}>
-        <AlertDescription>
-          <p>{t("spaceMembers.rolesLoadError")}</p>
-          <p className="text-xs opacity-80">{errorMessage(error)}</p>
+      <Alert
+        variant="destructive"
+        className={className}
+        action={
           <Button type="button" variant="outline" size="sm" onClick={refetch}>
             {t("btn.retry", { ns: "common" })}
           </Button>
-        </AlertDescription>
+        }
+      >
+        <AlertTitle>{t("spaceMembers.rolesLoadError")}</AlertTitle>
+        <AlertDescription>{errorMessage(error)}</AlertDescription>
       </Alert>
     );
 

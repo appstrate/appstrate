@@ -53,6 +53,7 @@ import {
 } from "../../../src/services/integration-connections.ts";
 import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const app = getTestApp();
 const INTEGRATION = "@myorg/probe";
@@ -81,6 +82,8 @@ async function setup(
     authorizationParams?: Record<string, string>;
     refreshTokenIssuance?: "default" | "not_supported";
     resource?: string;
+    /** Declare `code_challenge_methods_supported: ["S256"]` (default true). */
+    declaresPkce?: boolean;
   },
   client: { clientId: string; clientSecret: string },
   tier: "space" | "org" = "space",
@@ -99,7 +102,7 @@ async function setup(
           tokenEndpoint: provider.tokenEndpoint,
           defaultScopes: SCOPES,
           tokenEndpointAuthMethod: manifest.tokenEndpointAuthMethod,
-          codeChallengeMethodsSupported: ["S256"],
+          ...(manifest.declaresPkce === false ? {} : { codeChallengeMethodsSupported: ["S256"] }),
           ...(manifest.authorizationParams
             ? { authorizationParams: manifest.authorizationParams }
             : {}),
@@ -203,10 +206,11 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
       .limit(1)
   )[0]!;
   const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-  const { auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
+  const { manifest, auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
   const outcome = await refreshConnectionCredential({
     connection: { ...row, credentialRevision: (await readCredentialRevision(connectionId))! },
     integrationId: INTEGRATION,
+    manifest: manifest as IntegrationManifest,
     authDef: auth as AfpsManifestAuth,
     scope,
     actor: { type: "user", id: ctx.user.id },
@@ -523,6 +527,51 @@ describe("integration OAuth2 flow (conformant provider)", () => {
 
     expect(completionOf(html)).toEqual(expect.objectContaining({ ok: true }));
     expect(completionOf(html)).not.toHaveProperty("scopesDenied");
+  });
+
+  it("a classic integration with static endpoints and no metadata still connects with S256", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", declaresPkce: false },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const authUrl = new URL(await beginConnect(ctx));
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(completionOf(await consentAndCallback(authUrl.toString()))).toMatchObject({ ok: true });
+  });
+
+  it("never reports offline_access as denied: the server decides on refresh tokens", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      declinedScopes: ["offline_access"],
+      offlineParam: { name: "access_type", value: "offline" },
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", refreshTokenIssuance: "not_supported" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx, { scopes: ["offline_access"] }));
+
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+    expect(completionOf(html)).not.toHaveProperty("scopesDenied");
+    expect(html).not.toContain("non accordées");
+    const trail = await db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id));
+    expect(trail.map((r) => r.action)).not.toContain("integration.connection.scopes_denied");
   });
 
   // #1871: scopes added in place reach every agent bound to the connection.

@@ -187,7 +187,37 @@ describe("the proxy's api_call failure codes (#1761)", () => {
       () => engineFailure("https://api.acme.com/x", { fetchFn: rejecting(new Error("reset")) }),
     ],
   ] as const)("%s → %s", async (_kind, code, run) => {
-    const err = toProxyCallError(await run(), "@acme/api", "api.acme.com", "c1");
+    const err = toProxyCallError(await run(), "@acme/api", "https://api.acme.com/x", "c1");
     expect(err).toMatchObject({ name: "ProxyCallError", code });
+  });
+
+  describe("refusal detail names the target", () => {
+    const refused = async (target: string, kind: "path" | "ssrf") =>
+      toProxyCallError(
+        await (kind === "path"
+          ? engineFailure(target, { authorizedUris: ["https://api.acme.com/ok/**"] })
+          : engineFailure(target, { resolveHost: async () => ["10.0.0.5"] })),
+        "@acme/api",
+        target,
+        "c1",
+      );
+
+    it("unauthorized_target on a refused path names origin and path, not the allowed host", async () => {
+      const err = await refused("https://api.acme.com/other/thing", "path");
+      expect(err.message).toContain("(https://api.acme.com/other/thing)");
+      expect(err.message).not.toContain("(host ");
+    });
+
+    it("keeps placeholders literal and drops query and fragment", async () => {
+      const err = await refused("https://api.acme.com/{{org}}/x?token={{secret}}&a=1#frag", "path");
+      expect(err.message).toContain("(https://api.acme.com/{{org}}/x)");
+      expect(err.message).not.toMatch(/token|secret|frag/);
+    });
+
+    it("blocked_target still names the host only", async () => {
+      const err = await refused("https://api.acme.com/x/y?q=1", "ssrf");
+      expect(err.message).toContain("(host api.acme.com)");
+      expect(err.message).not.toContain("/x/y");
+    });
   });
 });

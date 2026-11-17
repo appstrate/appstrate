@@ -87,7 +87,8 @@ test.describe("Space authentication settings — UI", () => {
       from_name: "Acme Tenant",
       secure_mode: "starttls",
     });
-    await expect(page.getByText("Configuration SMTP enregistrée")).toBeVisible();
+    // The card shows the stored state at once: no toast confirms what is already on screen.
+    await expect(smtp.getByText("Configuré", { exact: true })).toBeVisible();
 
     // After a reload the form is seeded from the GET alone.
     await page.reload();

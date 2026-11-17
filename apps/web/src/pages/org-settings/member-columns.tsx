@@ -69,7 +69,6 @@ export function useMemberColumns({
       header: t("orgSettings.emailColumn"),
       width: 150,
       elastic: true,
-      tier: 2,
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },
@@ -107,8 +106,7 @@ export function useMemberColumns({
             id: "spaces",
             header: t("orgSettings.inviteSpacesLabel"),
             width: 100,
-            elastic: true as const,
-            tier: 3 as const,
+            elastic: true,
             cell: (member: OrgMember) => <CellList items={spaces(member)} />,
           },
         ]
@@ -118,7 +116,6 @@ export function useMemberColumns({
       header: t("orgSettings.joinedColumn"),
       width: 92,
       align: "end",
-      tier: 3,
       cell: (member) => <CellDate value={member.joinedAt} granularity="date" />,
     },
     rowActionsColumn((member: OrgMember) =>

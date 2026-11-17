@@ -162,6 +162,34 @@ describe("closePiTurn", () => {
     });
   });
 
+  it("carries a runtime-version refusal's reason, live and persisted", async () => {
+    const chunks = closePiTurn({
+      error: new Error(
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.280 does not support this model","details":{"error_code":"claude_code_version_too_old"}}}',
+      ),
+      finishReason: "error",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 0,
+      stepCapReached: false,
+      ...MODEL,
+      newId: () => "assistant-1",
+    }).chunks;
+
+    expect(chunks.find((chunk) => chunk.type === "error")).toEqual({
+      type: "error",
+      errorText: "appstrate:chat-turn-error:invalid_request+runtime_version_too_old",
+    });
+    const message = await assemble(chunks);
+    expect(turnMetadataFromMessage(message)).toMatchObject({
+      errorCategory: "invalid_request",
+      errorRetryable: false,
+      errorReason: "runtime_version_too_old",
+    });
+    expect(JSON.stringify(message)).not.toContain("2.1.280");
+  });
+
   it("finishes a started prompt failure exactly once for reload persistence", async () => {
     const chunks: UIMessageChunk[] = [
       { type: "start", messageId: "assistant-after-start" },

@@ -31,6 +31,12 @@ export const DEFAULT_TOOL_RESULT_BYTE_LIMIT = 2048;
  *     so sinks can render "[truncated …]" without re-serialising.
  *   - circular / non-serialisable: a `{ __truncated, reason: "non_serialisable" }`
  *     marker.
+ *
+ * Before the size check, every MCP image block (`{ type: "image", data: <base64> }`,
+ * at any depth) is summarised to `{ type: "image", mimeType, bytes }`: base64 is
+ * useless in a log and would otherwise fill the preview, hiding the text that
+ * follows it. The summarised value is what is returned whenever an image was
+ * replaced; otherwise the original reference is returned untouched.
  */
 export function truncateToolResult(
   result: unknown,
@@ -41,14 +47,21 @@ export function truncateToolResult(
   // Booleans / numbers / bigint / symbols never trigger truncation.
   if (typeof result !== "object") return result;
   let serialised: string;
+  let imageSummarised = false;
   try {
-    serialised = JSON.stringify(result);
+    serialised = JSON.stringify(result, (_key, value: unknown) => {
+      if (isImageBlock(value)) {
+        imageSummarised = true;
+        return { type: "image", mimeType: value.mimeType, bytes: base64DecodedSize(value.data) };
+      }
+      return value;
+    });
   } catch {
     return { __truncated: true, reason: "non_serialisable" };
   }
   if (serialised === undefined) return result;
   const byteLength = Buffer.byteLength(serialised, "utf8");
-  if (byteLength <= limitBytes) return result;
+  if (byteLength <= limitBytes) return imageSummarised ? JSON.parse(serialised) : result;
   return {
     __truncated: true,
     reason: "size",
@@ -56,6 +69,20 @@ export function truncateToolResult(
     limit: limitBytes,
     preview: truncateString(serialised, Math.min(512, limitBytes)),
   };
+}
+
+function isImageBlock(v: unknown): v is { type: "image"; data: string; mimeType?: unknown } {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as { type?: unknown; data?: unknown };
+  return o.type === "image" && typeof o.data === "string";
+}
+
+/** Decoded size of a base64 string, from its length and `=` padding (no decoding). */
+function base64DecodedSize(b64: string): number {
+  let pad = 0;
+  if (b64.endsWith("==")) pad = 2;
+  else if (b64.endsWith("=")) pad = 1;
+  return Math.floor((b64.length * 3) / 4) - pad;
 }
 
 function truncateString(s: string, limitBytes: number): string {

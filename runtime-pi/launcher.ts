@@ -45,4 +45,7 @@ try {
 
 await child.exited;
 stopReaper();
-process.exit(child.exitCode ?? 128 + (constants.signals[child.signalCode!] ?? 9));
+// bun-types >= 1.4.4 reports an unnamed signal as its number.
+const signal = child.signalCode;
+const signalNumber = typeof signal === "number" ? signal : signal ? constants.signals[signal] : 9;
+process.exit(child.exitCode ?? 128 + (signalNumber ?? 9));

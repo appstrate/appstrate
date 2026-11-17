@@ -3,11 +3,10 @@
 /**
  * The run cost readout exists so a run the platform could NOT price stops
  * rendering a confident `$0.0000`. The web test runner has no DOM, so this
- * exercises the pure mapping both surfaces share (`run-cost.ts`), plus source
- * scans proving the header (`run-detail/run-header-summary.tsx`) and the Usage
- * card (`run-detail/run-snapshot-inspector.tsx`) really route through it — a second
- * hand-rolled `toFixed(4)` on either surface is exactly the drift this split
- * was made to prevent.
+ * exercises the pure mapping (`run-cost.ts`), plus a source scan proving the
+ * Usage card (`run-detail/run-snapshot-inspector.tsx`) really routes through it
+ * — a hand-rolled `toFixed(4)` there is exactly the drift this split was made
+ * to prevent.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -89,17 +88,12 @@ describe("cost readout wiring", () => {
     expect(source).toContain("tabIndex={0}");
   });
 
-  it("both surfaces delegate to the shared readout instead of formatting a cost", () => {
-    for (const relative of [
-      "../run-detail/run-header-summary.tsx",
-      "../run-detail/run-snapshot-inspector.tsx",
-    ]) {
-      const source = read(relative);
-      expect(source).toContain("<RunCostReadout");
-      expect(source).toContain("pricingStatus={run.cost_pricing_status}");
-      expect(source).not.toContain("toFixed(4)");
-      expect(source).not.toContain("NumberFormat");
-    }
+  it("the Usage card delegates to the shared readout instead of formatting a cost", () => {
+    const source = read("../run-detail/run-snapshot-inspector.tsx");
+    expect(source).toContain("<RunCostReadout");
+    expect(source).toContain("pricingStatus={run.cost_pricing_status}");
+    expect(source).not.toContain("toFixed(4)");
+    expect(source).not.toContain("NumberFormat");
   });
 
   it("the live metric patch carries the provenance with the number", () => {

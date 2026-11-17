@@ -17,15 +17,47 @@ export function integrationIdOfField(field: string): string {
 /** One `errors[]` item of a `409 missing_integration_connection`. */
 export type MissingIntegrationFieldError = components["schemas"]["ConnectionResolutionItem"];
 
-type ConnectionChoiceCandidate = NonNullable<
+export type ConnectionChoiceCandidate = NonNullable<
   MissingIntegrationFieldError["candidate_connections"]
 >[number];
+
+/**
+ * What tells candidates apart: the account, whether another member shared it, whether it is dead.
+ * `labels` are the translated phrases, so the wording stays with the caller.
+ */
+export function candidateDescription(
+  c: Pick<ConnectionChoiceCandidate, "account_id" | "owned_by_actor" | "needs_reconnection">,
+  labels: { sharedByOther: string; needsReconnection: string },
+): string {
+  return [
+    // "default" is the placeholder of a connection with no account identity.
+    c.account_id !== "default" ? c.account_id : null,
+    !c.owned_by_actor ? labels.sharedByOther : null,
+    c.needs_reconnection ? labels.needsReconnection : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
+/** A candidate as a single-choice option; a dead connection fails the run it is picked for. */
+export function candidateSelectOption(
+  c: ConnectionChoiceCandidate,
+  labels: { sharedByOther: string; needsReconnection: string },
+): { value: string; label: string; disabled: boolean } {
+  const description = candidateDescription(c, labels);
+  return {
+    value: c.id,
+    label: description ? `${c.label} · ${description}` : c.label,
+    disabled: c.needs_reconnection,
+  };
+}
 
 const SCHEDULE_CHOICE_CODES = [
   "must_choose_connection",
   "override_connection_unavailable",
   "auth_serves_no_selected_tool",
   "override_outranked",
+  "connection_set_too_large",
   "required_integration_unbound",
 ] as const satisfies readonly MissingIntegrationConnectionCode[];
 
@@ -139,6 +171,8 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
       return "error.authServesNoSelectedTool";
     case "override_outranked":
       return "error.overrideOutranked";
+    case "connection_set_too_large":
+      return "error.connectionSetTooLarge";
     case "required_integration_unbound":
       return "error.requiredIntegrationUnbound";
   }
@@ -148,6 +182,7 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
 const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
   "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
   ...INTEGRATION_MANIFEST_FAILURE_CODES,
 ]);
 

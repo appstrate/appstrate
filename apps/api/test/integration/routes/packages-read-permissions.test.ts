@@ -17,7 +17,7 @@
  *
  * The scoped API key is the only credential that can express "authenticated
  * for this org, without `<type>:read`" — every org ROLE, down to `viewer`,
- * carries all four read scopes, which is exactly why this gap was invisible
+ * carries all three read scopes, which is exactly why this gap was invisible
  * from the SPA.
  *
  * The file-explorer block at the bottom covers the two routes #1118 added

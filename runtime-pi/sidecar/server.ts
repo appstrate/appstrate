@@ -17,8 +17,6 @@ import {
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
-import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
-import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
 import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
@@ -207,34 +205,15 @@ const oauthTokenCache = new OAuthTokenCache({
 // take several seconds for a fresh node_modules tree). `/mcp` serves at
 // once; `GET /integrations/boot-report` awaits this promise, and the agent
 // reads that report before listing its tools.
-// Run-scoped runtime deps built ONCE and shared between the integration
-// boot pipeline (in-process `api_call` MCP server) and the HTTP `/mcp`
-// surface (`createApp`), so both read the same blob store — resource_link
-// spillover from api_call resolves via the outer server's resources/read.
+// Run-scoped runtime deps built ONCE for the integration boot pipeline
+// (in-process `api_call` MCP server); its blob store also goes to the HTTP
+// `/mcp` surface (`createApp`), so resource_link spillover from api_call
+// resolves via the outer server's resources/read.
 const runtimeDeps = buildSidecarRuntimeDeps({
   config,
   cookieJar,
   ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
 });
-
-// Platform runtime tools (output/log/note/pin) the agent selected,
-// hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
-// same transport every other tool uses, so they are not Pi-SDK
-// extensions. Static for the run's lifetime (selection + output schema are
-// fixed at boot).
-//
-// Each def is wrapped so its handler runs ONCE and its canonical events are
-// journaled (the events sub-key is then stripped from the tool result). The
-// runner drains `GET /runtime-events` and re-emits on its single sink — one
-// execution, transport-agnostic, no `_meta` reliance.
-const runtimeEventJournal = new RuntimeEventJournal();
-const runtimeToolDefs = journalRuntimeToolDefs(
-  buildRuntimeToolDefs({
-    runtimeTools: env.runtimeToolNames,
-    outputSchema: env.outputSchema ?? null,
-  }),
-  runtimeEventJournal,
-) as unknown as AppstrateToolDefinition[];
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
@@ -299,13 +278,12 @@ const integrationBootPromise =
 const app = createApp({
   config,
   cookieJar,
-  runtimeDeps,
+  blobStore: runtimeDeps.blobStore,
   isReady: () => proxy.readySync,
   oauthTokenCache,
-  additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
+  mcpToolsProvider: () => integrationTools,
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
-  runtimeEventJournal,
 });
 
 logger.info("Sidecar proxy listening", {

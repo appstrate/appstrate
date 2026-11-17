@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelErrorCategory } from "./model-error.ts";
+import type { ModelErrorCategory, ModelErrorReason } from "./model-error.ts";
 
 /**
  * The chat surface's name for {@link ModelErrorCategory} — an ALIAS, not a
@@ -137,6 +137,14 @@ export interface AppstrateTurnMetadata {
   errorCategory?: ChatTurnErrorCategory;
   /** Whether retrying later may succeed without changing the request. */
   errorRetryable?: boolean;
+  /**
+   * The structured cause the provider named, beside {@link errorCategory}
+   * (`ModelErrorReason`, `./model-error.ts`). Stamped only when the failure
+   * named a known one; it picks the sentence and never changes the category
+   * nor `errorRetryable`. Unvalidated JSONB: a reader meeting a value it has no
+   * sentence for falls back to the category's sentence.
+   */
+  errorReason?: ModelErrorReason;
   /** Public platform request id when the upstream envelope exposed one. */
   requestId?: string;
   stepCount: number;

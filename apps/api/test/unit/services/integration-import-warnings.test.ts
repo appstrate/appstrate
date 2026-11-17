@@ -118,4 +118,13 @@ describe("collectLoginCriteriaWarnings", () => {
     expect(collectLoginCriteriaWarnings({ type: "agent" })).toEqual([]);
     expect(collectLoginCriteriaWarnings(null)).toEqual([]);
   });
+
+  it("stays silent on an oauth2 login, whose answer is judged as a token response", () => {
+    expect(
+      collectLoginCriteriaWarnings({
+        type: "integration",
+        auths: { oauth: { type: "oauth2", connect: { login: { request: formRequest } } } },
+      }),
+    ).toEqual([]);
+  });
 });

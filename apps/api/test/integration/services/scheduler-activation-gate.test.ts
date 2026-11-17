@@ -33,7 +33,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { deactivatePackage, activatePackage } from "../../../src/services/space-packages.ts";
-import { createSchedule, triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 getTestApp();
@@ -65,7 +66,7 @@ beforeEach(async () => {
     draftManifest: { name: AGENT, version: "0.1.0", type: "agent", description: "Scheduled" },
   });
   await seedSpacePackage(ctx.defaultSpaceId, AGENT);
-  const schedule = await createSchedule(
+  const schedule = await createJudgedSchedule(
     { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     AGENT,
     actor,

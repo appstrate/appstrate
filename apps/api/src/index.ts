@@ -39,6 +39,7 @@ import { serveSpaBuild } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
+import { createCrossSpaceReadsRouter } from "./routes/cross-space-reads.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
@@ -49,6 +50,7 @@ import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
+import { createOAuthClientMetadataRouter } from "./routes/oauth-client-metadata.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
@@ -341,6 +343,7 @@ app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
+app.route("/api/orgs", createCrossSpaceReadsRouter());
 
 // User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
 // (it is the prerequisite to setting `X-Org-Id`); the other routes run
@@ -350,7 +353,7 @@ app.route("/api/me", meRouter);
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter());
 // Unified-runner event ingestion — HMAC-authenticated, no user principal.
-// Mounted BEFORE runsRouter so the more-specific `/runs/:runId/events` path
+// Mounted BEFORE runsRouter so the more-specific `/runs/:id/events` path
 // matches without falling through to `GET /runs/:id`. Path-pattern `skipAuth`
 // bypass is declared in `lib/auth-pipeline.ts` so these never pass through
 // the cookie/API-key auth layer.
@@ -384,6 +387,9 @@ app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
+
+// Public OAuth Client ID Metadata Documents, fetched by integration authorization servers.
+app.route("/oauth", createOAuthClientMetadataRouter());
 
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);

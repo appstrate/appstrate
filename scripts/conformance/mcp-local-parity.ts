@@ -3,39 +3,35 @@
 /**
  * Local MCP-server tool-parity check.
  *
- * For `type: "mcp-server"` packages, spawn the bundled server over stdio
- * (reusing `probeBunCompat`, which performs the `initialize` + `tools/list`
- * handshake), then diff the live tool names against the manifest's declared
- * `tools[]`. Strict both directions — local MCP servers have no
+ * For integrations with `source.kind: "local"`, spawn the server bundled in the
+ * archive over stdio (`probeLocalServer`, which performs the `initialize` +
+ * `tools/list` handshake), then diff the live tool names against the
+ * `source.server.tools` catalog. Strict both directions — a local server has no
  * `allow_undeclared_tools` escape hatch; the manifest IS the contract.
  *
  * Deterministic (no network, no credentials), so it is gate-eligible.
  */
 
-import { probeBunCompat } from "@appstrate/core/mcp-server-bundle";
+import { probeLocalServer } from "./local-server-probe.ts";
+import { getLocalServer, getLocalServerTools } from "@appstrate/core/integration";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding } from "./types.ts";
 import { diffToolSets } from "./tool-diff.ts";
 
 const CHECK = "mcp-local-parity";
 
-/** Declared tool names from a `type: "mcp-server"` manifest's `tools[]`. */
+/** Declared tool names from a local integration manifest's `source.server.tools`. */
 export function declaredTools(manifest: Record<string, unknown>): string[] {
-  const tools = manifest.tools;
+  const tools = getLocalServerTools(manifest);
   if (!Array.isArray(tools)) return [];
   return tools
     .map((t) => (t && typeof t === "object" ? (t as { name?: unknown }).name : undefined))
     .filter((n): n is string => typeof n === "string");
 }
 
-/** Manifest `server.entry_point` (relative path spawned for the probe). */
+/** Manifest `source.server.entry_point` (relative path spawned for the probe). */
 export function serverEntryPoint(manifest: Record<string, unknown>): string | undefined {
-  const server = manifest.server;
-  if (server && typeof server === "object") {
-    const ep = (server as { entry_point?: unknown }).entry_point;
-    if (typeof ep === "string") return ep;
-  }
-  return undefined;
+  return getLocalServer(manifest)?.entry_point;
 }
 
 /**
@@ -57,12 +53,12 @@ export async function checkMcpLocalParity(entry: SystemPackageEntry): Promise<Fi
         packageId: entry.packageId,
         check: CHECK,
         severity: "fail",
-        message: "manifest declares no server.entry_point — cannot spawn for parity",
+        message: "manifest declares no source.server.entry_point — cannot spawn for parity",
       },
     ];
   }
 
-  const probe = await probeBunCompat(entry.files, entryPoint);
+  const probe = await probeLocalServer(entry.files, entryPoint);
   if (!probe.ok) {
     return [
       {

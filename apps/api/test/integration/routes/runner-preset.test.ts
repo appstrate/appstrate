@@ -10,7 +10,7 @@
  * NAMES of the locked fields, `output`, the enforced timeout, the caller's own
  * run counters, and the integrations it must connect) and withholds what an
  * author would call the agent's content: the manifest, the prompt, the
- * composition — its skills and MCP servers — the authoring history, and the
+ * composition — its skills — the authoring history, and the
  * value stored behind a locked field, which is the editor's to set and the
  * launcher's neither to set nor to read (issue #1338).
  *
@@ -37,7 +37,6 @@ import {
 import {
   seedAgent,
   seedSpacePackage,
-  seedMcpServer,
   seedPackage,
   seedPublishedVersion,
   seedRun,
@@ -60,7 +59,6 @@ const AGENT_PATH = "@runner/report-agent";
 const LAUNCH_AGENT_ID = "@runner/simple-agent";
 const SKILL_ID = "@runner/summarise";
 const INTEGRATION_ID = "@runner/svc";
-const MCP_ID = "@runner/filesystem";
 /** The editor's value behind the locked field — distinctive so a leak is greppable. */
 const LOCKED_VALUE = "ADMIN-ONLY-HOUSE-STYLE";
 /** The agent DETAIL lives under the packages router, not `/api/agents`. */
@@ -138,7 +136,6 @@ describe("runner preset", () => {
       createdBy: owner.user.id,
       draftManifest: { name: SKILL_ID, version: "1.0.0", type: "skill" },
     });
-    await seedMcpServer({ id: MCP_ID, orgId: owner.orgId });
   });
 
   async function agentList(ctx: TestContext, extra?: Record<string, string>) {
@@ -172,12 +169,10 @@ describe("runner preset", () => {
     const deps = item.dependencies as Record<string, unknown>;
     expect(deps.integrations).toEqual({ [INTEGRATION_ID]: "^1.0.0" });
     expect(deps.skills).toBeUndefined();
-    expect(deps.mcp_servers).toBeUndefined();
 
     // The control: same row, same request, composition included.
     expect((await agentList(operator)).dependencies).toEqual({
       skills: { [SKILL_ID]: "^1.0.0" },
-      mcp_servers: {},
       integrations: { [INTEGRATION_ID]: "^1.0.0" },
     });
   });
@@ -204,7 +199,6 @@ describe("runner preset", () => {
     const deps = detail.dependencies as Record<string, unknown>;
     expect(deps.integrations).toEqual([{ id: INTEGRATION_ID, version: "^1.0.0" }]);
     expect(deps.skills).toBeUndefined();
-    expect(deps.mcp_servers).toBeUndefined();
 
     for (const field of [
       "manifest",
@@ -236,7 +230,6 @@ describe("runner preset", () => {
     });
     expect(detail.dependencies).toMatchObject({
       skills: [{ id: SKILL_ID }],
-      mcp_servers: [],
       integrations: [{ id: INTEGRATION_ID, version: "^1.0.0" }],
     });
     expect(detail).toHaveProperty("version_count");
@@ -299,8 +292,6 @@ describe("runner preset", () => {
       // Other package types entirely.
       { label: "skills", path: "/api/packages/skills" },
       { label: "skill detail", path: `/api/packages/skills/${SKILL_ID}` },
-      { label: "mcp servers", path: "/api/packages/mcp-servers" },
-      { label: "mcp server detail", path: `/api/packages/mcp-servers/${MCP_ID}` },
     ];
 
     for (const route of denied) {

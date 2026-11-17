@@ -11,12 +11,7 @@ import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import {
-  ceilingAllows,
-  effectivePermissions,
-  toScopeCeiling,
-  type Permission,
-} from "../lib/permissions.ts";
+import { ceilingAllows, effectivePermissions, toScopeCeiling } from "../lib/permissions.ts";
 import { resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
@@ -28,7 +23,12 @@ import {
   validateViewAs,
 } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
-import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
+import { canReadEveryRun } from "../lib/run-visibility.ts";
+import {
+  mayFollowRun,
+  subscribedChannels,
+  type RealtimeCaller,
+} from "../services/realtime-access.ts";
 import {
   canReadRuns,
   reportPermissionDenial,
@@ -91,44 +91,6 @@ function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | 
     if (known) requested.add(known);
   }
   return requested.size > 0 ? requested : undefined;
-}
-
-interface ChannelCaller {
-  /** In the caller's effective set in the streamed space (a key: ceiling ∩ creator). */
-  holds: (permission: string) => boolean;
-  ceilingAllows: (permission: Permission) => boolean;
-}
-
-const readsRuns = (caller: ChannelCaller) => canReadRuns(caller.holds);
-
-/**
- * Who may receive each channel: who may read its rows over HTTP — a run read
- * (RBAC spec §3.4), the `chat:read` grant of `/api/chat/*`, the ceiling alone of
- * `GET /api/me/connections` (§7.1). Total, so no channel ships without a rule.
- */
-const CHANNEL_REQUIREMENTS: Record<RealtimeChannel, (caller: ChannelCaller) => boolean> = {
-  run_update: readsRuns,
-  run_log: readsRuns,
-  run_metric: readsRuns,
-  connection_update: (caller) => caller.ceilingAllows("integrations:read"),
-  chat_session_update: (caller) => caller.holds("chat:read"),
-};
-
-/** The requested channels — every channel when none is requested — this caller may receive. */
-function subscribedChannels(
-  c: Context<AppEnv>,
-  requested: ReadonlySet<RealtimeChannel> | undefined,
-  permissions: ReadonlySet<string>,
-): ReadonlySet<RealtimeChannel> {
-  const caller: ChannelCaller = {
-    holds: (permission) => permissions.has(permission),
-    ceilingAllows: (permission) => ceilingAllows(c, permission),
-  };
-  return new Set(
-    [...(requested ?? REALTIME_CHANNELS)].filter((channel) =>
-      CHANNEL_REQUIREMENTS[channel](caller),
-    ),
-  );
 }
 
 interface SSEAuthResult {
@@ -356,6 +318,16 @@ function requireRunRead(validated: SSEAuthResult): void {
   }
 }
 
+/** The SSE caller as the shared realtime gates see it (`services/realtime-access.ts`). */
+function realtimeCaller(c: Context<AppEnv>, validated: SSEAuthResult): RealtimeCaller {
+  return {
+    scope: { orgId: validated.orgId, spaceId: validated.spaceId },
+    actor: { type: "user", id: validated.userId },
+    permissions: validated.permissions,
+    ceilingAllows: (permission) => ceilingAllows(c, permission),
+  };
+}
+
 /** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */
 function openRealtimeStream(
   c: Context<AppEnv>,
@@ -576,9 +548,10 @@ function openRealtimeStream(
 }
 
 /**
- * The run row behind a per-run stream: the visibility gate reads it before
- * subscribing, {@link sendInitialRunSnapshot} reads it again after — which is
- * the invariant documented there, not an accident to be optimised away.
+ * The run row behind a per-run stream's snapshot, read by
+ * {@link sendInitialRunSnapshot} after the subscriber registers — the
+ * invariant documented there. The visibility gate (`mayFollowRun`) reads the
+ * row's actor before subscribing.
  */
 async function loadRunForStream(runId: string, scope: { orgId: string; spaceId: string }) {
   const [row] = await db
@@ -668,17 +641,8 @@ export function createRealtimeRouter() {
     // too. A run id with no row is NOT refused — the SPA opens this stream the
     // moment it fires a launch, before the row is necessarily visible here —
     // and such a stream simply carries no snapshot.
-    const row = await loadRunForStream(runId, {
-      orgId: validated.orgId,
-      spaceId: validated.spaceId,
-    });
-    if (
-      row &&
-      !validated.canReadEveryRun &&
-      !ownsRun({ type: "user", id: validated.userId }, row)
-    ) {
-      throw notFound("Run not found");
-    }
+    const caller = realtimeCaller(c, validated);
+    if (!(await mayFollowRun(caller, runId))) throw notFound("Run not found");
 
     return openRealtimeStream(
       c,
@@ -690,11 +654,7 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: subscribedChannels(
-          c,
-          parseChannels(c.req.query("channels")),
-          validated.permissions,
-        ),
+        channels: subscribedChannels(caller, parseChannels(c.req.query("channels"))),
       },
       verbose,
       (send) =>
@@ -723,9 +683,8 @@ export function createRealtimeRouter() {
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
         channels: subscribedChannels(
-          c,
+          realtimeCaller(c, validated),
           parseChannels(c.req.query("channels")),
-          validated.permissions,
         ),
       },
       verbose,
@@ -741,9 +700,8 @@ export function createRealtimeRouter() {
     const verbose = c.req.query("verbose") === "true";
     // A multiplex, not a run stream: refused only when no requested channel is left.
     const channels = subscribedChannels(
-      c,
+      realtimeCaller(c, validated),
       parseChannels(c.req.query("channels")),
-      validated.permissions,
     );
     if (channels.size === 0) {
       throw forbidden("Caller may receive none of the requested channels in this space");

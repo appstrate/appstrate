@@ -10,6 +10,7 @@ import {
   getToolsPolicy,
   emptyAuth,
   isRemoteSourceUrl,
+  isWildcardUsable,
   setAllowUndeclaredTools,
   setAuths,
   setSource,
@@ -24,8 +25,10 @@ describe("integration-editor source", () => {
         kind: "remote",
         remoteUrl: "https://x.test/mcp/v1",
         remoteTransport: "streamable-http",
-        serverName: "",
-        serverVersion: "",
+        serverType: "node",
+        entryPoint: "",
+        command: "",
+        args: [],
       },
     );
     expect((m.source as any).kind).toBe("remote");
@@ -35,28 +38,103 @@ describe("integration-editor source", () => {
     expect(back.remoteUrl).toBe("https://x.test/mcp/v1");
   });
 
-  it("round-trips a local source", () => {
-    const m = setSource(
-      {},
-      {
+  const local = {
+    kind: "local" as const,
+    remoteUrl: "",
+    remoteTransport: "streamable-http" as const,
+    serverType: "node",
+    entryPoint: "server/index.ts",
+    command: "bun",
+    args: ["server/index.ts", "--stdio"],
+  };
+
+  it("emits the inline run declaration of a local source", () => {
+    expect(setSource({}, local)).toEqual({
+      source: {
         kind: "local",
-        remoteUrl: "",
-        remoteTransport: "streamable-http",
-        serverName: "@scope/srv",
-        serverVersion: "^1.0.0",
+        server: {
+          type: "node",
+          entry_point: "server/index.ts",
+          mcp_config: { command: "bun", args: ["server/index.ts", "--stdio"] },
+        },
       },
+    });
+  });
+
+  it("round-trips a local source", () => {
+    expect(getSource(setSource({}, local))).toEqual(local);
+  });
+
+  it("omits `args` when there are none", () => {
+    const m = setSource({}, { ...local, args: [] });
+    expect((m.source as any).server.mcp_config).toEqual({ command: "bun" });
+  });
+
+  it("keeps `mcp_config.env`, `tools` and unknown keys when the form edits its own fields", () => {
+    const stored = {
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "old.js",
+          mcp_config: {
+            command: "node",
+            args: ["old.js"],
+            env: { LOG_LEVEL: "debug" },
+            platform_overrides: { win32: { command: "node.exe" } },
+          },
+          tools: [{ name: "ssh_exec", description: "Run a command" }],
+          x_extra: 1,
+        },
+      },
+    };
+    const next = setSource(stored, {
+      ...getSource(stored),
+      serverType: "python",
+      entryPoint: "server.py",
+      command: "python3",
+      args: [],
+    });
+    expect((next.source as any).server).toEqual({
+      type: "python",
+      entry_point: "server.py",
+      mcp_config: {
+        command: "python3",
+        env: { LOG_LEVEL: "debug" },
+        platform_overrides: { win32: { command: "node.exe" } },
+      },
+      tools: [{ name: "ssh_exec", description: "Run a command" }],
+      x_extra: 1,
+    });
+  });
+
+  it("drops the local declaration when the kind moves to remote", () => {
+    const m = setSource(setSource({}, local), {
+      ...local,
+      kind: "remote",
+      remoteUrl: "https://x.test/mcp",
+    });
+    expect((m.source as any).server).toBeUndefined();
+  });
+
+  it("keeps a server type the form does not list, and rewrites it only when changed", () => {
+    const manifest = { source: { kind: "local", server: { type: "deno", entry_point: "x" } } };
+    const source = getSource(manifest);
+    expect(source.serverType).toBe("deno");
+    expect((setSource(manifest, source).source as any).server.type).toBe("deno");
+    expect((setSource(manifest, { ...source, serverType: "node" }).source as any).server.type).toBe(
+      "node",
     );
-    expect((m.source as any).kind).toBe("local");
-    expect((m.source as any).server.name).toBe("@scope/srv");
-    expect(getSource(m).serverVersion).toBe("^1.0.0");
   });
 
   const remote = (remoteUrl: string) => ({
     kind: "remote" as const,
     remoteUrl,
     remoteTransport: "streamable-http" as const,
-    serverName: "",
-    serverVersion: "",
+    serverType: "node",
+    entryPoint: "",
+    command: "",
+    args: [] as string[],
   });
 
   it("gives a new integration's auth the source host as its allowlist, once the URL names one", () => {
@@ -175,9 +253,9 @@ describe("integration-editor auths", () => {
     expect(back.scopeCatalog[0]!.value).toBe("read");
   });
 
-  it("drops auths with an empty key", () => {
-    const m = setAuths({}, [{ ...emptyAuth(""), key: "" }]);
-    expect(Object.keys(m.auths as any)).toHaveLength(0);
+  it("drops auths with an empty key, and with none left leaves auths out (AFPS §7.2)", () => {
+    const m = setAuths({ auths: { old: { type: "api_key" } } }, [{ ...emptyAuth(""), key: "" }]);
+    expect("auths" in m).toBe(false);
   });
 
   it("preserves unread auth fields on edit (no data loss)", () => {
@@ -245,6 +323,52 @@ describe("integration-editor auths", () => {
     expect(a.credentials.schema.properties.api_key.description).toBe("key");
   });
 
+  it("keeps the credentials and connect block of an oauth2 auth acquired by connect.login", () => {
+    const credentials = {
+      schema: {
+        type: "object",
+        required: ["refresh_token"],
+        properties: { refresh_token: { type: "string", description: "token" } },
+      },
+    };
+    const connect = {
+      login: {
+        request: {
+          method: "POST",
+          url: "https://x.test/token",
+          content_type: "application/x-www-form-urlencoded",
+          body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+        },
+      },
+    };
+    const imported = {
+      auths: {
+        primary: {
+          type: "oauth2",
+          token_endpoint: "https://x.test/token",
+          authorized_uris: ["https://x.test/**"],
+          credentials,
+          connect,
+        },
+        code: {
+          type: "oauth2",
+          authorization_endpoint: "https://x.test/authorize",
+          token_endpoint: "https://x.test/token",
+          authorized_uris: ["https://x.test/**"],
+          credentials,
+        },
+      },
+    };
+    const auths = getAuths(imported);
+    auths[0]!.tokenEndpoint = "https://x.test/token2";
+    const out = setAuths(imported, auths).auths as any;
+    expect(out.primary.token_endpoint).toBe("https://x.test/token2");
+    expect(out.primary.credentials).toEqual(credentials);
+    expect(out.primary.connect).toEqual(connect);
+    // An authorization-code oauth2 auth still carries no credentials.
+    expect(out.code.credentials).toBeUndefined();
+  });
+
   it("keeps an mtls auth mtls across an edit", () => {
     // A type the form does not know is read back as `api_key` and SAVED as one.
     const imported = {
@@ -307,5 +431,22 @@ describe("integration-editor allow_undeclared_tools (§7.8)", () => {
 
     const disabled = setAllowUndeclaredTools(enabled, false);
     expect(disabled).not.toHaveProperty("allow_undeclared_tools");
+  });
+});
+
+describe("isWildcardUsable", () => {
+  it("is usable with no auths (unauthenticated integration)", () => {
+    expect(isWildcardUsable([])).toBe(true);
+  });
+  it("is not usable with only an oauth2 auth lacking default scopes", () => {
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "oauth2", defaultScopes: [] }])).toBe(
+      false,
+    );
+  });
+  it("is usable with oauth2 default scopes or a non-oauth2 auth", () => {
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "oauth2", defaultScopes: ["x"] }])).toBe(
+      true,
+    );
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "api_key" }])).toBe(true);
   });
 });

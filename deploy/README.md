@@ -74,6 +74,8 @@ Facts worth writing down, because each one is easy to break:
     cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
   ```
 
+- **`APP_URL` must be fetchable from the internet, and its origin must not move casually.** Integration authorization servers fetch an instance document under it, and changing its origin forces some integration connections to be reconnected. Behind an access proxy, IP allow-list or split DNS, set `INTEGRATION_OAUTH_CIMD=off`; see `docs/ENV.md`.
+
 - **`watch_paths` is set to this directory.** Without it, a push anywhere in the monorepo would redeploy production — and a deploy is not free: it re-pulls every image and restarts the whole stack. If you change `docker_compose_location`, change `watch_paths` in the same edit.
 
 ## Rollback

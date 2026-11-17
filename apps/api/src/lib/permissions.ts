@@ -43,6 +43,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { invalidRequest } from "./errors.ts";
+import { getSpaceScope } from "./scope.ts";
 import {
   type ModuleResources,
   type CoreResource,
@@ -164,7 +165,6 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "agents:read",
     "agents:run",
     "skills:read",
-    "mcp-servers:read",
     // `runs:read` alone — the runs this member launched. Seeing a colleague's
     // (or an end-user's) run is `runs:read-all`, which `admin` and `builder`
     // derive from the catalog and an operator does not.
@@ -293,10 +293,6 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "skills:read",
   "skills:write",
   "skills:delete",
-  // MCP servers (AFPS §3.4 — import/delete via API key for headless flows)
-  "mcp-servers:read",
-  "mcp-servers:write",
-  "mcp-servers:delete",
   // Runs. `read-all` is grantable: a headless supervisor key must be able to
   // read the whole space's runs, and the ceiling still caps it at what its
   // creator holds.
@@ -571,6 +567,41 @@ export function callerPermissions(c: Context<AppEnv>): ReadonlySet<string> {
 export function ceilingAllows(c: Context<AppEnv>, permission: Permission): boolean {
   const ceiling = c.get("scopeCeiling");
   return ceiling === undefined || ceiling.has(permission);
+}
+
+/**
+ * The lifecycle half of the file ACL for THIS request, passed by every file
+ * resolution so a DTO's `capabilities` and the enforcement points agree.
+ * Ownership is not a role grant, so `permissions` cannot cap it — the
+ * credential's own scope ceiling does (RBAC spec §7.1).
+ */
+export function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
+  return { creatorCanManage: ceilingAllows(c, "files:delete") };
+}
+
+/**
+ * The caller's effective permissions in ONE space. A list spanning spaces takes
+ * one per space and decides each row by the grant of the row's space, never by
+ * the request's; a single-space list is the one-grant case.
+ */
+export interface SpaceGrant {
+  spaceId: string;
+  permissions: ReadonlySet<string>;
+}
+
+/** The {@link SpaceGrant} of the space this request entered. */
+export function callerSpaceGrant(c: Context<AppEnv>): SpaceGrant {
+  return { spaceId: getSpaceScope(c).spaceId, permissions: callerPermissions(c) };
+}
+
+/**
+ * Does this permission set read an agent's content — its prompt, its stored
+ * input? `agents:read`; `agents:run` alone sees what the launch form needs.
+ * Every projection of agent content, in one space or per space of a list
+ * spanning several, asks this one predicate.
+ */
+export function readsAgentContent(permissions: ReadonlySet<string>): boolean {
+  return permissions.has("agents:read");
 }
 
 /**

@@ -47,7 +47,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       expect(transitions[2]).toEqual(transitions[0]);
       await page.mouse.move(0, 0);
       for (const hovered of [true, false]) {
-        if (hovered) await row.getByRole("cell").nth(2).hover();
+        // The row's link covers its plain cells (the whole row opens the agent), so the
+        // pointer lands on that cover: `force` skips the interception check, not the hover.
+        if (hovered) await row.getByRole("cell").nth(2).hover({ force: true });
         else await page.mouse.move(0, 0);
         const differences = await row.evaluate(async (element) => {
           const canvas = document.createElement("canvas");
@@ -100,7 +102,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       const y = bounds!.y + bounds!.height / 2;
       await page.mouse.move(x, y);
       await page.mouse.down();
-      await page.mouse.move(x + 300, y, { steps: 5 });
+      // Wide enough to make the table scroll at 700px, narrow enough for the held name to
+      // fit the scroller: a sticky cell wider than its scrollport slides with the scroll.
+      await page.mouse.move(x + 150, y, { steps: 5 });
       await page.mouse.up();
       await page.setViewportSize({ width: 700, height: 900 });
       const scroller = table.locator("..");

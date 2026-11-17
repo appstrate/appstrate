@@ -185,3 +185,19 @@ describe("validateAgainstSchema", () => {
     });
   });
 });
+
+describe("validateAgainstSchema date formats", () => {
+  const schema = {
+    type: "object",
+    properties: { start: { type: "string", format: "date", formatMinimum: "2026-01-01" } },
+  } as JSONSchemaObject;
+
+  it("does not throw on the non-standard formatMinimum keyword", () => {
+    expect(validateAgainstSchema({ start: "2025-12-31" }, schema).valid).toBe(true);
+  });
+
+  it("still rejects an invalid date", () => {
+    expect(validateAgainstSchema({ start: "2026-02-30" }, schema).valid).toBe(false);
+    expect(validateAgainstSchema({ start: "not-a-date" }, schema).valid).toBe(false);
+  });
+});

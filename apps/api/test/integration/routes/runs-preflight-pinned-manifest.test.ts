@@ -45,7 +45,6 @@ function integManifest(version: string, requiredScopes: string[]) {
   return localIntegrationManifest({
     name: INTEG,
     version,
-    serverName: "@pinrun/svc-server",
     auths: {
       primary: {
         type: "oauth2",

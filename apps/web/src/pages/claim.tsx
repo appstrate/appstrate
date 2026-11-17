@@ -51,11 +51,9 @@ export function ClaimPage() {
   return (
     <AuthLayout>
       <div className="flex flex-col gap-6">
-        <Alert variant="info" className="px-4 py-3 text-sm">
+        <Alert variant="info">
           <AlertTitle>{t("claim.title")}</AlertTitle>
-          <AlertDescription className="text-muted-foreground">
-            {t("claim.subtitle")}
-          </AlertDescription>
+          <AlertDescription>{t("claim.subtitle")}</AlertDescription>
         </Alert>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -116,7 +114,7 @@ export function ClaimPage() {
           )}
 
           <PendingButton type="submit" pending={submitting}>
-            {submitting ? t("claim.submitting") : t("claim.submit")}
+            {t("claim.submit")}
           </PendingButton>
         </form>
 

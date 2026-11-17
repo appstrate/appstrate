@@ -50,6 +50,7 @@ function space(overrides: Partial<Space> = {}): Space {
     settings: {},
     visibility: "open",
     default_role: "viewer",
+    credential_proxy_open: true,
     personal: false,
     access: "member",
     role: null,
@@ -202,7 +203,7 @@ describe("a settings page's deeds", () => {
   it("render only in the shell's title slot, never a second time in the page", () => {
     // `null` is the slot before it mounts: nothing may fall back to the page body.
     const html = renderAs(
-      <SettingsPageActionTargetProvider target={null}>
+      <SettingsPageActionTargetProvider target={null} badgeTarget={null}>
         {apiKeys()}
       </SettingsPageActionTargetProvider>,
       { permissions },

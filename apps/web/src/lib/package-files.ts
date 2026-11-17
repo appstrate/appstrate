@@ -1,28 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PackageFileWriteError } from "@appstrate/core/package-file-operations";
-import { PACKAGE_CONTENT_FILE, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
-import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../api/errors";
-
-interface DisplayFile {
-  name: string;
-  /** `"content"`: the stored content file (prompt.md, SKILL.md); `"manifest"`: serialized from the manifest. */
-  source: "manifest" | "content";
-}
-
-/** Primary file of a package type, from `PACKAGE_CONTENT_FILE` (shared with the ZIP parser). `mcp-server` has none: `manifest.json` IS its only file (AFPS §3.4). */
-export function primaryDisplayFile(type: PackageType): DisplayFile {
-  const content = PACKAGE_CONTENT_FILE[type];
-  return content === null
-    ? { name: PACKAGE_MANIFEST_FILE, source: "manifest" }
-    : { name: content, source: "content" };
-}
-
-export function companionDisplayFile(type: PackageType): DisplayFile | undefined {
-  const primary = primaryDisplayFile(type);
-  return primary.source === "content" ? primary : undefined;
-}
 
 /** The three path refusals of a draft-tree write: the one sentence of each code, here and in `errorMessage`. */
 export const PACKAGE_PATH_ERROR_KEYS = {

@@ -36,7 +36,7 @@ describe("connection_ids cardinality CHECKs", () => {
     const { rows } = await pg.query<{ relation: string; definition: string }>(
       `SELECT c.conrelid::regclass::text AS relation, pg_get_constraintdef(c.oid) AS definition
          FROM pg_constraint c
-        WHERE c.contype = 'c' AND pg_get_constraintdef(c.oid) LIKE '%cardinality(connection_ids)%'`,
+        WHERE c.contype = 'c' AND c.conname LIKE '%connection_ids_cardinality'`,
     );
     const bounds = Object.fromEntries(
       rows.map((row) => [

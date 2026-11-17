@@ -41,11 +41,11 @@ import {
 // OAuth clients
 // ─────────────────────────────────────────────
 
-/** The label key of a client's level; an auto-provisioned space client is told apart. */
+/** The label key of a client's level; an auto-provisioned client is told apart, at any tier. */
 export function clientLevelKey({ client, level }: ClientRow) {
   if (level === "system") return "source.builtIn";
-  if (level === "org") return "source.org";
-  return client.auto_provisioned ? "source.autoProvisioned" : "source.space";
+  if (client.auto_provisioned) return "source.autoProvisioned";
+  return level === "org" ? "source.org" : "source.space";
 }
 
 /**
@@ -53,10 +53,20 @@ export function clientLevelKey({ client, level }: ClientRow) {
  * one the org integrations admin's, the system's nobody's. A system client is the platform's and
  * an auto-provisioned one was minted by the server at connect time: neither has settings an admin
  * could edit (the auto-provisioned one may be deleted, which re-triggers registration).
+ *
+ * `canDeleteOrgMachineClients` (the caller holds `org-integrations:configure`) is apart from
+ * `canManageOrg`, which an auto-provisioned auth never grants (it has no org list to manage):
+ * the org's auto-provisioned client of such an auth is still the org admin's to delete.
  */
-export function clientDeeds({ client, level }: ClientRow, canManageOrg: boolean) {
+export function clientDeeds(
+  { client, level }: ClientRow,
+  canManageOrg: boolean,
+  canDeleteOrgMachineClients = false,
+) {
   const ownLevel = level === "space" || (level === "org" && canManageOrg);
-  return { ownLevel, editable: ownLevel && !client.auto_provisioned };
+  const deletable =
+    ownLevel || (level === "org" && client.auto_provisioned && canDeleteOrgMachineClients);
+  return { ownLevel, editable: ownLevel && !client.auto_provisioned, deletable };
 }
 
 /**
@@ -65,9 +75,7 @@ export function clientDeeds({ client, level }: ClientRow, canManageOrg: boolean)
  *
  * ONE table for both tiers (`lib/integration-clients.ts` merges the space's and
  * the organization's lists): a client appears once, and "used here" is the
- * single verdict that matters for a new connection. Use waits for a 36rem
- * table and level for the next tier: on a phone what matters is which clients
- * exist and how to remove one, and on a narrow table which one is in use.
+ * single verdict that matters for a new connection.
  *
  * What a row offers follows its level: a space's own client can be edited,
  * shared with the organization or deleted by whoever configures the space; an
@@ -76,6 +84,7 @@ export function clientDeeds({ client, level }: ClientRow, canManageOrg: boolean)
 export function useIntegrationClientColumns({
   canUseHere,
   canManageOrg,
+  canDeleteOrgMachineClients,
   canChooseOrgDefault,
   pendingClientRef,
   onUseHere,
@@ -86,8 +95,10 @@ export function useIntegrationClientColumns({
 }: {
   /** Choosing one only means something when the space can mint with more than one. */
   canUseHere: boolean;
-  /** The caller holds `org-integrations:configure`. */
+  /** The caller holds `org-integrations:configure`, on an auth with an org list (not auto-provisioned). */
   canManageOrg: boolean;
+  /** The caller holds `org-integrations:configure`: it may delete the org's auto-provisioned client. */
+  canDeleteOrgMachineClients: boolean;
   /** Same rule for the organization's own choice. */
   canChooseOrgDefault: boolean;
   /** The row with a write in flight — only that row shows pending. */
@@ -116,14 +127,12 @@ export function useIntegrationClientColumns({
       id: "level",
       header: t("integration.clients.col.level"),
       width: 104,
-      tier: 3,
       cell: (row) => <CellText>{t(clientLevelKey(row))}</CellText>,
     },
     {
       id: "use",
       header: t("integration.clients.col.use"),
       width: 168,
-      tier: 2,
       cell: (row) =>
         row.usedHere ? (
           <Badge variant="success">{t("integration.clients.usedHere")}</Badge>
@@ -133,10 +142,12 @@ export function useIntegrationClientColumns({
     },
     rowActionsColumn((row) => {
       const { client, level } = row;
-      const { ownLevel, editable } = clientDeeds(row, canManageOrg);
+      const { editable, deletable } = clientDeeds(row, canManageOrg, canDeleteOrgMachineClients);
       const promotable = level === "space" && !client.auto_provisioned && canManageOrg;
-      const useHere = canUseHere && row.inSpaceList && !row.usedHere;
-      const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
+      // An auto-provisioned client is listed for display and deletion, never chosen as a default.
+      const choosable = !client.auto_provisioned;
+      const useHere = choosable && canUseHere && row.inSpaceList && !row.usedHere;
+      const useForOrg = choosable && canChooseOrgDefault && row.inOrgList && !row.orgDefault;
       return (
         <TableRowActions
           menuLabel={t("providers.moreActions", { name: client.client_id })}
@@ -183,7 +194,7 @@ export function useIntegrationClientColumns({
               onSelect: () => onDelete(row),
               disabled: pendingClientRef === client.client_ref,
               destructive: true,
-              hidden: !ownLevel,
+              hidden: !deletable,
               testId: `oauth-client-delete-${client.client_ref}`,
             },
           ]}
@@ -205,11 +216,8 @@ export function useIntegrationClientColumns({
  * and delete, share and reconnect are all owner-only server-side. A control
  * drawn for a row the caller does not own is a button that answers 403.
  *
- * Tier one is the account and its action end. Status and the scope with
- * its share editor wait for 36rem; the method, the owner, the granted
- * scopes and the expiry wait for 56rem because they are the longest and least
- * often read facts. The floors are written so that the whole set, method
- * included, holds in 56rem and a 1440px page needs no sideways scroll.
+ * The widths are written so that the whole set holds in 56rem and a 1440px
+ * page needs no sideways scroll.
  */
 export function useConnectionColumns({
   packageId,
@@ -253,7 +261,6 @@ export function useConnectionColumns({
       header: t("integration.presentation.method"),
       width: 84,
       elastic: true,
-      tier: 3,
       cell: (c) => <CellText title={methodLabel(c)}>{methodLabel(c)}</CellText>,
     },
     {
@@ -261,7 +268,6 @@ export function useConnectionColumns({
       header: t("proxies.col.status"),
       width: 104,
       elastic: true,
-      tier: 2,
       cell: (c) => <StatusCell connection={c} />,
     },
     {
@@ -269,7 +275,6 @@ export function useConnectionColumns({
       header: t("integration.connection.col.owner"),
       width: 88,
       elastic: true,
-      tier: 3,
       cell: (c) => {
         const owner = c.owner_name ?? t("integration.connection.ownerUnknown");
         return <CellText title={owner}>{owner}</CellText>;
@@ -280,7 +285,6 @@ export function useConnectionColumns({
       header: t("roles.permissionsLabel"),
       width: 80,
       elastic: true,
-      tier: 3,
       cell: (c) =>
         c.scopes_granted.length > 0 ? (
           <ScopeSummaryText
@@ -297,7 +301,6 @@ export function useConnectionColumns({
       id: "expires",
       header: t("apiKeys.expirationColumn"),
       width: 84,
-      tier: 3,
       align: "end",
       cell: (c) => <CellDate value={c.expiresAt} granularity="date" />,
     },
@@ -305,7 +308,6 @@ export function useConnectionColumns({
       id: "usage",
       header: t("integration.connection.col.usage"),
       width: 184,
-      tier: 2,
       cell: (c) => <ConnectionScopeBadge scope={c.scope} testId={`connection-scope-${c.id}`} />,
     },
     {

@@ -9,7 +9,7 @@
 
 import type { ReactNode } from "react";
 import { Lock } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 
 export function RoleLimitNotice({
   children,
@@ -19,15 +19,8 @@ export function RoleLimitNotice({
   className?: string;
 }) {
   return (
-    <div
-      role="note"
-      className={cn(
-        "border-border bg-muted/40 text-muted-foreground flex items-start gap-2 rounded-lg border px-4 py-3 text-sm",
-        className,
-      )}
-    >
-      <Lock className="mt-0.5 size-4 shrink-0" aria-hidden />
-      <div className="min-w-0">{children}</div>
-    </div>
+    <Alert role="note" icon={Lock} className={className}>
+      <AlertDescription className="text-muted-foreground">{children}</AlertDescription>
+    </Alert>
   );
 }

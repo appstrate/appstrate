@@ -15,7 +15,7 @@
  *  4. the agent page fetching the agent's runs a second time, unpaginated and
  *     under a key of its own, to learn whether there is any;
  *  5. a launch refetching the run lists of the page it is leaving;
- *  6. a skill or MCP-server page reading the lists only an agent page shows.
+ *  6. a skill or integration page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -85,7 +85,7 @@ describe("dashboard reuses its own runs", () => {
   });
 
   it("keeps exactly one run query on the page", () => {
-    expect([...DASHBOARD.matchAll(/usePaginatedRuns\(/g)]).toHaveLength(1);
+    expect([...DASHBOARD.matchAll(/useFirstRunsPage\(/g)]).toHaveLength(1);
   });
 
   it("keeps the table free of queries, and the fetching list exported", () => {
@@ -96,14 +96,14 @@ describe("dashboard reuses its own runs", () => {
     expect(RUN_LIST).toContain("export function RunList(");
     expect(RUNS_TABLE).toContain("export function RunsTable(");
     expect(code(RUNS_TABLE)).not.toContain("useQuery");
-    expect(code(RUNS_TABLE)).not.toContain("usePaginatedRuns");
+    expect(code(RUNS_TABLE)).not.toContain("useRuns");
   });
 });
 
 describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
-    expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
-    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(Paginated)?Runs\(/);
+    expect(code(AGENT_ACTIONS)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
+    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
     expect(ACTIONS_DROPDOWN).toContain("!detail?.last_run");
   });
 
@@ -137,7 +137,7 @@ describe("notification freshness", () => {
     const intervals = [...NOTIFICATIONS.matchAll(/refetchInterval:\s*([^,\n]+)/g)].map(
       (m) => m[1]!,
     );
-    expect(intervals).toHaveLength(3);
+    expect(intervals).toHaveLength(2);
     expect(intervals.every((v) => v === "NOTIFICATION_POLL_INTERVAL_MS")).toBe(true);
   });
 
@@ -150,9 +150,9 @@ describe("notification freshness", () => {
     stream.connected(1_000);
     expect(keys()).toContain('["get","/api/notifications"]');
     expect(keys()).toContain('["get","/api/notifications/unread-count"]');
-    expect(keys()).toContain('["get","/api/notifications/unread-counts-by-agent"]');
   });
 
+  // A failed run lands in the bell, so a terminal frame re-reads the feed.
   it("still invalidates them on a terminal run seen live", () => {
     expect(GLOBAL_SYNC).toContain("TERMINAL_RUN_STATUSES.has(status)");
     expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)].length).toBeGreaterThan(1);

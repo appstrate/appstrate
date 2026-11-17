@@ -7,9 +7,16 @@
  * in the catalogue, behind a confirmation, and reaches the picker locked.
  */
 
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
 import { openRow } from "../../helpers/table.ts";
+
+/** The picker sits behind the composer's « + » menu (its chip shows only off the defaults). */
+async function openSkillsPicker(page: Page) {
+  await page.getByTestId("composer-tools-trigger").click();
+  await page.getByRole("menuitem", { name: /Compétences|Skills/ }).click();
+}
 
 test("carries the chosen mode and skills with the first message, and writes nothing before", async ({
   authedPage: page,
@@ -27,20 +34,30 @@ test("carries the chosen mode and skills with the first message, and writes noth
   });
 
   await page.goto("/chat");
-  const trigger = page.getByTestId("skills-picker-trigger");
-  await trigger.click();
+  await openSkillsPicker(page);
   const popover = page.getByTestId("skills-picker-popover");
   const auto = popover.getByTestId("skills-mode-auto");
   const manual = popover.getByTestId("skills-mode-manual");
   await expect(auto).toHaveAttribute("data-state", "active");
-  // In auto the assistant chooses: the list is inert.
+  // In auto the assistant chooses among the catalogue: the picker lists only imposed skills.
   const pin = popover.getByTestId(`skill-pin-${packageId}`);
-  await expect(pin).toBeDisabled();
+  await expect(pin).toHaveCount(0);
   await manual.click();
   await expect(manual).toHaveAttribute("data-state", "active");
+  await expect(pin).toBeEnabled();
   await pin.click();
   await expect(pin).toBeChecked();
   await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+
+  // The pinned skill shows as a pill in the composer, and the pill reopens the picker.
+  const pinnedPill = page.getByTestId("skill-pill-pinned");
+  await expect(pinnedPill).toBeVisible();
+  await pinnedPill.click();
+  await expect(popover).toBeVisible();
+  await expect(pin).toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
 
   // Choosing created nothing: same page, no conversation, no write.
   await expect(page).toHaveURL(/\/chat$/);
@@ -95,7 +112,7 @@ test("a skill imposed from the space library is locked in the picker, after a co
 
   // The composer lists it first, checked and locked, and not among the choices.
   await page.goto("/chat");
-  await page.getByTestId("skills-picker-trigger").click();
+  await openSkillsPicker(page);
   const popover = page.getByTestId("skills-picker-popover");
   const locked = popover.getByTestId(`skill-enforced-${packageId}`);
   await expect(locked).toBeChecked();

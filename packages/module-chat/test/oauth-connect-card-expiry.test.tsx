@@ -8,10 +8,12 @@
 
 import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { testHost } from "./test-host.ts";
 import { OAuthConnectCard } from "../src/ui/oauth-connect-card.tsx";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
@@ -32,16 +34,7 @@ const helpers: ChatHelpers = {
   clearError: () => {},
 };
 
-const host: ChatHost = {
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: () => null,
-  t: (key) => key,
-  can: () => false,
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-};
+const host = testHost({ can: () => false });
 
 function Card({ expiresAt }: { expiresAt?: string }) {
   const runtime = useAISDKRuntime(helpers);
@@ -59,9 +52,11 @@ function Card({ expiresAt }: { expiresAt?: string }) {
 
 const render = (expiresAt?: string) =>
   renderToString(
-    <ChatHostProvider value={host}>
-      <Card expiresAt={expiresAt} />
-    </ChatHostProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <ChatHostProvider value={host}>
+        <Card expiresAt={expiresAt} />
+      </ChatHostProvider>
+    </QueryClientProvider>,
   );
 
 describe("OAuthConnectCard expiry", () => {

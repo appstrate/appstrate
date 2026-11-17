@@ -145,10 +145,7 @@ export function InvitationsTable({
           cancel.mutate(
             { params: { path: { orgId, invitationId: canceling.id } } },
             {
-              onSuccess: () => {
-                setCancelingId(null);
-                toast.success(t("orgSettings.invitationCanceled"));
-              },
+              onSuccess: () => setCancelingId(null),
             },
           );
         }}

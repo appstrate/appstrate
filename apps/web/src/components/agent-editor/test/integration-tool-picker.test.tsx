@@ -34,6 +34,18 @@ describe("IntegrationToolPicker — required switch", () => {
     expect(html).toContain(i18n.t("settings:agentEditor.integrations.tools.detailUnavailable"));
   });
 
+  it("is not offered for the platform's own integration, which binds no connection", () => {
+    const id = "@appstrate/platform";
+    const html = render(
+      <IntegrationToolPicker
+        packageId={id}
+        entry={{ id, version: "^1.0.0", tools: [] }}
+        onChange={() => {}}
+      />,
+    );
+    expect(html).not.toContain(`integ-required-${id}`);
+  });
+
   it("is checked only for an entry marked required", () => {
     expect(renderPicker({ id: ID, version: "*", required: true })).toContain(
       'data-state="checked"',

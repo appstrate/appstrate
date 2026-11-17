@@ -8,11 +8,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
+import { PackageOriginMeta } from "../package-origin-meta";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
 interface AgentDetailBarDetail {
   id: string;
   source: string;
+  /** Absent for a home the reader cannot enter. */
+  homeSpaceName?: string | null;
   version?: string | null;
   /**
    * The page shows the latest PUBLISHED version, not the draft: what a caller
@@ -25,9 +28,8 @@ interface AgentDetailBarDetail {
 
 /**
  * The agent page's title, version pill, actions and tabs, in the shell header.
- * The agent's description and its other metadata are in the overview tab
- * (`AgentIdentity`), not here: the band carries only what the page is, what
- * version it shows and what can be done to it.
+ * Like every package header, its meta line says where the agent comes from and where it
+ * lives; its description is the catalogue sheet's.
  */
 export function AgentDetailBar<T extends string>({
   title,
@@ -73,7 +75,12 @@ export function AgentDetailBar<T extends string>({
         />
       }
       trail={[listCrumb]}
-      meta={<DetailBarId id={detail.id} />}
+      meta={
+        <>
+          <DetailBarId id={detail.id} />
+          <PackageOriginMeta source={detail.source} homeSpaceName={detail.homeSpaceName} />
+        </>
+      }
       actions={actions}
       tabs={tabs}
     />
@@ -111,7 +118,7 @@ function VersionPill({
 
   // A draft that says what the last published version already says is not worth a
   // pill of its own: the version is. "Draft" means it differs, or nothing is published.
-  if (draftVerdictPending) return <Skeleton className="h-5 w-14 shrink-0" />;
+  if (draftVerdictPending) return <Skeleton className="h-[22px] w-14 shrink-0 rounded-full" />;
   if (!hasUnarchivedChanges && detail.version) return published;
   return (
     <Tooltip>

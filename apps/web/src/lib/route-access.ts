@@ -56,9 +56,11 @@ export const ROUTE_ACCESS = {
 
   "/schedules": { anyOf: ["schedules:read"], operations: ["listSchedules"] },
   "/schedules/:id": { anyOf: ["schedules:read"], operations: ["getSchedule"] },
+  "/notifications/:id": {
+    open: "the caller's own notification: the feed asks no role grant, only a delegated credential's ceiling",
+  },
 
   "/skills": { anyOf: ["skills:read"], operations: ["listSkills"] },
-  "/skills/new": { anyOf: ["skills:write"], operations: ["createSkill"] },
   "/skills/:scope/:name": { anyOf: ["skills:read"], operations: ["getSkill"] },
   "/skills/:scope/:name/:version": {
     anyOf: ["skills:read"],
@@ -66,15 +68,11 @@ export const ROUTE_ACCESS = {
   },
 
   "/integrations": { anyOf: ["integrations:read"], operations: ["listIntegrations"] },
-  "/integrations/new": { anyOf: ["integrations:write"], operations: ["createIntegrationPackage"] },
-  "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
-
-  "/mcp-servers": { anyOf: ["mcp-servers:read"], operations: ["listMcpServerPackages"] },
-  "/mcp-servers/:scope/:name": { anyOf: ["mcp-servers:read"], operations: ["getMcpServerPackage"] },
-  "/mcp-servers/:scope/:name/:version": {
-    anyOf: ["mcp-servers:read"],
-    operations: ["getMcpServerPackageVersionDetail"],
+  "/integrations/new/mcp": {
+    anyOf: ["integrations:write"],
+    operations: ["discoverRemoteIntegration", "createIntegrationPackage"],
   },
+  "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
 
   "/catalogue": CATALOGUE,
   "/catalogue/:type": CATALOGUE,

@@ -13,10 +13,9 @@ interface RunCostReadoutProps {
 
 /**
  * The run cost, rendered with whatever caveat its pricing provenance calls for.
- * Both surfaces that display a run's cost go through this, so the run header
- * (`run-detail/run-header-summary.tsx`) and the Usage card
- * (`run-detail/run-snapshot-inspector.tsx`) can never disagree about the same
- * run.
+ * Every surface that displays a run's cost goes through this — today the Usage
+ * card (`run-detail/run-snapshot-inspector.tsx`) — so two of them can never
+ * disagree about the same run.
  *
  * A `priced` (or status-less) run renders exactly as it always did: bare text,
  * no tooltip, no interactive affordance. The tooltip only appears when there is

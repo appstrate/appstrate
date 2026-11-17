@@ -14,6 +14,29 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`readDeclaredOutputSchema(manifest)`** (`output-schema`): a manifest's `output.schema`
+  when it is a non-empty object, `undefined` otherwise. It is the single reading of "this
+  agent declares an output schema", shared by the runner (`output` tool), the platform
+  prompt (`## Output Format`) and the platform's output validation at finalize (#2197).
+- **`hasUserinfo(url)`** (`connection-variables`): whether a URL's authority carries userinfo, even
+  empty (`https://@host`), judged as WHATWG parses it. The credential proxy refuses such a target
+  (#2222).
+- **`normalizeSkillMd(content, name)`** (`companion-files`): points a `SKILL.md` frontmatter
+  `name` at `name` by rewriting only that line (or prepending it), every other byte as
+  authored. The MCP Skills extension and `appstrate code sync` share it (#2175).
+- **`setSkillMdVersion(content, version)`** (`companion-files`): points a `SKILL.md`
+  frontmatter `metadata.version` at `version`, or removes it for `null`, and leaves the
+  content untouched when it already holds that value. The MCP Skills extension writes a
+  skill's published version there (#2175).
+- **`SkillFrontmatter.fields`**: `parseSkillFrontmatter` returns the parsed frontmatter
+  mapping with every key as authored (`{}` when the block is absent or invalid), so the MCP
+  Skills extension serves a skill's `frontmatter` from the same parser as its `name` (#2175).
+- **`GuardedFetchOptions.returnRedirect`**: `(url, hop) => boolean`. It is called for each
+  redirect hop before `validateHop`, DNS resolution or any request. Returning `true` ends the
+  chain and returns the 3xx unfollowed. (#2154)
+
 ### Fixed
 
 - **`urlTemplateAuthority`** ends the authority at a backslash: WHATWG reads `\` as a

@@ -5,7 +5,7 @@
  *
  * When a module re-enters the platform in-process via `app.fetch()` (the MCP
  * server's tools do, each dispatching to the route it stands for — see
- * `modules/mcp/tools.ts` and `modules/mcp/connection-tools.ts`), the synthetic
+ * `modules/mcp/tools.ts` and `modules/mcp/api-call-batch.ts`), the synthetic
  * request carries the SAME bearer token the external caller presented. That
  * token may be audience-bound to a single protected resource (e.g.
  * `/api/mcp/o/:org`); the outbound half of `enforceResourceAudience`
@@ -31,6 +31,7 @@
  *   dispatched request still runs the full auth pipeline + RBAC.
  */
 
+import type { Context } from "hono";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
 /** Lower-case so it round-trips through `Headers` (which lower-cases names). */
@@ -60,4 +61,23 @@ export function isInternalDispatch(headers: Headers): boolean {
   const candidate = Buffer.from(value, "utf8");
   if (candidate.length !== DISPATCH_TOKEN_BYTES.length) return false;
   return timingSafeEqual(candidate, DISPATCH_TOKEN_BYTES);
+}
+
+/**
+ * The `c.env` key of an in-process dispatch confined to one space (the space-pinned MCP endpoint).
+ * Only `dispatchInProcess` passes an env holding it, so it cannot be forged; read by
+ * `callerReachableSpaces` alone, it bounds everything built on the caller's reach.
+ */
+const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
+
+/** The `app.fetch` env of a dispatch confined to `spaceId`. */
+export function dispatchSpacePinEnv(spaceId: string): Record<symbol, string> {
+  return { [DISPATCH_SPACE_PIN]: spaceId };
+}
+
+/** The space this request is a dispatch confined to, if it is one. */
+export function dispatchSpacePin(c: Context): string | undefined {
+  const env = c.env as Record<symbol, unknown> | undefined;
+  const pin = env?.[DISPATCH_SPACE_PIN];
+  return typeof pin === "string" ? pin : undefined;
 }

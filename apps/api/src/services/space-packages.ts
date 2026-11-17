@@ -10,10 +10,16 @@
  * keeps the row; only `withdrawPlacement` deletes it.
  */
 
-import { eq, and, exists, sql } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { eq, and, exists, inArray, sql } from "drizzle-orm";
+import type { AnyPgColumn, PgSelect } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
+import {
+  spacePackages,
+  packages,
+  packageDistTags,
+  packageVersions,
+  spaces,
+} from "@appstrate/db/schema";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   MAX_ENFORCED_CHAT_SKILLS,
@@ -25,18 +31,15 @@ import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
-import type { SpaceScope } from "../lib/scope.ts";
-import { assertSpaceInScope } from "./spaces.ts";
-import { ApiError } from "../lib/errors.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { parsePackageZip } from "@appstrate/core/zip";
+import type { OrgScope, SpaceScope } from "../lib/scope.ts";
+import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { placementRowJoin } from "./package-placement.ts";
 import {
   getLatestVersionId,
-  getVersionForDownload,
-  loadPublishedDefinition,
+  getVersionDetail,
+  requirePublishedArchive,
 } from "./package-versions.ts";
-import { downloadVersionZip } from "./package-storage.ts";
+import { serveSkillMd } from "./served-skill.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -47,57 +50,6 @@ import {
 // ---------------------------------------------------------------------------
 // Activate / Deactivate
 // ---------------------------------------------------------------------------
-
-/**
- * Historical mcp-server drafts may predate companion-file validation. Refuse
- * to activate one unless the exact `latest` archive is present and passes the
- * same parser used at authoring/import and runtime boot. System packages are
- * boot-registry artifacts and do not have a package_versions row here.
- *
- * Exported because {@link activatePackageWithin} cannot run it (object storage
- * has no place inside a transaction); callers owning the transaction run it first.
- * A republication between this check and the commit is accepted: the run path
- * parses what it downloads anyway.
- */
-export async function assertMcpServerActivatable(
-  scope: SpaceScope,
-  packageId: string,
-): Promise<void> {
-  const [pkg] = await db
-    .select({ type: packages.type, source: packages.source })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
-    .limit(1);
-  if (!pkg || pkg.type !== "mcp-server" || pkg.source === "system") return;
-
-  const version = await getVersionForDownload(packageId, "latest");
-  if (!version) {
-    throw new ApiError({
-      status: 422,
-      code: "bundle_invalid",
-      title: "Invalid MCP Server Bundle",
-      detail: `MCP-server package '${packageId}' has no activatable published version.`,
-    });
-  }
-
-  try {
-    const bytes = await downloadVersionZip(packageId, version.version, version.integrity);
-    if (!bytes) throw new Error(`archive for ${packageId}@${version.version} is missing`);
-    const parsed = parsePackageZip(new Uint8Array(bytes), { retiredRuntimeTools: "drop" });
-    if (parsed.type !== "mcp-server" || parsed.packageId !== packageId) {
-      throw new Error(
-        `archive identity is ${parsed.packageId} (${parsed.type}), expected ${packageId} (mcp-server)`,
-      );
-    }
-  } catch (err) {
-    throw new ApiError({
-      status: 422,
-      code: "bundle_invalid",
-      title: "Invalid MCP Server Bundle",
-      detail: `MCP-server package '${packageId}@${version.version}' is not executable: ${getErrorMessage(err)}`,
-    });
-  }
-}
 
 /** The placement row of `(space, package)`, `FOR UPDATE` so a concurrent withdrawal cannot delete it under a door's decision. */
 async function currentPlacement(tx: Tx, packageId: string, spaceId: string) {
@@ -235,7 +187,6 @@ export async function activatePackage(
   opts?: { placeAs?: PlacementAuthority },
 ): Promise<PackageActivation> {
   await assertSpaceInScope(scope);
-  await assertMcpServerActivatable(scope, packageId);
 
   // One transaction: the org-visibility check is atomic with the write.
   return db.transaction((tx) => activatePackageWithin(tx, scope, packageId, opts));
@@ -243,8 +194,7 @@ export async function activatePackage(
 
 /**
  * {@link activatePackage}'s body inside the caller's transaction, for the home
- * move; the caller has already run {@link assertSpaceInScope} and
- * {@link assertMcpServerActivatable}. `keepExistingDecision` leaves a
+ * move; the caller has already run {@link assertSpaceInScope}. `keepExistingDecision` leaves a
  * destination's existing on/off verdict alone (a move transfers authority, not
  * what a space runs).
  */
@@ -416,7 +366,7 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * an ephemeral shadow. Expects the `spacePackages` join of {@link activeHereSql},
  * which index pages, hints and the run gate all share.
  */
-export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
+export function activePackagesFilter(scope: OrgScope, type: PackageType) {
   return and(
     eq(packages.type, type),
     orgOrSystemFilter(scope.orgId),
@@ -426,9 +376,40 @@ export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
 }
 
 /**
+ * Narrow `query` (a `$dynamic()` select from `packages`) to the packages of one
+ * `type` active in any of `spaceIds`, one row per package ({@link activeSpaceIds}
+ * names the spaces). A column `query` selects beyond `packages`' own goes in
+ * `groupBy`.
+ */
+export function activeInSpaces<Q extends PgSelect>(
+  query: Q,
+  orgId: string,
+  spaceIds: readonly string[],
+  type: PackageType,
+  groupBy: AnyPgColumn[] = [],
+) {
+  return query
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+    .where(activePackagesFilter({ orgId }, type))
+    .groupBy(packages.id, ...groupBy);
+}
+
+/**
+ * The spaces of {@link activeInSpaces} where a package is active: its home first
+ * when it is one of them, then in the order of a space listing
+ * ({@link spaceListingOrder}). Never empty: a package is listed for its spaces.
+ */
+export function activeSpaceIds() {
+  return sql<
+    string[]
+  >`array_agg(${spaces.id} ORDER BY (${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC, ${sql.join(spaceListingOrder(), sql`, `)})`;
+}
+
+/**
  * ORDER BY for the TWO reads below — {@link listActivePackages}, which the
- * per-type index pages draw from, and `listActivePackageHints`, the capped
- * caller-context list: system first, then by id. One function so an index and
+ * agent index and the served skills draw from, and `listActivePackageHints`,
+ * the capped caller-context list: system first, then by id. One function so an index and
  * the hints the model is handed for it cannot rank the SAME active set
  * differently.
  *
@@ -443,23 +424,36 @@ function packageListingOrder() {
 }
 
 /**
- * List every package of one `type` this space runs ({@link activePackagesFilter}):
- * what can be launched from here. Placed-but-off packages belong to the library
- * (`services/package-library.ts`). The projection omits `draft_content` and the
- * `latest` tag: an index card reads neither.
+ * List every package of one `type` any of `spaceIds` runs
+ * ({@link activePackagesFilter}): what can be launched from there, one row per
+ * package carrying the spaces it is active in ({@link activeSpaceIds}) — ONE
+ * statement whatever the number of spaces. Placed-but-off packages belong to
+ * the library (`services/package-library.ts`). The projection omits
+ * `draft_content`, which an index card never reads; `latestVersionId` answers
+ * {@link isPublished}. Ordered by {@link packageListingOrder}.
  */
-export async function listActivePackages(scope: SpaceScope, type: PackageType) {
-  return db
+export async function listActivePackages(
+  orgId: string,
+  spaceIds: readonly string[],
+  type: PackageType,
+) {
+  if (spaceIds.length === 0) return [];
+  const query = db
     .select({
       id: packages.id,
+      spaceIds: activeSpaceIds(),
       type: packages.type,
       draftManifest: packages.draftManifest,
       source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
+      latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .where(activePackagesFilter(scope, type))
-    .orderBy(...packageListingOrder());
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .$dynamic();
+  return activeInSpaces(query, orgId, spaceIds, type, [packageDistTags.versionId]).orderBy(
+    ...packageListingOrder(),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -955,11 +949,31 @@ export async function updatePlacementSettings(
   });
 }
 
+/**
+ * The `SKILL.md` the chat injects for the `latest` published version of a
+ * skill: the one {@link serveSkillMd} serves from its whole archive (normalized
+ * `name`, `metadata.version` written), or `null` without a published version. A
+ * skill that cannot be served is refused: the chat could not inject it.
+ */
+async function injectedSkillMd(packageId: string, tx: Tx): Promise<string | null> {
+  const detail = await getVersionDetail(packageId, "latest", { executor: tx });
+  if (!detail) return null;
+  const { files } = requirePublishedArchive("skill", packageId, detail);
+  const served = serveSkillMd(packageId, files, detail.version);
+  if (!served.ok) {
+    throw conflict(
+      "skill_not_servable",
+      `Skill '${packageId}' version ${detail.version} cannot be served as an Agent Skills skill (${served.reason}) — publish a version that can`,
+    );
+  }
+  return served.content;
+}
+
 // Every read goes through `tx`: under PGlite's single connection a query on
 // the root `db` would wait on this very transaction.
 async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
-  const own = await loadPublishedDefinition("skill", packageId, "latest", tx);
-  if (!own) {
+  const own = await injectedSkillMd(packageId, tx);
+  if (own === null) {
     throw conflict(
       "no_published_version",
       `Skill '${packageId}' has no published version to enforce — publish it first`,
@@ -979,15 +993,10 @@ async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: T
     );
   }
 
-  const others = await Promise.all(
-    flagged
-      .filter((row) => row.packageId !== packageId)
-      .map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
-  );
-  const total = others.reduce(
-    (sum, skill) => sum + (skill?.content.length ?? 0),
-    own.content.length,
-  );
+  const flaggedOthers = flagged.filter((row) => row.packageId !== packageId);
+  const others = await Promise.all(flaggedOthers.map((row) => injectedSkillMd(row.packageId, tx)));
+  // Measured as injected: the served `SKILL.md` is what the chat puts in the prompt.
+  const total = others.reduce((sum, skill) => sum + (skill?.length ?? 0), own.length);
   if (total > CHAT_SKILLS_CONTENT_BUDGET_CHARS) {
     throw conflict(
       "enforced_skills_budget",

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentProps, ComponentType, ReactNode } from "react";
 import { Button } from "@appstrate/ui/components/button";
 
-/** A full-width option button: icon tile, title (with an optional trailing adornment), description. */
+/**
+ * A full-width option button: icon tile, title (with an optional trailing adornment), description.
+ * Other props reach the button, so it can be a menu's trigger (`SpaceChoiceDropdown`).
+ */
 export function ChoiceCard({
   icon: Icon,
   title,
@@ -11,17 +14,19 @@ export function ChoiceCard({
   adornment,
   onClick,
   disabled,
+  ...trigger
 }: {
   icon: ComponentType;
   title: ReactNode;
   description: ReactNode;
   /** Rendered after the title, e.g. a badge or a copy glyph. */
   adornment?: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
   disabled?: boolean;
-}) {
+} & Omit<ComponentProps<"button">, "title" | "onClick" | "disabled">) {
   return (
     <Button
+      {...trigger}
       type="button"
       variant="outline"
       className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"

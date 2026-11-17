@@ -38,7 +38,10 @@ import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./
 import { principalGrants } from "./principal-permissions.ts";
 import { toScopeCeiling } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
-import { INTEGRATION_TAGGED_CALLBACK_PATH } from "./integration-callback-url.ts";
+import {
+  INTEGRATION_CALLBACK_PATH,
+  INTEGRATION_TAGGED_CALLBACK_PATH,
+} from "./integration-callback-url.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
@@ -227,12 +230,11 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.deferOrgResolution) {
           c.set("deferOrgResolution", true);
         }
-        if (resolution.firstPartyLoopback) {
-          // Declared first-party loopback capability (server-minted, process-local
-          // bearer). The bearer-only proxy gates read this instead of matching a
-          // module's auth-method id. See apps/api/src/lib/bearer-only.ts.
-          c.set("firstPartyLoopback", true);
-        }
+        // Declared capabilities of a server-minted bearer. The bearer-only proxy gates
+        // read these instead of matching a module's auth-method id: the credential
+        // proxy `serverMinted`, the LLM proxy `firstPartyLoopback`. See lib/bearer-only.ts.
+        if (resolution.serverMinted) c.set("serverMinted", true);
+        if (resolution.firstPartyLoopback) c.set("firstPartyLoopback", true);
         if (resolution.extra && Object.keys(resolution.extra).length > 0) {
           // Strategy-specific opaque metadata. Consumers cast to the
           // shape they expect — keeping it untyped here avoids dragging
@@ -497,7 +499,7 @@ export function skipAuth(
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
-  if (path === "/api/integrations/callback") return true; // Integration OAuth redirect — no session
+  if (path === INTEGRATION_CALLBACK_PATH) return true; // Integration OAuth redirect — no session
   if (INTEGRATION_TAGGED_CALLBACK_PATH.test(path)) return true; // Its per-authorization-server twin
   // Hosted connect portal — token/page-cookie authenticated at the
   // route layer. The authed MINT route lives at
@@ -507,9 +509,10 @@ export function skipAuth(
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
   // Unified-runner run-scoped routes: event ingestion
-  // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
-  // workspace self-provisioning fetches (`/api/runs/:runId/workspace`,
-  // `/files`, `/files/:name`). All authenticate via a Standard
+  // (`/api/runs/:id/events[/finalize|/heartbeat]`) and the agent
+  // workspace self-provisioning fetches (`/api/runs/:id/workspace`,
+  // `/files`, `/files/:name`), and the run MCP server of a remote run
+  // (`/api/runs/:id/mcp`). All authenticate via a Standard
   // Webhooks HMAC signature at the route layer — not via JWT / API key /
   // cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
@@ -528,7 +531,7 @@ export function skipAuth(
 }
 
 const REMOTE_RUN_EVENT_PATH_PATTERN =
-  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|files(\/[^/]+)?)$/;
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|files(\/[^/]+)?|mcp)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

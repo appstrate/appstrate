@@ -106,9 +106,8 @@ function overrideRefusal(r: {
 /**
  * Refuses a `connection_overrides` KEY the EFFECTIVE manifest does not declare
  * (`undeclared_connection_override`): the resolver would drop it and bind a lower cascade layer
- * instead. Also `[]`
- * on an integration the manifest marks `required`, which no launch could ever satisfy —
- * the `required_integration_unbound` a pin's `[]` raises, refused here at the write.
+ * instead. A VALUE is the resolver's to judge: `[]` on a `required` integration binds an imposed
+ * set whole (it adds nothing), and is `required_integration_unbound` only where nothing imposes one.
  */
 export function assertConnectionOverridesAllowed(
   manifest: Record<string, unknown>,
@@ -126,15 +125,14 @@ interface OverrideKeyRefusal {
   error: ApiError;
 }
 
-/** Every key {@link assertConnectionOverridesAllowed} refuses — undeclared first. */
+/** Every key {@link assertConnectionOverridesAllowed} refuses. */
 export function connectionOverrideRefusals(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, readonly unknown[]>> | null | undefined,
 ): OverrideKeyRefusal[] {
   if (!overrides) return [];
-  const declared = parseManifestIntegrations(manifest);
-  const ids = new Set(declared.map((entry) => entry.id));
-  const undeclared = Object.keys(overrides)
+  const ids = new Set(parseManifestIntegrations(manifest).map((entry) => entry.id));
+  return Object.keys(overrides)
     .filter((key) => !ids.has(key))
     .map((key) =>
       overrideRefusal({
@@ -144,15 +142,4 @@ export function connectionOverrideRefusals(
         message: `${key} is not an integration this agent declares — remove the key`,
       }),
     );
-  const emptiedRequired = declared
-    .filter((entry) => entry.required === true && overrides[entry.id]?.length === 0)
-    .map((entry) =>
-      overrideRefusal({
-        field: "connection_overrides",
-        key: entry.id,
-        code: "required_integration_unbound",
-        message: `The agent marks ${entry.id} \`required\`, so its set cannot be empty — name at least one connection, or omit the key`,
-      }),
-    );
-  return [...undeclared, ...emptiedRequired];
 }

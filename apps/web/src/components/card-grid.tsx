@@ -17,6 +17,7 @@ export function CardGrid<T>({
   renderCard,
   itemKey,
   min = "20rem",
+  placeholder,
   ...state
 }: {
   items: T[];
@@ -24,6 +25,8 @@ export function CardGrid<T>({
   itemKey: (item: T) => string;
   /** The narrowest a card may be before the grid drops a column (thumbnails pass less). */
   min?: string;
+  /** A card while the items load: `renderCard`'s shape, so a card lands where it waited. */
+  placeholder?: ReactNode;
 } & CollectionState) {
   const verdict = collectionVerdict(state, items.length);
 
@@ -32,13 +35,7 @@ export function CardGrid<T>({
       <CollectionStates
         verdict={verdict}
         state={state}
-        skeleton={
-          <Grid min={min}>
-            {Array.from({ length: SKELETON_CARDS }, (_, i) => (
-              <Skeleton key={i} className="h-28 rounded-lg" />
-            ))}
-          </Grid>
-        }
+        skeleton={<CardGridSkeleton min={min} placeholder={placeholder} />}
       />
     );
   }
@@ -54,6 +51,31 @@ export function CardGrid<T>({
           {renderCard(item)}
         </div>
       ))}
+    </Grid>
+  );
+}
+
+/** The grid's wait, also a collection route's fallback when its list is shown as cards. */
+export function CardGridSkeleton({
+  min = "20rem",
+  placeholder,
+}: {
+  min?: string;
+  /** The card's shape (`CardGrid`'s `placeholder`); a plain block when unset. */
+  placeholder?: ReactNode;
+}) {
+  return (
+    <Grid min={min}>
+      {Array.from({ length: SKELETON_CARDS }, (_, i) =>
+        placeholder ? (
+          // The real cell (`h-full [&>*]:h-full`), so the placeholder fills its row the same way.
+          <div key={i} className="h-full [&>*]:h-full">
+            {placeholder}
+          </div>
+        ) : (
+          <Skeleton key={i} className="h-28 rounded-lg" />
+        ),
+      )}
     </Grid>
   );
 }

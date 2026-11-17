@@ -7,7 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Mail } from "lucide-react";
 import { useAppForm } from "../../hooks/use-app-form";
-import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { ConfirmModal } from "../../components/confirm-modal";
 import { Input } from "@appstrate/ui/components/input";
 import { FieldError } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
@@ -44,6 +45,30 @@ function LinkedAccountsSection({
   // Account row id (`LinkedAccount["id"]`) awaiting a step-up re-login, not a
   // provider id — it is fed straight back to `unlinkAccount()` on retry.
   const [pendingUnlink, setPendingUnlink] = useState<string | null>(null);
+  const [confirmUnlink, setConfirmUnlink] = useState<{
+    accountId: string;
+    providerId: string;
+    name: string;
+  } | null>(null);
+
+  const unlink = async (accountId: string, providerId: string) => {
+    setUnlinking(providerId);
+    try {
+      await unlinkAccount(accountId);
+      await refetch();
+    } catch (err: unknown) {
+      if (err instanceof SessionNotFreshError) {
+        // Session too old for a sensitive action — walk the user
+        // through a step-up re-login, then retry the unlink.
+        setPendingUnlink(accountId);
+      } else {
+        // Surface the failure: swallowed, the button just stops spinning.
+        toastError(err);
+      }
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
   if (!features.googleAuth && !features.githubAuth) return null;
 
@@ -62,7 +87,6 @@ function LinkedAccountsSection({
             icon: GoogleIcon,
             account: googleAccount,
             link: linkGoogle,
-            linkingKey: "preferences.linkingGoogle" as const,
             linkKey: "preferences.linkGoogle" as const,
           },
         ]
@@ -75,7 +99,6 @@ function LinkedAccountsSection({
             icon: GitHubIcon,
             account: githubAccount,
             link: linkGithub,
-            linkingKey: "preferences.linkingGoogle" as const,
             linkKey: "preferences.linkGithub" as const,
           },
         ]
@@ -120,34 +143,22 @@ function LinkedAccountsSection({
                     <div className="text-muted-foreground text-xs">{account.accountId}</div>
                   </div>
                 </div>
-                <Button
+                <PendingButton
                   variant="ghost"
                   size="sm"
-                  disabled={!canUnlink || unlinking === provider.id}
+                  pending={unlinking === provider.id}
+                  disabled={!canUnlink}
                   title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
-                  onClick={async () => {
-                    setUnlinking(provider.id);
-                    try {
-                      await unlinkAccount(account.id);
-                      await refetch();
-                    } catch (err: unknown) {
-                      if (err instanceof SessionNotFreshError) {
-                        // Session too old for a sensitive action — walk the user
-                        // through a step-up re-login, then retry the unlink.
-                        setPendingUnlink(account.id);
-                      } else {
-                        // Surface the failure: swallowed, the button just stops spinning.
-                        toastError(err);
-                      }
-                    } finally {
-                      setUnlinking(false);
-                    }
-                  }}
+                  onClick={() =>
+                    setConfirmUnlink({
+                      accountId: account.id,
+                      providerId: provider.id,
+                      name: provider.name,
+                    })
+                  }
                 >
-                  {unlinking === provider.id
-                    ? t("preferences.unlinking")
-                    : t("preferences.unlinkGoogle")}
-                </Button>
+                  {t("preferences.unlinkGoogle")}
+                </PendingButton>
               </Card>
             ) : (
               <Card
@@ -158,10 +169,10 @@ function LinkedAccountsSection({
                   <Icon className="size-5" />
                   <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
                 </div>
-                <Button
+                <PendingButton
                   variant="outline"
                   size="sm"
-                  disabled={linking === provider.id}
+                  pending={linking === provider.id}
                   onClick={async () => {
                     setLinking(provider.id);
                     try {
@@ -171,13 +182,27 @@ function LinkedAccountsSection({
                     }
                   }}
                 >
-                  {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
-                </Button>
+                  {t(provider.linkKey)}
+                </PendingButton>
               </Card>
             );
           })}
         </div>
       )}
+      <ConfirmModal
+        open={confirmUnlink !== null}
+        onClose={() => setConfirmUnlink(null)}
+        title={t("preferences.unlinkConfirmTitle", { provider: confirmUnlink?.name ?? "" })}
+        description={t("preferences.unlinkConfirm", { provider: confirmUnlink?.name ?? "" })}
+        confirmLabel={t("preferences.unlinkGoogle")}
+        isPending={unlinking !== false}
+        onConfirm={() => {
+          if (!confirmUnlink) return;
+          const { accountId, providerId } = confirmUnlink;
+          setConfirmUnlink(null);
+          void unlink(accountId, providerId);
+        }}
+      />
       <ReauthModal
         open={pendingUnlink !== null}
         methods={availableReauthMethods(accounts, features)}
@@ -185,7 +210,6 @@ function LinkedAccountsSection({
           try {
             await unlinkAccount(pendingUnlink!);
             await refetch();
-            toast.success(t("preferences.unlinked"));
           } catch (err: unknown) {
             // The retry can still fail (last account, unlinked in another tab).
             toastError(err);
@@ -255,9 +279,9 @@ function PasswordChangeForm() {
         <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
         {success && <div className="text-success text-sm">{success}</div>}
-        <Button type="submit" className="self-start" disabled={isSubmitting}>
-          {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
-        </Button>
+        <PendingButton type="submit" className="self-start" pending={isSubmitting}>
+          {t("preferences.changePassword")}
+        </PendingButton>
       </form>
     </Card>
   );
@@ -324,24 +348,24 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
         <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
-        <Button type="submit" className="self-start" disabled={isSubmitting}>
-          {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}
-        </Button>
+        <PendingButton type="submit" className="self-start" pending={isSubmitting}>
+          {t("preferences.setPassword")}
+        </PendingButton>
       </form>
       {features.smtp && (
         <div className="border-border mt-4 border-t pt-4">
           {resetEmailState === "sent" ? (
             <div className="text-success text-sm">{t("preferences.resetEmailSent")}</div>
           ) : (
-            <Button
+            <PendingButton
               type="button"
               variant="ghost"
               size="sm"
-              disabled={resetEmailState === "sending"}
+              pending={resetEmailState === "sending"}
               onClick={sendResetEmail}
             >
               {t("preferences.sendResetEmail")}
-            </Button>
+            </PendingButton>
           )}
         </div>
       )}
@@ -358,6 +382,7 @@ export function PreferencesSecurityPage() {
     refetch,
     error: accountsError,
   } = useQuery({
+    // Better Auth's own endpoint, absent from the OpenAPI spec: a named key, user-level.
     queryKey: ["linked-accounts"],
     queryFn: () => listLinkedAccounts(),
   });

@@ -181,17 +181,24 @@ export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
 
 /**
  * What each organization role grants (`GET /api/org-roles`, module contributions included), as
- * `role → permissions`; `undefined` until it answers. The same for every caller.
+ * `role → permissions`; `undefined` until it answers, and with `error` when it failed. The same
+ * for every caller.
  */
-export function useOrgRoleGrants(): Map<OrgRole, Set<string>> | undefined {
+export function useOrgRoleGrants(): {
+  grants: Map<OrgRole, Set<string>> | undefined;
+  error: unknown;
+} {
   const scope = useOrgOnlyScope();
-  const { data } = $api.useQuery(
+  const { data, error } = $api.useQuery(
     "get",
     "/api/org-roles",
     { params: { header: scope.header } },
     { enabled: scope.enabled, staleTime: Infinity },
   );
-  return data
-    ? new Map(data.data.map((entry) => [entry.role, new Set(entry.permissions)]))
-    : undefined;
+  return {
+    grants: data
+      ? new Map(data.data.map((entry) => [entry.role, new Set(entry.permissions)]))
+      : undefined,
+    error,
+  };
 }

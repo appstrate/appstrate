@@ -78,22 +78,24 @@ describe("buildPlatformPromptInputs", () => {
     });
   });
 
-  it("collects skill dependencies (mcp-servers are advertised via MCP tools/list, not derived here)", () => {
+  it("collects skill dependencies (a local integration's server tools are advertised via MCP tools/list, not derived here)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    // An `mcp-server` package must NOT surface — only skills are collected;
-    // mcp-server tools reach the model via MCP `tools/list`.
+    // A local integration member carries its own server payload; its tools reach
+    // the model via MCP `tools/list`, never this prompt.
     const mcp = pkg(
       "@acme/m1@1.0.0",
       {
-        manifest_version: "0.3",
         name: "@acme/m1",
         version: "1.0.0",
-        type: "mcp-server",
+        type: "integration",
         schema_version: "0.1",
-        server: {
-          type: "node",
-          entry_point: "server/index.js",
-          mcp_config: { command: "node", args: ["server/index.js"] },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
         },
       },
       { "server/index.js": "//" },
@@ -125,24 +127,30 @@ describe("buildPlatformPromptInputs", () => {
       },
       { "prompt.md": "Do the thing." },
     );
-    const mcp = pkg("@acme/m@1.0.0", {
-      manifest_version: "0.3",
-      name: "@acme/m",
-      version: "1.0.0",
-      type: "mcp-server",
-      schema_version: "0.1",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+    const mcp = pkg(
+      "@acme/m@1.0.0",
+      {
+        name: "@acme/m",
+        version: "1.0.0",
+        type: "integration",
+        schema_version: "0.1",
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
       },
-    });
+      { "server/index.js": "//" },
+    );
     const prompt = renderPlatformPrompt(
       buildPlatformPromptInputs(bundleOf(root, mcp), ctx(), { platformName: "Test" }),
     );
     expect(prompt).toContain("running on the Test platform");
     expect(prompt).toContain("**Timeout**: You have 60 seconds");
-    // mcp-server tools are advertised via MCP tools/list — not in the prompt.
+    // local-server tools are advertised via MCP tools/list — not in the prompt.
     expect(prompt).not.toContain("### Tools");
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("Do the thing.");
@@ -154,6 +162,17 @@ describe("buildPlatformPromptInputs", () => {
     expect(inputs.integrations).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();
+  });
+
+  it("renders no output section for an empty `output.schema`", () => {
+    const root = pkg(
+      "@acme/agent@1.0.0",
+      { type: "agent", output: { schema: {} } },
+      { "prompt.md": "Do the thing." },
+    );
+    const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
+    expect(inputs.outputSchema).toBeUndefined();
+    expect(renderPlatformPrompt(inputs)).not.toContain("## Output Format");
   });
 
   it("overrides never leak context — caller-supplied context always wins", () => {

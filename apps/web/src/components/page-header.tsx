@@ -12,6 +12,8 @@ interface PageHeaderProps {
   titleClassName?: string;
   /** Custom leading icon node. */
   icon?: ReactNode;
+  /** One line under the title, styled like a settings heading's. */
+  description?: ReactNode;
   breadcrumbs?: BreadcrumbEntry[];
   actions?: ReactNode;
   /** Lets an action group move below the title when the container is genuinely too narrow. */
@@ -25,6 +27,7 @@ export function PageHeader({
   variant = "default",
   titleClassName,
   icon,
+  description,
   breadcrumbs,
   actions,
   wrapActions = false,
@@ -65,6 +68,7 @@ export function PageHeader({
           </div>
         )}
       </div>
+      {description && <div className="text-muted-foreground mt-1 text-sm">{description}</div>}
       {children}
     </div>
   );

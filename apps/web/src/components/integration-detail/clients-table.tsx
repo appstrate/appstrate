@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, KeyRound, Plus } from "lucide-react";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "../app-ui/checkbox-field";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +18,8 @@ import { FormItem } from "../app-ui/form-item";
 import { CopyBlock } from "../copy-block";
 import { CallbackUrlHint } from "../package-detail/callback-url-hint";
 import { ConfirmModal } from "../confirm-modal";
-import { Modal } from "../modal";
+import { FormModal } from "../form-modal";
+import { errorMessage } from "../../lib/mutation-error";
 import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -52,6 +55,70 @@ type ModalState =
   | { mode: "edit"; tier: IntegrationClientTier; client: IntegrationClient }
   | null;
 
+/**
+ * The client's redirect URI override and the exact redirect_uri connect sends — none for a
+ * `connect.login` auth, whose first token comes from a token request, not a redirect.
+ */
+export function OAuthClientRedirectFields({
+  authKey,
+  authDecl,
+  redirectUri,
+  onRedirectUriChange,
+  platformRedirectUri,
+}: {
+  authKey: string;
+  authDecl?: IntegrationManifestAuth;
+  redirectUri: string;
+  onRedirectUriChange: (value: string) => void;
+  platformRedirectUri: string;
+}) {
+  const { t } = useTranslation("settings");
+  if (authDecl && acquiresByConnectLogin(authDecl)) return null;
+  // What connect will send for THIS client. Named once: the copy block and the
+  // publisher hint below must agree, and they diverge the moment the same
+  // expression is spelled out twice.
+  const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
+  return (
+    <>
+      <FormItem
+        id={`redir-${authKey}`}
+        label={t("integration.oauthClient.redirectUri")}
+        className="sm:col-span-2"
+      >
+        <Input
+          type="url"
+          value={redirectUri}
+          onChange={(e) => onRedirectUriChange(e.target.value)}
+        />
+      </FormItem>
+      {/* The redirect_uri connect will send for THIS client: the override typed above when it
+          is set, else the platform callback. Providers compare it byte-for-byte and reject a
+          mismatch with an opaque error, so the admin is shown the exact string to register
+          rather than left to reconstruct it from the browser's origin (which is NOT
+          authoritative — `APP_URL` is). */}
+      <div className="flex flex-col gap-1 sm:col-span-2">
+        <p className="text-muted-foreground text-[0.7rem]">
+          {t("integration.oauthClient.platformRedirectUri")}
+        </p>
+        <CopyBlock
+          value={effectiveRedirectUri}
+          dense
+          testId={`platform-redirect-uri-modal-${authKey}`}
+        />
+        {/* AFPS §7.10: `auths.<key>.callback_url_hint`, its `{{callback_url}}` placeholder
+            resolved against the SAME value shown above. */}
+        {authDecl?.callback_url_hint && (
+          <CallbackUrlHint
+            hint={authDecl.callback_url_hint}
+            callbackUrl={effectiveRedirectUri}
+            authKey={authKey}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
 function OAuthClientModal({
   tier,
   packageId,
@@ -74,14 +141,11 @@ function OAuthClientModal({
   const { t } = useTranslation("settings");
   const create = useCreateIntegrationOAuthClient(tier);
   const update = useUpdateIntegrationOAuthClient(tier);
-  const pending = mode === "create" ? create.isPending : update.isPending;
+  const mutation = mode === "create" ? create : update;
+  const pending = mutation.isPending;
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
-  // What connect will send for THIS client. Named once: the copy block and the
-  // publisher hint below must agree, and they diverge the moment the same
-  // expression is spelled out twice.
-  const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
   // The admin's own declaration, read back from the row — NOT re-derived from
   // the absence of a secret. The old `!has_client_secret` guess could not tell
   // "declared public" from "secret not entered yet", so reopening a client
@@ -144,100 +208,69 @@ function OAuthClientModal({
   };
 
   return (
-    <Modal
+    <FormModal
       onClose={onClose}
       title={
         mode === "create"
           ? t("integration.oauthClient.modalCreateTitle")
           : t("integration.oauthClient.btnEdit")
       }
+      onSubmit={submit}
+      isPending={pending}
+      error={mutation.error ? errorMessage(mutation.error) : null}
+      submitLabel={
+        mode === "create"
+          ? t("integration.oauthClient.btnRegister")
+          : t("integration.oauthClient.btnEdit")
+      }
+      submitDisabled={clientId.trim() === ""}
+      submitTestId={`oauth-client-save-${authKey}`}
+      formProps={{ className: "grid gap-3 sm:grid-cols-2" }}
     >
-      <form
-        className="grid gap-3 sm:grid-cols-2"
-        onSubmit={submit}
-        data-testid={`oauth-client-form-${authKey}`}
+      <FormItem id={`cid-${authKey}`} label={t("oauthClients.clientIdColumn")}>
+        <Input
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          disabled={mode === "edit"}
+          data-testid={`oauth-clientid-${authKey}`}
+        />
+      </FormItem>
+      <FormItem
+        id={`csecret-${authKey}`}
+        label={t("integration.oauthClient.clientSecret")}
+        error={
+          secretMissing && (secretTouched || attempted) ? (
+            <span data-testid={`oauth-clientsecret-error-${authKey}`}>
+              {t("integration.oauthClient.clientSecretRequired")}
+            </span>
+          ) : undefined
+        }
       >
-        <FormItem id={`cid-${authKey}`} label={t("oauthClients.clientIdColumn")}>
-          <Input
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            disabled={mode === "edit"}
-            data-testid={`oauth-clientid-${authKey}`}
-          />
-        </FormItem>
-        <FormItem
-          id={`csecret-${authKey}`}
-          label={t("integration.oauthClient.clientSecret")}
-          error={
-            secretMissing && (secretTouched || attempted) ? (
-              <span data-testid={`oauth-clientsecret-error-${authKey}`}>
-                {t("integration.oauthClient.clientSecretRequired")}
-              </span>
-            ) : undefined
-          }
-        >
-          <Input
-            type="password"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            onBlur={() => setSecretTouched(true)}
-            disabled={publicClient}
-            placeholder={existing?.has_client_secret ? "••••••••" : ""}
-            data-testid={`oauth-clientsecret-${authKey}`}
-          />
-        </FormItem>
-        <FormItem
-          id={`redir-${authKey}`}
-          label={t("integration.oauthClient.redirectUri")}
-          className="sm:col-span-2"
-        >
-          <Input type="url" value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} />
-        </FormItem>
-        {/* The redirect_uri connect will send for THIS client: the override typed above when it
-            is set, else the platform callback. Providers compare it byte-for-byte and reject a
-            mismatch with an opaque error, so the admin is shown the exact string to register
-            rather than left to reconstruct it from the browser's origin (which is NOT
-            authoritative — `APP_URL` is). */}
-        <div className="flex flex-col gap-1 sm:col-span-2">
-          <p className="text-muted-foreground text-[0.7rem]">
-            {t("integration.oauthClient.platformRedirectUri")}
-          </p>
-          <CopyBlock
-            value={effectiveRedirectUri}
-            dense
-            testId={`platform-redirect-uri-modal-${authKey}`}
-          />
-          {/* AFPS §7.10: `auths.<key>.callback_url_hint`, its `{{callback_url}}` placeholder
-              resolved against the SAME value shown above. */}
-          {authDecl?.callback_url_hint && (
-            <CallbackUrlHint
-              hint={authDecl.callback_url_hint}
-              callbackUrl={effectiveRedirectUri}
-              authKey={authKey}
-            />
-          )}
-        </div>
-        <label className="flex items-center gap-2 text-sm sm:col-span-2">
-          <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
-          {t("integration.oauthClient.publicClient")}
-        </label>
-        <div className="flex items-center justify-end gap-2 sm:col-span-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            size="sm"
-            disabled={pending || clientId.trim() === ""}
-            data-testid={`oauth-client-save-${authKey}`}
-          >
-            {mode === "create"
-              ? t("integration.oauthClient.btnRegister")
-              : t("integration.oauthClient.btnEdit")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+        <Input
+          type="password"
+          value={clientSecret}
+          onChange={(e) => setClientSecret(e.target.value)}
+          onBlur={() => setSecretTouched(true)}
+          disabled={publicClient}
+          placeholder={existing?.has_client_secret ? "••••••••" : ""}
+          data-testid={`oauth-clientsecret-${authKey}`}
+        />
+      </FormItem>
+      <OAuthClientRedirectFields
+        authKey={authKey}
+        authDecl={authDecl}
+        redirectUri={redirectUri}
+        onRedirectUriChange={setRedirectUri}
+        platformRedirectUri={platformRedirectUri}
+      />
+      <CheckboxField
+        id={`public-client-${authKey}`}
+        className="sm:col-span-2"
+        label={t("integration.oauthClient.publicClient")}
+        checked={publicClient}
+        onCheckedChange={(c) => setPublicClient(Boolean(c))}
+      />
+    </FormModal>
   );
 }
 
@@ -271,8 +304,11 @@ export function ClientsTable({
 }) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
-  // Auto-provisioned clients are per space: such an auth has no org level.
+  // An auto-provisioned auth has no org list to manage (no client an admin registers or chooses
+  // there); its org-tier machine client, listed with the space's clients, stays the org admin's to
+  // delete.
   const canManageOrg = !autoProvisioned && can("org-integrations:configure");
+  const canDeleteOrgMachineClients = can("org-integrations:configure");
   const spaceClients = useIntegrationClients("space", packageId, authKey);
   const orgClients = useIntegrationClients("org", canManageOrg ? packageId : undefined, authKey);
   // Read from the same query key the page already holds, rather than threading
@@ -303,6 +339,7 @@ export function ClientsTable({
     spaceClients.data ?? [],
     canManageOrg ? orgClients.data : undefined,
   );
+  const loading = spaceClients.isLoading || (canManageOrg && orgClients.isLoading);
   const inUse = rows.find((row) => row.usedHere);
   const hasAutoClient = rows.some((row) => row.client.auto_provisioned);
   // Classic auths always allow registering more clients; auto-provisioned
@@ -332,6 +369,7 @@ export function ClientsTable({
   const columns = useIntegrationClientColumns({
     canUseHere: (spaceClients.data?.length ?? 0) > 1,
     canManageOrg,
+    canDeleteOrgMachineClients,
     canChooseOrgDefault: canManageOrg && (orgClients.data?.length ?? 0) > 1,
     pendingClientRef,
     onUseHere: (row) =>
@@ -398,6 +436,7 @@ export function ClientsTable({
       </div>
 
       {/* The one answer the table exists for, then the rule in one line. */}
+      {loading && <Skeleton className="mb-1 h-5 w-64 max-w-full" />}
       {inUse && (
         <p className="mb-1 text-sm" data-testid={`oauth-client-in-use-${authKey}`}>
           {t("integration.clients.inUse", {
@@ -412,12 +451,11 @@ export function ClientsTable({
 
       <DataTable
         tableId="integration-clients"
-        surface="integrated"
         label={t("integration.clients.title")}
         columns={columns}
         rows={rows}
         rowKey={(row) => row.client.client_ref}
-        isLoading={spaceClients.isLoading || (canManageOrg && orgClients.isLoading)}
+        isLoading={loading}
         failure={spaceClients.error}
         // On an auto-provisioned auth the reason the list is empty IS the state, so
         // it is the empty state's hint rather than a second sentence above a
@@ -440,7 +478,7 @@ export function ClientsTable({
         }
       />
 
-      {autoProvisioned && !showManual && !hasAutoClient && (
+      {!loading && autoProvisioned && !showManual && !hasAutoClient && (
         <Button
           type="button"
           variant="ghost"
@@ -489,6 +527,7 @@ export function ClientsTable({
         onClose={() => setConfirmPromote(null)}
         title={t("integration.clients.promote.action")}
         description={t("integration.clients.promote.confirm")}
+        confirmLabel={t("integration.clients.promote.action")}
         variant="default"
         isPending={promote.isPending}
         onConfirm={() => {

@@ -54,7 +54,6 @@ export function useRoleColumns({
       header: t("roles.permissionsLabel"),
       width: 120,
       align: "end",
-      tier: 2,
       cell: (role) => (
         <span className="text-muted-foreground text-xs">
           {t("roles.permissionCount", { count: role.permissions.length })}

@@ -6,6 +6,7 @@ import {
   checkSkillMarkdown,
   companionFilesFromRecord,
   isValidSkillName,
+  normalizeSkillMd,
   parseSkillFrontmatter,
   SKILL_DESCRIPTION_MAX_LENGTH,
   SKILL_NAME_MAX_LENGTH,
@@ -295,18 +296,24 @@ describe("checkCompanionFiles — other package types are untouched", () => {
     ).toBeNull();
   });
 
-  it("requires no companion for an integration", () => {
+  it("requires no companion for a non-local integration", () => {
     expect(checkCompanionFiles({ type: "integration" }, companionFilesFromRecord({}))).toBeNull();
+    expect(
+      checkCompanionFiles(
+        { type: "integration", source: { kind: "remote" } },
+        companionFilesFromRecord({}),
+      ),
+    ).toBeNull();
   });
 });
 
-describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
+describe("checkCompanionFiles — local integration entry_point", () => {
   const enc = new TextEncoder();
   const serverBytes = enc.encode("export {};\n");
 
   function check(entryPoint: string, files: Record<string, Uint8Array>) {
     return checkCompanionFiles(
-      { type: "mcp-server", server: { entry_point: entryPoint } },
+      { type: "integration", source: { kind: "local", server: { entry_point: entryPoint } } },
       companionFilesFromRecord(files),
     );
   }
@@ -315,9 +322,8 @@ describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
     expect(check("server.js", { "server.js": serverBytes })).toBeNull();
   });
 
-  // Regression: every mcp-server under this repo's `system-packages/` declares
-  // the MCPB-conventional `./entry` form while the archive stores the entry
-  // flat. An exact `has()` made those packages importable through the on-disk
+  // Regression: system packages declare the conventional `./entry` form while the archive
+  // stores the entry flat. An exact `has()` made those packages importable through the on-disk
   // system-package loader and REJECTED through `POST /api/packages/import`.
   it("accepts a `./`-prefixed entry_point against a flat archive entry", () => {
     expect(check("./server.js", { "server.js": serverBytes })).toBeNull();
@@ -329,15 +335,89 @@ describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
 
   it("still reports a genuinely missing payload", () => {
     const violation = check("./server.js", { "manifest.json": serverBytes });
-    expect(violation?.reason).toBe("MCP_SERVER_MISSING_ENTRY_POINT");
+    expect(violation?.reason).toBe("LOCAL_SERVER_MISSING_ENTRY_POINT");
     expect(violation?.path).toBe("./server.js");
+  });
+
+  it("refuses a local integration that declares no entry_point", () => {
+    const violation = checkCompanionFiles(
+      { type: "integration", source: { kind: "local", server: {} } },
+      companionFilesFromRecord({}),
+    );
+    expect(violation?.reason).toBe("LOCAL_SERVER_MISSING_ENTRY_POINT");
   });
 
   // Normalising `./` must not turn into path resolution: a declared parent
   // traversal stays unresolved and unmatched.
   it("does not resolve `..` segments", () => {
     expect(check("../server.js", { "server.js": serverBytes })?.reason).toBe(
-      "MCP_SERVER_MISSING_ENTRY_POINT",
+      "LOCAL_SERVER_MISSING_ENTRY_POINT",
     );
+  });
+});
+
+const NORMALIZED_SKILL = `---
+name: pdf-tools
+description: Work with PDFs.
+allowed-tools: Read, Bash
+---
+
+# PDF tools
+
+Body text.
+`;
+
+describe("normalizeSkillMd", () => {
+  it("leaves a conforming file byte-for-byte alone", () => {
+    expect(normalizeSkillMd(NORMALIZED_SKILL, "pdf-tools")).toBe(NORMALIZED_SKILL);
+  });
+
+  it("rewrites only the name line when it differs from the slug", () => {
+    const source = NORMALIZED_SKILL.replace("name: pdf-tools", "name: PDF Tools");
+    const out = normalizeSkillMd(source, "pdf-tools");
+    expect(out).toBe(NORMALIZED_SKILL);
+    expect(out).toContain("allowed-tools: Read, Bash");
+  });
+
+  it("handles a name declared after other keys", () => {
+    const source = "---\ndescription: Work with PDFs.\nname: PDF Tools\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
+      "---\ndescription: Work with PDFs.\nname: pdf-tools\n---\n\nBody.\n",
+    );
+  });
+
+  it("prepends the name when the block only carries it inside a nested mapping", () => {
+    const source = "---\nmeta:\n  name: inner\n  description: inner desc\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
+      "---\nname: pdf-tools\nmeta:\n  name: inner\n  description: inner desc\n---\n\nBody.\n",
+    );
+  });
+
+  it("does not mistake an indented key inside a nested mapping for the top-level one", () => {
+    const source = "---\nmeta:\n  name: inner\nname: PDF Tools\ndescription: Work.\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
+      "---\nmeta:\n  name: inner\nname: pdf-tools\ndescription: Work.\n---\n\nBody.\n",
+    );
+  });
+
+  it("rewrites CRLF frontmatter in place and keeps CRLF line endings", () => {
+    const source = "---\r\nname: PDF Tools\r\ndescription: Work.\r\n---\r\n\r\nBody.\r\n";
+    const out = normalizeSkillMd(source, "pdf-tools");
+    expect(out).toBe("---\r\nname: pdf-tools\r\ndescription: Work.\r\n---\r\n\r\nBody.\r\n");
+    // The bug this pins prepended a SECOND key rather than replacing the first.
+    expect(out.match(/^name:/gm)).toHaveLength(1);
+  });
+
+  it("leaves a file whose frontmatter yaml cannot parse otherwise untouched", () => {
+    // Legacy published artifacts exist with an unquoted `description: a : b`.
+    // The name still points at the served name; the rest is copied.
+    const source = "---\nname: legacy\ndescription: Reports: weekly\n---\n\nBody.\n";
+    expect(normalizeSkillMd(source, "legacy-skill")).toBe(
+      "---\nname: legacy-skill\ndescription: Reports: weekly\n---\n\nBody.\n",
+    );
+  });
+
+  it("leaves a file with no frontmatter block exactly as authored", () => {
+    expect(normalizeSkillMd("Just a body.\n", "pdf-tools")).toBe("Just a body.\n");
   });
 });

@@ -115,44 +115,42 @@ describe("build-model-catalog", () => {
     });
   });
 
-  // An instance serves the `off` it derives: a record whose payloads say
-  // otherwise is dropped, not mislabelled. Under mid-conversation effort Pi
-  // sends adaptive thinking whatever the level, so the `off` payload equals a
-  // non-reasoning model's — observed "unsent" — while the rule derives "disables".
-  it("drops a record whose observed `off` differs from the derived one", async () => {
+  // An instance serves the `off` it derives; a record whose payloads say
+  // otherwise is dropped (Baseten case below). Pi 1.1.0 sent adaptive thinking
+  // under mid-conversation effort whatever the level, so an off-allowed Claude
+  // was observed "unsent" and dropped. Pi 1.5.2 sends the disable: observed and
+  // derived now agree on "disables" and the record is published.
+  it("publishes an off-allowed Claude under mid-conversation effort", async () => {
     const { off: _off, ...offAllowed } = bundled.thinkingLevelMap!;
     expect(bundled.compat).toMatchObject({ supportsMidConvoEffort: true });
     withRecords([{ id: "claude-next" }, { id: "claude-off", thinkingLevelMap: offAllowed }]);
     const { records, dropped } = await selectCatalogRecords(readChatRecords(dataDir));
 
-    expect(records.map((r) => r.id)).toEqual(["claude-next"]);
-    expect(dropped).toEqual([
-      {
-        provider: "anthropic",
-        id: "claude-off",
-        reason: 'reasoning off: derived "disables", observed "unsent"',
-      },
-    ]);
+    expect(records.map((r) => r.id)).toEqual(["claude-next", "claude-off"]);
+    expect(dropped).toEqual([]);
   });
 
-  // The rule reads Baseten's format as a disable without looking at its
-  // chat-template arguments: a record without them sends nothing and is dropped.
+  // The rule reads Baseten's format as a disable without looking at what the
+  // record sends. Pi 1.5.2 sends `off` either through the chat-template
+  // arguments or, under `supportsReasoningEffort`, as the mapped
+  // `reasoning_effort`: a record with neither sends nothing and is dropped.
   it("drops a Baseten record whose `off` sends nothing the rule expects", async () => {
-    const kimi = getPiModel("baseten", "moonshotai/Kimi-K2.5", "openai-completions")!;
-    const { chatTemplateArgs: _args, ...compat } = kimi.compat as Record<string, unknown>;
-    expect(kimi.thinkingLevelMap?.off).toBe("off");
+    const glm = getPiModel("baseten", "zai-org/GLM-5.2", "openai-completions")!;
+    const { chatTemplateArgs: _args, ...compat } = glm.compat as Record<string, unknown>;
+    expect(glm.compat).toMatchObject({ thinkingFormat: "baseten", supportsReasoningEffort: true });
+    expect(glm.thinkingLevelMap?.off).toBe("none");
     const source = (id: string, over: Record<string, unknown> = {}) =>
-      ({ ...kimi, type: "chat", id, ...over }) as Parameters<typeof selectCatalogRecords>[0][0];
+      ({ ...glm, type: "chat", id, ...over }) as Parameters<typeof selectCatalogRecords>[0][0];
     const { records, dropped } = await selectCatalogRecords([
-      source("moonshotai/Kimi-Next"),
-      source("moonshotai/Kimi-No-Args", { compat }),
+      source("zai-org/GLM-Next"),
+      source("zai-org/GLM-No-Args", { compat: { ...compat, supportsReasoningEffort: false } }),
     ]);
 
-    expect(records.map((r) => r.id)).toEqual(["moonshotai/Kimi-Next"]);
+    expect(records.map((r) => r.id)).toEqual(["zai-org/GLM-Next"]);
     expect(dropped).toEqual([
       {
         provider: "baseten",
-        id: "moonshotai/Kimi-No-Args",
+        id: "zai-org/GLM-No-Args",
         reason: 'reasoning off: derived "disables", observed "unsent"',
       },
     ]);

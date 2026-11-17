@@ -41,6 +41,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
@@ -271,10 +272,11 @@ export async function resolveRunPreflight(params: {
 
 /** The manifest memo seeded with the pinned integration manifests — see `resolveRunPreflight`. */
 export async function seedPinnedIntegrationManifests(params: {
-  agent: LoadedPackage;
+  agent: Pick<LoadedPackage, "manifest">;
   orgId: string;
   dependencyOverrides: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
+  executor?: DbOrTx;
 }): Promise<IntegrationManifestCache> {
   const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
   await resolveRunIntegrationVersions({
@@ -282,6 +284,7 @@ export async function seedPinnedIntegrationManifests(params: {
     orgId: params.orgId,
     dependencyOverrides: params.dependencyOverrides,
     manifestCache,
+    executor: params.executor,
   });
   return manifestCache;
 }

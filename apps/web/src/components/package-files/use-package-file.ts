@@ -5,6 +5,7 @@ import { $api, client } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { downloadOrToast } from "../../lib/blob-download";
 import { splitPackageRef } from "../../lib/package-paths";
+import { generatedKeyPackage, keepPreviousWithin } from "../../lib/query-state";
 import { baseName, previewBlockReason, type PackageFileEntry } from "../../lib/package-file-tree";
 
 /**
@@ -59,12 +60,13 @@ export function usePackageFile(
   // `[method, path, init]` — hand-writing that array is the drift
   // `lib/query-keys.ts` exists to warn about, and `invalidatePackageFiles`
   // prefix-matches `["get", "…/files/content"]` to reach it.
+  const ref = splitPackageRef(packageId ?? "");
   const query = $api.useQuery(
     "get",
     "/api/packages/{scope}/{name}/files/content",
     {
       params: {
-        path: splitPackageRef(packageId ?? ""),
+        path: ref,
         query: { path: entry.path, version },
         header: scope.header,
       },
@@ -72,7 +74,11 @@ export function usePackageFile(
     },
     {
       enabled: scope.enabled && !!packageId && needsFetch,
-      ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
+      ...(fresh
+        ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const }
+        : // Another file of the same package keeps the previous one drawn while it loads;
+          // an authoring pane (`fresh`) must never seed Monaco from a stand-in.
+          { placeholderData: keepPreviousWithin(`${ref.scope}/${ref.name}`, generatedKeyPackage) }),
     },
   );
 

@@ -33,7 +33,7 @@ import { usePackageVersions } from "../../hooks/use-packages";
 import { matchesSearch } from "../../lib/strings";
 import { isPinnedEntry, previewBlockReason } from "../../lib/package-file-tree";
 import { fileTextOperation, type DraftFile } from "../../lib/package-file-drafts";
-import { primaryDisplayFile } from "../../lib/package-files";
+import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
 import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { Modal } from "../modal";
@@ -87,9 +87,14 @@ export function PackageFilesView({
 
   const { data: versions } = usePackageVersions(type, packageId);
   const fileVersion = selectedVersion === "draft" ? undefined : selectedVersion;
-  const { data: bundleIndex, error: bundleError } = usePackageFileIndex(packageId, fileVersion);
+  const {
+    data: bundleIndex,
+    error: bundleError,
+    isPlaceholderData: indexIsStandIn,
+  } = usePackageFileIndex(packageId, fileVersion);
 
-  const editing = editable && selectedVersion === "draft";
+  // A stand-in tree is another version's: it is read, never edited.
+  const editing = editable && selectedVersion === "draft" && !indexIsStandIn;
   const edits = useDraftFileEdits({
     type,
     packageId,
@@ -102,7 +107,7 @@ export function PackageFilesView({
   const isPinned = (path: string) => path === "manifest.json" || isPinnedEntry(type, path);
 
   const visibleFiles = (entries ?? []).filter((file) => matchesSearch(query, [file.path]));
-  const mainFile = initialPath ?? primaryDisplayFile(type).name;
+  const mainFile = initialPath ?? PACKAGE_CONTENT_FILE[type];
   const activeFile =
     visibleFiles.find((file) => file.path === selectedPath) ??
     visibleFiles.find((file) => file.path === mainFile) ??
@@ -327,9 +332,11 @@ export function PackageFilesView({
                 version={fileVersion}
                 entry={sourceEntryOf(activeFile)}
                 className="h-full flex-1 rounded-none border-0"
-                hideHeader
               />
             </div>
+          ) : !bundleIndex && !bundleError ? (
+            // No tree yet: nothing to select from, so the pane waits in its shape.
+            <TextSkeleton lines={8} className="p-4" />
           ) : (
             <div className="text-muted-foreground grid h-full place-items-center text-sm">
               {t("agents:detail.files.selectItem")}
@@ -361,7 +368,6 @@ export function PackageFilesView({
               packageId={packageId}
               entry={sourceEntryOf(editedFile)}
               path={editingPath}
-              commit="apply"
               onCommit={(text) => {
                 if (staged.stage([fileTextOperation(editingPath, text)])) setEditingPath(null);
               }}

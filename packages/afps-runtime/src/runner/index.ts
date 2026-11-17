@@ -33,7 +33,5 @@ export type {
   RunTerminalStatus,
   RunArtifactsSummary,
   RunError,
-  LogEntry,
-  LogLevel,
   TokenUsage,
 } from "../types/run-result.ts";

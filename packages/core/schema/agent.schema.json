@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate Agent Manifest",
   "description": "Appstrate agent manifest — extends AFPS agent.",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright (c) 2026 AFPS contributors",
   "type": "object",
   "properties": {
     "name": {
@@ -185,16 +186,6 @@
       "type": "object",
       "properties": {
         "skills": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string",
-            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "mcp_servers": {
           "type": "object",
           "propertyNames": {
             "type": "string",
@@ -439,19 +430,6 @@
     "timeout": {
       "type": "number",
       "exclusiveMinimum": 0
-    },
-    "runtime_tools": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "output",
-          "log",
-          "note",
-          "pin",
-          "publish_file"
-        ]
-      }
     }
   },
   "required": [

@@ -8,6 +8,7 @@ import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageDetail } from "./use-packages";
@@ -26,19 +27,24 @@ function useCanReadSchedules(): boolean {
   return can("schedules:read");
 }
 
-export function useAllSchedules() {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const canRead = useCanReadSchedules();
+/** The current space's schedules, or, `spanning`, every space's the reader reaches (`GET /api/orgs/{orgId}/schedules`). */
+export function useAllSchedules(spanning = false) {
+  const scope = useListScope(spanning, useCanReadSchedules());
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
-    queryKey: scheduleKeys.list(orgId, spaceId),
-    queryFn: async (): Promise<EnrichedSchedule[]> => {
-      const { data } = await client.GET("/api/schedules");
-      return data?.data ?? [];
-    },
-    enabled: canRead && !!orgId && !!spaceId,
+    queryKey: scheduleKeys.list(scope.orgId, scope.keySpace),
+    queryFn: () => fetchSchedules(scope.acrossOrgId),
+    enabled: scope.enabled,
+    refetchInterval: scope.refetchInterval,
   });
+}
+
+/** The current space's list, or every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchSchedules(acrossOrgId: string | null): Promise<EnrichedSchedule[]> {
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/schedules", { params: { path: { orgId: acrossOrgId } } })
+    : await client.GET("/api/schedules");
+  return data?.data ?? [];
 }
 
 export function useScheduleById(id: string | undefined) {

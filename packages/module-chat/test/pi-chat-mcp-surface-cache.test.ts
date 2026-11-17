@@ -12,6 +12,11 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
+import {
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
+} from "@appstrate/mcp-transport";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import {
   MCP_SURFACE_CACHE_MAX_ENTRIES,
@@ -94,6 +99,56 @@ function mcpStub() {
         ],
       });
     }
+    if (msg.method === "resources/read") {
+      const { uri } = msg.params as { uri: string };
+      if (uri.endsWith("/data.bin")) {
+        return reply({ contents: [{ uri, mimeType: "application/octet-stream", blob: "AP8=" }] });
+      }
+      // At and one byte over the inline bounds the platform's file reads apply.
+      const sized = /\/(text|blob)-(\d+)$/.exec(uri);
+      if (sized) {
+        const bytes = Number(sized[2]);
+        return reply({
+          contents: [
+            sized[1] === "text"
+              ? { uri, mimeType: "text/plain", text: "é".repeat(bytes / 2) }
+              : {
+                  uri,
+                  mimeType: "application/octet-stream",
+                  blob: Buffer.alloc(bytes).toString("base64"),
+                },
+          ],
+        });
+      }
+      if (uri.endsWith("/SKILL.md")) {
+        return reply({
+          contents: [{ uri, mimeType: "text/markdown", text: "---\nname: tone\n---\n" }],
+        });
+      }
+      return json({
+        jsonrpc: "2.0",
+        id: msg.id,
+        error: { code: -32002, message: "Resource not found" },
+      });
+    }
+    if (msg.method === "skills/list") {
+      const meta = (msg.params as { _meta?: Record<string, unknown> } | undefined)?._meta;
+      const draft = meta?.["dev.appstrate/definition"] === "draft";
+      const uri = `skill://spc_1/acme/tone${draft ? "@draft" : ""}/tone/SKILL.md`;
+      return reply({
+        skills: [
+          {
+            uri,
+            frontmatter: {
+              name: "tone",
+              description: "Tone.",
+              ...(draft ? {} : { metadata: { version: "1.2.0" } }),
+            },
+            resources: [{ uri, digest: "sha256:00", size: 1 }],
+          },
+        ],
+      });
+    }
     if (msg.method === "tools/call") {
       const params = msg.params as { name: string };
       return reply({ content: [{ type: "text", text: JSON.stringify({ called: params.name }) }] });
@@ -120,6 +175,7 @@ function buildTurn(
   surface: string,
   surfaceKey: string | undefined,
   signal = new AbortController().signal,
+  listsSkills = false,
 ) {
   return buildPlatformMcpTools({
     url: MCP_URL,
@@ -130,6 +186,7 @@ function buildTurn(
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
+    listsSkills,
   });
 }
 
@@ -144,7 +201,7 @@ async function until(condition: () => boolean): Promise<void> {
 /** A cache hit whose lazy connect is held at `initialize` until `release()`. */
 async function wedgedHit(signal?: AbortSignal) {
   const stub = mcpStub();
-  const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+  const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
   await (await buildTurn(stub, "alpha", key)).close();
   stub.reset();
   let release!: () => void;
@@ -159,7 +216,7 @@ async function wedgedHit(signal?: AbortSignal) {
 describe("platform MCP surface cache", () => {
   it("serves a repeated surface with zero MCP hops and byte-identical instructions", async () => {
     const stub = mcpStub();
-    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
 
     const first = await buildTurn(stub, "alpha", key);
     await first.close();
@@ -191,7 +248,7 @@ describe("platform MCP surface cache", () => {
 
   it("opens the client once, on the first tool call, and reuses it for the rest of the turn", async () => {
     const stub = mcpStub();
-    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
     await (await buildTurn(stub, "alpha", key)).close();
 
     stub.reset();
@@ -221,8 +278,8 @@ describe("platform MCP surface cache", () => {
   it("never shares an entry between permission sets", async () => {
     const stub = mcpStub();
     const shared = uniquePermissions();
-    const keyA = platformMcpSurfaceKey(MCP_URL, shared);
-    const keyB = platformMcpSurfaceKey(MCP_URL, [...shared, "agents:write"]);
+    const keyA = platformMcpSurfaceKey(MCP_URL, shared, true);
+    const keyB = platformMcpSurfaceKey(MCP_URL, [...shared, "agents:write"], true);
     expect(keyB).not.toBe(keyA);
 
     await (await buildTurn(stub, "alpha", keyA)).close();
@@ -233,7 +290,10 @@ describe("platform MCP surface cache", () => {
       expect(b.surfaceCached).toBe(false);
       expect(stub.count("initialize")).toBe(1);
       expect(stub.count("tools/list")).toBe(1);
-      expect(register(b.extensionFactories).map((t) => t.name)).toEqual(["search_beta"]);
+      expect(register(b.extensionFactories).map((t) => t.name)).toEqual([
+        "search_beta",
+        "read_resource",
+      ]);
       expect(b.instructions).toStartWith("Instructions for beta.");
     } finally {
       await b.close();
@@ -242,20 +302,22 @@ describe("platform MCP surface cache", () => {
 
   it("keys on the permission SET and the surface flags, not on list order", () => {
     const perms = uniquePermissions("runs:read");
-    const key = platformMcpSurfaceKey(MCP_URL, perms);
-    expect(platformMcpSurfaceKey(MCP_URL, [...perms].reverse())).toBe(key);
-    expect(platformMcpSurfaceKey(MCP_URL, [...perms, perms[0]!])).toBe(key);
-    expect(platformMcpSurfaceKey(MCP_URL, perms.slice(1))).not.toBe(key);
+    const key = platformMcpSurfaceKey(MCP_URL, perms, true);
+    expect(platformMcpSurfaceKey(MCP_URL, [...perms].reverse(), true)).toBe(key);
+    expect(platformMcpSurfaceKey(MCP_URL, [...perms, perms[0]!], true)).toBe(key);
+    expect(platformMcpSurfaceKey(MCP_URL, perms.slice(1), true)).not.toBe(key);
     // `context=injected` drops get_me server-side, so it is part of the surface.
-    expect(platformMcpSurfaceKey(`${ORIGIN}/api/mcp/o/org_1`, perms)).not.toBe(key);
+    expect(platformMcpSurfaceKey(`${ORIGIN}/api/mcp/o/org_1`, perms, true)).not.toBe(key);
     expect(
-      platformMcpSurfaceKey("http://other.test/api/mcp/o/org_1?context=injected", perms),
+      platformMcpSurfaceKey("http://other.test/api/mcp/o/org_1?context=injected", perms, true),
     ).not.toBe(key);
+    // A space closing the credential proxy withholds the integration tools.
+    expect(platformMcpSurfaceKey(MCP_URL, perms, false)).not.toBe(key);
   });
 
   it("surfaces a failed lazy connect as the tool call's error, retries it, and evicts the entry", async () => {
     const stub = mcpStub();
-    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
     await (await buildTurn(stub, "alpha", key)).close();
 
     stub.state.failInitialize = true;
@@ -388,5 +450,136 @@ describe("McpSurfaceCache", () => {
     const read = cache.get("k")!;
     read.tools[0]!.inputSchema.properties = { injected: {} };
     expect(cache.get("k")).toEqual(surface("t"));
+  });
+});
+
+describe("read_resource", () => {
+  const SKILL = "skill://spc_1/acme/tone/tone/SKILL.md";
+
+  it("reads a platform resource whole: text as is, a binary file's base64 in blob", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined);
+    try {
+      const read = register(turn.extensionFactories).find((t) => t.name === "read_resource")!;
+      const md = await read.execute("call_1", { uri: SKILL });
+      expect(md.content[0]).toEqual({ type: "text", text: "---\nname: tone\n---\n" });
+      const bin = await read.execute("call_2", { uri: SKILL.replace("SKILL.md", "data.bin") });
+      expect(JSON.parse(bin.content[0]!.text)).toEqual({
+        uri: SKILL.replace("SKILL.md", "data.bin"),
+        mimeType: "application/octet-stream",
+        blob: "AP8=",
+      });
+      expect(stub.count("resources/read")).toBe(2);
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("returns a content over the file reads' inline bounds as its size and a note", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined);
+    try {
+      const read = register(turn.extensionFactories).find((t) => t.name === "read_resource")!;
+      const at = (path: string) => SKILL.replace("SKILL.md", path);
+      const text = async (path: string) =>
+        (await read.execute("call", { uri: at(path) })).content[0]!.text as string;
+      // Text is measured in UTF-8 bytes: `é` is two.
+      expect(await text(`text-${RESOURCE_TEXT_MAX_BYTES}`)).toBe(
+        "é".repeat(RESOURCE_TEXT_MAX_BYTES / 2),
+      );
+      expect(JSON.parse(await text(`text-${RESOURCE_TEXT_MAX_BYTES + 2}`))).toEqual({
+        uri: at(`text-${RESOURCE_TEXT_MAX_BYTES + 2}`),
+        mimeType: "text/plain",
+        size: RESOURCE_TEXT_MAX_BYTES + 2,
+        note: RESOURCE_OVERSIZED_NOTE,
+      });
+      // A blob is measured in raw bytes, not base64 characters.
+      expect(JSON.parse(await text(`blob-${RESOURCE_BLOB_MAX_BYTES}`)).blob).toBe(
+        Buffer.alloc(RESOURCE_BLOB_MAX_BYTES).toString("base64"),
+      );
+      expect(JSON.parse(await text(`blob-${RESOURCE_BLOB_MAX_BYTES + 2}`))).toEqual({
+        uri: at(`blob-${RESOURCE_BLOB_MAX_BYTES + 2}`),
+        mimeType: "application/octet-stream",
+        size: RESOURCE_BLOB_MAX_BYTES + 2,
+        note: RESOURCE_OVERSIZED_NOTE,
+      });
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("surfaces the server's refusal, and refuses a call without a uri before any hop", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined);
+    try {
+      const read = register(turn.extensionFactories).find((t) => t.name === "read_resource")!;
+      const refused = await read
+        .execute("call_1", { uri: "skill://spc_1/acme/tone/tone/missing.txt" })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      expect(String(refused)).toContain("Resource not found");
+      const before = stub.count("resources/read");
+      const invalid = await read.execute("call_2", {}).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String(invalid)).toContain("`uri` must be a non-empty string");
+      expect(stub.count("resources/read")).toBe(before);
+    } finally {
+      await turn.close();
+    }
+  });
+});
+
+describe("list_skills", () => {
+  it("is registered only on a turn that lists skills", async () => {
+    const stub = mcpStub();
+    const plain = await buildTurn(stub, "alpha", undefined);
+    const listing = await buildTurn(stub, "alpha", undefined, undefined, true);
+    try {
+      const names = (turn: typeof plain) => register(turn.extensionFactories).map((t) => t.name);
+      expect(names(plain)).not.toContain("list_skills");
+      expect(names(listing)).toContain("list_skills");
+    } finally {
+      await plain.close();
+      await listing.close();
+    }
+  });
+
+  it("relays `skills/list` as each skill's id, description, version and uri, drafts on request", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined, undefined, true);
+    try {
+      const list = register(turn.extensionFactories).find((t) => t.name === "list_skills")!;
+      const published = await list.execute("call_1", {});
+      expect(JSON.parse(published.content[0]!.text)).toEqual([
+        {
+          id: "@acme/tone",
+          description: "Tone.",
+          version: "1.2.0",
+          uri: "skill://spc_1/acme/tone/tone/SKILL.md",
+        },
+      ]);
+      const drafts = await list.execute("call_2", { definition: "draft" });
+      expect(JSON.parse(drafts.content[0]!.text)).toEqual([
+        {
+          id: "@acme/tone",
+          description: "Tone.",
+          version: null,
+          uri: "skill://spc_1/acme/tone@draft/tone/SKILL.md",
+        },
+      ]);
+      expect(stub.count("skills/list")).toBe(2);
+      const invalid = await list.execute("call_3", { definition: "latest" }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String(invalid)).toContain('`definition` must be "published" or "draft"');
+      expect(stub.count("skills/list")).toBe(2);
+    } finally {
+      await turn.close();
+    }
   });
 });

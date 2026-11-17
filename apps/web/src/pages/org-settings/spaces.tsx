@@ -15,7 +15,8 @@ import { toast } from "sonner";
 import { AppWindow, Plus } from "lucide-react";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
-import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
+import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { spaceLabel } from "../../lib/space-label";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
@@ -50,10 +51,7 @@ export function OrgSettingsSpacesPage() {
     const params = { params: { path: { id: pending.id } } };
     if (pending.action === "convert") {
       convert.mutate(params, {
-        onSuccess: () => {
-          setPending(null);
-          toast.success(t("spaces.personal.converted"));
-        },
+        onSuccess: () => setPending(null),
       });
       return;
     }
@@ -104,7 +102,12 @@ export function OrgSettingsSpacesPage() {
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
+          <EmptyState
+            message={t("spaces.empty")}
+            hint={t("spaces.emptyHint")}
+            icon={AppWindow}
+            compact
+          >
             <EmptyStateAction action={create} />
           </EmptyState>
         }

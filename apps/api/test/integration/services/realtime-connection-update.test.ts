@@ -60,7 +60,6 @@ const INTEG = "@isoorg/svc";
 function buildIntegrationManifest(id: string) {
   return localIntegrationManifest({
     name: id,
-    serverName: `${id}-server`,
     version: "1.0.0",
     auths: {
       primary: {

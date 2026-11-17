@@ -219,10 +219,9 @@ export type EnrichedRun = RunWireDto & {
   /** In declaration order; null when the run recorded none (no connection resolution ran). */
   integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
-   * True when the requesting recipient has an unread notification for this run.
-   * Per-recipient: derived from the `notifications` table for the
-   * current actor, so a dashboard user and an end-user see independent state.
-   * Drives the unread dot on run rows and the per-schedule unread count.
+   * True when the caller has not read this run yet. Per recipient, so a
+   * dashboard user and an end-user see independent state. Drives the unread
+   * dot on run rows; `PUT /api/runs/{id}/read` clears it.
    */
   unread: boolean;
   /**
@@ -269,6 +268,12 @@ export interface AppConfigFeatures {
    * pending-state boolean.
    */
   bootstrapTokenPending: boolean;
+  /**
+   * The run adapter can isolate a runner process (`RUN_ADAPTER` is not `process`), so an
+   * integration whose source is a local MCP server can actually run. The SPA flags those as
+   * unavailable here when false.
+   */
+  localIntegrations: boolean;
   [key: string]: boolean;
 }
 
@@ -292,7 +297,7 @@ export interface AppConfig {
 
 // --- Package Types ---
 
-/** A reference to a skill, mcp-server, or integration dependency with optional metadata. */
+/** A reference to a skill or integration dependency with optional metadata. */
 export interface ResourceEntry {
   id: string;
   version?: string;
@@ -385,6 +390,11 @@ export interface ScheduleWireDto {
 }
 
 export type EnrichedSchedule = ScheduleWireDto & {
+  /**
+   * Display name of the scheduled agent: its draft manifest's `display_name`,
+   * else its package id — the name the package catalog shows.
+   */
+  agent_name: string;
   /** Display name of the actor (member or end-user) the schedule runs as. */
   actor_name: string | null;
   /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
@@ -395,7 +405,7 @@ export type EnrichedSchedule = ScheduleWireDto & {
    */
   running_runs: number;
   /**
-   * Runs of this schedule whose notification is unread **by the caller**. Scoped
+   * Runs of this schedule **the caller** has not read yet. Scoped
    * to the requesting actor, like `EnrichedRun.unread` — a member and an
    * end-user never observe each other's read state.
    */
@@ -565,6 +575,10 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
+  /** The spaces of the index where the agent is active, its home first when it is one of them, then in the order of the space listing. */
+  space_ids: string[];
+  /** The home space when the caller reaches it, `null` otherwise (system package, withheld home). */
+  home_space_id: string | null;
   /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
   icon: string | null;
   /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */
@@ -576,11 +590,13 @@ export interface AgentListItem extends BasePackageListItem {
   dependencies: {
     /** Withheld from a summary read — `agents:run` without `agents:read`. */
     skills?: Record<string, string>;
-    /** Withheld from a summary read — `agents:run` without `agents:read`. */
-    mcp_servers?: Record<string, string>;
     integrations: Record<string, string>;
   };
   running_runs: number;
+  /** Runs of this agent the caller has not read yet (per recipient, like a schedule's). */
+  unread_count: number;
+  /** A published version (or a system agent): launching without a version selector resolves. */
+  published: boolean;
   type: PackageType;
   /** Always emitted by the agent-list mapper (`@scope` or null). */
   scope: string | null;
@@ -616,11 +632,6 @@ export interface AgentDetail {
       description?: string;
       home_writable: boolean;
     }[];
-    /**
-     * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
-     * Composition too: withheld from a summary read, with `skills`.
-     */
-    mcp_servers?: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
@@ -738,6 +749,8 @@ export interface AgentDetail {
 // --- Organization Package Types ---
 
 export interface OrgPackageItem extends BasePackageListItem {
+  /** The spaces of the index where the package is active, its home first when it is one of them, then in the order of the space listing. */
+  space_ids: string[];
   /** Always a string — `getPackageDisplayName` falls back to the package id. */
   name: string;
   /** Always emitted by the org-package list/detail mappers. */
@@ -802,18 +815,21 @@ export interface OrgPackageItem extends BasePackageListItem {
 export interface IntegrationIndexItem extends OrgPackageItem {
   /** The manifest's `source.kind`: a sandboxed server, a hosted MCP, or no MCP backing. */
   source_kind: "local" | "remote" | "none";
-  /** `source.server` of a `local` integration — the package it runs and its range. `null` otherwise. */
-  server: { name: string; version: string } | null;
+  /** `source.server` of a `local` integration — its runtime type and entry point. `null` otherwise. */
+  server: { type: string; entry_point: string } | null;
+  /** `false` for an integration that declares no `auths` (AFPS §7.2): it binds no connection. */
+  authenticated: boolean;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
 // dropped from the base via Omit (a sub-interface can't loosen a required
 // field to optional). `icon` and `keywords` go the same way and for the
 // mirror-image reason: they exist so an INDEX row can be drawn without its
-// manifest, and the detail ships `manifest` itself.
+// manifest, and the detail ships `manifest` itself. `space_ids` names the
+// spaces of an index; a detail is read in the request's space.
 export interface OrgPackageItemDetail extends Omit<
   OrgPackageItem,
-  "used_by_agents" | "icon" | "keywords"
+  "used_by_agents" | "icon" | "keywords" | "space_ids"
 > {
   /**
    * WHICH definition `content`, `manifest` and every field projected from it
@@ -1198,6 +1214,12 @@ export interface ProviderRegistryModelEntry extends CatalogModelEntry {
    * contribution); the rest of the catalog falls under "All models".
    */
   featured: boolean;
+  /**
+   * Set on a model of a subscription (OAuth) provider that the live catalog
+   * adds to the bundled registry: its request builds offline, but whether the
+   * provider serves it to a subscription is not established. Absent otherwise.
+   */
+  subscription_unverified?: true;
 }
 
 // --- Connection Test Types ---
@@ -1246,6 +1268,13 @@ export interface SpaceInfo {
   visibility: "open" | "closed" | "private";
   /** Preset the implicit members of an `open` space hold. */
   default_role: "admin" | "builder" | "operator" | "viewer";
+  /**
+   * Whether members may use the space's connections through the credential proxy outside a
+   * run (REST without `X-Run-Id`, MCP `search_integration_tools` /
+   * `call_integration_tool`). `false` closes that
+   * door for every role; runs keep their connections. Always `true` on a personal space.
+   */
+  credential_proxy_open: boolean;
   /**
    * Whether this is one member's personal space (RBAC spec §3.6). Reached by
    * its owner alone — organization owners and admins included — takes no other
@@ -1323,7 +1352,7 @@ export interface SpacePackage {
 
 /**
  * Per-space resolved run-config returned by
- * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+ * `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`.
  * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / generation settings.

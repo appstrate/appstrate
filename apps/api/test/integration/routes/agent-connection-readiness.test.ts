@@ -24,7 +24,12 @@ import { createVersionFromDraft } from "../../../src/services/package-versions.t
 import { eq } from "drizzle-orm";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { integrationConnections, integrationPins, packages } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOrgDefaults,
+  integrationPins,
+  packages,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -37,7 +42,6 @@ const app = getTestApp();
 
 const AGENT = "@rdyorg/agent";
 const INTEGRATION = "@rdyorg/svc";
-const MCP_SERVER = "@rdyorg/svc-server";
 
 function buildAgentManifest(
   integrations: string[],
@@ -68,7 +72,6 @@ function buildAgentManifest(
 function buildIntegrationManifest(id: string, required: boolean) {
   const m = localIntegrationManifest({
     name: id,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {
@@ -95,6 +98,7 @@ function buildIntegrationManifest(id: string, required: boolean) {
 interface ReadinessResolution {
   source: string | null;
   error_code: string | null;
+  additional_connections_allowed: boolean;
   resolved_connection_ids: string[];
   candidates: Array<{
     id: string;
@@ -474,6 +478,62 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const item = problem.errors.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(item!.code).toBe("auth_key_serves_no_selected_tool");
   });
+
+  // #2043 — the flag is the projection of `additionsOpen`: an admin pin open to additions,
+  // and no enforced org default. Rows written straight to the tables: only the flag is judged.
+  describe("additional_connections_allowed", () => {
+    async function adminPin(allowAdditionalConnections: boolean) {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        connectionIds: [crypto.randomUUID()],
+        allowAdditionalConnections,
+      });
+    }
+
+    async function orgDefault(enforce: boolean) {
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        connectionIds: [crypto.randomUUID()],
+        enforce,
+      });
+    }
+
+    async function allowed(): Promise<boolean> {
+      const body = (await (await getReadiness()).json()) as ReadinessBody;
+      const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
+      return integ!.resolution.additional_connections_allowed;
+    }
+
+    beforeEach(async () => {
+      await seedAgentWith(buildAgentManifest([INTEGRATION], true));
+      await seedIntegration(false);
+    });
+
+    it("is true under an open admin pin, alone or beside a soft default", async () => {
+      await adminPin(true);
+      expect(await allowed()).toBe(true);
+      await orgDefault(false);
+      expect(await allowed()).toBe(true);
+    });
+
+    it("is false with nothing imposed, under a closed admin pin, and under an enforced default", async () => {
+      expect(await allowed()).toBe(false);
+      await orgDefault(true);
+      expect(await allowed()).toBe(false);
+      await adminPin(false);
+      expect(await allowed()).toBe(false);
+    });
+
+    it("is false under an open admin pin when the default is enforced", async () => {
+      await adminPin(true);
+      await orgDefault(true);
+      expect(await allowed()).toBe(false);
+    });
+  });
 });
 
 // #1131 — Google's token endpoint echoes the OIDC scope `email` as
@@ -786,5 +846,168 @@ describe("connection-readiness — scopes of an inherited tool selection", () =>
       candidate: [["missing", ["search.read"]]],
       launch: "missing_integration_connection",
     });
+  });
+});
+
+describe("connection-readiness — unauthenticated integration (AFPS §7.2)", () => {
+  const OPEN = "@rdyorg/open";
+  const openManifest = {
+    type: "integration",
+    schema_version: "0.3",
+    name: OPEN,
+    version: "1.0.0",
+    display_name: "Open",
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+    },
+    tools_policy: { search: {} },
+  };
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "rdyorg" });
+    await seedPackage({
+      id: OPEN,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: openManifest,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OPEN);
+    await seedPublishedVersion(OPEN, "1.0.0", { manifest: openManifest });
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(INTEGRATION, false),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: AGENT,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Readiness Agent",
+        dependencies: { integrations: { [OPEN]: "^1.0.0", [INTEGRATION]: "^1.0.0" } },
+        integrations_configuration: {
+          [OPEN]: { tools: ["search"], required: true },
+          [INTEGRATION]: { tools: ["search"], required: true },
+        },
+      },
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+  });
+
+  it("asks no connection of it, required or not, while its authenticated sibling blocks", async () => {
+    const res = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      errors: Array<{ field: string }>;
+      integrations: Array<{
+        integration_package_id: string;
+        run_blocking: boolean;
+        inert: boolean;
+        connection_required: boolean;
+      }>;
+    };
+    expect(body.errors.map((e) => e.field)).toEqual([`integrations.${INTEGRATION}`]);
+    const open = body.integrations.find((i) => i.integration_package_id === OPEN)!;
+    expect(open).toMatchObject({ run_blocking: false, inert: false, connection_required: false });
+    const sibling = body.integrations.find((i) => i.integration_package_id === INTEGRATION)!;
+    expect(sibling.connection_required).toBe(true);
+  });
+
+  /** The agent saved before the integration lost its auths: the write gate never saw it. */
+  async function configureOpenOnly(config: Record<string, unknown>) {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          name: AGENT,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Readiness Agent",
+          dependencies: { integrations: { [OPEN]: "^1.0.0" } },
+          integrations_configuration: { [OPEN]: config },
+        },
+      })
+      .where(eq(packages.id, AGENT));
+  }
+
+  async function readiness(): Promise<ReadinessBody> {
+    const res = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as ReadinessBody;
+  }
+
+  async function runStatus(): Promise<number> {
+    const run = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    return run.status;
+  }
+
+  it("refuses an auth_key on it (AFPS §4.4): readiness blocks and the run 409s", async () => {
+    await configureOpenOnly({ tools: ["search"], auth_key: "oauth" });
+    const body = await readiness();
+    expect(body.blocks_run).toBe(true);
+    expect(body.errors).toEqual([
+      expect.objectContaining({
+        field: `integrations.${OPEN}`,
+        code: "auth_key_on_unauthenticated_integration",
+        required_auth_key: "oauth",
+      }),
+    ]);
+    expect(await runStatus()).toBe(409);
+  });
+
+  it("refuses an auth_key that is its whole configuration", async () => {
+    await configureOpenOnly({ auth_key: "oauth" });
+    const body = await readiness();
+    expect(body.blocks_run).toBe(true);
+    expect(body.errors.map((e) => e.code)).toEqual(["auth_key_on_unauthenticated_integration"]);
+    expect(await runStatus()).toBe(409);
+  });
+
+  it("reports no pin left over from an authenticated version", async () => {
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: AGENT,
+      integrationId: OPEN,
+      userId: null,
+      connectionIds: [crypto.randomUUID()],
+      allowAdditionalConnections: true,
+    });
+    const open = (await readiness()).integrations.find((i) => i.integration_package_id === OPEN)!;
+    expect(open.resolution).toMatchObject({
+      admin_pinned_connection_ids: null,
+      additional_connections_allowed: false,
+      resolved_connection_ids: [],
+      candidates: [],
+    });
+  });
+
+  it("without auth_key, asks nothing even when required", async () => {
+    await configureOpenOnly({ tools: ["search"], required: true });
+    const body = await readiness();
+    expect(body.blocks_run).toBe(false);
+    expect(body.errors).toEqual([]);
   });
 });

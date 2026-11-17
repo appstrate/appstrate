@@ -128,6 +128,7 @@ describe("bundleImportAuditRecords", () => {
         ],
         root_active: true,
         root_package_id: "@acme/a",
+        root_type: "agent",
         root_version: "1.0.0",
         warnings: [],
       },

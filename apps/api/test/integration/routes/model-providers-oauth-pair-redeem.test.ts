@@ -50,7 +50,7 @@ async function mintPairing(
       ...(options.ownerType ? { owner_type: options.ownerType } : {}),
     }),
   });
-  expect(res.status).toBe(200);
+  expect(res.status).toBe(201);
   return (await res.json()) as {
     id: string;
     token: string;

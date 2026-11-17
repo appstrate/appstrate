@@ -86,7 +86,6 @@ export function useMemoryColumns({
       id: "scope",
       header: t("agents:detail.memoryColumnScope"),
       width: 128,
-      tier: 2,
       cell: (item) => <ActorBadge actor_type={item.actor_type} actor_id={item.actor_id} />,
     },
     {
@@ -94,7 +93,6 @@ export function useMemoryColumns({
       header: t("agents:detail.memoryColumnUpdated"),
       width: 160,
       align: "end",
-      tier: 3,
       cell: (item) => <CellDate value={item.updatedAt} />,
     },
     rowActionsColumn((item: MemoryCollectionItem) => (

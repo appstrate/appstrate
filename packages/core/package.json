@@ -46,6 +46,7 @@
     "./request-body": "./src/request-body.ts",
     "./etag": "./src/etag.ts",
     "./pagination-link": "./src/pagination-link.ts",
+    "./list-query": "./src/list-query.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
@@ -54,12 +55,11 @@
     "./validation": "./src/validation.ts",
     "./integration": "./src/integration.ts",
     "./mcp-server": "./src/mcp-server.ts",
-    "./mcp-server-meta": "./src/mcp-server-meta.ts",
-    "./mcp-server-bundle": "./src/mcp-server-bundle/index.ts",
     "./zip": "./src/zip.ts",
     "./package-files": "./src/package-files.ts",
     "./package-file-operations": "./src/package-file-operations.ts",
     "./naming": "./src/naming.ts",
+    "./skill-uri": "./src/skill-uri.ts",
     "./image-ref": "./src/image-ref.ts",
     "./mime": "./src/mime.ts",
     "./dependencies": "./src/dependencies.ts",
@@ -68,9 +68,6 @@
     "./dist-tags": "./src/dist-tags.ts",
     "./version-policy": "./src/version-policy.ts",
     "./system-packages": "./src/system-packages.ts",
-    "./runtime-tools-catalog": "./src/runtime-tools-catalog.ts",
-    "./runtime-tool-defs": "./src/runtime-tool-defs.ts",
-    "./runtime-event-drain": "./src/runtime-event-drain.ts",
     "./ssrf": "./src/ssrf.ts",
     "./sse": "./src/sse.ts",
     "./cache": "./src/cache.ts",
@@ -112,7 +109,7 @@
     "./model-selectable": "./src/model-selectable.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.9.0",
+    "@afps-spec/schema": "^0.13.0",
     "@appstrate/afps-shared": "^0.13.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
@@ -121,7 +118,7 @@
     "fflate": "^0.8.3",
     "pino": "^10.4.0",
     "semver": "^7.8.4",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/mime-db": "^1.43.6",

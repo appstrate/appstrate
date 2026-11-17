@@ -3,6 +3,7 @@
 
 export {
   sign,
+  signFresh,
   verify,
   type SignOptions,
   type VerifyOptions,

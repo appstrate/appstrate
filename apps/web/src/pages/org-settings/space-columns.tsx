@@ -21,13 +21,10 @@ import type { components } from "../../api/client";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
-import { CellText } from "../../components/table-cells";
 import { formatDateField } from "../../lib/format-date";
-import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { spaceLabel } from "../../lib/space-label";
-import { spaceTile } from "../../lib/identity-tile-props";
-import { isSpaceEnterable } from "../../hooks/use-current-space";
-import { useViewer } from "../../hooks/use-auth";
+import { isSpaceEnterable } from "../../lib/space-lists";
+import { SpaceName } from "../../components/space-name";
 
 export interface SpaceRow {
   id: string;
@@ -56,7 +53,6 @@ export function useSpaceColumns({
   actionsBusy?: boolean;
 }): DataColumn<SpaceRow>[] {
   const { t } = useTranslation(["settings", "common"]);
-  const viewer = useViewer();
 
   return [
     {
@@ -65,18 +61,15 @@ export function useSpaceColumns({
       width: 160,
       elastic: true,
       cell: (space) => (
-        <span className="flex min-w-0 items-center gap-3">
-          <IdentityTile {...spaceTile(space, viewer)} className="size-7 rounded-md" />
-          <CellText
-            strong
-            // A `closed` space is listed so the caller knows it exists, not so they
-            // can be dropped into it (pinning one 403s every space-scoped request,
-            // same rule as the org switcher): its row is static and says why.
-            title={isSpaceEnterable(space) ? spaceLabel(space, t) : t("spaces.requestAccess")}
-          >
-            {spaceLabel(space, t)}
-          </CellText>
-        </span>
+        <SpaceName
+          space={space}
+          size="lg"
+          className="text-foreground font-medium"
+          // A `closed` space is listed so the caller knows it exists, not so they
+          // can be dropped into it (pinning one 403s every space-scoped request,
+          // same rule as the org switcher): its row is static and says why.
+          title={isSpaceEnterable(space) ? undefined : t("spaces.requestAccess")}
+        />
       ),
     },
     {
@@ -84,7 +77,6 @@ export function useSpaceColumns({
       header: t("spaces.visibilityLabel"),
       width: 150,
       elastic: true,
-      tier: 2,
       cell: (space) =>
         space.orphaned_at ? (
           // The one state that asks the reader for a decision, so it is said
@@ -105,9 +97,6 @@ export function useSpaceColumns({
       header: t("spaces.createdAtLabel"),
       width: 132,
       align: "end",
-      // Tier 2, not 3: the settings dialog tops out around 800px and never
-      // crosses the 56rem threshold, so tier 3 there means never drawn.
-      tier: 2,
       cell: (space) => (
         <span className="text-muted-foreground text-xs">
           {space.orphaned_at

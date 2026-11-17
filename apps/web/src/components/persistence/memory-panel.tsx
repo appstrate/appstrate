@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { BrainCircuit } from "lucide-react";
 import { EmptyState, NoMatchState } from "../page-states";
 import { ActorBadge } from "./actor-badge";
@@ -24,6 +25,7 @@ import {
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { authStore } from "../../stores/auth-store";
 
 interface MemoryPanelProps {
   packageId: string;
@@ -35,7 +37,7 @@ interface MemoryPanelProps {
 
 const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
 const MEMORY_TYPES = ["pinned", "archive"] as const;
-const MEMORY_SCOPES = ["shared", "mine"] as const;
+const MEMORY_SCOPES = ["shared", "mine", "others"] as const;
 
 /** Pinned slots (always-in-prompt, incl. `checkpoint`) and archive memories in one filterable list. */
 export function MemoryPanel({
@@ -61,12 +63,14 @@ export function MemoryPanel({
   const deleteMemory = useDeleteMemory(packageId);
   const deletePinned = useDeletePinnedSlot(packageId);
   const { can } = usePermissions();
-  const canDelete = !isRunView && can("persistence:delete");
+  // `persistence:delete` is also what lets the API return other actors' rows.
+  const readsEveryActor = can("persistence:delete");
+  const canDelete = !isRunView && readsEveryActor;
+  const userId = useStore(authStore, (s) => s.user?.id);
   const [toDelete, setToDelete] = useState<{ kind: "pinned" | "archive"; id: number } | null>(null);
   const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
-  const isError = pinnedQ.isError || memoriesQ.isError;
 
   const list = useLocalListParams({ type: initialTypes });
   const types = list.values("type", MEMORY_TYPES);
@@ -94,7 +98,7 @@ export function MemoryPanel({
   );
   const selected = memoryParam.target ?? null;
 
-  const filteredItems = filterMemoryItems(allItems, { query: list.search, scopes, types });
+  const filteredItems = filterMemoryItems(allItems, { query: list.search, scopes, types }, userId);
 
   const filters: FilterSpec[] = [
     {
@@ -116,6 +120,9 @@ export function MemoryPanel({
             options: [
               { value: "shared", label: t("agents:detail.memoryScopeShared") },
               { value: "mine", label: t("agents:detail.memoryScopeMine") },
+              ...(readsEveryActor
+                ? [{ value: "others", label: t("agents:detail.memoryScopeOthers") }]
+                : []),
             ],
             onChange: list.setValues("scope"),
           },
@@ -130,18 +137,6 @@ export function MemoryPanel({
     onDelete: canDelete ? (item) => setToDelete({ kind: item.kind, id: item.id }) : undefined,
   });
 
-  // Empty in BOTH tiers, once both answered: two failed queries also count zero, and a 500 must not draw "no memory yet".
-  if (!isLoading && !isError && allItems.length === 0) {
-    return (
-      <EmptyState
-        message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
-        hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
-        icon={BrainCircuit}
-        compact
-      />
-    );
-  }
-
   const selectedTypeLabel =
     selected?.kind === "pinned"
       ? t("agents:detail.memoryTypePinned")
@@ -149,8 +144,8 @@ export function MemoryPanel({
 
   return (
     <>
-      {/* Run results already own the section heading and outer content padding. */}
-      <section className={isRunView ? "min-w-0" : "min-w-0 p-6"}>
+      {/* Laid on the page like the runs tab: its toolbar, then the table in its own card. */}
+      <section className="min-w-0">
         <ListToolbar
           search={{
             value: list.search,
@@ -165,7 +160,6 @@ export function MemoryPanel({
         )}
         <DataTable
           tableId="package-memories"
-          tiered
           label={t("agents:detail.tabMemory")}
           columns={columns}
           rows={filteredItems}
@@ -174,7 +168,20 @@ export function MemoryPanel({
           rowLabel={(item) => item.key ?? memoryText(item.content)}
           isLoading={isLoading}
           failure={pinnedQ.error ?? memoriesQ.error}
-          empty={<NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />}
+          // Like the runs tab: an empty list keeps its toolbar and says so inside its card; "no
+          // memory yet" only once both tiers answered (two failed reads also count zero).
+          empty={
+            allItems.length === 0 ? (
+              <EmptyState
+                message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
+                hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
+                icon={BrainCircuit}
+                compact
+              />
+            ) : (
+              <NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />
+            )
+          }
         />
       </section>
       {selected !== null && (

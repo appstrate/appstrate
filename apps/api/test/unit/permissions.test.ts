@@ -262,7 +262,6 @@ describe("the `runner` preset", () => {
     const withheldGrants: Permission[] = [
       "agents:read",
       "skills:read",
-      "mcp-servers:read",
       "schedules:read",
       "end-users:read",
       "end-users:write",
@@ -296,17 +295,12 @@ describe("the `runner` preset", () => {
 describe("the `share` verb", () => {
   /**
    * Who may change a package's AUDIENCE (RBAC spec §6.10). `admin` and
-   * `builder` derive their grants from the catalog, so the four strings reached
+   * `builder` derive their grants from the catalog, so the three strings reached
    * them the moment core declared them — what needs pinning is the three
    * presets that must NOT have them, and the API-key allowlist, both of which
    * are hand-written lists where an addition would be silent.
    */
-  const SHARE = [
-    "agents:share",
-    "skills:share",
-    "mcp-servers:share",
-    "integrations:share",
-  ] as const;
+  const SHARE = ["agents:share", "skills:share", "integrations:share"] as const;
 
   it("is granted by `admin` and `builder`", () => {
     for (const preset of ["admin", "builder"] as const) {

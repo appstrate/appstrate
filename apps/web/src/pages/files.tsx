@@ -2,29 +2,28 @@
 
 /**
  * Files gallery. Paginated (keyset "load more") list of every file
- * visible to the caller in the current space, with a purpose filter.
- * Visibility is the API's (container-inherited ACL): members see the space's
- * files, end-users see only their own.
+ * visible to the caller in the current space, or in every space it reaches
+ * in « Tous les espaces », with a purpose filter. Visibility is the API's
+ * (container-inherited ACL): members see the space's files, end-users see only
+ * their own.
  */
 
 import { Alert } from "@appstrate/ui/components/alert";
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle } from "lucide-react";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useFilesPaged } from "../hooks/use-files";
+import { useFilesPaged, type FileDto } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
 import { ListViewTabs } from "../components/list-view-tabs";
 import { useListView } from "../stores/list-view-store";
 import { DocumentListPanel } from "../components/document-list-panel";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { KeysetListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
@@ -68,17 +67,19 @@ function DocumentsCollection({
   onReset: () => void;
 }) {
   const { t } = useTranslation(["files", "common"]);
-  const canReach = useCanReach();
+  const { on: spanning } = useOverviewMode();
+  const runSpaces = useAdmittingSpaces("runs");
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
 
-  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
-    search: query,
-    purpose: effectivePurpose,
-  });
+  const filesQuery = useFilesPaged({ search: query, purpose: effectivePurpose, spanning });
+  const { data, isLoading, error, hasNextPage } = filesQuery;
   const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
+
+  // A row's run opens in the row's space: judged by that space's grants.
+  const showRunLink = (doc: FileDto) => runSpaces.some((space) => space.id === doc.spaceId);
 
   const filtering = purposes.length > 0 || query.trim() !== "";
   const countLabel = hasNextPage
@@ -103,7 +104,6 @@ function DocumentsCollection({
 
       {overLimit && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle size={16} />
           <AlertDescription>{t("storage.limitReached")}</AlertDescription>
         </Alert>
       )}
@@ -140,23 +140,18 @@ function DocumentsCollection({
         )}
         empty={
           filtering
-            ? { message: t("page.noMatch"), compact: true }
+            ? { message: t("page.noMatch"), compact: true, onReset }
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
-        showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
+        showRunLink={showRunLink}
+        spanning={spanning}
         footer={
-          <ListFooter count={isLoading || error ? undefined : footerLabel}>
-            {hasNextPage && (
-              <PendingButton
-                variant="outline"
-                size="sm"
-                pending={isFetchingNextPage}
-                onClick={() => void fetchNextPage()}
-              >
-                {t("page.loadMore")}
-              </PendingButton>
-            )}
-          </ListFooter>
+          <KeysetListFooter
+            query={filesQuery}
+            loaded={files.length}
+            count={footerLabel}
+            ready={!isLoading && !error}
+          />
         }
       />
     </div>

@@ -16,7 +16,7 @@ export interface RunLaunch {
   rerun_from?: string;
   /** Forwarded as `?version=`; omitted = the API's published-when-exists default. `"draft"` needs `home_writable` (`defaultRunVersion`). */
   version?: string;
-  /** Per-integration connection sets for THIS run (cascade layer 3). */
+  /** Per-integration connection sets chosen for THIS run only (the launch override). */
   connectionOverrides?: Record<string, string[]>;
   modelId?: string;
   proxyId?: string;

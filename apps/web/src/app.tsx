@@ -29,15 +29,18 @@ import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { AppSidebar, ShellHeader } from "./components/app-shell";
 import { ShellFrameProvider } from "./components/shell-header-slots";
 import {
+  ChatConversationSkeleton,
   ChatPanelSkeleton,
   DashboardSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
+  NotificationDetailSkeleton,
   OverlayPanelSkeleton,
   PackageDetailSkeleton,
   RunDetailSkeleton,
   ScheduleDetailSkeleton,
   SettingsSkeleton,
+  SettingsTableSkeleton,
 } from "./components/loading-skeletons";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
@@ -49,6 +52,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
+import { useOverviewRules } from "./hooks/use-overview-mode";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -85,15 +89,21 @@ const UnifiedPackageDetailPage = lazyPage(
   () => import("./pages/unified-package-detail"),
   "UnifiedPackageDetailPage",
 );
-const PackageEditorPage = lazyPage(() => import("./pages/package-editor"), "PackageEditorPage");
+const IntegrationFromMcpUrlPage = lazyPage(
+  () => import("./pages/integration-from-mcp-url"),
+  "IntegrationFromMcpUrlPage",
+);
 const RunDetailPage = lazyPage(() => import("./pages/run-detail"), "RunDetailPage");
 const RunsPage = lazyPage(() => import("./pages/runs-page"), "RunsPage");
 const FilesPage = lazyPage(() => import("./pages/files"), "FilesPage");
 const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReaderPage");
 const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
 const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
+const NotificationDetailPage = lazyPage(
+  () => import("./pages/notification-detail"),
+  "NotificationDetailPage",
+);
 const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
-const McpServersPage = lazyPage(() => import("./pages/mcp-servers-page"), "McpServersPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
   () => import("./pages/integration-detail"),
@@ -269,16 +279,13 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/files/:fileId": <FileReaderPage />,
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
+  "/notifications/:id": <NotificationDetailPage />,
   "/skills": <SkillsPage />,
-  "/skills/new": <PackageEditorPage type="skill" />,
   "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
   "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
   "/integrations": <IntegrationsPage />,
-  "/integrations/new": <PackageEditorPage type="integration" />,
+  "/integrations/new/mcp": <IntegrationFromMcpUrlPage />,
   "/integrations/:scope/:name": <IntegrationDetailPage />,
-  "/mcp-servers": <McpServersPage />,
-  "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
-  "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
   "/catalogue": <CatalogueIndexRedirect />,
   "/catalogue/:type": <CataloguePage />,
   "/preferences": <Outlet />,
@@ -332,22 +339,71 @@ const flatPaths = (overlay: boolean) =>
 const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
   ["/agents/", "agent"],
   ["/skills/", "skill"],
-  ["/mcp-servers/", "mcp-server"],
   ["/integrations/", "integration"],
 ];
 
 /** What a route draws while its chunk or permissions load: the same skeleton its page draws for data. */
+/** The collections a reader may show as cards: the screen key `useListView` stores their choice under. */
+const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
+  "/agents": "agent",
+  "/skills": "skill",
+  "/integrations": "integrations",
+  "/files": "documents",
+};
+
+/**
+ * The collection pages' titles (their crumb), whether they carry an Actions menu, and what ends
+ * their bar: `views` (the cards-or-table switch).
+ */
+const LIST_PAGE: Partial<
+  Record<RoutePath, { titleKey: string; actions: boolean; views?: boolean }>
+> = {
+  "/agents": { titleKey: "common:nav.agents", actions: true, views: true },
+  "/skills": { titleKey: "settings:packages.type.skills", actions: true, views: true },
+  "/integrations": { titleKey: "settings:integrations.title", actions: true, views: true },
+  "/schedules": { titleKey: "common:nav.schedules", actions: true },
+  "/runs": { titleKey: "agents:runs.title", actions: true },
+  "/files": { titleKey: "common:nav.files", actions: false, views: true },
+};
+
+/** The settings pages that are a table, not rows of fields; the value says what leads the table. */
+const SETTINGS_TABLES: Partial<
+  Record<RoutePath, { toolbar?: boolean; columns?: boolean; intro?: "heading" | "hint" }>
+> = {
+  "/org-settings/members": { toolbar: true },
+  "/org-settings/spaces": {},
+  "/org-settings/proxies": {},
+  "/org-settings/cli-sessions": { intro: "heading" },
+  "/preferences/devices": { intro: "heading" },
+  "/workspace-settings/members": { toolbar: true, intro: "hint" },
+  "/workspace-settings/api-keys": { toolbar: true },
+  "/workspace-settings/webhooks": {},
+  "/workspace-settings/end-users": { toolbar: true, columns: true },
+};
+
 function skeletonOf(path: RoutePath): ReactNode {
+  const table = SETTINGS_TABLES[path];
+  if (table !== undefined) return <SettingsTableSkeleton {...table} />;
+  if (path === "/") return <DashboardSkeleton />;
   if (inLayout(path)) return <SettingsSkeleton />;
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
+  if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;
   if (isUnder(path, "/chat")) return <ChatPanelSkeleton />;
-  if (path === "/") return <DashboardSkeleton />;
-  if (path.endsWith("/new")) return <FormPageSkeleton />;
+  if (path === "/integrations/new/mcp") return <FormPageSkeleton />;
   if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
+  if (path === "/notifications/:id") return <NotificationDetailSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
-  return <ListPageSkeleton />;
+  const page = LIST_PAGE[path];
+  return (
+    <ListPageSkeleton
+      list={LIST_VIEW_OF[path]}
+      titleKey={page?.titleKey}
+      actions={page?.actions}
+      views={page?.views}
+    />
+  );
 }
 
 function pageRoute(path: RoutePath) {
@@ -404,6 +460,7 @@ function MainLayout() {
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
+  useOverviewRules();
   useGlobalRunSync();
 
   return (

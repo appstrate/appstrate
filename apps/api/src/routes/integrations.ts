@@ -7,12 +7,14 @@
  *
  *   - `GET    /`                                     — list available + active status
  *   - `GET    /calls`                                — admin: the credential proxy's calls made in this space
+ *   - `POST   /discover`                             — a manifest proposal from a remote MCP server URL
  *
  * Activating and deactivating an integration are NOT here: they are the same
  * act as activating any other package type, on the one pair of doors that
- * spells it — `POST /api/spaces/{spaceId}/packages` and
- * `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` (RBAC spec §6.10).
+ * spells it — `POST /api/spaces/{id}/packages` and
+ * `DELETE /api/spaces/{id}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
+ *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
@@ -65,18 +67,14 @@ import {
   validationFailed,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
-import {
-  parseListPagination,
-  parseFieldSelection,
-  paginate,
-  projectFields,
-} from "../lib/list-query.ts";
+import { listResponse } from "@appstrate/core/list-query";
+import { parseListPagination } from "@appstrate/core/list-query";
+import { parseFieldSelection, paginate, projectFields } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { db } from "@appstrate/db/client";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
@@ -88,15 +86,24 @@ import {
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
-import { ceilingAllows } from "../lib/permissions.ts";
+import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
 import { assertSpaceId } from "../lib/ids.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import type { ConnectionCaller, SpaceSeen } from "../services/connection-reach.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
+import { withRunToolDescriptions } from "../services/run-tools-mcp.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
-import { listIntegrations } from "../services/integration-service.ts";
+import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
+import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
+import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
+import {
+  reachOutsideRun,
+  reachOutsideRunIfPermitted,
+} from "../services/credential-proxy/access.ts";
+import { assertPackageMutationAccess } from "../lib/package-access.ts";
+import { getActor } from "../lib/actor.ts";
 import {
   assertConnectionBelongsToActor,
   assertIsIntegration,
@@ -117,7 +124,6 @@ import {
   setDefaultIntegrationClient,
   toPublicClient,
   updateIntegrationOAuthClient,
-  usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
   type ReconnectTarget,
   type WidenedConnection,
@@ -142,8 +148,10 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
   getVariablesSchema,
+  usesAutoProvisionedClient,
 } from "../services/integration-manifest-helpers.ts";
 import {
+  acquiresByConnectLogin,
   partitionScopesByAuthCatalog,
   scopesNotCovered,
   scopeTokenSchema,
@@ -154,7 +162,7 @@ import {
   deletePin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
-  pinAudit,
+  adminPinAudit,
   pinAuditResourceId,
   setBlockUserConnections,
   upsertIntegrationPin,
@@ -171,6 +179,7 @@ import {
   deleteOrgDefault,
 } from "../services/integration-org-defaults-service.ts";
 import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
+import { clientMetadataRedirectTag } from "../lib/integration-callback-url.ts";
 import {
   buildConnectUrl,
   connectClaimsFor,
@@ -269,8 +278,19 @@ export const updateSettingsSchema = z
 export const setPinSchema = z
   .object({
     connection_ids: connectionIdSetSchema,
+    // PUT replaces: absent is a closed pin, whatever was stored.
+    allow_additional_connections: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.allow_additional_connections && body.connection_ids.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["allow_additional_connections"],
+        message: "cannot open a pin to no connection: an empty floor imposes nothing to add to",
+      });
+    }
+  });
 
 export const setOrgDefaultSchema = z
   .object({
@@ -280,6 +300,19 @@ export const setOrgDefaultSchema = z
   .strict();
 
 export const connectionShareAllSpacesSchema = z.object({ share_all_spaces: z.boolean() }).strict();
+
+export const discoverIntegrationSchema = z
+  .object({
+    // Credentials in a URL would reach logs and the stored manifest. Zod 4 runs a refinement
+    // after a failed `url` check too: an unparsable value is left to that check.
+    url: z.url().refine((url) => {
+      const parsed = URL.parse(url);
+      return !parsed || (parsed.username === "" && parsed.password === "");
+    }, "The URL must not carry a username or password."),
+  })
+  .strict();
+
+export const syncFromServerSchema = z.object({ connection_id: z.uuid().optional() }).strict();
 
 export const updateConnectionSchema = z
   .object({
@@ -849,9 +882,10 @@ export function createIntegrationsRouter() {
     return c.json(listResponse(projected, { hasMore, total }));
   });
 
-  // One handler for the shared `/callback` and the per-authorization-server
-  // `/callback/:tag` of a server chosen per connection (AFPS §7.3): the state
-  // names which of the two the response must arrive at, both ways.
+  // One handler for the shared `/callback`, the per-authorization-server
+  // `/callback/:tag` of a DCR client of a server chosen per connection (AFPS
+  // §7.3) and the `/callback/cimd/:tag` of a metadata-document client: the
+  // state names which one the response must arrive at, every way.
   const oauthCallback = async (c: Context<AppEnv>, redirectTag: string | null) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
@@ -996,6 +1030,9 @@ export function createIntegrationsRouter() {
   };
   router.get("/callback", (c) => oauthCallback(c, null));
   router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
+  router.get("/callback/cimd/:tag", (c) =>
+    oauthCallback(c, clientMetadataRedirectTag(c.req.param("tag"))),
+  );
 
   // The credential proxy's journal for this space: every call made here, whatever the connection
   // and whoever owns it. Under `configure`, the permission that governs which credential the
@@ -1007,12 +1044,75 @@ export function createIntegrationsRouter() {
     serveSpaceConnectionCalls,
   );
 
+  // What a remote MCP server URL says about the integration it would back, before
+  // one exists: a manifest proposal for the editor. Reaches a caller-supplied
+  // URL, hence the egress guard inside and the rate limit here; persists nothing.
+  router.post("/discover", rateLimit(10), requirePermission("integrations", "write"), async (c) => {
+    const { url } = await readJsonBody(c, discoverIntegrationSchema);
+    const proposal = await discoverRemoteIntegration(
+      { url, orgSlug: c.get("orgSlug") },
+      { signal: c.req.raw.signal },
+    );
+    // What the caller can already reach at this URL, under the listing's own visibility.
+    const existing = await listIntegrationsAtRemoteUrl(getSpaceScope(c), url);
+    return c.json({
+      manifest: proposal.manifest,
+      icon_source: proposal.iconSource,
+      provenance: proposal.provenance,
+      warnings: proposal.warnings,
+      existing: existing.map(({ id, manifest }) => ({
+        integration_package_id: id,
+        display_name: manifest.display_name || id,
+      })),
+    });
+  });
+
+  // What the connected server says about this integration (tools, serverInfo, instructions), for
+  // its editor; editing the result needs write authority on the package's home. An authenticated
+  // draft's MCP exchange rides the credential proxy, under the proxy's own permission outside a
+  // run; an unauthenticated one (AFPS §7.2) reaches its server directly and asks no proxy right.
+  router.post("/:packageId{@[^/]+/[^/]+}/discover", rateLimit(10), async (c) => {
+    const packageId = c.req.param("packageId")!;
+    await assertPackageMutationAccess(c, packageId, "write");
+    const scope = getSpaceScope(c);
+    await assertIsIntegration(scope, packageId);
+    const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
+    const proposal = await syncIntegrationFromServer({
+      scope,
+      actor: getActor(c),
+      packageId,
+      ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+      proxyReach: () => {
+        assertPermission(c, "credential-proxy", "call-own");
+        return reachOutsideRun(callerPermissions(c), c.get("space")!);
+      },
+      caller: {
+        apiKeyId: c.get("apiKeyId") || null,
+        authMethod: c.get("authMethod"),
+        requestId: c.get("requestId"),
+      },
+      signal: c.req.raw.signal,
+    });
+    return c.json({
+      manifest: proposal.manifest,
+      icon_source: proposal.iconSource,
+      instructions: proposal.instructions,
+      tools: proposal.tools.map(({ readOnly, ...tool }) => ({ ...tool, read_only: readOnly })),
+      warnings: proposal.warnings,
+    });
+  });
+
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
-    return c.json(status);
+    const status = await getIntegrationAuthStatuses(
+      scope,
+      packageId,
+      ...spaceListCaller(c),
+      reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
+    );
+    return c.json(withRunToolDescriptions(status));
   });
 
   // ─── OAuth client registration (admin) ─────
@@ -1100,7 +1200,7 @@ export function createIntegrationsRouter() {
         : null;
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-        if (auth.type === "oauth2") {
+        if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
           throw invalidRequest(
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
@@ -1166,9 +1266,11 @@ export function createIntegrationsRouter() {
         : null;
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-      if (auth.type !== "oauth2") {
+      if (auth.type !== "oauth2" || acquiresByConnectLogin(auth)) {
         throw invalidRequest(
-          `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
+          auth.type === "oauth2"
+            ? `Auth '${authKey}' acquires its first token by connect.login — use the fields flow instead`
+            : `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
         );
       }
       assertScopesInAuthCatalog(auth, authKey, body.scopes);
@@ -1294,7 +1396,11 @@ export function createIntegrationsRouter() {
 
     // An integration declaring connection variables (AFPS §7.12) collects them on the hosted form
     // first: its oauth2 begins from `/connect/submit`, once the user has chosen the upstream.
-    if (auth.type === "oauth2" && getVariablesSchema(manifest) === null) {
+    if (
+      auth.type === "oauth2" &&
+      !acquiresByConnectLogin(auth) &&
+      getVariablesSchema(manifest) === null
+    ) {
       const begun = await beginHostedOAuth(claims, manifest, auth);
       if ("redirectUrl" in begun) return c.redirect(begun.redirectUrl);
       if ("connectionGone" in begun) {
@@ -1327,10 +1433,9 @@ export function createIntegrationsRouter() {
       );
     }
 
-    // Non-oauth, or oauth2 with connection variables → hand off to the hosted
-    // SPA form. Pin the page cookie so the form can read context via
-    // GET /connect/context (no token in the URL). The oauth2 branch above never
-    // reaches here, so the cookie is set only when the hosted form needs it.
+    // Non-oauth, oauth2 acquired by connect.login, or oauth2 with connection
+    // variables → hand off to the hosted SPA form. Pin the page cookie so the
+    // form can read context via GET /connect/context (no token in the URL).
     setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });
@@ -1361,6 +1466,16 @@ export function createIntegrationsRouter() {
     });
   });
 
+  /**
+   * Ends the page session on a refusal, and says so with the RFC 9457 extension member
+   * `connect_session_ended: true`: a resubmission would meet no session, so the form must not
+   * offer one — the connection restarts from the application.
+   */
+  function endConnectSession(c: Context<AppEnv>, err: ApiError): ApiError {
+    clearConnectPageCookie(c);
+    return err.with({ extensions: { ...err.extensions, connect_session_ended: true } });
+  }
+
   // POST /connect/submit — hosted-form credential submit. Context + actor come
   // from the page cookie; the request carries only the credentials + CSRF nonce.
   // Rate-limited per IP like `/connect/start`: no session, and an oauth2 submit
@@ -1377,13 +1492,16 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
     const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
+    // An oauth2 `connect.login` submission spends the page cookie's jti like an authorization
+    // flow: a rotating grant presented twice is redeemed once and refused once.
+    const loginJti = { consumed: false, grantPresented: false };
     try {
       const { manifest, auth } = await readIntegrationAuth(
         scope,
         claims.package_id,
         claims.auth_key,
       );
-      if (auth.type === "oauth2") {
+      if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
         if (body.credentials) {
           throw invalidRequest(
             "This integration uses OAuth: submit its connection variables only",
@@ -1401,8 +1519,7 @@ export function createIntegrationsRouter() {
           return c.json({ ok: true, redirect_url: begun.redirectUrl });
         }
         if ("connectionGone" in begun) {
-          clearConnectPageCookie(c);
-          throw notFound("Connection not found");
+          throw endConnectSession(c, notFound("Connection not found"));
         }
         if ("refused" in begun && begun.refused.code === "validation_failed") {
           // A variable to fix, shown beside its field: the form may be submitted again.
@@ -1411,9 +1528,8 @@ export function createIntegrationsRouter() {
         }
         const reusable = "refused" in begun ? begun.reusable : begun.beforeEgress;
         if (reusable) await releaseJti(claims.jti);
-        else clearConnectPageCookie(c);
         if ("refused" in begun) {
-          throw new ApiError({
+          const notReady = new ApiError({
             status: begun.refused.status,
             code: "connection_not_ready",
             title: "Connection Not Ready",
@@ -1421,14 +1537,24 @@ export function createIntegrationsRouter() {
               reusable ? "submit this form again" : "request a new connection link"
             }.`,
           });
+          throw reusable ? notReady : endConnectSession(c, notReady);
         }
         if (begun.beforeEgress) throw internalError();
-        throw new ApiError({
-          status: 502,
-          code: "connect_start_failed",
-          title: "Bad Gateway",
-          detail: "Could not start the connection. Please request a new connection link.",
-        });
+        throw endConnectSession(
+          c,
+          new ApiError({
+            status: 502,
+            code: "connect_start_failed",
+            title: "Bad Gateway",
+            detail: "Could not start the connection. Please request a new connection link.",
+          }),
+        );
+      }
+      if (auth.type === "oauth2") {
+        if (!(await consumeJti(claims.jti, claims.exp))) {
+          throw notFound("No active connect session");
+        }
+        loginJti.consumed = true;
       }
       if (!body.credentials) {
         throw invalidRequest("credentials payload cannot be empty", "credentials");
@@ -1467,6 +1593,13 @@ export function createIntegrationsRouter() {
         ...(target ? { target } : {}),
         ...(claims.delegated ? { delegated: true } : {}),
         ...(body.variables ? { variables: body.variables } : {}),
+        ...(loginJti.consumed
+          ? {
+              onGrantPresented: () => {
+                loginJti.grantPresented = true;
+              },
+            }
+          : {}),
       };
       const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
       const { conn, audits } = await completeConnect(strategy, ctx, {
@@ -1487,9 +1620,15 @@ export function createIntegrationsRouter() {
           : {}),
       });
     } catch (err) {
-      if (err instanceof ApiError) throw err;
-      logger.error("Hosted connect submit failed", { err: String(err) });
-      throw internalError();
+      if (!(err instanceof ApiError))
+        logger.error("Hosted connect submit failed", { err: String(err) });
+      const apiErr = err instanceof ApiError ? err : internalError();
+      if (loginJti.consumed) {
+        // Refused before the grant left the platform: the form can be fixed and submitted again.
+        if (loginJti.grantPresented) throw endConnectSession(c, apiErr);
+        await releaseJti(claims.jti);
+      }
+      throw apiErr;
     }
   });
 
@@ -1527,8 +1666,13 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap.
-      const detail = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
-      return c.json(detail);
+      const detail = await getIntegrationAuthStatuses(
+        scope,
+        packageId,
+        ...spaceListCaller(c),
+        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
+      );
+      return c.json(withRunToolDescriptions(detail));
     },
   );
 
@@ -1567,16 +1711,17 @@ export function createIntegrationsRouter() {
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setPinSchema);
-      const { previous, pin } = await upsertIntegrationPin(scope, packageId, {
+      const { previous, pin, memberPinsCleared } = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
         connectionIds: body.connection_ids,
+        allowAdditionalConnections: body.allow_additional_connections,
       });
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, packageId),
-        before: pinAudit(previous),
-        after: pinAudit(pin.connection_ids),
+        before: previous,
+        after: { ...adminPinAudit(pin), memberPinsCleared },
       });
       return c.json(pin);
     },
@@ -1589,7 +1734,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous, disabledScheduleIds } = await deletePin(
+      const { previous, memberPinsCleared, disabledScheduleIds } = await deletePin(
         scope,
         agentPackageId,
         packageId,
@@ -1601,8 +1746,11 @@ export function createIntegrationsRouter() {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
-          before: pinAudit(previous),
-          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
+          before: previous,
+          after: {
+            memberPinsCleared,
+            ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+          },
         });
       }
       return c.json({ schedules_disabled_count: disabledScheduleIds.length });
@@ -1621,8 +1769,9 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const item = await getOrgDefault(scope, packageId);
-      // Bare resource, or 204 when no default is set — same contract as
-      // PUT (bare resource) and the models/proxies default endpoints.
+      // Bare resource, or 204 when no default is set — the resource PUT
+      // answers (plus its `schedules_disabled_count`), as the models/proxies
+      // default endpoints do.
       if (!item) return c.body(null, 204);
       return c.json(item);
     },
@@ -1635,18 +1784,24 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
-      const { previous, orgDefault } = await upsertOrgDefault(scope, packageId, {
-        connectionIds: body.connection_ids,
-        enforce: body.enforce,
-      });
+      const { previous, orgDefault, memberPinsCleared, disabledScheduleIds } =
+        await upsertOrgDefault(scope, packageId, {
+          connectionIds: body.connection_ids,
+          enforce: body.enforce,
+        });
+      await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
         before: orgDefaultAudit(previous),
-        after: orgDefaultAudit(orgDefault),
+        after: {
+          ...orgDefaultAudit(orgDefault),
+          memberPinsCleared,
+          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+        },
       });
-      return c.json(orgDefault);
+      return c.json({ ...orgDefault, schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 
@@ -1656,7 +1811,10 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const { previous, disabledScheduleIds } = await deleteOrgDefault(scope, packageId);
+      const { previous, memberPinsCleared, disabledScheduleIds } = await deleteOrgDefault(
+        scope,
+        packageId,
+      );
       await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
@@ -1664,7 +1822,10 @@ export function createIntegrationsRouter() {
           resourceType: "integration_org_default",
           resourceId: packageId,
           before: orgDefaultAudit(previous),
-          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
+          after: {
+            memberPinsCleared,
+            ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+          },
         });
       }
       return c.json({ schedules_disabled_count: disabledScheduleIds.length });

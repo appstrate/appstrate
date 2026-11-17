@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, spaceMembers, spacePackages, spaceRoles, spaces } from "@appstrate/db/schema";
+import { packages, runs, spacePackages, spaces } from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
-import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   VERSION_SELECTOR_DRAFT,
   VERSION_SELECTOR_PUBLISHED,
@@ -28,27 +26,15 @@ import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
-import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
+import type { OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
-import { callerPermissions, type Permission } from "./permissions.ts";
+import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  effectiveInSpace,
-  personaFor,
-  personaMemberships,
-} from "./view-as.ts";
-import {
-  customRoleOn,
-  MEMBERSHIP_COLUMNS,
-  memberFromJoin,
-  membershipOn,
-  resolveSpaceRole,
-} from "./space-role.ts";
+import { callerOrgRole, callerPersonalOwnerId } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
+import { callerReachableSpaces, type ReachableSpace } from "./reachable-spaces.ts";
 import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -58,15 +44,9 @@ import { placementRowJoin } from "../services/package-placement.ts";
  */
 export const requireAgentRead = requireAnyPermission(packageSightPermissions("agent"));
 
-/**
- * `agents:run` without `agents:read` — the caller sees what the launch form
- * needs and nothing an author would call the agent's content.
- *
- * The three routes above answer this ONE question to shape their projection;
- * none of them re-derives the condition.
- */
+/** `readsAgentContent`, negated, for the request's own space. */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
-  return !callerPermissions(c).has("agents:read");
+  return !readsAgentContent(callerPermissions(c));
 }
 
 /**
@@ -99,22 +79,11 @@ export async function assertExistingPackageActivationAccess(
     await makePermissionGuard(spacePackagePermission(type, "activate"))(c, async () => {});
 }
 
-/**
- * One space of the caller's reach, with their effective permissions in it.
- *
- * Written out rather than inferred from the resolver: the memo that returns it
- * lives on the Hono context, so `AppEnv` names this type and inferring it back
- * off the resolver would close the loop through the environment.
- */
-export interface PackageAccessSpace {
-  id: string;
-  name: string;
-  isDefault: boolean;
-  visibility: SpaceVisibility;
-  defaultRole: SpaceRolePreset;
-  ownerUserId: string | null;
-  permissions: ReadonlySet<string>;
-}
+/** One space of the caller's reach, with their effective permissions in it. */
+export type PackageAccessSpace = Pick<
+  ReachableSpace,
+  "id" | "name" | "isDefault" | "visibility" | "defaultRole" | "ownerUserId"
+> & { permissions: ReadonlySet<string> };
 
 /**
  * A package read that crosses into ANOTHER organization, with the standing the
@@ -141,87 +110,30 @@ export interface ForeignOrgStanding {
  * failure is silent and it fails OPEN, which is why the role is not an optional
  * parameter with a default.
  */
-export async function packageAccessSpaces(c: Context<AppEnv>, foreign?: ForeignOrgStanding) {
-  const orgId = foreign?.orgId ?? c.get("orgId");
-  const orgRole = foreign?.orgRole ?? callerOrgRole(c, orgId);
-  // MEMOIZED per request. Every authority and reachability decision needs this
-  // set, so a single route resolved it up to four times over; an optional
-  // `resolvedSpaces` parameter threaded through the signatures instead would
-  // cost a query when forgotten and a wrong answer when stale. The cache lives
-  // on the Hono context, so it dies with the request and cannot outlive the
-  // standing it describes.
-  //
-  // Keyed on the org AND the role, not the org alone: one request can ask about
-  // two organizations (the cross-organization fork), and a key that dropped the
-  // role would let whichever call ran first decide for the other.
-  const cache =
-    c.get("packageAccessSpacesCache") ?? new Map<string, Promise<PackageAccessSpace[]>>();
-  if (!c.get("packageAccessSpacesCache")) c.set("packageAccessSpacesCache", cache);
-  const key = `${orgId}:${orgRole}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  const pending = resolvePackageAccessSpaces(c, orgId, orgRole);
-  cache.set(key, pending);
-  return pending;
-}
-
-/** The read itself — {@link packageAccessSpaces} is the memo in front of it. */
-async function resolvePackageAccessSpaces(
+export async function packageAccessSpaces(
   c: Context<AppEnv>,
-  orgId: string,
-  orgRole: OrgRole,
+  foreign?: ForeignOrgStanding,
 ): Promise<PackageAccessSpace[]> {
-  const callerId = callerPersonalOwnerId(c, orgId);
-  const tokenOnly = Boolean(c.get("endUser")) && !c.get("orgRole");
-  const persona = personaFor(c, orgId);
-  // Spaces and the caller's rows in one statement (RBAC spec §4.4); none under a
-  // preview (the overlay replaces them) or for an end-user token (no org role).
-  const joined = await db
+  const orgId = foreign?.orgId ?? c.get("orgId");
+  // Memoized per request by `callerReachableSpaces`.
+  if (c.get("principalKind") !== "end_user") {
+    return callerReachableSpaces(c, orgId, foreign?.orgRole ?? callerOrgRole(c, orgId));
+  }
+  // An end-user acts in its own space only (RBAC spec §7.2), with the request's set there.
+  const spaceId = c.get("credentialSpaceId");
+  if (spaceId === undefined) return [];
+  const [space] = await db
     .select({
-      space: {
-        id: spaces.id,
-        name: spaces.name,
-        isDefault: spaces.isDefault,
-        visibility: spaces.visibility,
-        defaultRole: spaces.defaultRole,
-        ownerUserId: spaces.ownerUserId,
-      },
-      ...MEMBERSHIP_COLUMNS,
+      id: spaces.id,
+      name: spaces.name,
+      isDefault: spaces.isDefault,
+      visibility: spaces.visibility,
+      defaultRole: spaces.defaultRole,
+      ownerUserId: spaces.ownerUserId,
     })
     .from(spaces)
-    .leftJoin(spaceMembers, membershipOn(tokenOnly || persona ? null : c.get("user").id))
-    .leftJoin(spaceRoles, customRoleOn)
-    .where(
-      and(
-        eq(spaces.orgId, orgId),
-        c.get("authMethod") === "api_key" || c.get("endUser")
-          ? eq(spaces.id, c.get("spaceId"))
-          : undefined,
-        // Someone else's personal space is never even LOADED. `resolveSpaceRole`
-        // would drop it anyway, but with one personal space per member this
-        // query would otherwise grow with the organization's headcount on
-        // every catalog read (RBAC spec §3.6).
-        callerId === null
-          ? isNull(spaces.ownerUserId)
-          : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
-      ),
-    );
-  const overlay = personaMemberships(persona);
-  return joined.flatMap((row) => {
-    const { space } = row;
-    if (tokenOnly) {
-      return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
-    }
-    const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(row);
-    const ref = resolveSpaceRole(orgRole, space, member, callerId);
-    if (!ref) return [];
-    return [
-      {
-        ...space,
-        permissions: effectiveInSpace(c, ref),
-      },
-    ];
-  });
+    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)));
+  return space ? [{ ...space, permissions: callerPermissions(c) }] : [];
 }
 
 /**
@@ -265,6 +177,36 @@ export async function isPackageReadableInSpace(
   if (row.source === "system") return true;
   const here = new Set([spaceId]);
   return placementGrantsRead(row, row.rowHere ? here : [], here);
+}
+
+/**
+ * True when `packageId` is an ephemeral inline shadow of this org with a run in
+ * this space that `visibility` admits — the one way a shadow, which no
+ * placement reaches, is readable. A shadow is 1:1 with its run, so its read
+ * rule is the run's: pass `runVisibilityFilter(c)` (`lib/run-visibility.ts`).
+ */
+export async function isInlineShadowRunReadable(
+  orgId: string,
+  spaceId: string,
+  packageId: string,
+  visibility: SQL | undefined,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .innerJoin(packages, eq(packages.id, runs.packageId))
+    .where(
+      and(
+        eq(runs.packageId, packageId),
+        eq(runs.orgId, orgId),
+        eq(runs.spaceId, spaceId),
+        eq(packages.orgId, orgId),
+        eq(packages.ephemeral, true),
+        visibility,
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 /**
@@ -771,6 +713,16 @@ async function refuseHomeAuthority(
   throw forbidden(detail);
 }
 
+/** The home's id when the caller reaches that space, `null` otherwise (never the raw column). */
+export function visibleHomeSpaceId(
+  pkg: { homeSpaceId: string | null },
+  accessible: readonly { id: string }[],
+): string | null {
+  return pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId)
+    ? pkg.homeSpaceId
+    : null;
+}
+
 /**
  * The `home_*` fields EVERY package read emits — one contract, computed once,
  * for `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail` and the library
@@ -808,13 +760,11 @@ export function homeWireForCaller(
   home_deletable: boolean;
   home_shareable: boolean;
 } {
-  const reached =
-    pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId);
   const system = isSystemPackageRow(pkg);
   const holds = (action: "write" | "delete" | "share") =>
     !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, action));
   return {
-    home_space_id: reached ? pkg.homeSpaceId : null,
+    home_space_id: visibleHomeSpaceId(pkg, accessible),
     home_writable: holds("write"),
     home_deletable: holds("delete"),
     home_shareable: holds("share"),
@@ -988,7 +938,7 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
       continue;
     }
     const type = pkg.manifest.type;
-    if (type !== "agent" && type !== "skill" && type !== "integration" && type !== "mcp-server") {
+    if (type !== "agent" && type !== "skill" && type !== "integration") {
       throw invalidRequest(`Unknown package type '${String(type)}'`);
     }
     await makePermissionGuard(packagePermission(type, "write"))(c, async () => {});
@@ -1008,14 +958,10 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
   // the rule the package routes use ({@link assertPackageDependenciesAccessible}).
   //
   // The loop above authorizes what the bundle brings. A manifest may also point
-  // OUTWARD — a declared dependency, or the `source.server.name` of a
-  // `source.kind: "local"` integration — and `importBundle` writes
+  // OUTWARD — a declared dependency — and `importBundle` writes
   // `draftManifest` straight from the archive, so an unchecked outward
-  // reference is written verbatim and resolved at kickoff by
-  // `integration-spawn-resolver.ts`, which asks the ORGANIZATION boundary and
-  // nothing about placement. Without this pass, an archive was the way to name
-  // a package the importer may not read — an mcp-server homed in somebody
-  // else's personal space included (§3.6).
+  // reference is written verbatim. Without this pass, an archive was the way
+  // to name a package the importer may not read (§3.6).
   //
   // References the bundle carries are excluded: those are the rows the loop
   // above already authorized, and they may not exist in the catalog yet.
@@ -1050,23 +996,12 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
 type PackageIdString = `@${string}/${string}`;
 
 /**
- * EVERY package this manifest names, as `{ id, type }` — `dependencies.*` AND
- * the one reference that lives outside that block.
- *
- * An integration with `source.kind: "local"` names its mcp-server in
- * `source.server.name` (AFPS §7.1), and `extractDependencies` does not see it:
- * it reads `dependencies.{skills,mcp_servers,integrations}` and nothing else.
- * That reference is not decorative — `integration-spawn-resolver.ts` resolves it
- * at kickoff and spawns THOSE bytes. Leaving it out of the access check made it
- * the one way to name a package the caller may not read: the spawn resolver
- * applies the ORGANIZATION boundary (`resolveMcpServerForSpawn` →
- * `resolvePublishedManifest(…, orgId, …)`) and asks nothing about placement, so
- * an mcp-server homed in somebody else's PERSONAL space — a 404 on every
- * package route, §3.6 — resolved and ran.
+ * EVERY package this manifest names, as `{ id, type }`, read from
+ * `dependencies.{skills,integrations}`. A local MCP server is declared inline
+ * on its integration (`source.server`), so it names no package.
  */
 const DEPENDENCY_GROUPS = [
   ["skills", "skill"],
-  ["mcp_servers", "mcp-server"],
   ["integrations", "integration"],
 ] as const satisfies ReadonlyArray<readonly [string, PackageType]>;
 
@@ -1075,7 +1010,7 @@ function manifestPackageRefs(
 ): Array<{ id: PackageIdString; type: PackageType }> {
   // The NAMES, read tolerantly. `extractDependencies` validates the semver
   // range beside each one and THROWS on a bad one — right for a write path,
-  // wrong here: whether a caller may read `@scope/server` does not depend on
+  // wrong here: whether a caller may read `@scope/skill` does not depend on
   // the range written next to it, and letting a malformed range decide an
   // authorization answer turns a schema question into a 500. A name that
   // matches no catalog row grants nothing, which is the only outcome a
@@ -1087,12 +1022,6 @@ function manifestPackageRefs(
       refs.push({ id: name as PackageIdString, type });
     }
   }
-  const localServer = getLocalServerRef(manifest as unknown as IntegrationManifest);
-  // `source.server.name` is a free-form string in the raw manifest; the schema
-  // that validates the package has already refused anything that is not a
-  // scoped name, and a reference that still does not match simply matches no
-  // catalog row below.
-  if (localServer) refs.push({ id: localServer.name as PackageIdString, type: "mcp-server" });
   return refs;
 }
 

@@ -47,6 +47,8 @@ interface CredentialFormModalProps {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
+  /** The submission's refusal, shown under the fields. */
+  error?: string | null;
   /**
    * The caller's own credential: the picker offers only what a member may own. Otherwise the
    * credential is the organization's, a key or a subscription.
@@ -71,6 +73,7 @@ interface CredentialFormFields {
 export function CredentialFormModal({
   credential,
   isPending,
+  error,
   onSubmit,
   onClose,
   personal = false,
@@ -260,6 +263,7 @@ export function CredentialFormModal({
       onClose={onClose}
       title={title}
       onSubmit={onFormSubmit}
+      error={error}
       isPending={isPending}
       submitLabel={submitLabel}
       submitDisabled={!selectedProvider}

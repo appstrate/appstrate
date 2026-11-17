@@ -9,7 +9,7 @@
  *   3. Never insert a shadow row regardless of outcome.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -22,6 +22,8 @@ import {
   apiIntegrationManifest,
   localIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 
 const app = getTestApp();
 
@@ -301,7 +303,6 @@ describe("POST /api/runs/inline/validate", () => {
     function integrationManifest() {
       return localIntegrationManifest({
         name: INTEGRATION,
-        serverName: `${INTEGRATION}-server`,
         version: "1.0.0",
         auths: {
           primary: {
@@ -512,7 +513,6 @@ describe("POST /api/runs/inline/validate", () => {
       function svcManifest(tools: string[]): Record<string, unknown> {
         return localIntegrationManifest({
           name: PINNED,
-          serverName: `${PINNED}-server`,
           version: "1.0.0",
           auths: {
             primary: {
@@ -597,5 +597,42 @@ describe("POST /api/runs/inline/validate", () => {
         }
       });
     });
+  });
+});
+
+describe("an inline run selecting no tool of @appstrate/platform", () => {
+  const PLATFORM = "@appstrate/platform";
+  let ctx: TestContext;
+  let restore: () => void;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "inlineorg" });
+    restore = await installRuntimeBoundSystemPackages();
+  });
+
+  afterEach(() => restore());
+
+  it("is accepted and spawns no platform server", async () => {
+    const manifest = {
+      ...validManifest(),
+      dependencies: { skills: {}, integrations: { [PLATFORM]: "^1.0.0" } },
+      integrations_configuration: { [PLATFORM]: { tools: [] } },
+    };
+    const res = await app.request("/api/runs/inline/validate", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest, prompt: "do something" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ valid: true, warnings: [] });
+
+    const spawns = await resolveIntegrationSpawns({
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: manifest,
+      resolvedConnections: {},
+    });
+    expect(spawns).toEqual({ specs: [], dropped: [] });
   });
 });

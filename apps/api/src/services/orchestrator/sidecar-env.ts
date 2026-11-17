@@ -42,7 +42,7 @@ interface BaseSidecarEnvParams {
   /**
    * Handed to the sidecar as WORKSPACE_HANDLE_JSON so its integration
    * runtime adapter can mount/wire the same shared surface into runner
-   * workloads that opt in via mcp-server `_meta["dev.appstrate/workspace"]`.
+   * workloads that opt in via the integration `_meta["dev.appstrate/workspace"]`.
    */
   workspace: WorkspaceHandle;
   /**
@@ -130,14 +130,6 @@ export function applySpecToSidecarEnv(
   // resolved spawn env (with live OAuth tokens / API keys).
   if (spec.integrations && spec.integrations.length > 0) {
     target.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
-  }
-  // Platform runtime tools (output/log/note/pin) the sidecar hosts
-  // as in-process MCP tools, plus the output schema they validate against.
-  if (spec.runtimeTools && spec.runtimeTools.length > 0) {
-    target.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);
-  }
-  if (spec.outputSchema) {
-    target.OUTPUT_SCHEMA = JSON.stringify(spec.outputSchema);
   }
   // P4 — connect-run mode. When set, the sidecar runs `runConnectOnce`
   // against this single integration and exits (no agent /mcp server).

@@ -7,38 +7,32 @@
  * A required `orgId` now lands in the SQL WHERE of BOTH the package-metadata
  * lookup and the version lookup (`orgOrSystemFilter`), so a run can only ever
  * resolve a package its org owns or a system package (`org_id IS NULL`). If
- * the filter is reverted, a run in org A referencing an integration or
- * mcp-server package PUBLISHED BY ORG B would happily feed org B's manifest
+ * the filter is reverted, a run in org A referencing an integration
+ * PUBLISHED BY ORG B would happily feed org B's manifest
  * (and its bytes) into org A's spawn path.
  *
- * The kernel is private; it is exercised through its two exported wrappers:
- *   - `resolveMcpServerForSpawn` (mcp-server axis, #588)
- *   - `resolveRunIntegrationVersions` (integration axis, #686)
+ * The kernel is private; it is exercised through its exported wrapper
+ * `resolveRunIntegrationVersions` (#686)
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion, seedPublishedVersion } from "../../helpers/seed.ts";
 import {
-  resolveMcpServerForSpawn,
+  readIntegrationManifestForConnect,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "../../../src/services/integration-service.ts";
-import {
-  localIntegrationManifest,
-  mcpServerManifest,
-} from "../../helpers/integration-manifests.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
-const SERVER = "@tenantb/server";
 const INTEG = "@tenantb/integ";
-const SYSTEM_SERVER = "@shared/system-server";
+const SYSTEM_INTEG = "@shared/system-integ";
 
 function integManifest(version: string) {
   return localIntegrationManifest({
     name: INTEG,
     version,
-    serverName: SERVER,
     auths: {
       key: {
         type: "api_key",
@@ -74,54 +68,48 @@ describe("resolvePublishedManifest — tenant boundary (CRIT-11)", () => {
     orgB = await createTestContext({ orgSlug: "tenantb", email: "b@tenant.test" });
   });
 
-  describe("mcp-server axis (resolveMcpServerForSpawn)", () => {
+  describe("connect manifest and bundle version (readIntegrationManifestForConnect)", () => {
     beforeEach(async () => {
       await seedPackage({
-        id: SERVER,
+        id: INTEG,
         orgId: orgB.orgId,
-        type: "mcp-server",
+        type: "integration",
         source: "local",
-        draftManifest: mcpServerManifest({ name: SERVER }),
+        draftManifest: integManifest("9.9.9"),
       });
-      await seedPackageVersion({
-        packageId: SERVER,
-        version: "1.0.0",
-        manifest: mcpServerManifest({ name: SERVER, version: "1.0.0" }),
-      });
+      await seedPublishedVersion(INTEG, "1.0.0", { manifest: integManifest("1.0.0") });
     });
 
-    it("a run in org A cannot resolve org B's published mcp-server", async () => {
-      const res = await resolveMcpServerForSpawn(SERVER, orgA.orgId, "1.0.0");
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.reason).toBe("not_found");
+    it("a connect in org A cannot resolve org B's published integration", async () => {
+      expect(await readIntegrationManifestForConnect({ orgId: orgA.orgId }, INTEG)).toEqual({
+        ok: false,
+        reason: "not_found",
+      });
     });
 
     it("the owning org still resolves it (control)", async () => {
-      const res = await resolveMcpServerForSpawn(SERVER, orgB.orgId, "1.0.0");
-      expect(res.ok).toBe(true);
-      if (res.ok) {
-        expect(res.version).toBe("1.0.0");
-        expect(res.source).toBe("version");
-      }
+      expect(await readIntegrationManifestForConnect({ orgId: orgB.orgId }, INTEG)).toMatchObject({
+        ok: true,
+        version: "1.0.0",
+      });
     });
 
     it("a system package (orgId: null) still resolves for any org", async () => {
       await seedPackage({
-        id: SYSTEM_SERVER,
+        id: SYSTEM_INTEG,
         orgId: null,
-        type: "mcp-server",
+        type: "integration",
         source: "local",
-        draftManifest: mcpServerManifest({ name: SYSTEM_SERVER }),
+        draftManifest: integManifest("1.0.0"),
       });
-      await seedPackageVersion({
-        packageId: SYSTEM_SERVER,
-        version: "1.0.0",
-        manifest: mcpServerManifest({ name: SYSTEM_SERVER, version: "1.0.0" }),
-      });
+      await seedPublishedVersion(SYSTEM_INTEG, "1.0.0", { manifest: integManifest("1.0.0") });
 
-      const res = await resolveMcpServerForSpawn(SYSTEM_SERVER, orgA.orgId, "1.0.0");
-      expect(res.ok).toBe(true);
-      if (res.ok) expect(res.version).toBe("1.0.0");
+      expect(
+        await readIntegrationManifestForConnect({ orgId: orgA.orgId }, SYSTEM_INTEG),
+      ).toMatchObject({
+        ok: true,
+        version: "1.0.0",
+      });
     });
   });
 

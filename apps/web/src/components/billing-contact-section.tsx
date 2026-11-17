@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -23,11 +21,14 @@ import {
   commitCcInput,
   hasBillingContactChanges,
   isBillingEmail,
+  type BillingContact,
   toBillingContactDraft,
   type BillingContactDraft,
 } from "../lib/billing-contact";
+import { ManualSave } from "./settings/manual-save";
+import { useSettingDraft } from "../hooks/use-setting-draft";
 import { ErrorState } from "./page-states";
-import { SettingsSkeleton } from "./loading-skeletons";
+import { FormSkeleton } from "./form-skeleton";
 import { SectionCard } from "./section-card";
 
 /**
@@ -43,22 +44,35 @@ import { SectionCard } from "./section-card";
  * but never turned into a chip is committed on blur and on Save, so it cannot
  * be silently dropped by the button the operator pressed to keep it.
  */
+const NO_CONTACT: BillingContact = { billing_email: null, billing_cc: [] };
+
 export function BillingContactSection() {
+  const contactQuery = useBillingContact();
+
+  // The form itself, inert and empty, so the card lands without a move.
+  if (contactQuery.isLoading) {
+    return (
+      <FormSkeleton>
+        <BillingContactForm contact={NO_CONTACT} />
+      </FormSkeleton>
+    );
+  }
+  if (contactQuery.error) return <ErrorState error={contactQuery.error} />;
+
+  return <BillingContactForm contact={contactQuery.data ?? NO_CONTACT} />;
+}
+
+function BillingContactForm({ contact }: { contact: BillingContact }) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
-  const contactQuery = useBillingContact();
   const contactKey = useBillingContactKey();
   const update = useUpdateBillingContact();
 
-  const [draft, setDraft] = useState<BillingContactDraft | null>(null);
+  const draft = useSettingDraft(toBillingContactDraft(contact));
   const [ccInput, setCcInput] = useState("");
   const [ccError, setCcError] = useState<string | null>(null);
 
-  if (contactQuery.isLoading) return <SettingsSkeleton rows={2} />;
-  if (contactQuery.error) return <ErrorState error={contactQuery.error} />;
-
-  const contact = contactQuery.data ?? { billing_email: null, billing_cc: [] };
-  const current = draft ?? toBillingContactDraft(contact);
+  const current = draft.value;
   const pendingCc = commitCcInput(ccInput, current.billing_cc);
   const patch = billingContactPatch(
     contact,
@@ -68,7 +82,7 @@ export function BillingContactSection() {
   const emailInvalid =
     current.billing_email.trim() !== "" && !isBillingEmail(current.billing_email.trim());
 
-  const edit = (next: Partial<BillingContactDraft>) => setDraft({ ...current, ...next });
+  const edit = (next: Partial<BillingContactDraft>) => draft.set({ ...current, ...next });
 
   /** Commit the CC text. Returns the resulting list, or `null` on a refusal. */
   const commitCc = (): string[] | null => {
@@ -99,23 +113,21 @@ export function BillingContactSection() {
     commitCc();
   };
 
-  const handleSave = () => {
+  const discard = () => {
+    draft.reset();
+    setCcInput("");
+    setCcError(null);
+  };
+
+  const save = async () => {
     const cc = commitCc();
-    if (cc === null) return;
-    const body = billingContactPatch(contact, { ...current, billing_cc: cc });
-    update.mutate(
-      { body },
-      {
-        onSuccess: (data) => {
-          queryClient.setQueryData(contactKey, data);
-          setDraft(null);
-          setCcInput("");
-          setCcError(null);
-          void queryClient.invalidateQueries({ queryKey: contactKey });
-          toast.success(t("billingContact.saveSuccess"));
-        },
-      },
-    );
+    if (cc === null) throw new Error("invalid billing cc");
+    const sent = { ...current, billing_cc: cc };
+    const body = billingContactPatch(contact, sent);
+    const data = await update.mutateAsync({ body });
+    queryClient.setQueryData(contactKey, data);
+    draft.accept(sent, toBillingContactDraft(data));
+    void queryClient.invalidateQueries({ queryKey: contactKey });
   };
 
   return (
@@ -201,8 +213,8 @@ export function BillingContactSection() {
         </Field>
       </FieldGroup>
 
-      <div className="flex justify-end gap-2">
-        {contact.billing_email !== null && (
+      {contact.billing_email !== null && (
+        <div className="flex justify-end">
           <Button
             variant="outline"
             size="sm"
@@ -211,30 +223,10 @@ export function BillingContactSection() {
           >
             {t("billingContact.useOwners")}
           </Button>
-        )}
-        {draft !== null && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={update.isPending}
-            onClick={() => {
-              setDraft(null);
-              setCcInput("");
-              setCcError(null);
-            }}
-          >
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-        )}
-        <PendingButton
-          size="sm"
-          pending={update.isPending}
-          disabled={!dirty || emailInvalid}
-          onClick={handleSave}
-        >
-          {t("btn.save", { ns: "common" })}
-        </PendingButton>
-      </div>
+        </div>
+      )}
+
+      <ManualSave dirty={dirty} saveDisabled={emailInvalid} onSave={save} onDiscard={discard} />
     </SectionCard>
   );
 }

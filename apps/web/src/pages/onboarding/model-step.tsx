@@ -22,6 +22,7 @@ import {
 } from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingModelStep() {
@@ -31,8 +32,10 @@ export function OnboardingModelStep() {
   const { nextRoute } = useOnboardingNav("model");
 
   const [adding, setAdding] = useState(false);
-  const { data: models } = useModels();
-  const { data: registry } = useProvidersRegistry();
+  const { data: models, isLoading: modelsLoading } = useModels();
+  const { data: registry, isLoading: registryLoading } = useProvidersRegistry();
+  // The list, the separator and the button's label all hang on these two reads.
+  const settled = !modelsLoading && !registryLoading;
   const { data: credentials } = useModelProviderCredentials();
 
   const goNext = () => nextRoute && navigate(nextRoute);
@@ -66,6 +69,12 @@ export function OnboardingModelStep() {
         {/* Configured models, if any. The seeded rows land here once the
             quick-connect completes — gives the user a visible confirmation
             of what got created. */}
+        {!settled && (
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-12 w-full rounded-md" />
+          </div>
+        )}
         {hasModels && (
           <div className="flex flex-col gap-2">
             <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -103,7 +112,7 @@ export function OnboardingModelStep() {
         {/* "Or add manually" — separator before the secondary CTA. Only where
             something sits above it: with no quick-connect provider and no model
             yet, the button is the single path and "or" would answer nothing. */}
-        {(hasModels || hasQuickConnect) && (
+        {settled && (hasModels || hasQuickConnect) && (
           <div className="relative my-1">
             <div className="border-border absolute inset-0 flex items-center">
               <div className="w-full border-t border-dashed" />
@@ -116,10 +125,19 @@ export function OnboardingModelStep() {
           </div>
         )}
 
-        <Button variant="outline" size="sm" className="self-center" onClick={() => setAdding(true)}>
-          <Plus className="mr-1.5" />
-          {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
-        </Button>
+        {settled ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="self-center"
+            onClick={() => setAdding(true)}
+          >
+            <Plus className="mr-1.5" />
+            {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
+          </Button>
+        ) : (
+          <Skeleton className="h-8 w-36 self-center rounded-md" />
+        )}
       </div>
 
       {adding && (

@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dia
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { useCloseOverlay } from "../lib/modal-route";
 import { isUnder } from "../lib/route-access";
+import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
 
 export function OverlayFrame() {
   const { t } = useTranslation("settings");
@@ -49,6 +50,7 @@ export function OverlayFrame() {
           // The header band owns the close control at every width.
           "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md",
         ].join(" ")}
+        {...INTEGRATED_TABLE_SURFACE}
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <Outlet />

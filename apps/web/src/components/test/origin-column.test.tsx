@@ -32,7 +32,7 @@ function columnsOf<T>(useColumns: () => DataColumn<T>[]): DataColumn<T>[] {
 }
 
 const packageOrigin = columnsOf(() => usePackageColumns("agent")).find((c) => c.id === "origin")!;
-const integrationOrigin = columnsOf(() => useIntegrationListColumns()).find(
+const integrationOrigin = columnsOf(() => useIntegrationListColumns(undefined, false)).find(
   (c) => c.id === "origin",
 )!;
 

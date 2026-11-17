@@ -1,0 +1,730 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/shadcn.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* Ensure Tailwind compiles classes used inside fumadocs-openapi (two-column
+   layout relies on container-query utilities like `@4xl:flex-row`). */
+@source '../node_modules/fumadocs-openapi/dist/**/*.{js,mjs}';
+
+/* Primary accent — Cursor-style burnt orange (#eb5600). */
+:root,
+.dark {
+  --color-fd-primary: #eb5600;
+}
+
+/* Theme-aware helpers for the docs UI. Referenced from overrides
+   below so everything switches cleanly with the light/dark toggle. */
+:root {
+  --docs-sidebar-item: #141414;
+  --docs-grid-line: rgba(0, 0, 0, 0.06);
+  --docs-block-bg: #f6f6f7;
+  --docs-block-border: rgba(0, 0, 0, 0.08);
+}
+.dark {
+  --docs-sidebar-item: #ededec;
+  --docs-grid-line: rgba(255, 255, 255, 0.08);
+  --docs-block-bg: #17171a;
+  --docs-block-border: rgba(255, 255, 255, 0.07);
+}
+
+/* Light-mode sidebar — no grey fill, just a right border separator
+   between the sidebar and the content. Dark mode keeps the Cursor-style
+   slightly-lighter fill (#1b1913). */
+:root:not(.dark) #nd-sidebar {
+  background: transparent !important;
+  border-right: 1px solid var(--color-fd-border);
+}
+
+/* Sidebar items — Cursor palette.
+   - Non-active items render near-white (var(--docs-sidebar-item)), weight 400.
+   - Active item is accent color only, no left vertical bar, no bg tint. */
+#nd-sidebar a:not([data-active="true"]),
+#nd-sidebar button {
+  color: var(--docs-sidebar-item) !important;
+}
+#nd-sidebar a[data-active="true"] {
+  background-color: transparent !important;
+}
+#nd-sidebar a[data-active="true"]::before {
+  display: none !important;
+}
+
+/* Tighter item rhythm — less vertical space between sibling items,
+   and align left edge with group labels (no more indent since we
+   removed the vertical bar on non-collapsible groups). */
+#nd-sidebar a,
+#nd-sidebar button {
+  padding-top: 0.3rem !important;
+  padding-bottom: 0.3rem !important;
+  padding-inline-start: 0.5rem !important;
+  font-weight: 400 !important;
+}
+
+/* Non-collapsible group folders (collapsible: false in meta.json).
+   The outer wrapper has data-disabled="" with an empty className.
+   The inner content region ALSO has data-disabled="" but className
+   starts with "overflow-hidden", so scope all rules to the outer
+   wrapper only via :not([class*="overflow"]). */
+
+/* No vertical indent bar on non-collapsible groups */
+#nd-sidebar [data-disabled=""]:not([class*="overflow"]) > div::before {
+  display: none !important;
+}
+
+/* Breathing room between groups */
+#nd-sidebar [data-disabled=""]:not([class*="overflow"]) {
+  margin-top: 1.5rem;
+}
+#nd-sidebar [data-disabled=""]:not([class*="overflow"]):first-of-type {
+  margin-top: 0.25rem;
+}
+
+/* Label style — Cursor-like: title case, muted gray, no uppercase. */
+#nd-sidebar [data-disabled=""]:not([class*="overflow"]) > div.rounded-lg.p-2 {
+  font-size: 0.75rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  color: #969592;
+  padding: 0.35rem 0.5rem !important;
+  margin-bottom: 0.15rem;
+}
+/* Hide the folder's lucide icon on group labels */
+#nd-sidebar [data-disabled=""]:not([class*="overflow"]) > div.rounded-lg.p-2 > svg {
+  display: none;
+}
+
+/* Separator labels (from "---Name---" entries in meta.json) — styled
+   identically to non-collapsible folder group headers: small, muted,
+   title-case, no uppercase. Items that follow a separator keep the
+   base sidebar item padding so they align with root-level items. */
+#nd-sidebar p {
+  font-size: 0.75rem !important;
+  font-weight: 400 !important;
+  text-transform: none !important;
+  letter-spacing: 0.03em !important;
+  color: #969592 !important;
+  padding: 0.35rem 0.5rem !important;
+  margin-top: 1.5rem !important;
+  margin-bottom: 0.15rem !important;
+}
+#nd-sidebar [data-disabled=""] > div > p:first-child,
+#nd-sidebar [data-state="open"] > div > p:first-child,
+#nd-sidebar p:first-child,
+#nd-sidebar p:first-of-type {
+  margin-top: 0.25rem !important;
+}
+
+/* Sub-group markers INSIDE a truly-collapsible expanded folder only
+   (e.g. API's Agents folder with Model / Provider profiles / Memory).
+   Render as a thin horizontal rule only — the label text is kept in
+   the DOM for accessibility / screen readers but visually hidden so
+   the sidebar stays dense and scannable. Scoped via :not([data-disabled])
+   so non-collapsible top-level sections keep their visible labels. */
+#nd-sidebar [data-state="open"]:not([data-disabled]) p {
+  display: block !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.25rem !important;
+  padding: 0 !important;
+  height: 1px !important;
+  font-size: 0 !important;
+  color: transparent !important;
+  background: var(--color-fd-border);
+  overflow: hidden;
+}
+#nd-sidebar [data-state="open"]:not([data-disabled]) p:first-of-type {
+  margin-top: 0.1rem !important;
+}
+
+/* Breathing room after an expandable folder (like API's Agents when
+   expanded) so its last item doesn't crowd the next folder's header.
+   Scoped via :not([data-disabled]) so non-collapsible top-level
+   sections (Features, Integrations, ...) don't pick up extra bottom
+   margin — we want them to match the rhythm of `---Label---`
+   separators in API/Resources (1.5rem gap, no extra padding). */
+#nd-sidebar [data-state="open"]:not([data-disabled]) {
+  margin-bottom: 0.5rem !important;
+}
+
+/* Items inside an expandable (collapsible) folder's open content
+   region must sit to the right of the vertical bar (at start-2.5 =
+   10px). Non-collapsible groups use [data-disabled] and don't have
+   the bar, so exclude them. */
+#nd-sidebar [data-state]:not([data-disabled]) a,
+#nd-sidebar [data-state]:not([data-disabled]) p {
+  padding-inline-start: 1.25rem !important;
+}
+
+/* Tailwind 4: enable class-based dark mode. Fumadocs/next-themes toggles
+   html.dark on /docs; without this, `dark:` would only react to the OS
+   prefers-color-scheme media query. */
+@custom-variant dark (&:where(.dark, .dark *));
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-bg: var(--lp-bg);
+  --color-bg-alt: var(--lp-bg-alt);
+  --color-bg-dark: #262626;
+
+  --color-text: var(--lp-text);
+  --color-text-secondary: var(--lp-text-secondary);
+  --color-text-muted: var(--lp-text-muted);
+  --color-text-light: var(--lp-text-light);
+  --color-text-white: #fafafa;
+
+  --color-border-solid: var(--lp-border-solid);
+  --color-border-dashed: var(--lp-border-dashed);
+  --color-border-light: var(--lp-border-light);
+  --color-border-subtle: var(--lp-border-subtle);
+
+  --color-red: #ff5f57;
+  --color-orange: #febc2e;
+  --color-green: #28c840;
+
+  /* Appstrate brand gradient — extracted from the mark (bolt) */
+  --brand-1: #ff7e27;
+  --brand-2: #e55342;
+  --brand-3: #ce2e59;
+
+  --color-red-light: #fff5f5;
+  --color-orange-light: #fffbf0;
+  --color-green-light: #f0fff0;
+
+  --color-accent: var(--color-green);
+  --color-accent-light: var(--color-green-light);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Light-mode tokens (default) */
+:root {
+  --lp-bg: #ffffff;
+  --lp-bg-alt: #f8f8f8;
+  --lp-text: #141414;
+  --lp-text-secondary: #666666;
+  --lp-text-muted: #aaaaaa;
+  --lp-text-light: #cccccc;
+  --lp-border-solid: #292929;
+  --lp-border-dashed: #666666;
+  --lp-border-light: #c9c9c9;
+  --lp-border-subtle: #e5e5e5;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(1 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+/* Dark-mode tokens: neutral zinc-family grays (no warm tint).
+   Body = #0e0e10, raised = #17171a. */
+html.dark {
+  --lp-bg: #0e0e10;
+  --lp-bg-alt: #17171a;
+  --lp-text: #fafafa;
+  --lp-text-secondary: #a1a1aa;
+  --lp-text-muted: #71717a;
+  --lp-text-light: #71717a;
+  --lp-border-solid: #e4e4e7;
+  --lp-border-dashed: #52525b;
+  --lp-border-light: #3f3f46;
+  --lp-border-subtle: #27272a;
+}
+
+html {
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-geist-sans), var(--font-sans);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+
+.dark {
+  /* Neutral zinc near-black. Body/sidebar/header share a single
+     background; cards/popovers use the slightly raised tone. */
+  --background: #0e0e10;
+  --foreground: oklch(0.985 0 0);
+  --card: #17171a;
+  --card-foreground: oklch(0.985 0 0);
+  --popover: #17171a;
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: #17171a;
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: #17171a;
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: #17171a;
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: #17171a;
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: #17171a;
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ───────────────────────────────────────────────────
+   Docs — Cursor-style content layout overrides
+   Scoped to #nd-page so marketing prose is untouched.
+   ─────────────────────────────────────────────────── */
+
+/* More horizontal breathing room and a narrower measure,
+   matching Cursor/Supabase. Default fumadocs is 16→32px
+   padding with a 900px child cap. */
+#nd-page {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+  gap: 1rem;
+  position: relative;
+  isolation: isolate;
+}
+/* Blueprint grid background, faded from top-left to bottom-right so
+   only the bottom-right corner of the content area shows it — matches
+   the marketing site aesthetic. */
+#nd-page::before {
+  content: '';
+  position: absolute;
+  inset: -1px 0 0 0;
+  pointer-events: none;
+  z-index: -1;
+  /* `to left` draws the 1px vertical stripe on the RIGHT of each tile,
+     so with background-position: right top the last vertical line
+     lands exactly on #nd-page's right edge (the last square closes
+     cleanly instead of leaving a 19px transparent gutter). */
+  background-image:
+    linear-gradient(to left, var(--docs-grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--docs-grid-line) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: right top;
+  /* Two masks intersected: strong vertical fade (grid disappears
+     quickly going down) + softer horizontal fade (from the right
+     edge toward the left). Keeps the grid visible only in the
+     top-right corner. */
+  mask-image:
+    linear-gradient(to bottom, black 0%, transparent 20%),
+    linear-gradient(to left, black 0%, transparent 55%);
+  -webkit-mask-image:
+    linear-gradient(to bottom, black 0%, transparent 20%),
+    linear-gradient(to left, black 0%, transparent 55%);
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+@media (min-width: 768px) {
+  #nd-page {
+    padding-left: 4rem;
+    padding-right: 4rem;
+    padding-top: 2.5rem;
+  }
+}
+@media (min-width: 1280px) {
+  #nd-page {
+    padding-left: 6rem;
+    padding-right: 6rem;
+    padding-top: 3rem;
+  }
+}
+@media (min-width: 1536px) {
+  #nd-page {
+    padding-left: 8rem;
+    padding-right: 8rem;
+  }
+}
+/* Prose pages: clamp content to a readable 760px column.
+   Full-width pages (OpenAPI reference with `full: true` frontmatter) keep the
+   wider layout Fumadocs applies natively. */
+#nd-page:not([data-full="true"]) > * {
+  max-width: 760px;
+}
+
+/* Title + description block */
+#nd-page h1:first-of-type {
+  font-size: 2.25rem;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin-bottom: 0.5rem;
+}
+#nd-page > p:first-of-type,
+#nd-page [data-description] {
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--color-fd-muted-foreground);
+  margin-bottom: 0.5rem;
+}
+
+/* Body prose — tighter than fumadocs defaults, Cursor-like rhythm */
+#nd-page .prose {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--color-fd-foreground);
+}
+#nd-page .prose p {
+  margin-top: 1.15em;
+  margin-bottom: 1.15em;
+  color: color-mix(in oklch, var(--color-fd-foreground) 88%, transparent);
+}
+#nd-page .prose h2:not(.not-prose) {
+  margin-top: 2em;
+  margin-bottom: 0.6em;
+  font-size: 1.5rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+#nd-page .prose h3:not(.not-prose) {
+  margin-top: 1.4em;
+  margin-bottom: 0.4em;
+  font-size: 1.175rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+}
+#nd-page .prose h4:not(.not-prose) {
+  margin-top: 1.2em;
+  margin-bottom: 0.35em;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Inline code — subtle pill, not a box */
+#nd-page .prose :not(pre) > code {
+  font-size: 0.86em;
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--color-fd-muted) 60%, transparent);
+  border: 1px solid var(--color-fd-border);
+  color: var(--color-fd-foreground);
+  font-weight: 500;
+}
+/* Reset the inline-code pill inside non-prose UI (OpenAPI signature card,
+   playground fields, etc.) so Fumadocs' own styling comes through. */
+#nd-page .prose .not-prose code,
+#nd-page .prose .not-prose :not(pre) > code {
+  font-size: inherit;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+  font-weight: inherit;
+}
+
+/* OpenAPI two-column layout — widen the gutter between the docs column and
+   the sticky code-sample rail. Default fumadocs is `gap-x-6` (24px). */
+#nd-page[data-full="true"] .prose div.flex.flex-col.gap-x-6 {
+  column-gap: 3.5rem;
+}
+
+/* Hide the "Filter Properties" search input on OpenAPI body/response schemas.
+   Fumadocs has no option to disable it; most Appstrate endpoints have tiny
+   bodies (2-5 fields) so the filter is noise. */
+#nd-page[data-full="true"] input[placeholder="Filter Properties"] {
+  display: none;
+}
+#nd-page[data-full="true"] div:has(> input[placeholder="Filter Properties"]) {
+  display: none;
+}
+
+/* Code blocks — Supabase-style subtle grey background on the figure wrapper,
+   the <pre> inside gets no border (avoids the double outline). */
+#nd-page .prose figure.shiki {
+  background-color: var(--docs-block-bg) !important;
+  border-color: var(--docs-block-border) !important;
+  box-shadow: none !important;
+}
+#nd-page .prose pre {
+  border: 0 !important;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  background: transparent !important;
+}
+
+/* Tighter vertical rhythm inside the figure wrapper so single-line code
+   blocks don't render as tall cards. Fumadocs nests an
+   `.fd-scroll-container` div (with `py-3.5` = 14px) between figure.shiki
+   and the <pre>, which inflates the card — zero it out and own the
+   vertical padding via the pre. Equal top/bottom padding keeps the
+   content vertically centered for single-line and multi-line code. */
+#nd-page .prose figure.shiki {
+  padding: 0 !important;
+}
+#nd-page .prose figure.shiki > .fd-scroll-container,
+#nd-page .prose figure.shiki > div[class*="py-"] {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+#nd-page .prose figure.shiki pre {
+  padding-top: 0.55rem !important;
+  padding-bottom: 0.55rem !important;
+}
+
+/* Copy button — hidden by default, reveal on figure hover/focus (Supabase-style).
+   Vertically center in the figure now that single-line blocks are compact. */
+#nd-page .prose figure.shiki button[aria-label*="Copy"] {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+#nd-page .prose figure.shiki > div:has(> button[aria-label*="Copy"]) {
+  top: 0.3rem !important;
+  background: var(--docs-block-bg) !important;
+  padding: 0.15rem;
+}
+#nd-page .prose figure.shiki:hover button[aria-label*="Copy"],
+#nd-page .prose figure.shiki:focus-within button[aria-label*="Copy"],
+#nd-page .prose figure.shiki button[data-checked] {
+  opacity: 1;
+}
+
+/* Accordion triggers — pointer cursor and subtle hover tint.
+   Vertical padding comes from Fumadocs' py-2.5; we don't override it. */
+#nd-page .prose button[data-state][aria-expanded] {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+#nd-page .prose button[data-state][aria-expanded]:hover {
+  background-color: var(--color-fd-muted);
+}
+
+/* Lists — tighter, muted markers */
+#nd-page .prose ul,
+#nd-page .prose ol {
+  padding-left: 1.3em;
+}
+#nd-page .prose li {
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+}
+#nd-page .prose li::marker {
+  color: var(--color-fd-muted-foreground);
+}
+
+/* Tables — minimal, no alternation */
+#nd-page .prose table {
+  font-size: 0.9rem;
+  border-collapse: collapse;
+}
+#nd-page .prose thead th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.55em 0.8em;
+  border-bottom: 1px solid var(--color-fd-border);
+  color: var(--color-fd-foreground);
+  background: transparent;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#nd-page .prose tbody td {
+  padding: 0.6em 0.8em;
+  border-bottom: 1px solid var(--color-fd-border);
+  color: var(--color-fd-muted-foreground);
+}
+
+/* TOC — white active state (not brand orange), no icon on "On this page" */
+#nd-toc #toc-title > svg {
+  display: none;
+}
+/* Align "On this page" heading with the TOC items below (ps-3 = 12px). */
+#nd-toc #toc-title {
+  padding-inline-start: 0.75rem;
+}
+/* Remove the default muted bar next to TOC items — keep only the
+   white progress indicator that tracks the active section. */
+#nd-toc .border-s {
+  border-inline-start-color: transparent !important;
+}
+#nd-toc a[data-active="true"] {
+  color: var(--color-fd-foreground) !important;
+}
+/* TOC progress indicator (vertical bar tracking scroll position) — white, not brand orange. */
+#nd-toc .bg-fd-primary.w-px {
+  background-color: var(--color-fd-foreground) !important;
+}
+/* TOC items — smaller font, tighter row spacing, depth-aware indent.
+   Base indent matches ps-3 (12px) + 1rem of gap from the vertical bar. */
+#nd-toc a {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding-top: 0.2rem !important;
+  padding-bottom: 0.2rem !important;
+}
+#nd-toc a.ps-3 {
+  padding-inline-start: 1.75rem !important;
+}
+#nd-toc a.ps-6 {
+  padding-inline-start: 2.75rem !important;
+}
+#nd-toc a.ps-8 {
+  padding-inline-start: 3.5rem !important;
+}
+#nd-toc #toc-title {
+  padding-inline-start: 1.75rem;
+  font-size: 0.75rem !important;
+  font-weight: 400 !important;
+  text-transform: none !important;
+  letter-spacing: 0.03em !important;
+  color: #969592 !important;
+}
+
+/* Inline code inside TOC links: strip all styling (pill box + mono
+   font) so entries like `appstrate install` look identical to the
+   neighboring non-code TOC entries. */
+#nd-toc a code {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  font-family: inherit !important;
+}
+
+/* Body links — Cursor-style pale white underline, not brand-orange. */
+#nd-page .prose a:not([data-card]):not(.peer):not([class*="button"]) {
+  color: var(--color-fd-foreground) !important;
+  text-decoration: underline !important;
+  text-decoration-color: color-mix(in oklch, var(--color-fd-foreground) 30%, transparent) !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 180ms ease;
+}
+#nd-page .prose a:not([data-card]):not(.peer):not([class*="button"]):hover {
+  text-decoration-color: var(--color-fd-foreground) !important;
+}
+
+/* Cards — Supabase-flat, not fumadocs-deep.
+   Target only real Card components (data-card="true"), NOT the
+   heading anchor links which fumadocs also marks with data-card="". */
+#nd-page a[data-card="true"] {
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--color-fd-border);
+  transition: border-color 180ms ease, background 180ms ease;
+}
+#nd-page a[data-card="true"]:hover {
+  border-color: color-mix(in oklch, var(--color-fd-foreground) 25%, transparent);
+  background: color-mix(in oklch, var(--color-fd-muted) 40%, transparent);
+}
+/* SVG illustration wrapper — theme-aware container for inline SVG diagrams */
+.svg-illustration {
+  background: #f4f4f5;
+  color: #18181b;
+  border-radius: 10px;
+  padding: 1.5rem 1.15rem;
+  border: 1px solid var(--color-border-subtle);
+  margin: 1.4em 0;
+}
+.dark .svg-illustration {
+  background: #141414;
+  color: #e5e5e5;
+}

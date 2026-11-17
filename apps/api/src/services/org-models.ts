@@ -1619,7 +1619,7 @@ export async function assertExplicitModelExists(
  * will actually run on, and answer the two ways it can be refused.
  *
  * One implementation, three routes: `PATCH /agents/{scope}/{name}/model`,
- * `PATCH /spaces/{spaceId}/packages/{scope}/{name}` and the two schedule
+ * `PATCH /spaces/{id}/packages/{scope}/{name}` and the two schedule
  * handlers each ran their own copy of this — same two refusals, same literal
  * message spelled out four times, and only the `param` legitimately differed
  * (it names the wire field the override arrived on, which is `generation`,
@@ -1634,7 +1634,7 @@ export async function assertExplicitModelExists(
  * RESPONSE-SHAPE CHANGE, DELIBERATE. All four route-local copies threw the
  * `!selectedModel` refusal with NO `param` — only their `ModelGenerationError`
  * sibling carried one. Hoisting them here gives BOTH refusals the same `param`,
- * so the 400 on `PATCH /agents/{scope}/{name}/model`, `PATCH /spaces/{spaceId}/
+ * so the 400 on `PATCH /agents/{scope}/{name}/model`, `PATCH /spaces/{id}/
  * packages/{scope}/{name}` and both schedule surfaces now carries a `param` it
  * did not carry before. Kept rather than reverted: the two refusals come from
  * one body field and now describe it identically, `param` is optional in the

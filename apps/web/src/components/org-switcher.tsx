@@ -1,29 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { requestScopeChange } from "../hooks/use-unsaved-changes";
-
 /**
  * Organization and workspace switcher, at the head of the header trail: two columns, the
  * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
- * opens its workspaces, it does not switch to it). You are always in a workspace, never
- * in an organization alone, so org + workspace are applied together. The current context
- * keeps the coral fill and the only gear; the explored one is the highlighted row.
+ * opens its workspaces, it does not switch to it), even with a single organization; one
+ * column, the organization above its workspaces, on a phone only. You are always in a
+ * workspace, never in an organization alone, so org + workspace are applied together. The current context
+ * keeps the tinted fill and the check; the explored one is the highlighted row. Every row leads
+ * to its own settings, entering its organization or space first.
  */
-import { useState, type ComponentProps, type ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { useLandAfterOrgSwitch } from "../lib/modal-route";
+import { useId, useState, type ComponentProps, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLandAfterOrgSwitch, useOpenOverlayAfterOrgSwitch } from "../lib/modal-route";
+import { mayCreateSpaceIn, settingsEntry } from "../lib/switcher-context";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronRight, ChevronsUpDown, Plus, Settings, Star } from "lucide-react";
+import { Check, ChevronRight, ChevronsUpDown, Globe, Plus, Settings, Star } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
 import { spaceRoleLabel } from "../hooks/use-roles";
-import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
 import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
-import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
 import { useEnterSpace } from "../hooks/use-enter-space";
-import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
+import { useCanCreateOrg } from "../hooks/use-auth";
+import { useViewer } from "../hooks/use-viewer";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { routeOf } from "../lib/route-match";
+import { holdsOverview, isSpaceEnterable, overviewOffered } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -31,41 +36,61 @@ import { useSidebar } from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { NEW_SPACE_PARAM } from "./space-create-modal";
+import { SpaceName } from "./space-name";
 
-function ColumnHeader({
-  label,
-  onAdd,
-  addState,
-  addLabel,
-  onNavigate,
-}: {
-  label: string;
-  onAdd?: string;
-  addState?: unknown;
-  addLabel: string;
-  onNavigate: () => void;
-}) {
+function ColumnHeader({ label }: { label: string }) {
   return (
-    <div className="flex items-center justify-between px-2 pt-1 pb-2">
-      <span className="text-muted-foreground text-[0.72rem] font-semibold tracking-[0.05em] uppercase">
+    <p className="text-muted-foreground px-2 pt-1 pb-1.5 text-[0.72rem] font-semibold tracking-[0.05em] uppercase">
+      {label}
+    </p>
+  );
+}
+
+/**
+ * The last row of a column, under its list: where one more of what it lists is created.
+ * `onPick` replaces the link's own navigation, for a creation that changes organization first.
+ */
+function AddRow({
+  to,
+  state,
+  label,
+  onNavigate,
+  onPick,
+}: {
+  to: string;
+  state?: unknown;
+  label: string;
+  onNavigate: () => void;
+  onPick?: () => void;
+}) {
+  // The rule sits on a wrapper: on the rounded row itself its ends would curve.
+  return (
+    <div className="mt-1 border-t pt-1">
+      <Link
+        to={to}
+        state={state}
+        onClick={(event) => {
+          if (!onPick) return onNavigate();
+          event.preventDefault();
+          onPick();
+        }}
+        className="text-muted-foreground hover:bg-accent hover:text-foreground flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm"
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <Plus size={15} />
+        </span>
         {label}
-      </span>
-      {onAdd && (
-        <Link
-          to={onAdd}
-          state={addState}
-          onClick={onNavigate}
-          className="text-primary flex items-center gap-1 text-xs font-medium"
-        >
-          {addLabel}
-          <Plus size={13} />
-        </Link>
-      )}
+      </Link>
     </div>
   );
 }
 
-/** A pickable row: the pick on the left, and on the current one the gear to its settings. */
+/**
+ * A pickable row: the pick on the left, the gear to its settings on the right. The gear shows on
+ * the row pointed at or focused, and stays on the current one (`pinned`) and on a screen
+ * nothing hovers (a touch screen, `hover: none`). `onPick` replaces the link's own navigation,
+ * for settings of another context that is entered first.
+ */
 function PickerRow({
   rowClassName,
   settings,
@@ -74,15 +99,15 @@ function PickerRow({
   ...pick
 }: ComponentProps<"button"> & {
   rowClassName?: string | false;
-  settings?: { to: string; label: string };
+  settings?: { to: string; label: string; pinned: boolean; onPick?: () => void };
   onNavigate: () => void;
 }) {
   return (
-    <div className={cn("hover:bg-accent flex items-center rounded-md", rowClassName)}>
+    <div className={cn("group hover:bg-accent flex items-center rounded-md", rowClassName)}>
       <button
         type="button"
         className={cn(
-          "flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60",
+          "flex min-w-0 flex-1 items-center justify-start gap-2.5 px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-60",
           className,
         )}
         {...pick}
@@ -90,9 +115,18 @@ function PickerRow({
       {settings && (
         <Link
           to={settings.to}
-          onClick={onNavigate}
+          onClick={(event) => {
+            if (!settings.onPick) return onNavigate();
+            event.preventDefault();
+            settings.onPick();
+          }}
           aria-label={settings.label}
-          className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+          title={settings.label}
+          className={cn(
+            "text-muted-foreground hover:text-foreground shrink-0 px-2 py-1.5",
+            !settings.pinned &&
+              "hidden group-focus-within:block group-hover:block [@media(hover:none)]:block",
+          )}
         >
           <Settings size={15} />
         </Link>
@@ -101,31 +135,70 @@ function PickerRow({
   );
 }
 
+/** What the reader is on a row, after its name: it yields to the name and keeps its full text in `title`. */
+function RowRole({ children }: { children: string | null | undefined }) {
+  return (
+    <span
+      title={children ?? undefined}
+      className="text-muted-foreground min-w-0 flex-1 truncate text-right text-xs"
+    >
+      {children}
+    </span>
+  );
+}
+
+/** « Tous les espaces »'s tile, in the slot a space's sits: it reads even when the name is truncated. */
+function OverviewTile({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "bg-muted text-muted-foreground flex shrink-0 items-center justify-center",
+        className,
+      )}
+    >
+      <Globe className="size-[65%]" />
+    </span>
+  );
+}
+
+/** Where a space is created: the organization's spaces settings, its creation dialog open. */
+const NEW_SPACE_ADDRESS = `/org-settings/spaces?${NEW_SPACE_PARAM}=1`;
+
+/** A column's rows: it scrolls past eight of them, under a header that stays. */
+const LIST_BOX = "max-h-80 overflow-y-auto";
+
 /** The trigger's box per shape, shared by the live control and its loading placeholder. */
 const TRIGGER_BOX = {
-  brand: "h-9 w-full",
+  brand: "h-11 w-full",
   mobile: "h-11 min-w-0 flex-1",
 };
 
 export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
-  const { currentOrg, orgs, loading } = useOrg();
+  const openOverlayAfterOrgSwitch = useOpenOverlayAfterOrgSwitch();
+  const { currentOrg, orgs, loading, switchOrg } = useOrg();
   const { data: spaces, isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const enterSpace = useEnterSpace();
   const { isMobile, setOpenMobile } = useSidebar();
-  const { can } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
   const viewer = useViewer();
+  const overview = useOverviewMode();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // The organization whose workspaces column two shows; null = the one you are in (the panel always reopens there).
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
+  const spacesColumnId = useId();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
+  // A phone presents the panel under the trigger, in one column; everywhere else the
+  // organizations sit beside their spaces, even when there is only one.
   const mobilePresentation = variant === "mobile" || isMobile;
   const closeSwitcherAndSidebar = () => {
     setOpen(false);
@@ -138,9 +211,12 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   // The trigger's own box (avatar + name), so the column does not move when the org lands.
   if (loading) {
     return (
-      <div className={cn("flex items-center gap-2 px-1.5", TRIGGER_BOX[variant])} aria-hidden>
-        <Skeleton className="size-6 shrink-0 rounded-md" />
-        <Skeleton className="h-4 w-32" />
+      <div className={cn("flex items-center gap-2 px-2", TRIGGER_BOX[variant])} aria-hidden>
+        <Skeleton className="mr-1 size-8 shrink-0 rounded-lg" />
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className="h-3.5 w-28" />
+          <Skeleton className="h-3 w-20" />
+        </div>
       </div>
     );
   }
@@ -154,23 +230,75 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
-  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. */
+  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. A real space ends « Tous les espaces » there. */
   const applyContext = (orgId: string, spaceId: string) =>
     requestScopeChange(() => {
+      overview.choose(false, orgId);
       if (enterSpace(orgId, spaceId)) landAfterOrgSwitch();
       closeSwitcherAndSidebar();
     });
 
-  const spaceName: ReactNode = currentSpace ? (
-    <span className="text-muted-foreground">
+  /**
+   * « Tous les espaces » of the explored organization, in one pick. In the current one it keeps
+   * the working space, and a page that does not hold the mode gives way to its home, the
+   * dashboard. In another it switches there (the space resolver enters the space remembered
+   * there, else the default) and lands on that home.
+   */
+  const chooseOverview = () =>
+    requestScopeChange(() => {
+      overview.choose(true, exploredId ?? undefined);
+      if (isExploringElsewhere && exploredId) {
+        switchOrg(exploredId);
+        navigate("/");
+      } else if (!holdsOverview(routeOf(pathname))) navigate("/");
+      closeSwitcherAndSidebar();
+    });
+  const maySpaceWrite = mayCreateSpaceIn(orgs, exploredId);
+  /**
+   * The pick of settings (or of a creation) in another context: enter it, then open them. Over
+   * another organization's settings the page beneath moves to its landing, as a pick does.
+   * `undefined` for the current context's, which its link opens as is.
+   */
+  const settingsPick = (to: string, target: { orgId: string; spaceId?: string }) => {
+    const entry = settingsEntry({ orgId: currentOrg.id, spaceId: currentSpaceId }, target);
+    if (entry === "link") return undefined;
+    return () =>
+      requestScopeChange(() => {
+        if (target.spaceId === undefined) switchOrg(target.orgId);
+        else enterSpace(target.orgId, target.spaceId);
+        if (entry === "organization") openOverlayAfterOrgSwitch(to);
+        else navigate(to);
+        closeSwitcherAndSidebar();
+      });
+  };
+  const overviewLabel = t("overview.title");
+  const overviewCurrent = overview.on && !isExploringElsewhere;
+  const offersOverview =
+    overviewOffered(exploredSpaces.data) && matchesSearch(query, [overviewLabel]);
+
+  const currentContextLabel = overview.on
+    ? overviewLabel
+    : currentSpace
+      ? spaceLabel(currentSpace, t)
+      : undefined;
+  // The space's tile is a badge on the organization's, ringed in the trigger's background.
+  // « Tous les espaces » is no space: no badge, its name on the second line says it.
+  const spaceBadge: ReactNode =
+    currentSpace && !overview.on ? (
       <IdentityTile
         {...spaceTile(currentSpace, viewer)}
-        className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom"
+        className={cn(
+          "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
+          variant === "mobile" ? "ring-background" : "ring-sidebar",
+        )}
       />
-      {spaceLabel(currentSpace, t)}
+    ) : null;
+  const spaceName: ReactNode = currentContextLabel ? (
+    <span className="truncate" title={currentContextLabel}>
+      {currentContextLabel}
     </span>
   ) : (
-    spacesPending && <Skeleton className="inline-block h-3.5 w-16 align-middle" />
+    spacesPending && <Skeleton className="mt-0.5 h-3 w-16" />
   );
 
   return (
@@ -192,28 +320,30 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         <button
           type="button"
           data-testid="org-switcher-button"
-          aria-label={t("switcher.orgAriaLabel")}
+          aria-label={t("switcher.ariaLabel", {
+            current: [currentOrg.name, currentContextLabel].filter(Boolean).join(", "),
+          })}
           className={cn(
-            "flex items-center gap-2 rounded-md px-1.5 text-sm transition-colors",
+            // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
+            "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",
             TRIGGER_BOX[variant],
-            variant === "mobile"
-              ? "hover:bg-accent data-[state=open]:bg-accent"
-              : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
-          <IdentityTile {...orgTile(currentOrg)} className="size-6 rounded-md" />
-          <span className="min-w-0 flex-1 truncate text-left">
-            <span className="font-semibold">{currentOrg.name}</span>
+          {/* The organization's tile, the space's as a badge on its corner. */}
+          <span className="relative mr-1 shrink-0">
+            <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
+            {spaceBadge}
+          </span>
+          {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
+          <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+            <span className="truncate font-semibold" title={currentOrg.name}>
+              {currentOrg.name}
+            </span>
             {spaceName && (
-              <>
-                <span className="text-border mx-1.5" aria-hidden>
-                  |
-                </span>
-                {spaceName}
-              </>
+              <span className="text-muted-foreground flex min-w-0 text-xs">{spaceName}</span>
             )}
           </span>
-          <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
+          <ChevronsUpDown className="text-muted-foreground group-hover/trigger:text-foreground group-data-[state=open]/trigger:text-foreground size-3.5 shrink-0 transition-colors" />
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -221,7 +351,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         side={mobilePresentation ? "bottom" : "right"}
         sideOffset={variant === "mobile" ? 47 : 6}
         className={cn(
-          "w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0",
+          // Beside the sidebar the panel takes what the viewport leaves it, never more.
+          "max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] overflow-hidden rounded-xl p-0",
+          mobilePresentation ? "w-[340px]" : "w-[660px]",
           mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
           variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
           isMobile && variant !== "mobile" && "w-[calc(100vw-1rem)] max-w-[17rem]",
@@ -237,80 +369,70 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             aria-label={t("switcher.searchAriaLabel")}
           />
 
-          <div className={cn("grid grid-cols-2", mobilePresentation && "grid-cols-1")}>
-            <div className="p-2.5">
-              <ColumnHeader
-                label={t("switcher.orgsColumn")}
-                addLabel={t("btn.add")}
-                // Whether this user may create one is the server's rule, not a flag.
-                onAdd={canCreateOrg ? "/onboarding/create" : undefined}
-                // Without it the create step forwards a user who already has an org.
-                addState={{ fromSwitcher: true }}
-                onNavigate={closeSwitcherAndSidebar}
-              />
-              {shownOrgs.map((org) => {
-                const isCurrent = org.id === currentOrg.id;
-                const isExplored = org.id === exploredId;
-                return (
-                  // Opens this organization's workspaces beside it. It does NOT switch: you
-                  // are always in a workspace, so the pick is only complete one column to the
-                  // right. The gear is on the current org only: it configures what you are IN,
-                  // and switching org first is one honest click rather than a shortcut that
-                  // silently changes context.
-                  <PickerRow
-                    key={org.id}
-                    data-testid={`org-item-${org.id}`}
-                    aria-expanded={isExplored}
-                    onClick={() => setExploredOrgId(org.id)}
-                    rowClassName={cn(
-                      isExplored && "bg-accent",
-                      isCurrent && "bg-spark/10 hover:bg-spark/10",
-                    )}
-                    settings={
-                      isCurrent
-                        ? {
-                            to: "/org-settings",
-                            label: t("switcher.orgSettings", { org: org.name }),
-                          }
-                        : undefined
-                    }
-                    onNavigate={closeSwitcherAndSidebar}
-                  >
-                    <IdentityTile {...orgTile(org)} className="size-[30px]" />
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate text-sm font-medium">{org.name}</span>
-                      <span className="text-muted-foreground text-xs">
-                        {t(`switcher.role.${org.role}`)}
-                      </span>
-                    </span>
-                    {isCurrent && <Check size={15} className="text-spark ml-auto shrink-0" />}
-                    <ChevronRight
-                      className={cn(
-                        "text-muted-foreground shrink-0",
-                        isCurrent ? "ml-1" : "ml-auto",
-                        !isExplored && "opacity-0",
+          <div className={cn("grid", mobilePresentation ? "grid-cols-1" : "grid-cols-2")}>
+            <div className="flex min-h-0 flex-col p-2">
+              <ColumnHeader label={t("switcher.orgsColumn")} />
+              <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+                {shownOrgs.map((org) => {
+                  const isCurrent = org.id === currentOrg.id;
+                  const isExplored = org.id === exploredId;
+                  return (
+                    // Opens this organization's workspaces beside it. It does NOT switch: you
+                    // are always in a workspace, so the pick is only complete one column to the
+                    // right. Its gear does switch: the settings it opens are this organization's.
+                    <PickerRow
+                      key={org.id}
+                      data-testid={`org-item-${org.id}`}
+                      aria-current={isCurrent || undefined}
+                      // With one organization there is nothing to open: its spaces are always shown.
+                      aria-expanded={orgs.length > 1 ? isExplored : undefined}
+                      aria-controls={orgs.length > 1 ? spacesColumnId : undefined}
+                      onClick={() => setExploredOrgId(org.id)}
+                      rowClassName={cn(
+                        isExplored && "bg-accent",
+                        isCurrent && "bg-primary/10 hover:bg-primary/10",
                       )}
-                      size={15}
-                    />
-                  </PickerRow>
-                );
-              })}
+                      settings={{
+                        to: "/org-settings",
+                        label: t("switcher.settingsOf", { name: org.name }),
+                        pinned: isCurrent || mobilePresentation,
+                        onPick: settingsPick("/org-settings", { orgId: org.id }),
+                      }}
+                      onNavigate={closeSwitcherAndSidebar}
+                    >
+                      <IdentityTile {...orgTile(org)} className="size-6" />
+                      <span className="max-w-[65%] shrink-0 truncate text-sm font-medium">
+                        {org.name}
+                      </span>
+                      <RowRole>{t(`switcher.role.${org.role}`)}</RowRole>
+                      {isCurrent && <Check size={15} className="text-primary shrink-0" />}
+                      {isExplored && !isCurrent && (
+                        <ChevronRight className="text-muted-foreground shrink-0" size={15} />
+                      )}
+                    </PickerRow>
+                  );
+                })}
+              </div>
+              {/* Whether this user may create one is the server's rule, not a flag. Without
+                  the state the create step forwards a user who already has an org. */}
+              {canCreateOrg && (
+                <AddRow
+                  to="/onboarding/create"
+                  state={{ fromSwitcher: true }}
+                  label={t("switcher.newOrg")}
+                  onNavigate={closeSwitcherAndSidebar}
+                />
+              )}
             </div>
 
-            <div className={cn("border-l p-2.5", mobilePresentation && "border-t border-l-0")}>
-              {/* Adding a workspace lands in the CURRENT org's settings, so the shortcut is
-                  offered only while you are looking at your own — elsewhere it would create it
-                  in the wrong place. Creating is `spaces:write`. */}
-              <ColumnHeader
-                label={t("switcher.workspacesColumn")}
-                addLabel={t("btn.add")}
-                onAdd={
-                  isExploringElsewhere || !can("spaces:write")
-                    ? undefined
-                    : `/org-settings/spaces?${NEW_SPACE_PARAM}=1`
-                }
-                onNavigate={closeSwitcherAndSidebar}
-              />
+            <div
+              id={spacesColumnId}
+              className={cn(
+                "flex min-h-0 flex-col p-2",
+                mobilePresentation ? "border-t" : "border-l",
+              )}
+            >
+              <ColumnHeader label={t("switcher.workspacesColumn")} />
               {exploredSpaces.isPending ? (
                 <div className="flex flex-col gap-1 p-2">
                   <Skeleton className="h-5 w-2/3" />
@@ -318,34 +440,41 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                 </div>
               ) : exploredSpaces.isError ? (
                 <p className="text-destructive px-2 py-4 text-xs">{t("error.generic")}</p>
-              ) : shownSpaces.length === 0 ? (
+              ) : shownSpaces.length === 0 && !offersOverview ? (
                 <p className="text-muted-foreground px-2 py-4 text-xs">
                   {t("switcher.workspacesEmpty")}
                 </p>
               ) : (
-                shownSpaces.map((space, index) => {
-                  const isCurrent = space.id === currentSpaceId && !isExploringElsewhere;
-                  const enterable = isSpaceEnterable(space);
-                  // One heading per group, printed on the first row of each: the personal space
-                  // is a different KIND of place, not a space that sorts first.
-                  const heading =
-                    index === 0 && space.personal
-                      ? t("spaces.personal.badge", { ns: "settings" })
-                      : !space.personal && (index === 0 || shownSpaces[index - 1]?.personal)
-                        ? t("spaces.personal.teamGroup", { ns: "settings" })
-                        : null;
-                  return (
-                    <div key={space.id}>
-                      {heading && (
-                        <p className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
-                          {heading}
-                        </p>
-                      )}
-                      {/* The end of the pick: org AND workspace applied together. A closed space
-                          is listed but cannot be entered (and an orphaned personal one only
-                          managed): disabled, and says why. */}
+                <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+                  {/* Not a space: a mode over the working space, set apart above them. */}
+                  {offersOverview && (
+                    <div className="border-b pb-1">
                       <PickerRow
+                        aria-current={overviewCurrent || undefined}
+                        onClick={chooseOverview}
+                        rowClassName={overviewCurrent && "bg-primary/10 hover:bg-primary/10"}
+                        onNavigate={closeSwitcherAndSidebar}
+                      >
+                        <OverviewTile className="size-6 rounded-md" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {overviewLabel}
+                        </span>
+                        {overviewCurrent && <Check size={15} className="text-primary shrink-0" />}
+                      </PickerRow>
+                    </div>
+                  )}
+                  {shownSpaces.map((space) => {
+                    const isCurrent =
+                      space.id === currentSpaceId && !isExploringElsewhere && !overview.on;
+                    const enterable = isSpaceEnterable(space);
+                    return (
+                      // The end of the pick: org AND workspace applied together. A closed space
+                      // is listed but cannot be entered (and an orphaned personal one only
+                      // managed): disabled, and says why.
+                      <PickerRow
+                        key={space.id}
                         data-testid={`space-item-${space.id}`}
+                        aria-current={isCurrent || undefined}
                         disabled={!enterable}
                         title={
                           enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })
@@ -353,39 +482,57 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
                         rowClassName={isCurrent && "bg-primary/10 hover:bg-primary/10"}
                         settings={
-                          isCurrent
+                          enterable
                             ? {
                                 to: "/workspace-settings",
-                                label: t("workspaceSettings.pageTitle", { ns: "settings" }),
+                                label: t("switcher.settingsOf", { name: spaceLabel(space, t) }),
+                                pinned: isCurrent || mobilePresentation,
+                                onPick: settingsPick("/workspace-settings", {
+                                  orgId: exploredId ?? currentOrg.id,
+                                  spaceId: space.id,
+                                }),
                               }
                             : undefined
                         }
                         onNavigate={closeSwitcherAndSidebar}
                       >
-                        <IdentityTile {...spaceTile(space, viewer)} className="size-[30px]" />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                            {spaceLabel(space, t)}
-                            {space.isDefault && (
-                              <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
-                            )}
-                          </span>
-                          {enterable && space.role && (
-                            <span className="text-muted-foreground truncate text-xs">
-                              {spaceRoleLabel(space.role, t)}
-                            </span>
+                        <SpaceName
+                          space={space}
+                          size="md"
+                          className="max-w-[65%] shrink-0 font-medium"
+                        >
+                          {space.isDefault && (
+                            <Star
+                              size={12}
+                              role="img"
+                              aria-label={t("switcher.defaultSpace")}
+                              className="shrink-0 fill-amber-500 text-amber-500"
+                            >
+                              <title>{t("switcher.defaultSpace")}</title>
+                            </Star>
                           )}
-                        </span>
-                        {!enterable && (
-                          <span className="text-muted-foreground ml-auto shrink-0 text-xs">
-                            {t("switcher.spaceOnRequest")}
-                          </span>
-                        )}
-                        {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
+                        </SpaceName>
+                        <RowRole>
+                          {enterable
+                            ? space.role && spaceRoleLabel(space.role, t)
+                            : t("switcher.spaceOnRequest")}
+                        </RowRole>
+                        {isCurrent && <Check size={15} className="text-primary shrink-0" />}
                       </PickerRow>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
+              )}
+              {/* Adding a workspace happens in the settings of the organization being explored:
+                  in another one, the pick switches there first. Creating is `spaces:write`,
+                  an organization-level permission the org listing carries. */}
+              {maySpaceWrite && (
+                <AddRow
+                  to={NEW_SPACE_ADDRESS}
+                  label={t("spaces.create", { ns: "settings" })}
+                  onNavigate={closeSwitcherAndSidebar}
+                  onPick={settingsPick(NEW_SPACE_ADDRESS, { orgId: exploredId ?? currentOrg.id })}
+                />
               )}
             </div>
           </div>

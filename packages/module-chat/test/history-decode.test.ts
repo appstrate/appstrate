@@ -1,49 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { loadHistory, stopSession } from "../src/ui/sessions.ts";
+import { requestAnswering } from "./fake-request.ts";
 
-const realFetch = globalThis.fetch;
-afterEach(() => {
-  globalThis.fetch = realFetch;
-});
+const json = (body: unknown) => () => Response.json(body);
 
 describe("loadHistory decode", () => {
   it("reconstructs UIMessage[] as { id, ...content } in server order", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          id: "chs_1",
-          skill_mode: "auto",
-          pinned_skills: [],
-          messages: [
-            { id: "m1", content: { role: "user", parts: [{ type: "text", text: "hi" }] } },
-            { id: "m2", content: { role: "assistant", parts: [{ type: "text", text: "yo" }] } },
-          ],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      )) as typeof fetch;
+    const request = requestAnswering(
+      json({
+        id: "chs_1",
+        skill_mode: "auto",
+        pinned_skills: [],
+        messages: [
+          { id: "m1", content: { role: "user", parts: [{ type: "text", text: "hi" }] } },
+          { id: "m2", content: { role: "assistant", parts: [{ type: "text", text: "yo" }] } },
+        ],
+      }),
+    );
 
-    const loaded = await loadHistory(() => ({}), "chs_1");
-    expect(loaded.messages).toEqual([
+    const loaded = await loadHistory(request, "chs_1");
+    expect(loaded?.messages).toEqual([
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
       { id: "m2", role: "assistant", parts: [{ type: "text", text: "yo" }] },
     ] as never);
   });
 
   it("carries the session's skill selection as the server stores it", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          id: "chs_1",
-          messages: [],
-          skill_mode: "manual",
-          pinned_skills: ["@scope/a", "@scope/b"],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      )) as typeof fetch;
+    const request = requestAnswering(
+      json({
+        id: "chs_1",
+        messages: [],
+        skill_mode: "manual",
+        pinned_skills: ["@scope/a", "@scope/b"],
+      }),
+    );
 
-    const loaded = await loadHistory(() => ({}), "chs_1");
+    const loaded = await loadHistory(request, "chs_1");
     expect(loaded?.skills).toEqual({
       skillMode: "manual",
       pinnedSkills: ["@scope/a", "@scope/b"],
@@ -51,34 +45,29 @@ describe("loadHistory decode", () => {
   });
 
   it("reports a conversation the caller does not have (404) as null, not as an empty one", async () => {
-    globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
-    expect(await loadHistory(() => ({}), "chs_gone")).toBeNull();
+    const request = requestAnswering(() => new Response(null, { status: 404 }));
+    expect(await loadHistory(request, "chs_gone")).toBeNull();
   });
 
-  it("throws on other errors", async () => {
-    globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
-    await expect(loadHistory(() => ({}), "chs_x")).rejects.toThrow();
+  it("rethrows other refusals as the host raised them", async () => {
+    const request = requestAnswering(() => new Response(null, { status: 500 }));
+    await expect(loadHistory(request, "chs_x")).rejects.toMatchObject({ status: 500 });
   });
 });
 
 describe("stopSession", () => {
-  it("posts an authenticated explicit stop to the active conversation", async () => {
-    let request: { input: RequestInfo | URL; init?: RequestInit } | undefined;
-    globalThis.fetch = (async (input, init) => {
-      request = { input, init };
-      return new Response(null, { status: 204 });
-    }) as typeof fetch;
+  it("posts an explicit stop to the active conversation", async () => {
+    const request = requestAnswering(() => new Response(null, { status: 204 }));
 
-    await stopSession(() => ({ "X-Org-Id": "org_1" }), "chs_1");
+    await stopSession(request, "chs_1");
 
-    expect(String(request?.input)).toBe("/api/chat/sessions/chs_1/stop");
-    expect(request?.init?.method).toBe("POST");
-    expect(request?.init?.credentials).toBe("include");
-    expect(request?.init?.headers).toEqual({ "X-Org-Id": "org_1" });
+    expect(request.calls).toHaveLength(1);
+    expect(request.calls[0]?.path).toBe("/api/chat/sessions/chs_1/stop");
+    expect(request.calls[0]?.init?.method).toBe("POST");
   });
 
   it("throws when the server refuses the stop", async () => {
-    globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
-    await expect(stopSession(() => ({}), "chs_1")).rejects.toThrow("HTTP 500");
+    const request = requestAnswering(() => new Response(null, { status: 500 }));
+    await expect(stopSession(request, "chs_1")).rejects.toMatchObject({ status: 500 });
   });
 });

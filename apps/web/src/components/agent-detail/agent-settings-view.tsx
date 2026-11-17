@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
@@ -15,7 +14,6 @@ import {
   Plug,
   SlidersHorizontal,
   Sparkles,
-  Wrench,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
@@ -32,7 +30,7 @@ import {
 } from "../../lib/settings-section-href";
 import { SettingsRailView } from "../settings/settings-rail-view";
 import { AgentConfigurationView } from "./agent-configuration-view";
-import { SettingsSkeleton } from "../loading-skeletons";
+import { EditorPanelSkeleton } from "../loading-skeletons";
 import {
   PackageCommonSection,
   type PackageVersionsProps,
@@ -75,7 +73,6 @@ const SETTINGS_GROUPS = [
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "common:nav.skills" },
       { id: "integrations", icon: Boxes, labelKey: "common:nav.integrations" },
-      { id: "tools", icon: Wrench, labelKey: "integrationEditor.tabTools" },
     ],
   },
 ] satisfies Array<{
@@ -109,7 +106,6 @@ export function AgentSettingsView({
   inputWrapperOverride?: SchemaWrapper;
 }) {
   const { t } = useTranslation("agents");
-  const navigate = useNavigate();
   const { can } = usePermissions();
   // Write authority is the package's HOME space (`home_writable`), never the
   // space being browsed; nobody writes a system agent or a pinned version.
@@ -190,12 +186,8 @@ export function AgentSettingsView({
             versions={versions}
           />
         ) : isDefinitionSection(active) ? (
-          <Suspense fallback={<SettingsSkeleton />}>
-            <AgentDefinitionEditor
-              detail={detail}
-              section={active as AgentDefinitionSection}
-              onSection={(next) => void navigate(href(next))}
-            />
+          <Suspense fallback={<EditorPanelSkeleton />}>
+            <AgentDefinitionEditor detail={detail} section={active as AgentDefinitionSection} />
           </Suspense>
         ) : (
           <AgentConfigurationView

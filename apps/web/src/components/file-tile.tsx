@@ -16,6 +16,8 @@ import { formatBytes } from "../lib/format-bytes";
 import { formatDateField } from "../lib/format-date";
 import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge, MimeIcon } from "./file-badges";
+import { SkeletonLine } from "./skeleton-line";
+import { SpaceNameOf } from "./space-name";
 
 function MimePlaceholder({ mime }: { mime: string }) {
   return (
@@ -27,7 +29,7 @@ function MimePlaceholder({ mime }: { mime: string }) {
 
 // Mount the authenticated read only for images the caller can download.
 function FileTileImage({ file, inView }: { file: FileDto; inView: boolean }) {
-  const src = useFileImageSrc(file.id, inView);
+  const src = useFileImageSrc(file.id, file.spaceId, inView);
   if (src === undefined) return <Skeleton className="size-full rounded-none" />;
   if (!src) return <MimePlaceholder mime={file.mime} />;
   return <img src={src} alt="" className="size-full object-cover" />;
@@ -36,7 +38,7 @@ function FileTileImage({ file, inView }: { file: FileDto; inView: boolean }) {
 // Plain text only (a React text node, never HTML or rendered Markdown). The server decides which
 // types have one (null for the rest, storage untouched); the icon stays until an excerpt arrives.
 function FileTileExcerpt({ file, inView }: { file: FileDto; inView: boolean }) {
-  const { data: excerpt } = useFileExcerpt(file.id, inView);
+  const { data: excerpt } = useFileExcerpt(file.id, file.spaceId, inView);
   if (!excerpt) return <MimePlaceholder mime={file.mime} />;
   return (
     <div className="relative size-full overflow-hidden p-3 text-left">
@@ -54,6 +56,7 @@ export function FileTile({
   onKeep,
   onPreview,
   showRunLink,
+  showSpace = false,
 }: {
   file: FileDto;
   isKeepPending: boolean;
@@ -62,6 +65,8 @@ export function FileTile({
   onKeep: (file: FileDto) => void;
   onPreview: (file: FileDto) => void;
   showRunLink?: boolean;
+  /** Name the space it lives in: a list spanning spaces. */
+  showSpace?: boolean;
 }) {
   const { t } = useTranslation(["files", "common"]);
   const { preview, download } = file.capabilities;
@@ -84,7 +89,7 @@ export function FileTile({
             type="button"
             onClick={() => activate(file)}
             aria-label={`${preview ? t("row.preview") : t("common:btn.download")}: ${file.name}`}
-            className="bg-muted hover:bg-muted/70 focus-visible:ring-ring relative block aspect-square w-full outline-none focus-visible:ring-2 focus-visible:ring-inset"
+            className="bg-muted/40 hover:bg-muted/50 focus-visible:ring-ring relative block aspect-square w-full outline-none focus-visible:ring-2 focus-visible:ring-inset"
           >
             {media}
           </button>
@@ -112,7 +117,33 @@ export function FileTile({
           <span aria-hidden>·</span>
           <span>{formatDateField(file.createdAt, "datetime")}</span>
           <ExpiryBadge expiresAt={file.expiresAt} />
+          {showSpace && (
+            <>
+              <span aria-hidden>·</span>
+              <SpaceNameOf spaceId={file.spaceId} />
+            </>
+          )}
         </CardDescription>
+      </CardHeader>
+    </Card>
+  );
+}
+
+/**
+ * `FileTile` while the files load: the square preview, then the header — a title
+ * row as tall as its `size-7` actions button, then the size and date line.
+ */
+export function FileTileSkeleton() {
+  return (
+    <Card className="flex flex-col overflow-hidden">
+      <CardContent className="p-0">
+        <Skeleton className="aspect-square w-full rounded-none" />
+      </CardContent>
+      <CardHeader>
+        <div className="flex min-h-7 min-w-0 items-center gap-1">
+          <SkeletonLine className="w-3/4 text-sm leading-none font-semibold" />
+        </div>
+        <SkeletonLine className="w-2/3 text-sm" />
       </CardHeader>
     </Card>
   );

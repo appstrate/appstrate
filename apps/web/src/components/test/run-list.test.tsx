@@ -29,10 +29,10 @@ function failedQuery(data: ListEnvelope<EnrichedRun> | undefined): QueryClient {
     undefined,
     undefined,
     undefined,
-    20,
-    0,
+    undefined,
+    25,
   );
-  if (data) queryClient.setQueryData(key, data);
+  if (data) queryClient.setQueryData(key, { pages: [data], pageParams: [undefined] });
   const query = queryClient.getQueryCache().build(queryClient, { queryKey: key });
   query.setState({ status: "error", error: new Error("refetch failed"), fetchFailureCount: 1 });
   return queryClient;
@@ -59,5 +59,22 @@ describe("RunList after a failed fetch", () => {
     });
     expect(html).not.toContain(RUN_HREF);
     expect(html).toContain(commonFr["error.generic"]);
+  });
+});
+
+describe("RunList inside one agent", () => {
+  it("leads « Run » with the number, not the agent the page already names", () => {
+    const envelope = {
+      object: "list",
+      data: [makeRun({ packageId: PACKAGE_ID })],
+      total: 1,
+      hasMore: false,
+    } as unknown as ListEnvelope<EnrichedRun>;
+    const html = render(<RunList packageId={PACKAGE_ID} />, {
+      queryClient: failedQuery(envelope),
+    });
+    expect(html).toContain('data-column="run"');
+    expect(html).toContain(">#42<");
+    expect(html).not.toContain("bg-identity-");
   });
 });

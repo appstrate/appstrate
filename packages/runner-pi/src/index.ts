@@ -54,7 +54,7 @@ export {
 // here only when something outside the package imports it.
 export {
   InMemoryCredentialStore,
-  Type,
+  unsafeSchema,
   loadPiCodingAgentSdk,
   type PiCodingAgentSdk,
 } from "./pi-sdk.ts";
@@ -79,23 +79,12 @@ export { emitRuntimeReady, emitBootProgress } from "./runtime-ready.ts";
 
 export { startSinkHeartbeat, type SinkHeartbeatHandle } from "./sink-heartbeat.ts";
 
-// `RUN_HISTORY_INJECTED_TOOL` / `RECALL_MEMORY_INJECTED_TOOL` are NOT here:
-// their one outside consumer (`runtime-pi/sidecar/mcp.ts`) imports them from
-// the `./runtime-tools` subpath, the same barrel-vs-subpath split as
-// `PI_SDK_VERSION` above.
-export { RUNTIME_INJECTED_TOOLS } from "./runtime-tools/index.ts";
-
 export { piToolResultOrThrow } from "./pi-tool-result.ts";
 
-export {
-  buildRuntimeToolFactories,
-  callToolResultToPi,
-  type RuntimeEventEmitter,
-} from "./runtime-tools/mcp-forward.ts";
+export { callToolResultToPi, mcpToolForwardFactory, type McpToolCallPlan } from "./mcp-forward.ts";
 
-export {
-  buildRuntimeToolExtensions,
-  buildPublishFileExtension,
-} from "./runtime-tools/runtime-tool-extensions.ts";
+export { integrationOf, registerIntegrationTool } from "./tool-integration.ts";
 
-export { spillResourcesToWorkspace } from "./runtime-tools/resource-spill.ts";
+export type { RuntimeEventEmitter } from "./runtime-event.ts";
+
+export { spillResourcesToWorkspace } from "./resource-spill.ts";

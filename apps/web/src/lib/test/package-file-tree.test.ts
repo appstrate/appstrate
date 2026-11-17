@@ -547,7 +547,7 @@ describe("isPinnedEntry", () => {
 
   it("pins the manifest, which the write route answers `reserved_entry` for", () => {
     expect(isPinnedEntry("skill", "manifest.json")).toBe(true);
-    expect(isPinnedEntry("mcp-server", "manifest.json")).toBe(true);
+    expect(isPinnedEntry("integration", "manifest.json")).toBe(true);
   });
 
   it("leaves every other file free, including one type's entry under another type", () => {

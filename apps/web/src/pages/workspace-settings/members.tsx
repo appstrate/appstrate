@@ -42,6 +42,10 @@ import { useSpace } from "../../hooks/use-spaces";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { DataTable } from "../../components/data-table";
+import { ListFooter, ListToolbar } from "../../components/list-toolbar";
+import { useLocalListParams } from "../../lib/list-params";
+import { useSearchPlaceholder } from "../../lib/search-placeholder";
+import { matchesSearch } from "../../lib/strings";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
@@ -52,7 +56,7 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../../components/page-states";
 import { useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
@@ -77,6 +81,12 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { data, isLoading, error } = useSpaceMembers(spaceId, canRead);
   // Disabling a query does not remove previously cached rows after a role change.
   const members = canRead ? data : undefined;
+  // The page holds other lists and dialogs: its search stays local rather than writing `?q=`.
+  const list = useLocalListParams();
+  const searchPlaceholder = useSearchPlaceholder(t("spaceMembers.tabTitle"));
+  const shownMembers = (members ?? []).filter((member) =>
+    matchesSearch(list.search, [memberLabel(member), member.email]),
+  );
   const {
     options: roleOptions,
     roles,
@@ -91,7 +101,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const [previewing, setPreviewing] = useState(false);
   const canPreview = useCanPreviewRole();
 
-  const assignRole = useAssignSpaceRole(roleOptions);
+  const assignRole = useAssignSpaceRole();
   const removeMember = useRemoveSpaceMember();
 
   const canInvite = can("space-members:invite");
@@ -112,14 +122,15 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       {
         onSuccess: (result) => {
           setMemberToRemove(null);
-          toast.success(
-            result.access_after === "implicit"
-              ? t("spaceMembers.removedImplicit", {
-                  name: memberLabel(member),
-                  role: defaultRoleName,
-                })
-              : t("spaceMembers.removedNone", { name: memberLabel(member) }),
-          );
+          // The row leaving the table says it all, except when the member keeps a seat.
+          if (result.access_after === "implicit") {
+            toast.success(
+              t("spaceMembers.removedImplicit", {
+                name: memberLabel(member),
+                role: defaultRoleName,
+              }),
+            );
+          }
         },
       },
     );
@@ -138,8 +149,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     roles,
     roleOptions,
     isChangingRole: assignRole.isPending,
-    onChangeRole: (member, value) =>
-      assignRole.assign({ spaceId, member, name: memberLabel(member) }, value),
+    onChangeRole: (member, value) => assignRole.assign({ spaceId, member }, value),
     removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
     isRemoving: removeMember.isPending,
     removeDisabled: removeMember.isPending || !space || !!spaceError,
@@ -207,23 +217,45 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       )}
 
       {canRead && (
+        <ListToolbar
+          search={{
+            value: list.search,
+            onChange: list.setSearch,
+            placeholder: searchPlaceholder,
+          }}
+        />
+      )}
+      {canRead && (
         <DataTable
           tableId="space-members"
           label={t("spaceMembers.tabTitle")}
           columns={columns}
-          rows={members ?? []}
+          rows={shownMembers}
           rowKey={(member) => member.userId}
           isLoading={isLoading}
           failure={error}
           empty={
-            <EmptyState
-              message={t("spaceMembers.empty")}
-              hint={t("spaceMembers.emptyHint")}
-              icon={Users}
-              compact
-            >
-              <EmptyStateAction action={add} />
-            </EmptyState>
+            list.search ? (
+              <NoMatchState message={t("spaceMembers.noMatch")} onReset={list.reset} />
+            ) : (
+              <EmptyState
+                message={t("spaceMembers.empty")}
+                hint={t("spaceMembers.emptyHint")}
+                icon={Users}
+                compact
+              >
+                <EmptyStateAction action={add} />
+              </EmptyState>
+            )
+          }
+        />
+      )}
+      {canRead && (
+        <ListFooter
+          count={
+            isLoading || error
+              ? undefined
+              : t("list.count", { ns: "agents", count: shownMembers.length })
           }
         />
       )}
@@ -357,7 +389,6 @@ function AddSpaceMemberModal({
         {
           onSuccess: (invitation) => {
             setInvitationToken(invitation.token);
-            toast.success(t("spaceMembers.invited", { email: email.trim() }));
           },
           onError: (err) => {
             if (err instanceof ApiError && err.code === "invitation_already_pending") {
@@ -383,13 +414,6 @@ function AddSpaceMemberModal({
       },
       {
         onSuccess: () => {
-          const candidate = candidates.find((member) => member.userId === userId);
-          toast.success(
-            t("spaceMembers.added", {
-              name: canReadDirectory ? (candidate ? memberLabel(candidate) : userId) : email.trim(),
-              role: roleOptions.find((option) => option.value === effectiveRole)?.label,
-            }),
-          );
           onClose();
         },
         onError: (err) =>
@@ -463,7 +487,7 @@ function AddSpaceMemberModal({
           <Field data-disabled={usersLoading || !!usersError || isPending}>
             <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
             {usersLoading ? (
-              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-10 w-full" />
             ) : (
               <Select
                 value={userId}

@@ -56,7 +56,7 @@ describe("unknown request-body fields are refused, not stripped", () => {
   // The case named in the audit: `generation_config` is the snake spelling a
   // client would reasonably guess, since `schedules.ts` spells the same concept
   // `generation_config_override`. It used to answer 200 and change nothing.
-  it("spaces — PATCH /api/spaces/{spaceId}/packages/{scope}/{name}", async () => {
+  it("spaces — PATCH /api/spaces/{id}/packages/{scope}/{name}", async () => {
     const packageId = "@strictbodies/pkg";
     await seedPackage({ id: packageId, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
     await seedSpacePackage(ctx.defaultSpaceId, packageId);

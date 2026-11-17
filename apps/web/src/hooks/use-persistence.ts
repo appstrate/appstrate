@@ -41,7 +41,11 @@ function usePersistenceQuery<T>(
   });
 }
 
-/** Every memory row the caller may read for an agent. */
+/**
+ * Memories for an agent. Visibility is the same for both halves, here and on
+ * a run: a `persistence:delete` holder sees every actor's; others their own
+ * and the shared ones.
+ */
 export function useAgentMemories(packageId: string | undefined) {
   return usePersistenceQuery(
     packageId,
@@ -51,7 +55,7 @@ export function useAgentMemories(packageId: string | undefined) {
   );
 }
 
-/** Memories produced during a specific run. Always shows every actor's row for that run. */
+/** Memories produced during a specific run — same visibility as `useAgentMemories`. */
 export function useRunMemories(packageId: string | undefined, runId: string | undefined) {
   return usePersistenceQuery(
     packageId,
@@ -61,7 +65,7 @@ export function useRunMemories(packageId: string | undefined, runId: string | un
   );
 }
 
-/** Pinned slots for an agent. Admins see every actor's; members their own and the shared ones. */
+/** Pinned slots for an agent — same visibility as `useAgentMemories`. */
 export function useAgentPinned(packageId: string | undefined) {
   return usePersistenceQuery(
     packageId,
@@ -71,7 +75,7 @@ export function useAgentPinned(packageId: string | undefined) {
   );
 }
 
-/** Pinned slots written during a specific run. */
+/** Pinned slots written during a specific run — same visibility as `useAgentMemories`. */
 export function useRunPinned(packageId: string | undefined, runId: string | undefined) {
   return usePersistenceQuery(
     packageId,

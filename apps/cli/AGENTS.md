@@ -81,26 +81,27 @@ appstrate api GET /api/realtime/runs/run_cm1abc123def456
 
 ## Curl → appstrate api mapping (cheat sheet)
 
-Every curl flag you know works identically. Highlights:
+Most curl flags work identically (there is no `-N`, see below). Highlights:
 
-| You want                       | Write                                               |
-| ------------------------------ | --------------------------------------------------- |
-| Method inferred as GET         | `appstrate api /api/x`                              |
-| POST with JSON body            | `appstrate api POST /api/x -d @body.json`           |
-| POST with body from stdin      | `echo '…' \| appstrate api POST /api/x -d @-`       |
-| Multipart upload               | `appstrate api POST /api/x -F 'file=@pkg.zip'`      |
-| Custom header (one-off)        | `appstrate api -H 'X-Foo: bar' …`                   |
-| Fail on HTTP ≥ 400             | `appstrate api --fail-with-body …`                  |
-| Timeout the whole call         | `appstrate api --max-time 30 …`                     |
-| Retry with backoff             | `appstrate api --retry 5 …`                         |
-| Status-code only, no body      | `appstrate api -w '%{http_code}\n' -o /dev/null …`  |
-| Follow redirects (same origin) | `appstrate api -L …` (cross-origin hops strip auth) |
+| You want                  | Write                                              |
+| ------------------------- | -------------------------------------------------- |
+| Method inferred as GET    | `appstrate api /api/x`                             |
+| POST with JSON body       | `appstrate api POST /api/x -d @body.json`          |
+| POST with body from stdin | `echo '…' \| appstrate api POST /api/x -d @-`      |
+| Multipart upload          | `appstrate api POST /api/x -F 'file=@pkg.zip'`     |
+| Custom header (one-off)   | `appstrate api -H 'X-Foo: bar' …`                  |
+| Fail on HTTP ≥ 400        | `appstrate api --fail-with-body …`                 |
+| Timeout the whole call    | `appstrate api --max-time 30 …`                    |
+| Retry with backoff        | `appstrate api --retry 5 …`                        |
+| Status-code only, no body | `appstrate api -w '%{http_code}\n' -o /dev/null …` |
+| Follow redirects          | `appstrate api -L …` (any host, see below)         |
 
 **Differences from curl** (intentional, security-driven):
 
 - No `-u / --user` — the whole point is that you never see the bearer.
 - Cross-origin URLs are refused (exit 2). Use plain `curl` if you genuinely need to hit a non-Appstrate host.
 - Cookie-jar files (`-b file.txt`) are refused. Literal `-b 'k=v'` works.
+- `-L` follows a redirect to whatever host `Location` names. A cross-origin hop drops `Authorization` and `Cookie` but still forwards your `-H` headers and `X-Org-Id`/`X-Space-Id`.
 - `-d` / `--data-urlencode` do NOT auto-set `Content-Type: application/x-www-form-urlencoded`. Add `-H 'Content-Type: …'` explicitly.
 
 Full table and exit codes: [`apps/cli/README.md#appstrate-api`](./README.md#appstrate-api).
@@ -133,6 +134,12 @@ appstrate run @acme/email-sorter --connection @acme/gmail=<connection-id>
 
 # Through the API the same choice is `connection_overrides` on the launch body
 # (always an array), and the 409's `errors[].candidate_connections` is the list.
+# Where an admin imposes connections on the integration (an admin pin or an
+# enforced org default) they are always bound, whatever you pass: the override
+# then names additions only (`[]` means no addition, never no connection), and
+# one naming a connection outside a set that allows none is refused with
+# `override_outranked`. The imposed set plus an addition can be a set of
+# several, which a run executed locally refuses (`remote_binds_one_connection`).
 echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
   | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
 ```
@@ -189,7 +196,7 @@ appstrate api GET '/api/runs?status=success&limit=20' | jq '.data[]'
 
 ```sh
 appstrate api GET /api/runs/run_xyz/events \
-  -H 'Accept: text/event-stream' -N
+  -H 'Accept: text/event-stream'    # the CLI adds no buffering, there is no -N
 ```
 
 **Rotate an API key:**

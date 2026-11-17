@@ -19,7 +19,7 @@ describe("useFileExcerpt", () => {
   it("builds a disabled query while the tile is off-screen", () => {
     const queryClient = new QueryClient();
     function Probe() {
-      useFileExcerpt("file_1", false);
+      useFileExcerpt("file_1", undefined, false);
       return null;
     }
     render(<Probe />, { queryClient });

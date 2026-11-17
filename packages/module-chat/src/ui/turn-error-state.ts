@@ -153,13 +153,28 @@ function withFix(
   return { text: memberText ? t(memberText) : `${t(text)} ${t("turn.error.contactAdmin")}` };
 }
 
+/**
+ * Sentences for the structured reasons a failure can name, read before the
+ * category's own sentence. Keyed loosely: the persisted value is unvalidated
+ * JSONB, and a reason with no sentence here falls back to the category's.
+ */
+const TURN_ERROR_REASON_KEY: Record<string, string> = {
+  // Only a platform release clears it: no reconnection link, and the category
+  // (`invalid_request`) already refuses the retry.
+  runtime_version_too_old: "turn.error.runtimeVersionTooOld",
+};
+
 /** A dead credential cannot be retried: it names where it is fixed instead. */
 function classifiedState(
   category: ClientTurnError["category"],
+  reason: string | undefined,
   t: ChatTranslate,
   can: ChatCan,
   personalModelCredentials: boolean | undefined,
 ): Pick<TurnErrorState, "text" | "action"> {
+  if (reason && Object.prototype.hasOwnProperty.call(TURN_ERROR_REASON_KEY, reason)) {
+    return { text: t(TURN_ERROR_REASON_KEY[reason]!) };
+  }
   return category === "credential_unavailable"
     ? withFix(DEAD_CREDENTIAL, t, can, personalModelCredentials)
     : { text: t(TURN_ERROR_KEY[category]) };
@@ -209,7 +224,13 @@ export function turnErrorState(
   if (turnFailed(turn)) {
     return {
       // Optional on the persisted shape (unvalidated JSONB): default it.
-      ...classifiedState(turn.errorCategory ?? "unknown", t, can, personalModelCredentials),
+      ...classifiedState(
+        turn.errorCategory ?? "unknown",
+        turn.errorReason,
+        t,
+        can,
+        personalModelCredentials,
+      ),
       // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
       // whose cause was rate limiting is retryable, one whose credential is
       // dead is not. Read the persisted verdict either way.
@@ -228,7 +249,13 @@ export function turnErrorState(
     const requestId = classified?.requestId ?? problemRequestId(err);
     if (classified) {
       return {
-        ...classifiedState(classified.category, t, can, personalModelCredentials),
+        ...classifiedState(
+          classified.category,
+          classified.reason,
+          t,
+          can,
+          personalModelCredentials,
+        ),
         retryable: classified.retryable,
         requestId,
       };
