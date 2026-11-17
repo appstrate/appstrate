@@ -17,8 +17,6 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { useListScope } from "./use-org-scope";
-import { useSpaces } from "./use-spaces";
-import { onePerPackage, type InSpaces } from "../lib/across-spaces";
 import { invalidateLibraries } from "./use-library";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
@@ -146,28 +144,6 @@ async function fetchPackageDetail(
   return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
 
-/**
- * An index's rows as its lists hold them: each package once, its spaces in the order of the
- * reader's space listing. `sum`: the per-space counters to add up (a stable array).
- */
-function useOnePerPackage<T extends { id: string; spaceId: string; home_space_id?: string | null }>(
-  sum?: readonly (keyof T)[],
-): (rows: T[]) => InSpaces<T>[] {
-  const { data: spaces } = useSpaces();
-  return useCallback(
-    (rows) =>
-      onePerPackage(
-        rows,
-        (spaces ?? []).map((space) => space.id),
-        sum,
-      ),
-    [spaces, sum],
-  );
-}
-
-/** What an agent row counts in its own space. */
-const AGENT_COUNTERS = ["running_runs", "unread_count"] as const;
-
 /** The integration index adds the `source` facts its page splits by. */
 type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem
@@ -177,7 +153,7 @@ type Segment = (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType];
 
 /**
  * One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`).
- * `spanning` (any type but the agent, whose index is `useAgents`): every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), each package once with its spaces (`onePerPackage`) — asked by an index PAGE in « Vue d'ensemble », never by a surface of one space.
+ * `spanning` (any type but the agent, whose index is `useAgents`): every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), each package once with its `space_ids` — asked by an index PAGE in « Vue d'ensemble », never by a surface of one space.
  */
 function usePackageList<T extends PackageType>(
   type: T,
@@ -190,7 +166,6 @@ function usePackageList<T extends PackageType>(
       ? packageKeys.acrossSpaces(segment, scope.orgId)
       : packageKeys.list(segment, scope.orgId, scope.spaceId),
     queryFn: () => fetchPackageIndex(type, scope.acrossOrgId),
-    select: useOnePerPackage<PackageIndexItem<T>>(),
     enabled: scope.enabled,
     // No poll: an index carries nothing a run moves, and the writes that move it invalidate it.
   });
@@ -331,7 +306,7 @@ export {
 
 /**
  * The agent index for the current space: the ACTIVE set ({@link usePackageList}), so a listed agent is a runnable one.
- * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), each agent once with its spaces and its counters added up (`onePerPackage`), polled — asked by the agent index and the dashboard in « Vue d'ensemble », never by a surface of one space.
+ * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), each agent once with its `space_ids` and its counters over them, polled — asked by the agent index and the dashboard in « Vue d'ensemble », never by a surface of one space.
  * `enabled: false` asks nothing (a surface that does not show it).
  */
 export function useAgents({ spanning = false, enabled = true } = {}) {
@@ -341,7 +316,6 @@ export function useAgents({ spanning = false, enabled = true } = {}) {
       ? agentsKeys.acrossSpaces(scope.orgId)
       : agentsKeys.list(scope.orgId, scope.spaceId),
     queryFn: () => fetchAgents(scope.acrossOrgId),
-    select: useOnePerPackage<AgentListItem>(AGENT_COUNTERS),
     enabled: enabled && scope.enabled,
     // The running and unread counts of other spaces' agents reach no SSE stream here.
     refetchInterval: scope.refetchInterval,

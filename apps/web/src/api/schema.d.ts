@@ -3188,7 +3188,7 @@ export interface paths {
         };
         /**
          * List agents across the organization's spaces
-         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` is withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
+         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgAgents"];
         put?: never;
@@ -3358,7 +3358,7 @@ export interface paths {
         };
         /**
          * List integration packages across the organization's spaces
-         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
+         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgIntegrationPackages"];
         put?: never;
@@ -3378,7 +3378,7 @@ export interface paths {
         };
         /**
          * List skills across the organization's spaces
-         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
+         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgSkills"];
         put?: never;
@@ -5788,8 +5788,8 @@ export interface components {
             id: string;
             /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
-            /** @description The space whose index lists this row (spc_ prefix): the agent is ACTIVE there, and the row's counters and dependency summary follow the caller's role there. A list spanning spaces lists an agent once per space it is active in. */
-            spaceId: string;
+            /** @description The spaces of the index where the agent is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the agent's home first when it is one of them, then in the order of `GET /api/spaces`. */
+            space_ids: string[];
             /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
             icon: string | null;
             /** @description The colour, a palette key: `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink`, `orange`. `null` means derived from the resource id (a stable hue, never `neutral`); `neutral` is an explicit choice. An agent's is `_meta["dev.appstrate/ui"].color`, `null` when that is not a palette key. */
@@ -6276,8 +6276,8 @@ export interface components {
         };
         IntegrationIndexItem: {
             id: string;
-            /** @description The space whose index lists this row (spc_ prefix): the package is ACTIVE there. A list spanning spaces lists a package once per space it is active in. */
-            spaceId: string;
+            /** @description The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`. */
+            space_ids: string[];
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
             name: string;
@@ -6639,8 +6639,8 @@ export interface components {
         };
         OrgPackageItem: {
             id: string;
-            /** @description The space whose index lists this row (spc_ prefix): the package is ACTIVE there. A list spanning spaces lists a package once per space it is active in. */
-            spaceId: string;
+            /** @description The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`. */
+            space_ids: string[];
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
             name: string;
@@ -8394,7 +8394,9 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/email-sorter",
-                     *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": "lucide:mail",
                      *           "color": "blue",
@@ -8420,7 +8422,9 @@ export interface operations {
                      *         },
                      *         {
                      *           "id": "@appstrate/code-reviewer",
-                     *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": null,
                      *           "color": null,
@@ -20578,7 +20582,9 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/email-sorter",
-                     *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": "lucide:mail",
                      *           "color": "blue",
@@ -20604,7 +20610,9 @@ export interface operations {
                      *         },
                      *         {
                      *           "id": "@appstrate/code-reviewer",
-                     *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": null,
                      *           "color": null,
@@ -21156,7 +21164,9 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/summarize",
-                     *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "name": "Summarize",
                      *           "description": "Summarizes long text into key points",
                      *           "icon": "lucide:file-text",
@@ -22626,7 +22636,9 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "@acme/summarize",
-                     *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "space_ids": [
+                     *             "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *           ],
                      *           "name": "Summarize",
                      *           "description": "Summarizes long text into key points",
                      *           "icon": "lucide:file-text",

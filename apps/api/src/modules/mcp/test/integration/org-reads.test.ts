@@ -136,7 +136,7 @@ describe("lists spanning spaces through invoke_operation", () => {
     endpoint: string,
     token: string,
     spaceId?: string,
-  ): Promise<Array<{ id: string; spaceId: string; home_space_id?: string | null }>> {
+  ): Promise<Array<{ id: string; space_ids?: string[]; home_space_id?: string | null }>> {
     const res = await app.request(endpoint, {
       method: "POST",
       headers: {
@@ -272,12 +272,12 @@ describe("lists spanning spaces through invoke_operation", () => {
     // Homed in Un, where the member holds a role, and active in Deux too.
     const shared = await seedSkill("shared", un);
     await seedSpacePackage(deux, shared);
-    const sharedIn = (rows: Awaited<ReturnType<typeof invokeRows>>, spaceId: string) =>
-      rows.find((row) => row.id === shared && row.spaceId === spaceId)!;
+    const sharedOf = (rows: Awaited<ReturnType<typeof invokeRows>>) =>
+      rows.find((row) => row.id === shared)!;
 
     const orgToken = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
     const orgRows = await invokeRows("listOrgSkills", `/api/mcp/o/${owner.orgId}`, orgToken, deux);
-    expect(sharedIn(orgRows, deux).home_space_id).toBe(un);
+    expect(sharedOf(orgRows).home_space_id).toBe(un);
 
     // Bound to Deux, the token reaches no role in Un: the home is not named.
     const spaceToken = await mintToken(member, getMcpSpaceResourceUri(owner.orgId, deux));
@@ -286,7 +286,7 @@ describe("lists spanning spaces through invoke_operation", () => {
       `/api/mcp/o/${owner.orgId}/s/${deux}`,
       spaceToken,
     );
-    expect(pinnedRows.every((row) => row.spaceId === deux)).toBe(true);
-    expect(sharedIn(pinnedRows, deux).home_space_id).toBeNull();
+    expect(pinnedRows.every((row) => row.space_ids?.join() === deux)).toBe(true);
+    expect(sharedOf(pinnedRows).home_space_id).toBeNull();
   });
 });

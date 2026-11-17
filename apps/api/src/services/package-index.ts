@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The package INDEXES: what each space can LAUNCH, one row per (package, space)
- * where the package is ACTIVE, each row carrying its `spaceId`. The single-space
- * index (`GET /api/agents`, `GET /api/packages/{type}`) is the one-space case;
- * the organization's (`GET /api/orgs/{orgId}/agents|packages/{type}`) lists
- * every space it admits. Each costs the same number of queries whatever the
- * number of spaces.
+ * The package INDEXES: what each space can LAUNCH, one row per package ACTIVE in
+ * one of them, each row carrying `space_ids`, the spaces it is active in (its
+ * home first when it is one of them, then in the order of a space listing). The
+ * single-space index (`GET /api/agents`, `GET /api/packages/{type}`) is the
+ * one-space case; the organization's (`GET /api/orgs/{orgId}/agents|packages/{type}`)
+ * lists every space it admits. Each costs the same number of queries whatever
+ * the number of spaces.
  *
  * The ONE activation rule decides (`services/package-activation.ts`): the
  * placement row when the package is placed in the space, the deployment's
@@ -15,9 +16,7 @@
  * switched off — belongs to its library (`GET /api/spaces/{spaceId}/library`).
  *
  * Order: system packages first, then the index's own order (the agent index
- * by id, a catalog index newest first, then by id), then the space id — so one space's
- * index keeps its order, and a package active in several spaces has its rows
- * side by side.
+ * by id, a catalog index newest first, then by id).
  */
 
 import { inArray } from "drizzle-orm";
@@ -42,8 +41,9 @@ import { CONFIG_BY_TYPE } from "./package-items/config.ts";
 
 /**
  * The agent index of the spaces of `grants`, as `actor` reads each with its
- * grant there: whether a row is a summary and which runs its counters span
- * follow the row's space, never the request's.
+ * grant there: a row's counters span the agent's runs in every space of
+ * `grants`, each space counting the runs its grant admits, and the row is a
+ * summary unless one of its spaces grants the content read.
  */
 export async function listAgentIndex(
   orgId: string,
@@ -59,13 +59,15 @@ export async function listAgentIndex(
   ]);
 
   return rows.map((row) => {
-    const summaryOnly = !readsAgentContent(permissions.get(row.spaceId)!);
+    const summaryOnly = !row.spaceIds.some((spaceId) =>
+      readsAgentContent(permissions.get(spaceId)!),
+    );
     const manifest = asRecord(row.draftManifest) as AgentManifest;
     const parsed = parseScopedName(manifest.name);
     const appearance = readAgentAppearance(manifest as Record<string, unknown>);
     return {
       id: row.id,
-      spaceId: row.spaceId,
+      space_ids: row.spaceIds,
       home_space_id: visibleHomeSpaceId(row, accessible),
       ...appearance,
       display_name: manifest.display_name,
@@ -86,10 +88,10 @@ export async function listAgentIndex(
             }),
         integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
       },
-      running_runs: runningCounts.get(row.spaceId)?.get(row.id) ?? 0,
+      running_runs: runningCounts.get(row.id) ?? 0,
       // The caller's own unread runs of this agent (per recipient, like a
       // schedule's `unread_count`).
-      unread_count: unreadCounts.get(row.spaceId)?.get(row.id) ?? 0,
+      unread_count: unreadCounts.get(row.id) ?? 0,
       source: row.source ?? "local",
       // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
       // list output is directly usable as `{scope}` path-param input — one

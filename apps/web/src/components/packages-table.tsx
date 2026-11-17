@@ -45,7 +45,7 @@ export function PackagesTable({
       rowHref={
         rowAction
           ? undefined
-          : (item) => linkInSpace(packageDetailPath(item.type, item.id), item.spaceId)
+          : (item) => linkInSpace(packageDetailPath(item.type, item.id), item.spaceIds?.[0])
       }
       rowAction={rowAction}
       rowLabel={(item) => item.displayName}

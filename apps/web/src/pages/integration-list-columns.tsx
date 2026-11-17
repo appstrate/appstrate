@@ -2,7 +2,6 @@
 
 import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
-import type { InSpaces } from "../lib/across-spaces";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
 import { PackageSharedFrom } from "../components/package-spaces";
@@ -12,8 +11,6 @@ import {
   useCatalogueSourceColumn,
 } from "../components/catalogue-columns";
 import { useOrg } from "../hooks/use-org";
-
-type IntegrationRow = InSpaces<IntegrationIndexItem>;
 
 /**
  * One comparable integration fact per column. `connectionCount` is the caller's own connections
@@ -25,15 +22,17 @@ type IntegrationRow = InSpaces<IntegrationIndexItem>;
 export function useIntegrationListColumns(
   connectionCount: ((sourceId: string, spaceIds: readonly string[]) => number) | undefined,
   spanning: boolean,
-): DataColumn<IntegrationRow>[] {
+): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
-  const spaceColumn = usePackageSpaceColumn<IntegrationRow>(spanning, (integration) => ({
+  const spaceColumn = usePackageSpaceColumn<IntegrationIndexItem>(spanning, (integration) => ({
     homeSpaceId: integration.home_space_id,
-    spaceIds: integration.spaceIds,
+    spaceIds: integration.space_ids,
     system: integration.source === "system",
   }));
-  const origin = useCatalogueOriginColumn<IntegrationRow>(useOrg().currentOrg?.name ?? "");
-  const source = useCatalogueSourceColumn<IntegrationRow>((integration) => integration.source_kind);
+  const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
+  const source = useCatalogueSourceColumn<IntegrationIndexItem>(
+    (integration) => integration.source_kind,
+  );
 
   return [
     {
@@ -72,7 +71,7 @@ export function useIntegrationListColumns(
           );
         }
         if (!connectionCount) return null;
-        const count = connectionCount(integration.id, integration.spaceIds);
+        const count = connectionCount(integration.id, integration.space_ids);
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
             {count}

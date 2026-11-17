@@ -39,45 +39,6 @@ export function linkedSpaceStep(
   return enterable && current !== linked ? "wait" : "drop";
 }
 
-/** A package of an index, listed once: every space whose index lists it, `spaceId` first. */
-export type InSpaces<T> = T & { spaceIds: string[] };
-
-/**
- * One row per package of an index. The org routes answer one row per (package, space) where the
- * package is active; a list shows the package once and names its spaces. A row's spaces follow
- * `spaceOrder` (the reader's space listing), the package's home (`home_space_id`) first when it is
- * one of them. The first is the row's own `spaceId`: where its link opens. `sum`: the per-space
- * counters added up; every other field is the first space's.
- */
-export function onePerPackage<
-  T extends { id: string; spaceId: string; home_space_id?: string | null },
->(
-  rows: readonly T[],
-  spaceOrder: readonly string[],
-  sum: readonly (keyof T)[] = [],
-): InSpaces<T>[] {
-  const rank = (spaceId: string, home: string | null | undefined) => {
-    if (spaceId === home) return -1;
-    const index = spaceOrder.indexOf(spaceId);
-    return index < 0 ? spaceOrder.length : index;
-  };
-  const byPackage = new Map<string, T[]>();
-  for (const row of rows) {
-    const listed = byPackage.get(row.id);
-    if (listed) listed.push(row);
-    else byPackage.set(row.id, [row]);
-  }
-  return [...byPackage.values()].map((listed) => {
-    const ordered = [...listed].sort(
-      (a, b) => rank(a.spaceId, a.home_space_id) - rank(b.spaceId, b.home_space_id),
-    );
-    const totals = Object.fromEntries(
-      sum.map((key) => [key, ordered.reduce((total, row) => total + (Number(row[key]) || 0), 0)]),
-    );
-    return { ...ordered[0]!, ...totals, spaceIds: ordered.map((row) => row.spaceId) };
-  });
-}
-
 /**
  * The SSE stream is scoped to the current space: a run, schedule, file or agent list spanning
  * spaces polls while mounted, or it would never see a new row (or an agent's run counts) of another

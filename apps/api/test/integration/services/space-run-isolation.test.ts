@@ -133,15 +133,14 @@ describe("Cross-space run isolation (service layer)", () => {
         [{ spaceId: ctx.defaultSpaceId, permissions: readAll }],
         actor,
       );
-      expect(countsA.get(ctx.defaultSpaceId)?.get(agentId)).toBe(1);
-      expect(countsA.has(spaceBId)).toBe(false);
+      expect(countsA.get(agentId)).toBe(1);
 
       const countsB = await getRunningRunCounts(
         ctx.orgId,
         [{ spaceId: spaceBId, permissions: readAll }],
         actor,
       );
-      expect(countsB.get(spaceBId)?.get(agentId)).toBe(2);
+      expect(countsB.get(agentId)).toBe(2);
     });
   });
 

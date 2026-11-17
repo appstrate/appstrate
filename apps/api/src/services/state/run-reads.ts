@@ -199,25 +199,20 @@ export async function markAllRunsRead(scope: SpaceScope, actor: Actor): Promise<
   return updated.length;
 }
 
-/** A count per package, per space: `counts.get(spaceId)?.get(packageId)`. */
-export type CountsBySpace = Map<string, Map<string, number>>;
+/** A count per package: `counts.get(packageId)`. */
+export type CountsByPackage = Map<string, number>;
 
-/** Fold `(spaceId, packageId, count)` rows into {@link CountsBySpace}; a row with no package is dropped. */
-export function countsBySpace(
-  rows: readonly { spaceId: string; packageId: string | null; count: number }[],
-): CountsBySpace {
-  const counts: CountsBySpace = new Map();
-  for (const { spaceId, packageId, count: value } of rows) {
-    if (!packageId) continue;
-    const bySpace = counts.get(spaceId) ?? new Map<string, number>();
-    bySpace.set(packageId, value);
-    counts.set(spaceId, bySpace);
-  }
-  return counts;
+/** Fold `(packageId, count)` rows into {@link CountsByPackage}; a row with no package is dropped. */
+export function countsByPackage(
+  rows: readonly { packageId: string | null; count: number }[],
+): CountsByPackage {
+  return new Map(
+    rows.flatMap(({ packageId, count: value }) => (packageId ? [[packageId, value]] : [])),
+  );
 }
 
 /**
- * Unread runs per agent for the caller in each space of `grants`, in one
+ * Unread runs per agent for the caller across the spaces of `grants`, in one
  * statement — the agent index's `unread_count`. Each space counts the runs its
  * own grant reads (`runReadCondition`), so the count spans the runs
  * `GET /api/runs?unread=true` lists there, never one the caller can no longer
@@ -227,10 +222,10 @@ export async function getUnreadRunCountsByAgent(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
-): Promise<CountsBySpace> {
+): Promise<CountsByPackage> {
   if (grants.length === 0) return new Map();
   const rows = await db
-    .select({ spaceId: runs.spaceId, packageId: runs.packageId, count: count() })
+    .select({ packageId: runs.packageId, count: count() })
     .from(runReads)
     .innerJoin(runs, eq(runs.id, runReads.runId))
     .where(
@@ -246,6 +241,6 @@ export async function getUnreadRunCountsByAgent(
         runReadCondition(grants, actor),
       ),
     )
-    .groupBy(runs.spaceId, runs.packageId);
-  return countsBySpace(rows);
+    .groupBy(runs.packageId);
+  return countsByPackage(rows);
 }

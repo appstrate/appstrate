@@ -170,10 +170,14 @@ describe("lists spanning the organization's spaces: the shared reach", () => {
   async function spacesOf(list: string, headers: Record<string, string>): Promise<string[]> {
     const res = await app.request(path(list), { headers });
     expect(res.status, await res.clone().text()).toBe(200);
-    const body = (await res.json()) as { object: string; data: { id: string; spaceId: string }[] };
+    const body = (await res.json()) as {
+      object: string;
+      data: { id: string; spaceId?: string; space_ids?: string[] }[];
+    };
     expect(body.object).toBe("list");
     const rows = body.data.filter((row) => !row.id.startsWith("@") || row.id.startsWith(SCOPE));
-    return [...new Set(rows.map((row) => row.spaceId))].sort();
+    // A package index names a package's spaces; every other list, a row's space.
+    return [...new Set(rows.flatMap((row) => row.space_ids ?? [row.spaceId!]))].sort();
   }
   const sorted = (...ids: string[]) => ids.sort();
 

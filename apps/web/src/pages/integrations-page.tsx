@@ -129,7 +129,7 @@ export function IntegrationsPage() {
           rows={shown}
           rowKey={(integration) => integration.id}
           rowHref={(integration) =>
-            linkInSpace(packageDetailPath("integration", integration.id), integration.spaceId)
+            linkInSpace(packageDetailPath("integration", integration.id), integration.space_ids[0])
           }
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}
@@ -153,7 +153,7 @@ export function IntegrationsPage() {
                       <span aria-hidden>·</span>
                       <span className="shrink-0">
                         {t("connections.connectionCount", {
-                          count: connectionCount(integration.id, integration.spaceIds),
+                          count: connectionCount(integration.id, integration.space_ids),
                         })}
                       </span>
                     </>

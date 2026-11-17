@@ -8,7 +8,6 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { DataColumn } from "../data-table.tsx";
 import type { CardItem } from "../../lib/package-card-item.ts";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
-import type { InSpaces } from "../../lib/across-spaces.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
@@ -48,9 +47,9 @@ describe("the origin column", () => {
     expect(render(<>{packageOrigin.cell(system as CardItem)}</>)).toContain(
       settingsFr["catalogue.sourceSystem"],
     );
-    expect(
-      render(<>{integrationOrigin.cell(system as InSpaces<IntegrationIndexItem>)}</>),
-    ).toContain(settingsFr["catalogue.sourceSystem"]);
+    expect(render(<>{integrationOrigin.cell(system as IntegrationIndexItem)}</>)).toContain(
+      settingsFr["catalogue.sourceSystem"],
+    );
   });
 
   it("keeps the mark of a package installed on its own", () => {
