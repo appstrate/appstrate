@@ -10,6 +10,7 @@ installFakeStorage();
 const {
   actingSpaces,
   grantedInSomeActingSpace,
+  grantedForRow,
   grantsInRowSpace,
   holdsOverview,
   isListRow,
@@ -111,13 +112,8 @@ describe("holdsOverview", () => {
     expect(holdsOverview(undefined)).toBe(true);
   });
 
-  it("is left by any route of one space: a creation, the workspace settings", () => {
-    for (const path of [
-      "/integrations/new/mcp",
-      "/workspace-settings",
-      "/workspace-settings/general",
-      "/workspace-settings/webhooks",
-    ] as const) {
+  it("is left by any route of one space: a creation", () => {
+    for (const path of ["/integrations/new/mcp"] as const) {
       expect({ path, holds: holdsOverview(path) }).toEqual({ path, holds: false });
     }
   });
@@ -158,7 +154,24 @@ describe("spanningRouteVerdict", () => {
       "granted",
     );
     expect(spanningRouteVerdict("/", TWO, true)).toBeUndefined();
-    expect(spanningRouteVerdict("/agents/:scope/:name", TWO, true)).toBeUndefined();
+    expect(spanningRouteVerdict("/integrations/new/mcp", TWO, true)).toBeUndefined();
+  });
+
+  it("opens a list's row where some space admits the row's own route, not the hidden space", () => {
+    const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["schedules:read"])];
+    expect(spanningRouteVerdict("/schedules/:id", spaces, true)).toBe("granted");
+    expect(spanningRouteVerdict("/agents/:scope/:name/runs/:runId", spaces, true)).toBe("granted");
+    expect(spanningRouteVerdict("/skills/:scope/:name", spaces, true)).toBe("denied");
+    // A version reads the manifest: `agents:run` opens the agent, not its versions.
+    const runner = [...spaces, space("spc_c", ["agents:run"])];
+    expect(spanningRouteVerdict("/agents/:scope/:name", runner, true)).toBe("granted");
+    expect(spanningRouteVerdict("/agents/:scope/:name/:version", runner, true)).toBe("denied");
+    // An `open` row is its own declaration's.
+    expect(spanningRouteVerdict("/files/:fileId", spaces, true)).toBeUndefined();
+  });
+
+  it("leaves a row to the working space outside the overview", () => {
+    expect(spanningRouteVerdict("/schedules/:id", TWO, false)).toBeUndefined();
   });
 
   it("leaves a list to the working space outside the overview", () => {
@@ -295,5 +308,34 @@ describe("grantsInRowSpace", () => {
 
   it("counts the org-level grants in the row's space", () => {
     expect(grantsInRowSpace("spc_b", "spc_a", working, spaces, ["x:y"], "x:y")).toBe(true);
+  });
+});
+
+describe("grantedForRow", () => {
+  const spaces = [
+    space("spc_a", ["integrations:configure"]),
+    space("spc_b", []),
+    space("spc_closed", ["integrations:configure"], "none"),
+  ];
+
+  it("judges a row of one space in that space, never the working one", () => {
+    expect(grantedForRow(spaces, [], "spc_a", "integrations:configure")).toBe(true);
+    expect(grantedForRow(spaces, [], "spc_b", "integrations:configure")).toBe(false);
+    // A space held with no role grants nothing.
+    expect(grantedForRow(spaces, [], "spc_closed", "integrations:configure")).toBe(false);
+  });
+
+  it("judges an org-wide row in any space held with a role, org-level grants included", () => {
+    expect(grantedForRow(spaces, [], null, "integrations:configure")).toBe(true);
+    expect(grantedForRow([space("spc_b", [])], [], null, "integrations:configure")).toBe(false);
+    expect(
+      grantedForRow(
+        [space("spc_b", [])],
+        ["integrations:configure"],
+        null,
+        "integrations:configure",
+      ),
+    ).toBe(true);
+    expect(grantedForRow(undefined, [], null, "integrations:configure")).toBe(false);
   });
 });

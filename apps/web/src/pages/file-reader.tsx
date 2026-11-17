@@ -4,7 +4,9 @@
  * The file reader (`/files/:fileId?org=…&space=…`): one file, full page, in the
  * isolated frame of `FileViewer`. The link always names the file's organization
  * and space, and the file is read there whatever the current context, which only
- * « Ouvrir dans l'espace » changes. An address without them reads as unavailable.
+ * « Ouvrir dans l'espace » changes — in « Tous les espaces » it leaves the mode for the file's
+ * space, the one move that shows something new. The header names the file's space whenever it
+ * is not the working one the switcher names. An address without them reads as unavailable.
  *
  * Every failure reads the same, so the page never tells a file that does not
  * exist from one the caller may not read.
@@ -20,7 +22,10 @@ import { FileArtifact } from "../components/file-artifact";
 import { MimeIcon } from "../components/file-badges";
 import { HeaderActionButton } from "../components/header-action-button";
 import { EmptyState } from "../components/page-states";
+import { SpaceNameOf } from "../components/space-name";
 import { useEnterSpace } from "../hooks/use-enter-space";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useFile } from "../hooks/use-files";
 import { requestScopeChange } from "../hooks/use-unsaved-changes";
 import { readerContext, type FileContext } from "../lib/file-link";
@@ -39,6 +44,8 @@ function FileReader({ fileId, context }: { fileId: string; context: FileContext 
   const { t } = useTranslation(["files", "common"]);
   const navigate = useNavigate();
   const enterSpace = useEnterSpace();
+  const overview = useOverviewMode();
+  const currentSpaceId = useCurrentSpaceId();
   const { data: file, error } = useFile(fileId, context);
 
   if (error && !file) return <EmptyState icon={SearchX} message={t("reader.unavailable")} />;
@@ -47,6 +54,8 @@ function FileReader({ fileId, context }: { fileId: string; context: FileContext 
   const openInSpace = file
     ? () =>
         requestScopeChange(() => {
+          // The mode would keep listing every space: the file's own is where it opens.
+          if (overview.on) overview.choose(false);
           enterSpace(context.orgId, file.spaceId);
           navigate(`/files?${new URLSearchParams({ preview: file.id }).toString()}`);
         })
@@ -63,6 +72,11 @@ function FileReader({ fileId, context }: { fileId: string; context: FileContext 
             </span>
           }
           trail={[{ label: t("common:nav.files") }]}
+          spaces={
+            overview.on || file.spaceId !== currentSpaceId ? (
+              <SpaceNameOf spaceId={file.spaceId} size="sm" className="shrink-0" />
+            ) : undefined
+          }
           actions={
             openInSpace && (
               <HeaderActionButton onClick={openInSpace}>

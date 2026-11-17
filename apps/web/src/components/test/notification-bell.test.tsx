@@ -31,7 +31,7 @@ type Notifications = Parameters<typeof NotificationContent>[0]["notifications"];
 
 function renderList(
   notifications: Notifications,
-  canReach: (target: string) => boolean = () => true,
+  canReach: (target: string, spaceId: string | undefined) => boolean = () => true,
 ): string {
   return render(
     <NotificationContent

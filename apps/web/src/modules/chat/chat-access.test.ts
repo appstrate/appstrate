@@ -19,17 +19,21 @@ import type { SpaceGrant } from "../../lib/package-permissions.ts";
 /** The grant `maySetPackageActive` reads for an integration in a team space. */
 const INTEGRATION_ACTIVATE_PERMISSION = spacePackagePermission("integration", "activate");
 
-/** A caller holding exactly `permissions`, standing in `space`, agent authoring on unless said. */
+/**
+ * A caller holding exactly `permissions` in the one space the chat acts in, shaped by `space`
+ * (`null`: it acts in none), agent authoring on unless said.
+ */
 function context(
   permissions: string[],
-  space?: Partial<SpaceGrant>,
+  space: Partial<SpaceGrant> | null = {},
   authoring = true,
 ): ChatAccessContext {
-  const held = new Set(permissions);
   return {
-    can: (permission) => held.has(permission),
-    spaceGrants:
-      space === undefined ? [] : [{ permissions, personal: false, access: "member", ...space }],
+    spaces:
+      space === null
+        ? []
+        : [{ id: "spc_1", permissions, personal: false, access: "member", ...space }],
+    orgPermissions: [],
     authoring,
   };
 }
@@ -86,9 +90,12 @@ describe("the capability table", () => {
   });
 
   it("grants nothing to a caller holding nothing", () => {
-    // Includes the space-less case: an empty `spaceGrants` is "not loaded",
-    // which must read as no, never as yes.
     expect(Object.values(verdicts(context([])))).toEqual(ROW_IDS.map(() => false));
+  });
+
+  it("grants nothing while no space the chat acts in is known", () => {
+    // An empty `spaces` is "not loaded" (or acting nowhere): it reads as no, never as yes.
+    expect(Object.values(verdicts(context(EVERYTHING, null)))).toEqual(ROW_IDS.map(() => false));
   });
 
   it("grants everything to a caller holding every underlying permission", () => {
@@ -237,15 +244,11 @@ describe("activating an integration", () => {
   });
 
   it("is granted when ONE of the spaces the chat acts in allows it", () => {
-    const ctx = context(CONVERSES);
-    const refused: SpaceGrant = { permissions: [], personal: false, access: "member" };
-    const allowed: SpaceGrant = {
-      permissions: [INTEGRATION_ACTIVATE_PERMISSION],
-      personal: false,
-      access: "member",
-    };
-    expect(verdicts({ ...ctx, spaceGrants: [refused] }).activateIntegrations).toBe(false);
-    expect(verdicts({ ...ctx, spaceGrants: [refused, allowed] }).activateIntegrations).toBe(true);
+    const refused = { id: "spc_r", permissions: [], personal: false, access: "member" as const };
+    const allowed = { ...refused, id: "spc_a", permissions: [INTEGRATION_ACTIVATE_PERMISSION] };
+    const ctx = { orgPermissions: CONVERSES, authoring: true };
+    expect(verdicts({ ...ctx, spaces: [refused] }).activateIntegrations).toBe(false);
+    expect(verdicts({ ...ctx, spaces: [refused, allowed] }).activateIntegrations).toBe(true);
   });
 
   it("is granted in the caller's PERSONAL space WITHOUT that permission", () => {
@@ -334,6 +337,61 @@ describe("a caller who may read the chat but not write to it", () => {
       ),
     );
     expect(Object.values(readOnlyEverything)).toEqual(ROW_IDS.map(() => false));
+  });
+});
+
+describe("the spaces granting each row", () => {
+  const team = (id: string, permissions: string[]) => ({
+    id,
+    permissions,
+    personal: false,
+    access: "member" as const,
+  });
+  const spacesOf = (ctx: ChatAccessContext) =>
+    Object.fromEntries(resolveChatCapabilities(ctx).map((c) => [c.id, c.spaceIds]));
+
+  it("names, for each row, the acting spaces that grant it, in order", () => {
+    const ctx: ChatAccessContext = {
+      spaces: [
+        team("spc_a", ["runs:read", "files:read"]),
+        team("spc_b", ["files:read", "schedules:write"]),
+      ],
+      orgPermissions: CONVERSES,
+      authoring: true,
+    };
+    const spaces = spacesOf(ctx);
+    expect(spaces.readRuns).toEqual(["spc_a"]);
+    expect(spaces.browseFiles).toEqual(["spc_a", "spc_b"]);
+    expect(spaces.schedule).toEqual(["spc_b"]);
+    expect(spaces.runAgents).toEqual([]);
+    // The verdict is the same computation: granted exactly where a space is named.
+    for (const c of resolveChatCapabilities(ctx)) {
+      expect({ id: c.id, granted: c.verdict === "granted" }).toEqual({
+        id: c.id,
+        granted: c.spaceIds.length > 0,
+      });
+    }
+  });
+
+  it("judges each space alone: grants split across two spaces hold no row", () => {
+    // `run_and_wait` launches and polls in ONE space: launching in one and reading in another
+    // is no run the assistant can follow.
+    const ctx: ChatAccessContext = {
+      spaces: [team("spc_a", ["agents:run"]), team("spc_b", ["runs:read"])],
+      orgPermissions: CONVERSES,
+      authoring: true,
+    };
+    expect(spacesOf(ctx).runAgents).toEqual([]);
+    expect(spacesOf(ctx).readRuns).toEqual(["spc_b"]);
+  });
+
+  it("names nothing for a space where the caller may not write to the chat", () => {
+    const ctx: ChatAccessContext = {
+      spaces: [team("spc_a", ["chat:write", "files:read"]), team("spc_b", ["files:read"])],
+      orgPermissions: ["mcp:read", "mcp:invoke"],
+      authoring: true,
+    };
+    expect(spacesOf(ctx).browseFiles).toEqual(["spc_a"]);
   });
 });
 

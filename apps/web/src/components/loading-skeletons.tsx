@@ -187,24 +187,26 @@ function ListTabBlocks() {
 }
 
 /**
- * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
- * in the tab panel's card.
- */
-/**
- * An agent's configuration section set in one space (model, proxy, parameters, connections — the
- * section the rail opens on when none is named) names that space above its heading in « Tous les
- * espaces » (`AgentConfigurationView`).
+ * Whether an agent's settings section opens with the space it is read in, in « Tous les espaces »
+ * (`AgentSettingsView`): a section set in one space (model, proxy, parameters, connections — the
+ * section the rail opens on when none is named) always, and Fichiers or Versions when the
+ * working space refuses `agents:read`, its panel then naming the space to read them from.
  */
 function useNamesConfigurationSpace(type: PackageType): boolean {
   const { on } = useOverviewMode();
+  const { can } = usePermissions();
   const section = new URLSearchParams(useLocation().search).get("agentSettings");
-  return (
-    on &&
-    type === "agent" &&
-    (section === null || ["model", "proxy", "inputs", "connections"].includes(section))
-  );
+  if (!on || type !== "agent") return false;
+  if (section === null || ["model", "proxy", "inputs", "connections"].includes(section)) {
+    return true;
+  }
+  return (section === "files" || section === "versions") && !can("agents:read");
 }
 
+/**
+ * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
+ * in the tab panel's card.
+ */
 function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <Card className="@container/split overflow-hidden">
@@ -222,7 +224,7 @@ function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
           <div className="p-6">
             {/* The space the configuration is read in (`ConfigurationSpace`): label, then its button. */}
             {spaceLine && (
-              <div className="mb-6 flex items-center gap-2">
+              <div className="mb-6 flex min-h-8 items-center gap-2">
                 <SkeletonLine className="w-36 text-sm" />
                 <Skeleton className="h-8 w-32" />
               </div>
@@ -324,7 +326,8 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       trail={[listCrumb]}
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
-      // Every package's line opens with the spaces it is active in.
+      // A package's line opens with the spaces it is active in where the reader reaches one, as
+      // most do: a package active nowhere they reach draws none, which only its detail says.
       spaces
       panel={
         tab === "settings" ? (
@@ -378,10 +381,13 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
 /** A notification's page: the bar, then the card holding its message. */
 export function NotificationDetailSkeleton() {
   const { t } = useTranslation("common");
+  // The page names its notification's space in « Tous les espaces ».
+  const { on } = useOverviewMode();
   return (
     <DetailPageSkeleton
       trail={[{ label: t("notifications.ariaLabel") }]}
       tabCount={0}
+      spaces={on}
       panel={
         <div className="bg-muted/40 flex min-w-0 flex-col overflow-hidden rounded-lg border">
           <div className="flex min-h-5 items-center gap-2 px-4 py-3">
@@ -682,8 +688,18 @@ function MetricCardSkeleton() {
   );
 }
 
-/** `RunRow`: icon, agent and date, status badge, duration. */
-function RunRowSkeleton() {
+/** `RowSpaceName`: a space's small tile and its name, in a row spanning spaces. */
+function RowSpaceNameSkeleton() {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+      <SkeletonLine className="w-16 text-xs" />
+    </span>
+  );
+}
+
+/** `RunRow`: icon, agent and date, its space when `spanning`, status badge, duration. */
+function RunRowSkeleton({ spanning = false }: { spanning?: boolean }) {
   return (
     <div className="flex min-h-16 items-center gap-3 px-4 py-3">
       <Skeleton className="size-8 shrink-0 rounded-lg" />
@@ -691,6 +707,7 @@ function RunRowSkeleton() {
         <SkeletonLine className="w-40 text-sm font-medium" />
         <SkeletonLine className="mt-0.5 w-28 text-xs" />
       </div>
+      {spanning && <RowSpaceNameSkeleton />}
       {/* `RunStatusBadge`'s own wrapper: its line box makes the row's badge column taller than the badge. */}
       <span className="relative shrink-0">
         <SkeletonBadge className="w-16" />
@@ -700,8 +717,8 @@ function RunRowSkeleton() {
   );
 }
 
-/** The dashboard's schedule row: icon, label and agent, state badge and next run. */
-function ScheduleRowSkeleton() {
+/** The dashboard's schedule row: icon, label and agent, its space when `spanning`, state badge and next run. */
+function ScheduleRowSkeleton({ spanning }: { spanning: boolean }) {
   return (
     <div className="flex min-h-[74px] items-center gap-3 px-4 py-3">
       <Skeleton className="size-9 shrink-0 rounded-lg" />
@@ -709,6 +726,7 @@ function ScheduleRowSkeleton() {
         <SkeletonLine className="w-36 text-sm font-medium" />
         <SkeletonLine className="mt-0.5 w-24 text-xs" />
       </div>
+      {spanning && <RowSpaceNameSkeleton />}
       <div className="flex shrink-0 flex-col items-end">
         <SkeletonBadge className="w-14" />
         <SkeletonLine className="mt-1 w-24 text-[11px]" />
@@ -722,7 +740,7 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
- * In « Tous les espaces » the agent cards name their space.
+ * In « Tous les espaces » the agent cards and the rows name their space.
  */
 export function DashboardBodySkeleton() {
   const { on } = useOverviewMode();
@@ -748,7 +766,7 @@ export function DashboardBodySkeleton() {
           <DashboardSectionHeadingSkeleton />
           <CardList>
             {Array.from({ length: 7 }, (_, i) => (
-              <RunRowSkeleton key={i} />
+              <RunRowSkeleton key={i} spanning={on} />
             ))}
           </CardList>
         </div>
@@ -756,7 +774,7 @@ export function DashboardBodySkeleton() {
           <DashboardSectionHeadingSkeleton />
           <CardList>
             {Array.from({ length: 2 }, (_, i) => (
-              <ScheduleRowSkeleton key={i} />
+              <ScheduleRowSkeleton key={i} spanning={on} />
             ))}
           </CardList>
         </div>

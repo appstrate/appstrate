@@ -3,7 +3,7 @@
 /**
  * « Tous les espaces » on the surfaces of one resource and on the shell: a skill's or an
  * integration's header names the spaces it is active in, the sidebar counts the runs of every
- * reached space, the integration's activation asks the space, and a link entering a space from an
+ * reached space, the integration header's « Activer » names or asks the space, and a link entering a space from an
  * overlay is read off the address bar, not off the page drawn beneath it.
  */
 
@@ -28,7 +28,8 @@ const { authStore } = await import("../../stores/auth-store.ts");
 const { overviewStore } = await import("../../stores/overview-store.ts");
 const { NavOrg } = await import("../../components/nav-org.tsx");
 const { PackageDetailSpaces } = await import("../../components/package-spaces.tsx");
-const { useActivationChoice } = await import("../../hooks/use-activation-choice.ts");
+const { IntegrationActivateButton } =
+  await import("../../components/integration-detail/integration-activate-button.tsx");
 const { linkedSpaceIn } = await import("../../hooks/use-current-space.ts");
 const { useOverlayState, withBackground } = await import("../../lib/modal-route.ts");
 
@@ -114,9 +115,9 @@ describe("the sidebar's Runs entry", () => {
     const keys = renderIn(true, <NavOrg />).asked("paginated-runs");
     expect(keys.length).toBe(2);
     expect(keys.every((key) => key[1] === "org_1" && key[2] === "across-spaces")).toBe(true);
-    // The unread count (`unread: true`) and the running one (`status: running`).
+    // The unread count (`unread: true`) and the runs in flight (`status: pending,running`).
     expect(keys.some((key) => key[7] === true)).toBe(true);
-    expect(keys.some((key) => key[6] === "running")).toBe(true);
+    expect(keys.some((key) => key[6] === "pending,running")).toBe(true);
   });
 
   it("counts the working space's out of the mode", () => {
@@ -126,41 +127,86 @@ describe("the sidebar's Runs entry", () => {
   });
 });
 
-describe("an integration's activation in the mode", () => {
-  const library = {
-    spaces: [],
+describe("an integration header's « Activer »", () => {
+  const row = (activation: { spaceId: string; activate: string }[], active: string[] = []) => ({
+    spaces: SPACES.map(({ id, name }) => ({ id, name })),
     packages: {
       agent: [],
       skill: [],
       integration: [
         {
           id: "@acme/crm",
-          placements: [{ space_id: "spc_a", via: "home", state: "active" }],
-          activation: [
-            { spaceId: "spc_a", activate: "allowed", deactivate: "allowed" },
-            { spaceId: "spc_b", activate: "allowed", deactivate: "allowed" },
-            { spaceId: "spc_c", activate: "forbidden", deactivate: "forbidden" },
-          ],
+          placements: active.map((spaceId) => ({
+            space_id: spaceId,
+            via: "home",
+            state: "active",
+          })),
+          activation: activation.map((cell) => ({ ...cell, deactivate: cell.activate })),
         },
       ],
     },
-  };
-  function Probe() {
-    const choice = useActivationChoice("integration", "@acme/crm");
-    return <p>{choice ? `${choice.label} ${choice.spaces.map((s) => s.id).join(",")}` : "none"}</p>;
-  }
-  const seedLibrary = (qc: QueryClient) =>
+  });
+  const seed = (library: ReturnType<typeof row>) => (qc: QueryClient) => {
     qc.setQueryData(
       ["get", "/api/library", { params: { header: { "X-Org-Id": "org_1" } } }],
       library,
     );
+    qc.setQueryData(
+      [
+        "get",
+        "/api/spaces/{id}/library",
+        { params: { path: { id: "spc_a" }, header: { "X-Org-Id": "org_1" } } },
+      ],
+      library,
+    );
+  };
+  const button = (overview: boolean, library: ReturnType<typeof row>, activeHere = false) =>
+    renderIn(
+      overview,
+      <IntegrationActivateButton packageId="@acme/crm" activeHere={activeHere} />,
+      seed(library),
+    ).html;
 
-  it("asks among the spaces where it is off and the reader may switch it on", () => {
-    expect(renderIn(true, <Probe />, seedLibrary).html).toContain("Activer dans… spc_b<");
+  it("is one click naming the one space it may switch it on in, in the mode", () => {
+    const html = button(
+      true,
+      row(
+        [
+          { spaceId: "spc_a", activate: "allowed" },
+          { spaceId: "spc_b", activate: "allowed" },
+          { spaceId: "spc_c", activate: "forbidden" },
+        ],
+        ["spc_a"],
+      ),
+      true,
+    );
+    expect(html).toContain("Activer dans Coffre<");
+    expect(html).not.toContain("aria-haspopup");
   });
 
-  it("asks nothing out of the mode: the working space's switch answers", () => {
-    expect(renderIn(false, <Probe />, seedLibrary).html).toContain(">none<");
+  it("opens the menu of the spaces when several are eligible, in the mode", () => {
+    const html = button(
+      true,
+      row([
+        { spaceId: "spc_a", activate: "allowed" },
+        { spaceId: "spc_b", activate: "allowed" },
+      ]),
+    );
+    expect(html).toContain("Activer dans…<");
+    expect(html).toContain('aria-haspopup="menu"');
+  });
+
+  it("is not drawn in the mode when no space is left to switch it on in", () => {
+    const html = button(true, row([{ spaceId: "spc_a", activate: "allowed" }], ["spc_a"]), true);
+    expect(html).not.toContain("detail-activate-btn");
+  });
+
+  it("switches the working space on out of the mode, and is gone once it is on", () => {
+    const library = row([{ spaceId: "spc_a", activate: "allowed" }]);
+    const off = button(false, library);
+    expect(off).toContain('data-testid="detail-activate-btn"');
+    expect(off).toContain(">Activer<");
+    expect(button(false, library, true)).not.toContain("detail-activate-btn");
   });
 });
 

@@ -122,7 +122,7 @@
   "access.capability.readRuns": "See your runs",
   "access.capability.browseFiles": "Browse your files",
   "access.capability.connectIntegrations": "Connect your accounts",
-  "access.capability.activateIntegrations": "Activate an integration for the space",
+  "access.capability.activateIntegrations": "Activate an integration in your spaces",
   "access.capability.schedule": "Schedule runs",
   "skills.label": "Skills",
   "skills.title": "Conversation skills",

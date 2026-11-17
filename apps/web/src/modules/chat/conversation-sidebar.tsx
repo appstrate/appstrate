@@ -15,7 +15,7 @@ import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { FileArtifact } from "../../components/file-artifact";
 import { MimeIcon } from "../../components/file-badges";
-import { RunRow } from "../../components/run-row";
+import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
@@ -23,7 +23,7 @@ import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useConversationTabs } from "./use-conversation-tabs";
-import { useRunAgentName } from "../../hooks/use-run-agent-name";
+import { resolveRunAgentName } from "../../hooks/use-run-agent-name";
 import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { formatBytes } from "../../lib/format-bytes";
@@ -123,13 +123,17 @@ export function ConversationRuns({
   conversationId: string | null;
   active: boolean;
 }) {
-  const { t } = useTranslation("chat");
-  const canRead = useAdmittingSpaces("runs").length > 0;
+  const { t } = useTranslation(["chat", "agents"]);
+  const admitting = useAdmittingSpaces("runs");
+  const canRead = admitting.length > 0;
   // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
   const scope = useListScope(true, canRead);
-  const agentName = useRunAgentName();
-  const { data: agents } = useAgents();
+  // Their agents are every space's too: named from the index spanning spaces, read while shown.
+  const { data: agents } = useAgents({ spanning: true, enabled: active && !!conversationId });
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
+  const byPackageId = new Map(
+    (agents ?? []).map((agent) => [agent.id, agent.display_name ?? agent.id] as const),
+  );
   const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
   // A conversation belongs to the organization: the runs it launched, in every space.
   const query = $api.useQuery(
@@ -154,9 +158,12 @@ export function ConversationRuns({
         <RunRow
           key={run.id}
           run={run}
-          agentName={agentName(run)}
+          agentName={resolveRunAgentName(run, { byPackageId, t })}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
           dense
+          // The list spans the spaces the reader reads runs in: each row names its own once
+          // there are several.
+          spanning={admitting.length > 1}
           className="px-3"
         />
       ))}
@@ -174,6 +181,8 @@ function ConversationFiles({
   onSelect: (file: SidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
+  // The list spans the spaces the reader reads files in: each row names its own once there are several.
+  const named = useAdmittingSpaces("files").length > 1;
   const query = useFiles({
     spanning: true,
     contextChatSessionId: conversationId ?? undefined,
@@ -211,6 +220,7 @@ function ConversationFiles({
               ].join(" · ")}
             </span>
           </span>
+          {named && <RowSpaceName spaceId={file.spaceId} />}
         </button>
       ))}
     </div>

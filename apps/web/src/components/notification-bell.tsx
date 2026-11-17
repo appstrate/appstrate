@@ -14,7 +14,7 @@ import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { EmptyState, ErrorState } from "./page-states";
 import { useUnreadCount, useMarkAllRead, useNotifications } from "../hooks/use-notifications";
-import { useCanReach } from "../hooks/use-can-reach";
+import { useCanReachInSpace } from "../hooks/use-can-reach";
 import { useAgents } from "../hooks/use-packages";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -48,7 +48,8 @@ export function NotificationContent({
   notifications: NotificationItem[];
   /** A listed agent's display name, from its package id. */
   agentName: (packageId: string) => string | undefined;
-  canReach: (target: string) => boolean;
+  /** Whether a row's page opens, judged in the row's space (`useCanReachInSpace`). */
+  canReach: (target: string, spaceId: string | undefined) => boolean;
   /** The working space: a row of another one enters its space on the way. */
   currentSpaceId: string | null;
   /** « Tous les espaces »: each row names its space. */
@@ -98,6 +99,8 @@ export function NotificationContent({
               <div className="flex flex-1 flex-col gap-2">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-24" />
+                {/* A row in « Tous les espaces » names its space on a third line. */}
+                {spanning && <Skeleton className="h-4 w-20" />}
               </div>
             </div>
           ))}
@@ -112,7 +115,7 @@ export function NotificationContent({
             const { title, status, message, meta, target } = notificationRow(
               notification,
               agentName,
-              canReach,
+              (href) => canReach(href, notification.spaceId),
               t,
             );
             const body = (
@@ -168,9 +171,12 @@ export function NotificationBell() {
   const { on: spanning } = useOverviewMode();
   const currentSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
+  const [open, setOpen] = useState(false);
+  // Only the badge's count is read on every page; the rows and the agent names they show are
+  // read while the list is open.
   // `isLoading`, not `isPending`: the read is off for a role that sees no agent,
   // and a disabled query stays pending forever.
-  const { data: agents, isLoading: agentsLoading } = useAgents({ spanning });
+  const { data: agents, isLoading: agentsLoading } = useAgents({ spanning, enabled: open });
   const { data: count } = useUnreadCount({ spanning });
   const {
     data: notifications,
@@ -179,11 +185,10 @@ export function NotificationBell() {
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
-  } = useNotifications({ unread: true, limit: 50, spanning });
+  } = useNotifications({ unread: true, limit: 50, spanning, enabled: open });
   const markAllRead = useMarkAllRead();
-  const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
-  const canReach = useCanReach();
+  const canReach = useCanReachInSpace();
   const unread = count ?? 0;
   const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
 

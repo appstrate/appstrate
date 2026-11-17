@@ -153,18 +153,23 @@ describe("the navigation in « Tous les espaces »", () => {
     expect(active[0]).toContain('href="/agents"');
   });
 
-  it("counts runs across spaces in the mode, and reads the working space's agents only out of it", () => {
+  it("asks one definition of a run in flight in both modes: the runs queued or running", () => {
+    // Out of the mode the working space must read runs for the Runs entry to show at all.
     const asked = (overview: boolean) => {
       const queryClient = new QueryClient();
-      navFor(working, spaces, overview, "/", queryClient);
+      navFor(overview ? working : [...working, "runs:read"], spaces, overview, "/", queryClient);
       return queryClient
         .getQueryCache()
         .findAll()
         .filter((query) => (query.options as { enabled?: unknown }).enabled !== false)
-        .map((query) => query.queryKey[0]);
+        .map((query) => query.queryKey);
     };
-    expect(asked(true)).not.toContain("agents");
-    expect(asked(true)).toContain("paginated-runs");
-    expect(asked(false)).toContain("agents");
+    for (const overview of [true, false]) {
+      const keys = asked(overview);
+      expect(keys.map((key) => key[0])).not.toContain("agents");
+      const runs = keys.filter((key) => key[0] === "paginated-runs");
+      expect(runs.length).toBeGreaterThan(0);
+      expect(JSON.stringify(runs)).toContain("pending,running");
+    }
   });
 });

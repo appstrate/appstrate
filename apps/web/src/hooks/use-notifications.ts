@@ -62,12 +62,13 @@ export function useUnreadCount({ spanning = false } = {}) {
 
 /**
  * Recipient's notifications (newest first), keyset-paged. `unread` filters to unread only;
- * `spanning` lists every reached space's, each row carrying its `spaceId`.
+ * `spanning` lists every reached space's, each row carrying its `spaceId`. `enabled: false`
+ * reads nothing (the bell's list while it is closed: its badge is the count's).
  */
 export function useNotifications(
-  opts: { unread?: boolean; limit?: number; spanning?: boolean } = {},
+  opts: { unread?: boolean; limit?: number; spanning?: boolean; enabled?: boolean } = {},
 ) {
-  const { unread = true, limit = 50, spanning = false } = opts;
+  const { unread = true, limit = 50, spanning = false, enabled = true } = opts;
   const scope = useFeedScope(spanning);
   const query = { unread, limit };
   return useInfiniteQuery({
@@ -92,7 +93,7 @@ export function useNotifications(
     },
     ...keysetPaging,
     refetchInterval: scope.refetchInterval,
-    enabled: scope.enabled,
+    enabled: enabled && scope.enabled,
     select: (d) => d.pages.flatMap((page) => page.data),
   });
 }
@@ -134,20 +135,30 @@ export function useMarkRead() {
 
 /**
  * « Tout marquer comme lu »: the working space's feed (`null`), or each listed space's — the
- * route reads one space, so one request per space, each naming it. The feed is refreshed even
- * when one space refused.
+ * route reads one space, so one request per space, each naming it. Every request settles before
+ * the outcome: one refusal fails the mutation once, with the first refusal, after the others
+ * have landed; the feed is refreshed either way.
  */
 export function useMarkAllRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (spaceIds: readonly string[] | null) =>
-      Promise.all(
-        (spaceIds ?? [null]).map((spaceId) =>
-          client.PUT("/api/notifications/read-all", {
-            params: spaceId ? { header: { "X-Space-Id": spaceId } } : {},
-          }),
-        ),
-      ),
+    mutationFn: (spaceIds: readonly string[] | null) => markAllReadIn(spaceIds, markReadInSpace),
     onSettled: () => invalidateNotificationQueries(qc),
   });
+}
+
+function markReadInSpace(spaceId: string | null): Promise<unknown> {
+  return client.PUT("/api/notifications/read-all", {
+    params: spaceId ? { header: { "X-Space-Id": spaceId } } : {},
+  });
+}
+
+/** {@link useMarkAllRead}'s requests, `put` sending one. Exported for its test. */
+export async function markAllReadIn(
+  spaceIds: readonly string[] | null,
+  put: (spaceId: string | null) => Promise<unknown>,
+): Promise<void> {
+  const outcomes = await Promise.allSettled((spaceIds ?? [null]).map(put));
+  const refused = outcomes.find((outcome) => outcome.status === "rejected");
+  if (refused) throw refused.reason;
 }

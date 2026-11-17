@@ -2,30 +2,66 @@
 
 /**
  * A detail page opened in « Tous les espaces » on a resource the hidden working space cannot read:
- * the list spanning spaces says where it is, and the page reopens there.
+ * a read spanning spaces says where it is, and the page reopens there.
  */
 
 import { ApiError } from "../api/client";
-import { linkedSpacePath, rowSpace } from "./across-spaces";
+import { linkedSpacePath } from "./across-spaces";
 
 /** Whether a detail read failed for want of the resource here (403, 404, or a 404 read as `null`). */
 export function isUnreadableHere(error: unknown): boolean {
   return !error || (error instanceof ApiError && (error.status === 403 || error.status === 404));
 }
 
+/** A resource the read spanning spaces found, with the spaces it sits in, in the order tried. */
+export interface ElsewhereRow {
+  id: string;
+  spaceIds: readonly string[];
+}
+
 /**
- * Where the detail of `id` opens instead: `path` in the space of the spanning list's row naming
- * it (`rowSpace`), with `?enterSpace=`. `undefined` while the list has not answered; `null` when
- * no row names it, or only the working space does (reopening there would read the same refusal).
+ * The spaces a package is placed in, from its library placements: the active ones first, then
+ * the inactive ones (its page reads there and says it is switched off).
+ */
+export function placedSpaceIds(
+  placements: readonly { space_id: string; state: "active" | "inactive" | "none" }[],
+): string[] {
+  const placed = placements.filter((placement) => placement.state !== "none");
+  return [
+    ...placed.filter((placement) => placement.state === "active"),
+    ...placed.filter((placement) => placement.state === "inactive"),
+  ].map((placement) => placement.space_id);
+}
+
+/**
+ * The space to try next among a row's: the first enterable one listed AFTER the working space,
+ * or the first enterable one when the working space is not listed. Never one before it: each
+ * refusal moves forward, so a chain of refusals ends instead of bouncing between two spaces.
+ */
+export function nextSpaceToTry(
+  spaceIds: readonly string[],
+  currentSpaceId: string,
+  enterable: (spaceId: string) => boolean,
+): string | undefined {
+  const at = spaceIds.indexOf(currentSpaceId);
+  return spaceIds.slice(at + 1).find(enterable);
+}
+
+/**
+ * Where the detail of `id` opens instead: `target` (path, search and hash) in {@link nextSpaceToTry},
+ * with `?enterSpace=`. `undefined` while the read has not answered; `null` when no row names it,
+ * no space is left to try, or no space is resolved yet (nothing to move from).
  */
 export function detailElsewhere(
-  rows: readonly { id: string; spaceIds: readonly string[] }[] | undefined,
+  rows: readonly ElsewhereRow[] | undefined,
   id: string,
-  path: string,
+  target: string,
   currentSpaceId: string | null,
+  enterable: (spaceId: string) => boolean,
 ): string | null | undefined {
   if (rows === undefined) return undefined;
-  const spaceId = rowSpace(rows.find((row) => row.id === id)?.spaceIds, currentSpaceId);
-  if (!spaceId || spaceId === currentSpaceId) return null;
-  return linkedSpacePath(path, spaceId, currentSpaceId);
+  if (!currentSpaceId) return null;
+  const spaceIds = rows.find((row) => row.id === id)?.spaceIds ?? [];
+  const spaceId = nextSpaceToTry(spaceIds, currentSpaceId, enterable);
+  return spaceId ? linkedSpacePath(target, spaceId, currentSpaceId) : null;
 }

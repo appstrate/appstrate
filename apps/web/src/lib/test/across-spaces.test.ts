@@ -33,6 +33,19 @@ describe("linkedSpacePath", () => {
     );
   });
 
+  it("merges into the query the link carries and keeps its hash last", () => {
+    expect(
+      linkedSpacePath("/agents/@a/x?agentSettings=connections#settings", "spc_2", "spc_1"),
+    ).toBe("/agents/@a/x?agentSettings=connections&enterSpace=spc_2#settings");
+    expect(linkedSpacePath("/agents/@a/x#runs", "spc_2", "spc_1")).toBe(
+      "/agents/@a/x?enterSpace=spc_2#runs",
+    );
+    // A stale space the link already names is replaced, never doubled.
+    expect(linkedSpacePath("/runs?enterSpace=spc_9", "spc_2", "spc_1")).toBe(
+      "/runs?enterSpace=spc_2",
+    );
+  });
+
   it("has nothing to move from before a space is resolved", () => {
     expect(linkedSpacePath("/schedules/sch_1", "spc_2", null)).toBe("/schedules/sch_1");
   });

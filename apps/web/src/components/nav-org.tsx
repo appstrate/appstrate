@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { useUnreadRunCount } from "../hooks/use-run-reads";
-import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
 import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
@@ -35,38 +34,17 @@ import {
 } from "@appstrate/ui/components/sidebar";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
-/**
- * Whether a run is in flight in the working space, asked only while `enabled`. Inline runs live
- * on ephemeral shadow packages that are not in `agents`, so they do not count in `running_runs`:
- * they are asked separately.
- */
-function useWorkingSpaceRunning(enabled: boolean): boolean {
-  const { data: agents } = useAgents({ enabled });
-  const { data: runningInline } = useFirstRunsPage({
-    kind: "inline",
-    status: ["running"],
-    limit: 1,
-    enabled,
-  });
-  return (
-    enabled &&
-    ((agents?.some((agent) => agent.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0)
-  );
-}
+/** A run in flight: queued or running, inline runs included. */
+const IN_FLIGHT = ["pending", "running"] as const;
 
 /**
- * Whether a run is in flight where the reader stands: the working space (above), or in « Tous les
- * espaces » any space reached — one polled first page of their running runs, inline ones included.
+ * Whether a run is in flight where the reader stands: the working space, or in « Tous les
+ * espaces » any space reached. One definition in both modes: the first page of the runs in flight,
+ * which the realtime stream refreshes (`broadRunKeys`) and the mode polls.
  */
 function useRunning(overview: boolean): boolean {
-  const working = useWorkingSpaceRunning(!overview);
-  const { data: across } = useFirstRunsPage({
-    status: ["running"],
-    spanning: true,
-    limit: 1,
-    enabled: overview,
-  });
-  return overview ? (across?.total ?? 0) > 0 : working;
+  const { data } = useFirstRunsPage({ status: [...IN_FLIGHT], spanning: overview, limit: 1 });
+  return (data?.total ?? 0) > 0;
 }
 
 type NavItem = {

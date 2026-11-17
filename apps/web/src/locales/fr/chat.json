@@ -122,7 +122,7 @@
   "access.capability.readRuns": "Consulter vos exécutions",
   "access.capability.browseFiles": "Parcourir vos fichiers",
   "access.capability.connectIntegrations": "Connecter vos comptes",
-  "access.capability.activateIntegrations": "Activer une intégration pour l'espace",
+  "access.capability.activateIntegrations": "Activer une intégration dans vos espaces",
   "access.capability.schedule": "Planifier des exécutions",
   "skills.label": "Compétences",
   "skills.title": "Compétences de la conversation",

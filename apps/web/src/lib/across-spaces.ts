@@ -21,7 +21,10 @@ export function rowSpace(
   return spaceIds?.[0];
 }
 
-/** `path` as it was within the current space (or for a row of no space); naming the row's space otherwise. */
+/**
+ * `path` as it was within the current space (or for a row of no space); naming the row's space
+ * otherwise, merged into the query `path` already carries, its hash kept last.
+ */
 export function linkedSpacePath(
   path: string,
   spaceId: string | undefined,
@@ -29,7 +32,14 @@ export function linkedSpacePath(
 ): string {
   // No current space yet: nothing to move from.
   if (!spaceId || !currentSpaceId || spaceId === currentSpaceId) return path;
-  return `${path}?${new URLSearchParams({ [ENTER_SPACE_PARAM]: spaceId }).toString()}`;
+  const hashAt = path.indexOf("#");
+  const hash = hashAt < 0 ? "" : path.slice(hashAt);
+  const beforeHash = hashAt < 0 ? path : path.slice(0, hashAt);
+  const queryAt = beforeHash.indexOf("?");
+  const pathname = queryAt < 0 ? beforeHash : beforeHash.slice(0, queryAt);
+  const params = new URLSearchParams(queryAt < 0 ? "" : beforeHash.slice(queryAt + 1));
+  params.set(ENTER_SPACE_PARAM, spaceId);
+  return `${pathname}?${params.toString()}${hash}`;
 }
 
 /**
