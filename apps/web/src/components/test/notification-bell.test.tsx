@@ -34,7 +34,7 @@ function renderList(
       notifications={notifications}
       agentName={(id) => (id === PACKAGE_ID ? "Worker" : undefined)}
       canReach={canReach}
-      onNavigate={() => {}}
+      onItemClick={() => {}}
       markAllRead={() => {}}
     />,
   );
@@ -210,7 +210,7 @@ describe("NotificationContent", () => {
           notifications={row}
           agentName={() => "Worker"}
           canReach={() => true}
-          onNavigate={() => {}}
+          onItemClick={() => {}}
           markAllRead={() => {}}
           hasMore={hasMore}
           onLoadMore={() => {}}

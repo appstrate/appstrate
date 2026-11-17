@@ -12,7 +12,7 @@ import {
   type NotificationType,
   type PackageType,
 } from "@appstrate/db/schema";
-import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import { isUuid, scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { listResponse } from "@appstrate/core/list-query";
@@ -86,11 +86,8 @@ export async function notifyRunFinished(
 }
 
 /**
- * Read the caller's failure notices of one run (`runId`), or of every run:
- * opening a run, or reading them all, acknowledges the failure the bell showed
- * for it — the run page is where a `run_failed` notification leads. Only that
- * kind: a message the agent sent (`agent_message`) leads to its own page
- * (`GET /api/notifications/{id}`) and is read there, never by viewing the run.
+ * Read the caller's failure notices of one run (`runId`), or of every run: the
+ * run page is where a `run_failed` leads. Every other kind is read on its own page.
  */
 export async function markRunFailureNotificationsRead(
   scope: SpaceScope,
@@ -199,15 +196,18 @@ export async function createPackageShareNotification(params: {
 // decided when it was written (`notifyRunFinished`, the share notice), so no
 // read below filters a kind.
 
-/** Row → wire DTO, shared by the feed and the single read. */
-function toNotificationDto(r: {
-  id: string;
-  type: NotificationType;
-  runId: string | null;
-  payload: NotificationPayloads[NotificationType] | null;
-  readAt: Date | null;
-  createdAt: Date;
-}): NotificationDto {
+const notificationColumns = {
+  id: notifications.id,
+  type: notifications.type,
+  runId: notifications.runId,
+  payload: notifications.payload,
+  readAt: notifications.readAt,
+  createdAt: notifications.createdAt,
+};
+
+function toNotificationDto(
+  r: Pick<typeof notifications.$inferSelect, keyof typeof notificationColumns>,
+): NotificationDto {
   return {
     id: r.id,
     type: r.type,
@@ -218,26 +218,13 @@ function toNotificationDto(r: {
   };
 }
 
-const notificationColumns = {
-  id: notifications.id,
-  type: notifications.type,
-  runId: notifications.runId,
-  payload: notifications.payload,
-  readAt: notifications.readAt,
-  createdAt: notifications.createdAt,
-};
-
-/**
- * One notification of the caller — the notification page reads it. A pure
- * read: the page marks it read through `PUT /api/notifications/{id}/read`.
- * `null` when it does not exist or is not the caller's (the route's 404), so
- * a recipient never learns of another's notification.
- */
+/** One notification of the caller; `null` when it is unknown or another's (the route's 404). */
 export async function getNotification(
   scope: SpaceScope,
   notificationId: string,
   actor: Actor,
 ): Promise<NotificationDto | null> {
+  if (!isUuid(notificationId)) return null;
   const [row] = await db
     .select(notificationColumns)
     .from(notifications)
@@ -267,6 +254,7 @@ export async function markNotificationRead(
   notificationId: string,
   actor: Actor,
 ): Promise<boolean> {
+  if (!isUuid(notificationId)) return false;
   const updated = await db
     .update(notifications)
     .set({ readAt: sql`COALESCE(${notifications.readAt}, now())` })

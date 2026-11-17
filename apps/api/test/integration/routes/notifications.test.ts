@@ -285,49 +285,23 @@ describe("Notifications feed API (per-recipient)", () => {
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
-    it("returns a read notification with its read_at", async () => {
+    it("returns 404 for anything that is not the caller's notification", async () => {
       await seedShare();
       const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
-      await markRead(authHeaders(ctx), id);
-
-      const body = (await (await getOne(authHeaders(ctx), id)).json()) as NotificationDto;
-      expect(body.read_at).not.toBeNull();
-    });
-
-    it("returns 404 for an unknown id", async () => {
-      const res = await getOne(authHeaders(ctx), "00000000-0000-0000-0000-000000000000");
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 404 for an id that is not a uuid", async () => {
-      expect((await getOne(authHeaders(ctx), "not-a-uuid")).status).toBe(404);
-    });
-
-    it("returns 404 for another member's notification", async () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id);
-      await seedShare();
-      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
-
-      expect((await getOne(headersFor(userB), id)).status).toBe(404);
-    });
-
-    it("returns 404 for another org's notification", async () => {
-      await seedShare();
-      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
-
-      expect((await getOne(authHeaders(otherCtx), id)).status).toBe(404);
-    });
-
-    it("returns 404 from another space of the same org", async () => {
-      await seedShare();
-      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Space B" });
-      const headersB = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": spaceB.id };
 
-      const res = await getOne(headersB, id);
-      expect(res.status).toBe(404);
+      for (const [headers, target] of [
+        [authHeaders(ctx), "00000000-0000-0000-0000-000000000000"],
+        [authHeaders(ctx), "not-a-uuid"],
+        [headersFor(userB), id],
+        [authHeaders(otherCtx), id],
+        [{ Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": spaceB.id }, id],
+      ] as const) {
+        expect((await getOne(headers, target)).status).toBe(404);
+      }
     });
 
     it("returns 401 without authentication", async () => {

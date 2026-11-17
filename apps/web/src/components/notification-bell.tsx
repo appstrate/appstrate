@@ -17,11 +17,7 @@ import { useUnreadCount, useMarkAllRead, useNotifications } from "../hooks/use-n
 import { useCanReach } from "../hooks/use-can-reach";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import {
-  describeNotification,
-  notificationTarget,
-  type NotificationItem,
-} from "../lib/notification-view";
+import { notificationRow, type NotificationItem } from "../lib/notification-row";
 
 /**
  * The bell's list, exported for the rendering tests: a Radix popover mounts
@@ -33,7 +29,7 @@ export function NotificationContent({
   notifications,
   agentName,
   canReach,
-  onNavigate,
+  onItemClick,
   markAllRead,
   loading = false,
   failed = false,
@@ -46,8 +42,8 @@ export function NotificationContent({
   /** A listed agent's display name, from its package id. */
   agentName: (packageId: string) => string | undefined;
   canReach: (target: string) => boolean;
-  /** A row was followed: the page it opens marks the notification read. */
-  onNavigate: () => void;
+  /** A row was followed; the page it opens marks the notification read. */
+  onItemClick: () => void;
   markAllRead: () => void;
   /** The list is still being read: the badge may already say N. */
   loading?: boolean;
@@ -102,8 +98,12 @@ export function NotificationContent({
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
-            const view = describeNotification(notification, agentName, t);
-            const { title, status, message, meta } = view;
+            const { title, status, message, meta, target } = notificationRow(
+              notification,
+              agentName,
+              canReach,
+              t,
+            );
             const body = (
               <>
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
@@ -121,12 +121,16 @@ export function NotificationContent({
                 </div>
               </>
             );
-            // The page a row opens is the one that marks it read: the bell marks nothing.
+            // A failed run opens its run; every other kind its own page. That page reads it.
+            const to =
+              notification.type === "run_failed" && target
+                ? target
+                : `/notifications/${notification.id}`;
             return (
               <Link
                 key={notification.id}
-                to={notificationTarget(notification, view, canReach)}
-                onClick={onNavigate}
+                to={to}
+                onClick={onItemClick}
                 className="hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors"
               >
                 {body}
@@ -188,7 +192,7 @@ export function NotificationBell() {
     notifications: notifications ?? [],
     agentName: (packageId: string) => agentNames.get(packageId),
     canReach,
-    onNavigate: () => setOpen(false),
+    onItemClick: () => setOpen(false),
     markAllRead: () => markAllRead.mutate({}),
     // Rows wait for the agent names: a title never shows the raw package id first.
     loading: notificationsPending || agentsLoading,

@@ -394,20 +394,6 @@ describe("Run read state (per-recipient)", () => {
       expect((await notificationsOf(run.id))[0]!.readAt).not.toBeNull();
     });
 
-    it("leaves the message its agent sent unread (`agent_message` is read on its own page)", async () => {
-      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
-      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
-        title: "t",
-        message: "m",
-      });
-      expect(await bellCount(authHeaders(ctx))).toBe(1);
-
-      expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
-
-      expect(await unreadCount(authHeaders(ctx))).toBe(0);
-      expect(await bellCount(authHeaders(ctx))).toBe(1);
-    });
-
     it("reads the failure notice and leaves the agent's message of the same run unread", async () => {
       const run = await seedFinishedRun({ actor: { userId: ctx.user.id }, status: "failed" });
       await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {

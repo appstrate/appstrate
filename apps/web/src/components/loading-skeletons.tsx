@@ -323,11 +323,7 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
   );
 }
 
-/** A schedule's page, under the schedules list. */
-/**
- * A notification's page (`/notifications/:id`): the bar with its meta line and
- * one action, then the one section card holding the message.
- */
+/** A notification's page: the bar, then the card holding its message. */
 export function NotificationDetailSkeleton() {
   const { t } = useTranslation("common");
   return (
@@ -348,6 +344,7 @@ export function NotificationDetailSkeleton() {
   );
 }
 
+/** A schedule's page, under the schedules list. */
 export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");
   const tab = useOpenTab();

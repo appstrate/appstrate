@@ -206,7 +206,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Get a notification",
       description:
-        "Returns one notification of the current recipient — what the notification's own page shows. A pure read: the page marks it read with `PUT /api/notifications/{id}/read`. A `run_failed` notification leads to its run instead, and opening the run reads it (`PUT /api/runs/{id}/read`). Returns 404 when the notification does not belong to the caller.",
+        "Returns one notification of the current recipient. A pure read: marking it read is `PUT /api/notifications/{id}/read`. Returns 404 when the notification does not belong to the caller.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

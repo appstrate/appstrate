@@ -2892,7 +2892,7 @@ export interface paths {
         };
         /**
          * Get a notification
-         * @description Returns one notification of the current recipient — what the notification's own page shows. A pure read: the page marks it read with `PUT /api/notifications/{id}/read`. A `run_failed` notification leads to its run instead, and opening the run reads it (`PUT /api/runs/{id}/read`). Returns 404 when the notification does not belong to the caller.
+         * @description Returns one notification of the current recipient. A pure read: marking it read is `PUT /api/notifications/{id}/read`. Returns 404 when the notification does not belong to the caller.
          */
         get: operations["getNotification"];
         put?: never;

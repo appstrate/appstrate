@@ -18,7 +18,7 @@ import { markRunFailureNotificationsRead, notifyRunFinished } from "./notificati
 // `unread`, an agent's and a schedule's `unread_count`, `?unread=true`); every
 // writer is below. Reading a run also reads its failure notice, when the bell
 // had one (`markRunFailureNotificationsRead`): opening the run is how a failure is
-// acknowledged, wherever it was seen. A message its agent sent is not read here.
+// acknowledged, wherever it was seen.
 
 /** Match the caller's own `run_reads` rows by their recipient tuple. */
 function recipientFilter(actor: Actor): SQL {
