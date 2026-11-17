@@ -45,14 +45,11 @@ const INDEXED_PACKAGE_TYPES = [
 }[PackageType][];
 
 /**
- * The handlers of one list spanning the spaces of `:orgId`, its read
- * permission stated once, as `permissions` (any one of them admits): the
- * ceiling guard refuses a delegated credential whose scopes omit them all
- * instead of answering it an empty page, and the reach keeps the spaces whose
- * effective set grants one. No space is entered here, so a space-level guard
- * could never pass: the authorization IS that per-space grant list. The spaces
- * are resolved before `parseQuery` reads the query (strict: an unknown
- * parameter is a 400), so a refused end-user is a 403 whatever its query.
+ * The handlers of one list spanning the spaces of `:orgId`. `permissions`
+ * (any one admits) is both the ceiling a delegated credential must name — a
+ * 403, not an empty page — and the per-space grant that keeps a space: that
+ * grant list IS the authorization. The spaces resolve before `parseQuery`, so a
+ * refused end-user is a 403 whatever its query.
  */
 function readAcrossSpaces<Q>(
   permissions: readonly Permission[],
@@ -108,9 +105,7 @@ export function createCrossSpaceReadsRouter() {
       parseEmptyQuery,
       async (c, orgId, grants) =>
         c.json(
-          listResponse(
-            await listAgentIndex(orgId, grants, getActor(c), await packageAccessSpaces(c)),
-          ),
+          listResponse(await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c))),
         ),
     ),
   );
@@ -128,7 +123,7 @@ export function createCrossSpaceReadsRouter() {
                 type,
                 orgId,
                 grants.map((g) => g.spaceId),
-                await packageAccessSpaces(c),
+                packageAccessSpaces(c),
               ),
             ),
           ),

@@ -3,7 +3,24 @@
 /** What lists spanning spaces share: the link into another space, and its entry. */
 
 import { describe, expect, it } from "bun:test";
-import { linkedSpacePath, linkedSpaceStep } from "../across-spaces.ts";
+import {
+  linkedSpaceEnterable,
+  linkedSpacePath,
+  linkedSpaceStep,
+  rowSpace,
+} from "../across-spaces.ts";
+
+describe("rowSpace", () => {
+  it("opens a row listed in the current space there", () => {
+    expect(rowSpace(["spc_1", "spc_2"], "spc_2")).toBe("spc_2");
+  });
+
+  it("enters the first space of a row the current space does not list", () => {
+    expect(rowSpace(["spc_1", "spc_2"], "spc_3")).toBe("spc_1");
+    expect(rowSpace(["spc_1", "spc_2"], null)).toBe("spc_1");
+    expect(rowSpace(undefined, "spc_1")).toBeUndefined();
+  });
+});
 
 describe("linkedSpacePath", () => {
   it("leaves a link within the current space as it was", () => {
@@ -41,5 +58,32 @@ describe("linkedSpaceStep", () => {
     expect(linkedSpaceStep("spc_2", "spc_1", undefined)).toBe("wait");
     // The hook answers `false` for a listing that errored: the page renders its own state.
     expect(linkedSpaceStep("spc_2", "spc_1", false)).toBe("drop");
+  });
+});
+
+describe("entering the space a link names (`?enterSpace=B`)", () => {
+  const listing = [
+    { id: "spc_a", access: "member" },
+    { id: "spc_b", access: "member" },
+    { id: "spc_closed", access: "none" },
+  ];
+  /** The step `useEnterLinkedSpace` takes for `linked`, from `current`, given the listing. */
+  const step = (
+    linked: string,
+    current: string | null,
+    spaces: typeof listing | undefined,
+    failed = false,
+  ) => linkedSpaceStep(linked, current, linkedSpaceEnterable(spaces, failed, linked));
+
+  it("keeps the param while the resolver enters B, drops it once current is B", () => {
+    expect(step("spc_b", "spc_a", undefined)).toBe("wait");
+    expect(step("spc_b", "spc_a", listing)).toBe("wait");
+    expect(step("spc_b", "spc_b", listing)).toBe("drop");
+  });
+
+  it("drops it at once when B cannot be entered, or the listing failed", () => {
+    expect(step("spc_closed", "spc_a", listing)).toBe("drop");
+    expect(step("spc_gone", "spc_a", listing)).toBe("drop");
+    expect(step("spc_b", "spc_a", undefined, true)).toBe("drop");
   });
 });

@@ -19,7 +19,6 @@ import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
 import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
-import { routeOf } from "../lib/route-match";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useCanReach, useReachReady } from "../hooks/use-can-reach";
 import {
@@ -72,9 +71,6 @@ export function NavOrg() {
   const hasRunning = useWorkingSpaceRunning(!overview);
   const canReach = useCanReach();
   const ready = useReachReady();
-  // In « Vue d'ensemble » a run's detail was opened from Runs: Runs is the active entry, not Agents.
-  const openedFromRuns =
-    overview && routeOf(visiblePathname) === "/agents/:scope/:name/runs/:runId";
 
   // Two groups, split by what you are DOING rather than by object type:
   // Activité is what happened (dashboard, runs, files), Construire is what you
@@ -106,11 +102,7 @@ export function NavOrg() {
       <SidebarMenuItem key={path}>
         <SidebarMenuButton
           asChild
-          isActive={
-            path === "/"
-              ? visiblePathname === "/"
-              : !openedFromRuns && visiblePathname.startsWith(path)
-          }
+          isActive={path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(path)}
           tooltip={label}
         >
           <Link to={path}>
@@ -160,7 +152,7 @@ export function NavOrg() {
               <SidebarMenuItem className="relative">
                 <SidebarMenuButton
                   asChild
-                  isActive={visiblePathname.startsWith("/runs") || openedFromRuns}
+                  isActive={visiblePathname.startsWith("/runs")}
                   tooltip={t("nav.runs")}
                 >
                   <Link to="/runs">

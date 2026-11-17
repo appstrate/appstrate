@@ -43,10 +43,6 @@ describe("persona-sensitive call sites", () => {
           "resolves the REAL role the persona's eligibility is judged against",
         ],
         [
-          "apps/api/src/lib/package-access.ts",
-          "distinguishes an end-user (no org role at all) from a member",
-        ],
-        [
           "apps/api/src/lib/permission-audit.ts",
           "a denial trail must name the real role, persona or not",
         ],

@@ -19,7 +19,8 @@ import {
   useViewAsStopped,
 } from "../stores/view-as-store";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { isSpaceEnterable } from "../lib/space-lists";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { useSpaces } from "../hooks/use-spaces";

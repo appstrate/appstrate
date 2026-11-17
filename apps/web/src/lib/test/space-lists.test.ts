@@ -8,8 +8,8 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const {
-  admittingSpaces,
   holdsOverview,
+  isSpaceEnterable,
   listAdmits,
   overviewLapsed,
   overviewListVerdict,
@@ -51,25 +51,34 @@ describe("overviewLapsed", () => {
   });
 });
 
-describe("listAdmits", () => {
-  it("admits a list where the permissions of its route hold", () => {
-    expect(listAdmits("runs")(["runs:read-all"])).toBe(true);
-    // An agent is seen by a runner too (`packageSightPermissions("agent")`).
-    expect(listAdmits("agents")(["agents:run"])).toBe(true);
-    expect(listAdmits("skills")(["skills:read"])).toBe(true);
-    expect(listAdmits("integrations")(["integrations:read"])).toBe(true);
-    expect(listAdmits("skills")(["agents:read", "integrations:read"])).toBe(false);
+describe("isSpaceEnterable", () => {
+  it("enters on member access only", () => {
+    expect(isSpaceEnterable({ access: "member" })).toBe(true);
+    // A closed space the caller may ask to join, an orphaned personal space.
+    expect(isSpaceEnterable({ access: "none" })).toBe(false);
   });
 });
 
-describe("admittingSpaces", () => {
-  it("asks every space with a role, none without one", () => {
-    const reads = (permission: string) => (permissions: readonly string[]) =>
-      permissions.includes(permission);
-    expect(admittingSpaces(TWO, reads("files:read")).map((s) => s.id)).toEqual(["spc_b"]);
-    expect(admittingSpaces(TWO, reads("schedules:read"))).toEqual([]);
+describe("listAdmits", () => {
+  const gate =
+    (...held: string[]) =>
+    (permission: string) =>
+      held.includes(permission);
+
+  it("admits a list where the permissions of its route hold", () => {
+    expect(listAdmits("runs")(gate("runs:read-all"))).toBe(true);
+    // An agent is seen by a runner too (`packageSightPermissions("agent")`).
+    expect(listAdmits("agents")(gate("agents:run"))).toBe(true);
+    expect(listAdmits("skills")(gate("skills:read"))).toBe(true);
+    expect(listAdmits("integrations")(gate("integrations:read"))).toBe(true);
+    expect(listAdmits("skills")(gate("agents:read", "integrations:read"))).toBe(false);
+  });
+
+  it("judges each space by its own set, through spacesWhere", () => {
+    expect(spacesWhere(TWO, undefined, listAdmits("files")).map((s) => s.id)).toEqual(["spc_b"]);
+    expect(spacesWhere(TWO, undefined, listAdmits("schedules"))).toEqual([]);
     expect(
-      admittingSpaces([space("spc_c", ["schedules:read"], "none")], reads("schedules:read")),
+      spacesWhere([space("spc_c", ["schedules:read"], "none")], undefined, listAdmits("schedules")),
     ).toEqual([]);
   });
 });
@@ -160,5 +169,11 @@ describe("spaceChoice", () => {
     expect(spaceChoice([])).toEqual({ kind: "none" });
     expect(spaceChoice([space("spc_a", [])])).toEqual({ kind: "one", spaceId: "spc_a" });
     expect(spaceChoice(TWO)).toEqual({ kind: "ask" });
+  });
+
+  it("takes the preferred space without asking when it is eligible, and only then", () => {
+    expect(spaceChoice(TWO, "spc_b")).toEqual({ kind: "one", spaceId: "spc_b" });
+    expect(spaceChoice(TWO, "spc_other")).toEqual({ kind: "ask" });
+    expect(spaceChoice([], "spc_a")).toEqual({ kind: "none" });
   });
 });

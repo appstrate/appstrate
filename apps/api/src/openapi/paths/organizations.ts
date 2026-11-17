@@ -153,7 +153,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Get organization with members",
       description: "Get organization details including members and pending invitations.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         "200": {
           description: "Organization detail with members and invitations",
@@ -215,7 +215,7 @@ export const organizationsPaths = {
       summary: "Update organization",
       description:
         "Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       requestBody: {
         required: true,
         content: {
@@ -267,7 +267,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Delete organization",
       description: "Delete organization and all associated data. Owner only.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         "204": {
           description: "Organization deleted",
@@ -286,7 +286,7 @@ export const organizationsPaths = {
       summary: "Invite a member",
       description:
         "Create a pending invitation for the given email (new and existing users alike). The invitee joins by opening the invite link, authenticating through the standard login/signup flow, then explicitly accepting. When SMTP is configured an invitation email is sent; otherwise the admin shares the returned token out of band.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       requestBody: {
         required: true,
         content: {
@@ -365,7 +365,7 @@ export const organizationsPaths = {
       description:
         "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.",
       parameters: [
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -421,7 +421,7 @@ export const organizationsPaths = {
       description:
         "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile.",
       parameters: [
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -442,7 +442,7 @@ export const organizationsPaths = {
       summary: "Leave an organization",
       description:
         "The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         "204": {
           description: "Left the organization",
@@ -471,7 +471,7 @@ export const organizationsPaths = {
       description:
         "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Merge semantics (RFC 7396): omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
       parameters: [
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -522,7 +522,7 @@ export const organizationsPaths = {
       summary: "Cancel an invitation",
       description: "Cancel a pending invitation.",
       parameters: [
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -542,7 +542,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Get organization settings",
       description: "Get organization settings (redirect domains, etc.).",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         "200": {
           description: "Organization settings",
@@ -567,7 +567,7 @@ export const organizationsPaths = {
       summary: "Update organization settings",
       description:
         "Update organization settings. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       requestBody: {
         content: {
           "application/json": {

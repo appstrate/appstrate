@@ -46,6 +46,12 @@ const REDIRECT_URI = "http://localhost:9918/callback";
 /** The rows this file seeds: run ids, and its own packages' ids. */
 const seeded = (id: string) => !id.startsWith("@") || id.startsWith("@mcporgreads/");
 type Operation = "listOrgRuns" | "listOrgSkills";
+interface HomeWire {
+  home_space_id: string | null;
+  home_writable: boolean;
+  home_deletable: boolean;
+  home_shareable: boolean;
+}
 
 describe("lists spanning spaces through invoke_operation", () => {
   let owner: TestContext;
@@ -136,7 +142,7 @@ describe("lists spanning spaces through invoke_operation", () => {
     endpoint: string,
     token: string,
     spaceId?: string,
-  ): Promise<Array<{ id: string; space_ids?: string[]; home_space_id?: string | null }>> {
+  ): Promise<Array<{ id: string; space_ids?: string[] } & Partial<HomeWire>>> {
     const res = await app.request(endpoint, {
       method: "POST",
       headers: {
@@ -189,11 +195,13 @@ describe("lists spanning spaces through invoke_operation", () => {
     member = await memberContext(owner, "member");
     un = (await seedSpace({ orgId: owner.orgId, name: "Un", visibility: "closed" })).id;
     deux = (await seedSpace({ orgId: owner.orgId, name: "Deux", visibility: "closed" })).id;
-    // MCP access in both spaces. Un: every run. Deux: own runs only. Both read their skills.
+    // MCP access in both spaces. Un: every run. Deux: own runs only. Both
+    // author their skills (read, write, delete, share).
+    const skills = ["skills:read", "skills:write", "skills:delete", "skills:share"];
     const grant = (spaceId: string, permissions: string[]) =>
       seedSpaceGrant({ orgId: owner.orgId, spaceId, userId: member.user.id, permissions });
-    await grant(un, ["mcp:read", "mcp:invoke", "runs:read-all", "skills:read"]);
-    await grant(deux, ["mcp:read", "mcp:invoke", "runs:read", "skills:read"]);
+    await grant(un, ["mcp:read", "mcp:invoke", "runs:read-all", ...skills]);
+    await grant(deux, ["mcp:read", "mcp:invoke", "runs:read", ...skills]);
     const inUn = await seedSpaceRuns(un);
     const inDeux = await seedSpaceRuns(deux);
     runIds = { un: [inUn.owner!, inUn.member!], deux: [inDeux.member!] };
@@ -288,5 +296,40 @@ describe("lists spanning spaces through invoke_operation", () => {
     );
     expect(pinnedRows.every((row) => row.space_ids?.join() === deux)).toBe(true);
     expect(sharedOf(pinnedRows).home_space_id).toBeNull();
+  });
+
+  it("bounds the home authority of an organization-bound token on a space's endpoint to that space", async () => {
+    // Both active in Deux; one homed there, the other homed in Un.
+    const inside = await seedSkill("inside", deux);
+    const outside = await seedSkill("outside", un);
+    await seedSpacePackage(deux, inside);
+    await seedSpacePackage(deux, outside);
+    const homeOf = (rows: Awaited<ReturnType<typeof invokeRows>>, id: string): HomeWire => {
+      const { home_space_id, home_writable, home_deletable, home_shareable } = rows.find(
+        (row) => row.id === id,
+      )!;
+      return { home_space_id, home_writable, home_deletable, home_shareable } as HomeWire;
+    };
+    const authority = (home: string | null, held: boolean): HomeWire => ({
+      home_space_id: home,
+      home_writable: held,
+      home_deletable: held,
+      home_shareable: held,
+    });
+
+    const token = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+    // On the organization's endpoint the member authors both, from their homes.
+    const orgRows = await invokeRows("listOrgSkills", `/api/mcp/o/${owner.orgId}`, token, deux);
+    expect(homeOf(orgRows, inside)).toEqual(authority(deux, true));
+    expect(homeOf(orgRows, outside)).toEqual(authority(un, true));
+
+    // The same token on Deux's endpoint holds no authority from Un.
+    const pinnedRows = await invokeRows(
+      "listOrgSkills",
+      `/api/mcp/o/${owner.orgId}/s/${deux}`,
+      token,
+    );
+    expect(homeOf(pinnedRows, inside)).toEqual(authority(deux, true));
+    expect(homeOf(pinnedRows, outside)).toEqual(authority(null, false));
   });
 });

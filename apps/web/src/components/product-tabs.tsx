@@ -44,10 +44,14 @@ export function ProductTabs() {
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
   const chatReachable = chat.offered;
-  // The chat has no entry in the Studio's navigation: its unread count rides on this tab. It is
-  // the working space's, so « Vue d'ensemble » does not show it.
-  const chatUnread = useChatUnreadCount(SHELL_CHAT_TRANSPORT, chatReachable);
-  const hasChatSessions = useHasChatSessions(SHELL_CHAT_TRANSPORT, chatReachable);
+  // The chat has no entry in the Studio's navigation: its unread count rides on this tab. Both
+  // reads are the working space's, so « Vue d'ensemble » neither shows nor asks them (as
+  // `NavOrg`): there the tab is offered where some space grants writing, own sessions counting
+  // for none.
+  const workingChat = chatReachable && !overview;
+  const chatUnread = useChatUnreadCount(SHELL_CHAT_TRANSPORT, workingChat);
+  const workingSessions = useHasChatSessions(SHELL_CHAT_TRANSPORT, workingChat);
+  const hasChatSessions = overview ? false : workingSessions;
   const chatShown = isChatTabShown({
     reachable: chatReachable,
     canWrite,

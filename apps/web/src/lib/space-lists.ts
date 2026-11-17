@@ -9,7 +9,11 @@
 
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
 import { isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
-import { isSpaceEnterable } from "../hooks/use-current-space";
+
+/** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
+export function isSpaceEnterable(space: { access: string }): boolean {
+  return space.access === "member";
+}
 
 /** A route its permissions open, which a space's permission set can therefore admit. */
 type PermissionRoute = {
@@ -28,31 +32,20 @@ const LIST_ROUTE = {
 export type SpaceList = keyof typeof LIST_ROUTE;
 const SPACE_LISTS = Object.keys(LIST_ROUTE) as SpaceList[];
 
-/** Whether a space's effective permission set admits something. */
-type Admits = (permissions: readonly string[]) => boolean;
+/** What the caller may do in one space: its effective set there, the org-level grants included. */
+export type SpaceGate = (permission: string) => boolean;
 
-/** A space admits a list where its permissions open the list's route. */
+/** A space admits a list where its gate opens the list's route. */
 export const listAdmits =
-  (list: SpaceList): Admits =>
-  (permissions) =>
-    ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some((permission) => permissions.includes(permission));
+  (list: SpaceList) =>
+  (can: SpaceGate): boolean =>
+    ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
 
 interface ListedSpace {
   id: string;
   access: string;
   permissions: readonly string[];
 }
-
-/** The spaces held with a role whose permissions answer what `admits` asks. */
-export function admittingSpaces<S extends ListedSpace>(
-  spaces: readonly S[] | undefined,
-  admits: Admits,
-): S[] {
-  return (spaces ?? []).filter((space) => isSpaceEnterable(space) && admits(space.permissions));
-}
-
-/** What the caller may do in one space: its effective set there, the org-level grants included. */
-export type SpaceGate = (permission: string) => boolean;
 
 function gateIn(
   space: { permissions: readonly string[] },
@@ -63,8 +56,10 @@ function gateIn(
 }
 
 /**
- * The spaces an action naming no space may act in: held with a role, and admitted by `admits`
- * judging the caller's gate there, as `usePermissions().can` judges the working space.
+ * The spaces held with a role that `admits`, judging the caller's gate there as
+ * `usePermissions().can` judges the working space: where a list spanning spaces finds its rows,
+ * where an action naming no space may act. A list's permissions are of space level, so its
+ * verdicts need no `orgPermissions`.
  */
 export function spacesWhere<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
@@ -82,16 +77,23 @@ export function spacesWhere<S extends ListedSpace>(
  */
 type SpaceChoice = { kind: "none" } | { kind: "one"; spaceId: string } | { kind: "ask" };
 
-export function spaceChoice(eligible: readonly { id: string }[]): SpaceChoice {
+/** `preferred`, when eligible, is taken without asking: a row's action in the working space. */
+export function spaceChoice(
+  eligible: readonly { id: string }[],
+  preferred: string | null = null,
+): SpaceChoice {
   if (eligible.length === 0) return { kind: "none" };
+  if (preferred && eligible.some((space) => space.id === preferred)) {
+    return { kind: "one", spaceId: preferred };
+  }
   if (eligible.length === 1) return { kind: "one", spaceId: eligible[0]!.id };
   return { kind: "ask" };
 }
 
 /** The « Vue d'ensemble » is offered from two spaces admitting at least one of the lists. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
-  const admits: Admits = (permissions) => SPACE_LISTS.some((list) => listAdmits(list)(permissions));
-  return admittingSpaces(spaces, admits).length >= 2;
+  const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
+  return spacesWhere(spaces, undefined, admits).length >= 2;
 }
 
 /** The listing proves the mode no longer offered (a space lost): the choice is withdrawn. */
@@ -147,5 +149,5 @@ export function overviewListVerdict(
 ): "granted" | "denied" | undefined {
   const list = listOf(path);
   if (!list) return undefined;
-  return admittingSpaces(spaces, listAdmits(list)).length > 0 ? "granted" : "denied";
+  return spacesWhere(spaces, undefined, listAdmits(list)).length > 0 ? "granted" : "denied";
 }

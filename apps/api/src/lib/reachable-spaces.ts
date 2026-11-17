@@ -32,16 +32,11 @@ export interface ReachableSpace {
 
 /**
  * The spaces of `GET /api/spaces` where the caller holds a role (persona
- * overlay included), in that listing's order, for every read that spans spaces
- * and for the package reach (`packageAccessSpaces`). A space listed without one
- * — a `closed` space not joined, an orphaned personal space shown to admins —
- * is not reached; a principal without an org role reaches none, and a
- * request pinned to a space reaches that space only: by its credential
- * (`credentialSpaceId`: a space API key, a space-bound token), else by the
- * space-pinned MCP endpoint dispatching it (`dispatchSpacePin`).
- *
- * `orgRole` is the caller's role in `orgId`, read off the request by default; a
- * read crossing into another organization names it (`ForeignOrgStanding`).
+ * overlay included) — the reach of every read spanning spaces and of the
+ * package reach (`packageAccessSpaces`). No org role, no space; a request
+ * pinned to a space, by its credential (`credentialSpaceId`) or by the
+ * space-pinned MCP endpoint dispatching it (`dispatchSpacePin`), reaches that
+ * space only. A read crossing into another organization names `orgRole`.
  */
 export function callerReachableSpaces(
   c: Context<AppEnv>,

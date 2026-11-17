@@ -22,10 +22,11 @@ import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
-import { admittingSpaces } from "../lib/space-lists";
+import { spacesWhere } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { useSpaces } from "../hooks/use-spaces";
+import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
@@ -305,8 +306,6 @@ function dashboardMetrics(
       )
     : "—";
   const activeSchedules = data.schedules.filter((schedule) => schedule.enabled);
-  const agentCount = data.agents.length;
-  const runningAgentCount = data.agents.filter((agent) => agent.running_runs).length;
   // The five that fire soonest; an active schedule with no next run is counted, not listed.
   const upcomingSchedules = data.schedules
     .flatMap((schedule) => {
@@ -329,8 +328,10 @@ function dashboardMetrics(
       },
       sections.recentAgents && {
         label: t("dashboard.metric.agents"),
-        value: agentCount,
-        detail: t("dashboard.metric.agentsDetail", { count: runningAgentCount }),
+        value: data.agents.length,
+        detail: t("dashboard.metric.agentsDetail", {
+          count: data.agents.filter((agent) => agent.running_runs).length,
+        }),
       },
       sections.recentRuns && {
         label: t("dashboard.metric.success"),
@@ -358,12 +359,13 @@ export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
   const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
   // The dashboard is the fallback route and renders for ANY principal: each
   // section answers to the guard of the query that feeds it — in « Vue
   // d'ensemble », granted in some space (the org route lists those).
   const sections = dashboardSections(
     data.spanning
-      ? (permission) => admittingSpaces(spaces, (held) => held.includes(permission)).length > 0
+      ? (permission) => spacesWhere(spaces, orgPermissions, (can) => can(permission)).length > 0
       : can,
   );
   const metrics = dashboardMetrics(data, sections, t);

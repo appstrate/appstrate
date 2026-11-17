@@ -3,16 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
-import { SpaceName } from "./space-name";
-
-interface PickableSpace {
-  id: string;
-  personal: boolean;
-  name: string;
-  icon: string | null;
-  color: string | null;
-  orphaned_at?: string | null;
-}
+import { SpaceName, type SpaceListed } from "./space-name";
 
 /**
  * « Dans quel espace ? »: the one question an action naming no space asks in « Vue d'ensemble »,
@@ -23,7 +14,7 @@ export function SpacePickerModal({
   onPick,
   onClose,
 }: {
-  spaces: readonly PickableSpace[];
+  spaces: readonly SpaceListed[];
   onPick: (spaceId: string) => void;
   onClose: () => void;
 }) {
@@ -45,7 +36,7 @@ export function SpacePickerList({
   spaces,
   onPick,
 }: {
-  spaces: readonly PickableSpace[];
+  spaces: readonly SpaceListed[];
   onPick: (spaceId: string) => void;
 }) {
   return (

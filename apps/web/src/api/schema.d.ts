@@ -4818,7 +4818,7 @@ export interface paths {
         };
         /**
          * List all schedules
-         * @description List all schedules across all agents for the organization.
+         * @description List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.
          */
         get: operations["listSchedules"];
         put?: never;
@@ -7939,7 +7939,7 @@ export interface components {
         IfMatchRequired: string;
         /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
         XOrgId: string;
-        /** @description Organization ID — the organization a list spanning its spaces reads. */
+        /** @description Organization ID. */
         OrgIdPath: string;
         /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
         SseOrgId: string;
@@ -20562,7 +20562,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20639,7 +20640,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20664,7 +20666,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20707,7 +20710,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                /** @description Organization ID. */
                 orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
@@ -20904,7 +20907,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                /** @description Organization ID. */
                 orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
@@ -20993,7 +20996,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
                 invitationId: string;
             };
             cookie?: never;
@@ -21019,7 +21023,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
                 invitationId: string;
             };
             cookie?: never;
@@ -21068,7 +21073,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -21102,7 +21108,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -21173,7 +21180,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
                 userId: string;
             };
             cookie?: never;
@@ -21230,7 +21238,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
                 userId: string;
             };
             cookie?: never;
@@ -21256,7 +21265,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                /** @description Organization ID. */
                 orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
@@ -21289,7 +21298,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                /** @description Organization ID. */
                 orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
@@ -21373,7 +21382,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                /** @description Organization ID. */
                 orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
@@ -21416,7 +21425,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                /** @description Organization ID. */
                 orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
@@ -21449,7 +21458,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -21481,7 +21491,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -26310,6 +26321,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

@@ -129,7 +129,7 @@ export function IntegrationsPage() {
           rows={shown}
           rowKey={(integration) => integration.id}
           rowHref={(integration) =>
-            linkInSpace(packageDetailPath("integration", integration.id), integration.space_ids[0])
+            linkInSpace(packageDetailPath("integration", integration.id), integration.space_ids)
           }
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}

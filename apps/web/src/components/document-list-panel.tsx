@@ -147,7 +147,7 @@ export function DocumentListPanel({
                 file={doc}
                 isKeepPending={pendingKeepId === doc.id}
                 showRunLink={showRunLink?.(doc)}
-                spaceId={spanning ? doc.spaceId : undefined}
+                showSpace={spanning}
                 onPreview={openPreview}
                 onDownload={onDownload}
                 onKeep={onKeep}

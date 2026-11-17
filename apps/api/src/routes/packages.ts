@@ -574,12 +574,7 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     const scope = getSpaceScope(c);
     return c.json(
       listResponse(
-        await listPackageIndex(
-          rcfg.cfg.type,
-          scope.orgId,
-          [scope.spaceId],
-          await packageAccessSpaces(c),
-        ),
+        await listPackageIndex(rcfg.cfg.type, scope.orgId, [scope.spaceId], packageAccessSpaces(c)),
       ),
     );
   };

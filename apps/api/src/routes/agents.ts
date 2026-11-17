@@ -199,7 +199,7 @@ export function createAgentsRouter() {
           getSpaceScope(c).orgId,
           [callerSpaceGrant(c)],
           getActor(c),
-          await packageAccessSpaces(c),
+          packageAccessSpaces(c),
         ),
       ),
     );

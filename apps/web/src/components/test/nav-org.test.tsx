@@ -146,11 +146,11 @@ describe("the navigation in « Vue d'ensemble »", () => {
     expect(html).not.toContain("<span>Runs</span>");
   });
 
-  it("reads a run's detail as opened from Runs, the one active entry", () => {
+  it("marks the entry a run's detail sits under, as out of the mode", () => {
     const html = navFor(working, spaces, true, "/agents/@acme/reporter/runs/run_1");
     const active = [...html.matchAll(/<a[^>]*data-active="true"[^>]*>/g)].map((m) => m[0]);
     expect(active).toHaveLength(1);
-    expect(active[0]).toContain('href="/runs"');
+    expect(active[0]).toContain('href="/agents"');
   });
 
   it("asks nothing the working space's spinner reads, which it asks out of the mode", () => {

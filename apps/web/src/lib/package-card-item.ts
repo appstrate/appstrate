@@ -8,7 +8,7 @@ import type { AgentListItem } from "@appstrate/shared-types";
 
 export interface CardItem {
   id: string;
-  /** Every space whose index lists it (`space_ids`): where its actions may act. Its link enters the first when it is not the current one (`useSpaceLink`). Absent off an index (the catalogue). */
+  /** Every space whose index lists it (`space_ids`): where its actions may act. Its link opens in the current one when listed there, else enters the first (`rowSpace`). Absent off an index (the catalogue). */
   spaceIds?: string[];
   /** The package's home space when the reader reaches it, `null` when withheld; undefined off an index (the catalogue). */
   homeSpaceId?: string | null;

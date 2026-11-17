@@ -1276,7 +1276,7 @@ export async function getFileForActor(
 
   const capabilities = getFileCapabilities(row, actor, {
     visible: true,
-    canManage: managesFiles(permissions),
+    canManage: permissions.has("files:delete"),
     creatorCanManage: opts.creatorCanManage,
   });
   return { row: row as FileRow, capabilities };
@@ -1447,11 +1447,6 @@ async function chatContextFileFilter(
   )!;
 }
 
-/** Does this permission set keep or delete another member's file? `files:delete`. */
-function managesFiles(permissions: ReadonlySet<string>): boolean {
-  return permissions.has("files:delete");
-}
-
 /**
  * The file gallery of `orgId` across the spaces of `grants`, with
  * container-inherited visibility (D7 — consistent with `getFileForActor`),
@@ -1486,7 +1481,9 @@ export async function listFilesForActor(
   const spaceIds = grants.map((g) => g.spaceId);
   const supervised = grants.filter((g) => canReadEveryRun(g.permissions)).map((g) => g.spaceId);
 
-  const conditions: SQL[] = [
+  // The rows the caller may read — and so the rows a cursor may name: a file it
+  // cannot read is no pivot, as for the run lists.
+  const visible = and(
     eq(files.orgId, orgId),
     inArray(files.spaceId, spaceIds),
     actor.type === "end_user"
@@ -1526,7 +1523,8 @@ export async function listFilesForActor(
             : []),
           eq(files.userId, actor.id),
         )!,
-  ];
+  )!;
+  const conditions: SQL[] = [visible];
   if (filters.purpose) conditions.push(eq(files.purpose, filters.purpose));
   if (filters.packageId) conditions.push(eq(files.packageId, filters.packageId));
   if (filters.runId) conditions.push(await runContainerFilter(orgId, spaceIds, filters.runId));
@@ -1542,17 +1540,11 @@ export async function listFilesForActor(
     const [cursor] = await db
       .select({ createdAt: files.createdAt, id: files.id })
       .from(files)
-      .where(
-        and(
-          eq(files.id, filters.startingAfter),
-          eq(files.orgId, orgId),
-          inArray(files.spaceId, spaceIds),
-        ),
-      )
+      .where(and(eq(files.id, filters.startingAfter), visible))
       .limit(1);
     // Next page (older rows), DESC order: (createdAt, id) < (cursor.createdAt, cursor.id).
-    // A cursor id that no longer exists drops its clause — the page just starts
-    // at the head rather than erroring.
+    // A cursor id that no longer exists, or that the caller cannot read, drops
+    // its clause — the page just starts at the head rather than erroring.
     if (cursor) {
       conditions.push(
         or(
@@ -1570,7 +1562,9 @@ export async function listFilesForActor(
     .orderBy(desc(files.createdAt), desc(files.id))
     .limit(fetchLimit);
 
-  const managed = new Set(grants.filter((g) => managesFiles(g.permissions)).map((g) => g.spaceId));
+  const managed = new Set(
+    grants.filter((g) => g.permissions.has("files:delete")).map((g) => g.spaceId),
+  );
   const { creatorCanManage } = opts;
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {

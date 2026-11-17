@@ -589,7 +589,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
     // Dispatched calls re-enter the space this request entered — and, on the
     // endpoint pinned to it, stay confined to it whatever the credential pins:
-    // a list spanning spaces then reaches that space only.
+    // the caller's reach is then that space only, for the lists spanning spaces
+    // and for the package home authority alike.
     authHeaders.set("x-space-id", scope.spaceId);
     const dispatch: Dispatch = orgSpaces
       ? dispatchInProcess

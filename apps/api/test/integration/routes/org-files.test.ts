@@ -25,6 +25,7 @@
  * | member session                               | `runId` of a run in Fermé whose input names an own file | that file is NOT added: the run is looked up in the listed spaces only |
  * | member session                               | `context_chat_session_id` of own session (Deux) | its attachment                                           |
  * | member session                               | `startingAfter` + `limit`                      | one keyset order across spaces                            |
+ * | member session                               | `startingAfter` naming a file it cannot read   | no pivot: the page starts at the head                     |
  * | owner session                                | every team space (preset `admin`)              | every row                                                 |
  * | API key pinned to Un, scopes `files:read` + `runs:read-all` | Un only, ceiling applied        | every Un row, `capabilities.delete` false                 |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling     | ceiling `files:read` → own rows only                      |
@@ -255,6 +256,15 @@ describe("GET /api/orgs/{orgId}/files", () => {
     // Newest first, whatever the space.
     const order = Object.values(f);
     expect(seen).toEqual([...seen].sort((a, b) => order.indexOf(b) - order.indexOf(a)));
+  });
+
+  it("takes no cursor from a file the caller cannot read: the page starts at the head", async () => {
+    const head = await list(session(member), "?limit=2");
+    // In spaces the member reads, but not theirs to read there; then Fermé, not reached.
+    for (const hidden of [f.deuxOwnerOutput!, f.unOwnerChat!, f.fermeOutput!]) {
+      const page = await list(session(member), `?limit=2&startingAfter=${hidden}`);
+      expect(ids(page)).toEqual(ids(head));
+    }
   });
 
   it("composes the filters of GET /api/files", async () => {

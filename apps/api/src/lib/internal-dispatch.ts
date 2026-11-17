@@ -68,8 +68,11 @@ export function isInternalDispatch(headers: Headers): boolean {
  * space-pinned MCP endpoint (`/api/mcp/o/:org/s/:space`) re-entering a route
  * for a credential that pins none (an organization's token, a session). Only
  * `dispatchInProcess` passes an env holding it — a network request's env is
- * the server's, which has no such key — so it cannot be forged. Read by `callerReachableSpaces`
- * alone: it bounds what a read spanning spaces reaches, nothing else.
+ * the server's, which has no such key — so it cannot be forged. Read by
+ * `callerReachableSpaces` alone, so it bounds everything the dispatched route
+ * builds on the caller's reach: the reads spanning spaces, the package reach
+ * (`packageAccessSpaces`: home authority to write, delete and share,
+ * `home_space_id`) and the member spaces of the organization's member list.
  */
 const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
 

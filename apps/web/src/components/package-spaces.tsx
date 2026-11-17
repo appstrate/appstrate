@@ -3,7 +3,6 @@
 import { useTranslation } from "react-i18next";
 import { Share2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { cn } from "@appstrate/ui/cn";
 import { useSharedFromText } from "../hooks/use-shared-from-text";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { SpaceNameOf } from "./space-name";
@@ -16,6 +15,7 @@ function SpacesBadge({ names, text }: { names: readonly string[]; text: string }
       <TooltipTrigger asChild>
         <span
           tabIndex={0}
+          role="img"
           aria-label={text}
           className="text-muted-foreground relative z-10 flex shrink-0 items-center gap-0.5 tabular-nums"
         >
@@ -37,12 +37,10 @@ export function PackageSpaces({
   homeSpaceId,
   spaceIds,
   system,
-  className,
 }: {
   homeSpaceId: string | null | undefined;
   spaceIds: readonly string[];
   system: boolean;
-  className?: string;
 }) {
   const { t } = useTranslation("common");
   const labelOf = useSpaceLabelOf();
@@ -52,7 +50,7 @@ export function PackageSpaces({
     names: names.join(", "),
   });
   return (
-    <span className={cn("text-muted-foreground flex min-w-0 items-center gap-2", className)}>
+    <span className="text-muted-foreground flex min-w-0 items-center gap-2">
       {home ? (
         <SpaceNameOf spaceId={home} />
       ) : (
