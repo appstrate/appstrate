@@ -19,6 +19,7 @@ import { scheduleKeys } from "../lib/query-keys";
 import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
+import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
 
 // Some space roles (`runner`, custom roles) lack `schedules:read`: gate here so incidental
 // surfaces (the dashboard) never fire a request the server is bound to refuse.
@@ -96,6 +97,7 @@ export function useSchedules(packageId: string | undefined) {
 export function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
+  void invalidateAgentDiagnostics(qc);
 }
 
 /** Says how many schedules removing a pin or a space default disabled, and refetches them. */
@@ -159,6 +161,7 @@ export function useDeleteSchedule() {
       qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
       // The page still showing the deleted schedule would re-read it, a 404: stale only.
       qc.invalidateQueries({ queryKey: scheduleKeys.detailAll, refetchType: "none" });
+      void invalidateAgentDiagnostics(qc);
     },
   });
 }

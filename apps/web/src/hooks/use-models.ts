@@ -14,6 +14,7 @@ import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import { invalidateCredentialsAndModels } from "./use-model-provider-credentials";
 import { invalidatePaths, packageKeys } from "../lib/query-keys";
+import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -130,6 +131,7 @@ export function useSetAgentModel(packageId: string) {
     onSuccess: () => {
       void invalidatePaths(qc, ["/api/agents/{scope}/{name}/model"]);
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
+      void invalidateAgentDiagnostics(qc);
     },
   });
 }

@@ -78,7 +78,9 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
         path.startsWith("/api/integrations") ||
         path === "/api/me/connections" ||
         // Lives under /api/agents but is driven entirely by connection state.
-        path === "/api/agents/{scope}/{name}/connection-readiness"
+        path === "/api/agents/{scope}/{name}/connection-readiness" ||
+        // The header's "Ready" badge reads the diagnostics, whose connection findings follow it.
+        path === "/api/agents/{scope}/{name}/diagnostics"
       );
     },
   });

@@ -4,17 +4,20 @@ import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
+import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { RunStatusBadge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
-import { latestMemoryDate } from "../../lib/agent-overview";
+import { latestMemoryDate, runSuccessRate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
+import { AgentHealthSection } from "./agent-health-section";
 import { SkeletonBadge, SkeletonLine } from "../skeleton-line";
 
 /** A figure read from a query: a placeholder while it loads, « unknown » when the read failed. */
@@ -38,10 +41,12 @@ function QueryValue({
 export function AgentOverviewTab({
   packageId,
   detail,
+  version,
   isHistorical,
 }: {
   packageId: string;
   detail: AgentDetail;
+  version: string | undefined;
   isHistorical: boolean;
 }) {
   const { t } = useTranslation("agents");
@@ -54,12 +59,20 @@ export function AgentOverviewTab({
       </div>
     );
   }
-  return <OperationalSummary packageId={packageId} detail={detail} />;
+  return <OperationalSummary packageId={packageId} detail={detail} version={version} />;
 }
 
 /** The live counters, read only where they are shown. */
-function OperationalSummary({ packageId, detail }: { packageId: string; detail: AgentDetail }) {
-  const { t } = useTranslation("agents");
+function OperationalSummary({
+  packageId,
+  detail,
+  version,
+}: {
+  packageId: string;
+  detail: AgentDetail;
+  version: string | undefined;
+}) {
+  const { t, i18n } = useTranslation("agents");
   const location = useLocation();
   const {
     data: schedules,
@@ -67,6 +80,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
     isError: schedulesError,
     isSuccess: schedulesSuccess,
   } = useSchedules(packageId);
+  const runActivity = useAgentRunActivity(packageId);
   const {
     data: memories,
     isLoading: memoriesLoading,
@@ -81,6 +95,16 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
   const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 
+  const activity = runActivity.data;
+  const failedRunCount = activity ? activity.failed + activity.timeout : undefined;
+  const successRate = activity ? runSuccessRate(activity) : null;
+  const successRateLabel =
+    successRate === null
+      ? "—"
+      : new Intl.NumberFormat(i18n.language, {
+          style: "percent",
+          maximumFractionDigits: 1,
+        }).format(successRate);
   const destination = (hash: string, key?: string, value?: string) => {
     const search = new URLSearchParams(location.search);
     if (hash === "#runs") search.delete("agentRunStatus");
@@ -93,6 +117,8 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
 
   return (
     <div className="flex flex-col gap-8" data-agent-operational-overview>
+      <AgentHealthSection packageId={packageId} version={version} />
+
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
           {/* A container for the compact status below: it follows the card's width. */}
@@ -140,12 +166,70 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
         </DetailSectionCard>
 
         <DetailSectionCard
-          title={t("detail.overview.activity")}
+          title={`${t("detail.overview.activity")} · ${t("detail.overview.lastThirtyDays")}`}
           icon={ChartNoAxesCombined}
           bodyClassName="p-0"
+          headerAction={
+            activity && activity.total > 0
+              ? { label: t("detail.overview.openRuns"), to: destination("#runs") }
+              : undefined
+          }
         >
-          <dl className="grid h-full grid-cols-2 divide-x xl:grid-cols-1 xl:divide-x-0 xl:divide-y">
+          <dl className="grid h-full grid-cols-2 divide-x md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0">
             <OperationalStat
+              className="xl:border-border xl:border-r xl:border-b"
+              label={t("detail.overview.totalRuns")}
+              value={
+                <QueryValue
+                  loading={runActivity.isLoading}
+                  error={runActivity.isError || !activity}
+                >
+                  {String(activity?.total)}
+                </QueryValue>
+              }
+              target={activity && activity.total > 0 ? { to: destination("#runs") } : undefined}
+            />
+            <OperationalStat
+              className="xl:border-border xl:border-b"
+              label={t("detail.overview.successRate")}
+              value={
+                <QueryValue
+                  loading={runActivity.isLoading}
+                  error={runActivity.isError || !activity}
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        tabIndex={0}
+                        className="focus-visible:ring-ring cursor-help border-b border-dotted outline-none focus-visible:ring-2"
+                      >
+                        {successRateLabel}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("detail.overview.successRateHelp")}</TooltipContent>
+                  </Tooltip>
+                </QueryValue>
+              }
+            />
+            <OperationalStat
+              className="xl:border-border xl:border-r xl:border-b"
+              label={t("detail.overview.failedRuns")}
+              value={
+                <QueryValue
+                  loading={runActivity.isLoading}
+                  error={runActivity.isError || failedRunCount === undefined}
+                >
+                  {String(failedRunCount)}
+                </QueryValue>
+              }
+              target={
+                failedRunCount && failedRunCount > 0
+                  ? { to: destination("#runs", "agentRunStatus", "failed,timeout") }
+                  : undefined
+              }
+            />
+            <OperationalStat
+              className="xl:border-border xl:border-b"
               label={t("detail.overview.runningRuns")}
               value={String(detail.running_runs)}
               target={
@@ -155,6 +239,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
               }
             />
             <OperationalStat
+              className="xl:col-span-2"
               label={t("detail.overview.activeSchedules")}
               value={
                 <QueryValue loading={schedulesLoading} error={schedulesError || !schedulesSuccess}>
@@ -263,16 +348,33 @@ export function AgentOverviewSkeleton() {
             </dl>
           </DetailSectionCard>
           <DetailSectionCard
-            title={t("detail.overview.activity")}
+            title={`${t("detail.overview.activity")} · ${t("detail.overview.lastThirtyDays")}`}
             icon={ChartNoAxesCombined}
             bodyClassName="p-0"
           >
-            <dl className="grid h-full grid-cols-2 divide-x xl:grid-cols-1 xl:divide-x-0 xl:divide-y">
+            <dl className="grid h-full grid-cols-2 divide-x md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0">
               <OperationalStat
+                className="xl:border-border xl:border-r xl:border-b"
+                label={t("detail.overview.totalRuns")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-b"
+                label={t("detail.overview.successRate")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-r xl:border-b"
+                label={t("detail.overview.failedRuns")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-b"
                 label={t("detail.overview.runningRuns")}
                 value={<StatValueSkeleton />}
               />
               <OperationalStat
+                className="xl:col-span-2"
                 label={t("detail.overview.activeSchedules")}
                 value={<StatValueSkeleton />}
               />

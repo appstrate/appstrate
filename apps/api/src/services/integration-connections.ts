@@ -112,12 +112,13 @@ import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@ap
 import {
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
-  resolveIntegrationToolCatalog,
+  resolveIntegrationToolSurface,
   readDefaultTools,
   type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
+  type IntegrationToolInspection,
 } from "@appstrate/core/integration";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
@@ -3219,8 +3220,10 @@ export async function getIntegrationAuthStatuses(
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
-  /** The agent-facing tool catalog ({@link resolveIntegrationToolCatalog}). */
+  /** The agent-facing tool catalog ({@link resolveIntegrationToolSurface}). */
   tool_catalog: IntegrationToolCatalogEntry[];
+  /** Explanatory inventory of every tool the integration names; never an agent allowlist. */
+  tool_catalog_inspection: IntegrationToolInspection;
   /** AFPS §4.4: the tools an agent inherits without a `tools` selection; `undefined` when none. */
   default_tools: readonly string[] | "*" | undefined;
   /** AFPS §7.8, verbatim: gates the editor's "include all upstream tools" toggle. */
@@ -3242,7 +3245,7 @@ export async function getIntegrationAuthStatuses(
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
-  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
+  const toolSurface = resolveIntegrationToolSurface({
     integration: manifest,
   });
 
@@ -3292,7 +3295,8 @@ export async function getIntegrationAuthStatuses(
   return {
     manifest,
     auths,
-    tool_catalog: toolCatalog,
+    tool_catalog: toolSurface.catalog,
+    tool_catalog_inspection: toolSurface.inspection,
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools: allowsUndeclaredTools(manifest),
     active: activation.active,

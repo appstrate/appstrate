@@ -212,6 +212,9 @@ const NOT_SURFACED = new Set([
   "authorization_server_blocked",
   "tools_truncated",
   "instructions_truncated",
+  // Agent diagnostics, never a refusal: `lib/agent-diagnostics.ts` words them.
+  "pinned_model_unavailable",
+  "schedule_version_differs",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",

@@ -47,10 +47,12 @@
  * before the sidecar receives its spawn plan.
  */
 
+import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
   getVersionRow,
+  loadVersionCatalog,
   readVersionArchive,
   requirePublishedPrompt,
   type VersionDetail,
@@ -192,4 +194,32 @@ export async function resolveAgentRunManifest(
     agent: { ...agent, manifest: row.manifest as unknown as AgentManifest },
     overrideVersionLabel: row.version,
   };
+}
+
+/**
+ * The `runs.version_ref` a non-system agent's run records for each selector —
+ * what {@link resolveAgentRunVersion} selects, read from one catalog load
+ * without loading any archive. `null` where a selector names no version: the
+ * run itself would 404.
+ */
+export async function resolveVersionRefs(
+  packageId: string,
+  selectors: readonly (string | null | undefined)[],
+): Promise<(string | null)[]> {
+  const sels = selectors.map((selector) => selector?.trim() || VERSION_SELECTOR_PUBLISHED);
+  if (sels.every((sel) => sel === VERSION_SELECTOR_DRAFT)) return sels;
+  const { versions, distTags } = await loadVersionCatalog(packageId);
+  const versionOf = (id: number | null | undefined) =>
+    versions.find((v) => v.id === id)?.version ?? null;
+  // `getLatestVersionInfo`'s reading: the `latest` tag's target, yanked or not.
+  const latestId = distTags.find((t) => t.tag === "latest")?.versionId;
+  return sels.map((sel) =>
+    sel === VERSION_SELECTOR_DRAFT
+      ? VERSION_SELECTOR_DRAFT
+      : versionOf(
+          sel === VERSION_SELECTOR_PUBLISHED
+            ? latestId
+            : resolveVersionFromCatalog(sel, versions, distTags),
+        ),
+  );
 }

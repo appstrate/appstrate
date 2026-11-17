@@ -38,6 +38,7 @@ export function AgentDetailBar<T extends string>({
   hasUnarchivedChanges,
   draftVerdictPending,
   latestPublishedVersion,
+  status,
   tabs,
   actions,
 }: {
@@ -48,6 +49,8 @@ export function AgentDetailBar<T extends string>({
   /** The draft-vs-published comparison is still being read: the pill holds its place. */
   draftVerdictPending?: boolean;
   latestPublishedVersion?: string | null;
+  /** The agent's readiness, beside its version. */
+  status?: ReactNode;
   tabs: readonly DetailTab<T>[];
   actions: ReactNode;
 }) {
@@ -66,13 +69,16 @@ export function AgentDetailBar<T extends string>({
       }
       title={title}
       badge={
-        <VersionPill
-          detail={detail}
-          isHistoricalVersion={isHistoricalVersion}
-          hasUnarchivedChanges={hasUnarchivedChanges}
-          draftVerdictPending={draftVerdictPending}
-          latestPublishedVersion={latestPublishedVersion}
-        />
+        <>
+          <VersionPill
+            detail={detail}
+            isHistoricalVersion={isHistoricalVersion}
+            hasUnarchivedChanges={hasUnarchivedChanges}
+            draftVerdictPending={draftVerdictPending}
+            latestPublishedVersion={latestPublishedVersion}
+          />
+          {status}
+        </>
       }
       trail={[listCrumb]}
       meta={

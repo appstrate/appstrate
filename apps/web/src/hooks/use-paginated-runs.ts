@@ -2,9 +2,9 @@
 
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { client } from "../api/client";
+import { $api, client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useListScope } from "./use-org-scope";
+import { useListScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
@@ -187,4 +187,21 @@ export async function fetchRunPage(
   }
   const { data } = await client.GET("/api/runs", { params: { query }, signal });
   return data!;
+}
+
+/** One server-side aggregate for the agent overview's fixed 30-day window. */
+export function useAgentRunActivity(packageId: string | undefined) {
+  const scope = useOrgScope();
+  const { can } = usePermissions();
+  return $api.useQuery(
+    "get",
+    "/api/agents/{scope}/{name}/run-activity",
+    {
+      params: {
+        path: packageId ? splitPackageRef(packageId) : { scope: "", name: "" },
+        header: scope.header,
+      },
+    },
+    { enabled: canReadRuns(can) && scope.enabled && !!packageId },
+  );
 }

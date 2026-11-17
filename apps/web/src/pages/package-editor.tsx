@@ -3,11 +3,8 @@
 import { Fragment, useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
-import type {
-  AgentDetail,
-  IntegrationToolCatalogEntry,
-  OrgPackageItemDetail,
-} from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { IntegrationToolInspection } from "@appstrate/core/integration";
 import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
 import { $api } from "../api/client";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
@@ -301,14 +298,14 @@ function IntegrationEditorInner({
   initialState,
   packageId,
   tab,
-  toolCatalog,
+  toolInspection,
   canSync,
 }: {
   initialState: EditorState;
   packageId: string;
   tab: PackageEditorTab;
-  /** The saved package's tool catalog, shown with the draft's policy. */
-  toolCatalog: IntegrationToolCatalogEntry[];
+  /** The server's reading of the saved tool catalog, shown with the draft's policy. */
+  toolInspection: IntegrationToolInspection;
   /** The draft's server can be asked for its tools. */
   canSync: boolean;
 }) {
@@ -422,7 +419,9 @@ function IntegrationEditorInner({
 
       {activeTab === "tools" && (
         <IntegrationToolsSection
-          tools={toolCatalog}
+          integrationId={packageId}
+          inspection={toolInspection}
+          showBasis={false}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
           sync={
             canSync
@@ -450,12 +449,12 @@ export type IntegrationDefinitionSection = "general" | "source" | "auths" | "too
 export function IntegrationDefinitionEditor({
   detail,
   section,
-  toolCatalog,
+  toolInspection,
   canSync,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
-  toolCatalog: IntegrationToolCatalogEntry[];
+  toolInspection: IntegrationToolInspection;
   /** The draft is served by a Streamable HTTP server at a fixed URL the caller may read. */
   canSync: boolean;
 }) {
@@ -465,7 +464,7 @@ export function IntegrationDefinitionEditor({
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
         tab={section}
-        toolCatalog={toolCatalog}
+        toolInspection={toolInspection}
         canSync={canSync}
       />
     </DraftEditorMount>

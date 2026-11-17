@@ -292,6 +292,8 @@ describe("run cache reconciliation on reconnect", () => {
       '["agents","org_1"]',
       '["packages","agents","org_1"]',
       '["get","/api/runs"]',
+      // A finished run moves the agent overview's 30-day counts.
+      '["get","/api/agents/{scope}/{name}/run-activity"]',
     ]);
     // The run-detail page appends live frames into the log cache; refetching
     // it would drop the per-turn breadcrumbs it holds.

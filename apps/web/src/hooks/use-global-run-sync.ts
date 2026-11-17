@@ -167,6 +167,8 @@ export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
     packageKeys.familyInOrg("agents", orgId),
     // The chat context sidebar reads this typed collection, not paginated-runs.
     ["get", "/api/runs"],
+    // The agent overview's 30-day counts.
+    ["get", "/api/agents/{scope}/{name}/run-activity"],
   ];
 }
 

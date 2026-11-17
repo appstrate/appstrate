@@ -18,11 +18,12 @@ const manifest = {
   auths: { primary: { type: "api_key" } },
   tools_policy: { list_issues: { required_scopes: { primary: ["issues:read"] } } },
 };
+const inspection = { basis: "manifest" as const, entries: [] };
 
 describe("IntegrationToolsSection without a saved catalog", () => {
   it("lists the tools the draft declares a policy for, with their scopes", () => {
     const html = render(
-      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} />,
+      <IntegrationToolsSection inspection={inspection} edit={{ manifest, onChange: () => {} }} />,
     );
     expect(html).toContain("list_issues");
     expect(html).toContain("issues:read");
@@ -30,7 +31,7 @@ describe("IntegrationToolsSection without a saved catalog", () => {
 
   it("offers the wildcard toggle", () => {
     const html = render(
-      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} />,
+      <IntegrationToolsSection inspection={inspection} edit={{ manifest, onChange: () => {} }} />,
     );
     expect(html).toContain('data-testid="integration-editor-allow-undeclared-tools"');
   });
@@ -51,7 +52,11 @@ describe("IntegrationToolsSection sync", () => {
 
   it("offers the sync, its confirmation and warnings when given", () => {
     const html = render(
-      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} sync={sync} />,
+      <IntegrationToolsSection
+        inspection={inspection}
+        edit={{ manifest, onChange: () => {} }}
+        sync={sync}
+      />,
     );
     expect(html).toContain(button);
     expect(html).toContain("Synchroniser depuis le serveur");
@@ -74,7 +79,7 @@ describe("IntegrationToolsSection sync", () => {
     ]);
     const html = render(
       <IntegrationToolsSection
-        tools={[]}
+        inspection={inspection}
         edit={{ manifest, onChange: () => {} }}
         sync={{ ...sync, result: null, error }}
       />,
@@ -84,7 +89,7 @@ describe("IntegrationToolsSection sync", () => {
 
   it("offers nothing without it", () => {
     const html = render(
-      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} />,
+      <IntegrationToolsSection inspection={inspection} edit={{ manifest, onChange: () => {} }} />,
     );
     expect(html).not.toContain(button);
   });
