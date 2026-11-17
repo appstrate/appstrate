@@ -20,6 +20,23 @@ interface PersistenceReach {
   spanning?: boolean;
 }
 
+/** An agent's persistence in the current space, or every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchAgentPersistence(
+  packageId: string,
+  acrossOrgId: string | null,
+  query: { kind: "pinned" | "memory"; runId?: string },
+): Promise<PersistenceResponse> {
+  const { scope, name } = splitPackageRef(packageId);
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/agents/{scope}/{name}/persistence", {
+        params: { path: { orgId: acrossOrgId, scope, name }, query },
+      })
+    : await client.GET("/api/agents/{scope}/{name}/persistence", {
+        params: { path: { scope, name }, query },
+      });
+  return data ?? {};
+}
+
 /** One subscription against `/persistence`; the stable `scopeTag` keeps run-level and agent-level views from sharing a cache slot. */
 function usePersistenceQuery<T>(
   packageId: string | undefined,
@@ -34,17 +51,7 @@ function usePersistenceQuery<T>(
   return useQuery({
     // Key pinned: use-mutations and the space-switch reset invalidate by its prefix.
     queryKey: persistenceKeys.list(scope.orgId, scope.keySpace, scopeTag, packageId, query),
-    queryFn: async () => {
-      const { scope: packageScope, name } = splitPackageRef(packageId!);
-      const { data } = scope.acrossOrgId
-        ? await client.GET("/api/orgs/{orgId}/agents/{scope}/{name}/persistence", {
-            params: { path: { orgId: scope.acrossOrgId, scope: packageScope, name }, query },
-          })
-        : await client.GET("/api/agents/{scope}/{name}/persistence", {
-            params: { path: { scope: packageScope, name }, query },
-          });
-      return pick(data ?? {});
-    },
+    queryFn: async () => pick(await fetchAgentPersistence(packageId!, scope.acrossOrgId, query)),
     enabled: scope.enabled && !!packageId,
     refetchInterval: scope.refetchInterval,
   });

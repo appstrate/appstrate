@@ -6,7 +6,10 @@ import { useTranslation } from "react-i18next";
 import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
-import { useFirstRunsPage } from "../../hooks/use-paginated-runs";
+import {
+  useAgentLatestRunAcross,
+  useAgentRunsInFlightAcross,
+} from "../../hooks/use-paginated-runs";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
@@ -69,14 +72,8 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
   // tabs instead: the agent's runs, schedules and memory in every space the reader reaches.
   const { on: spanning } = useOverviewMode();
   const workingSpaceId = useCurrentSpaceId();
-  const latest = useFirstRunsPage({ packageId, spanning: true, limit: 1, enabled: spanning });
-  const active = useFirstRunsPage({
-    packageId,
-    spanning: true,
-    status: ["pending", "running"],
-    limit: 1,
-    enabled: spanning,
-  });
+  const latest = useAgentLatestRunAcross(packageId, { enabled: spanning });
+  const active = useAgentRunsInFlightAcross(packageId, { enabled: spanning });
   const latestRun = latest.data?.data[0];
   const lastRun = spanning
     ? latestRun && {
@@ -86,7 +83,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
         spaceId: latestRun.spaceId,
       }
     : detail.last_run && { ...detail.last_run, spaceId: undefined };
-  const runningRuns = spanning ? active.data?.total : detail.running_runs;
+  const runningRuns = spanning ? active.total : detail.running_runs;
   const {
     data: schedules,
     isLoading: schedulesLoading,
@@ -145,6 +142,9 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                 >
                   {lastRun?.started_at ? (
                     formatDateField(lastRun.started_at, "datetime")
+                  ) : lastRun ? (
+                    // A run not started yet: its badge says so.
+                    "—"
                   ) : (
                     <span className="text-muted-foreground">{t("detail.overview.noRuns")}</span>
                   )}

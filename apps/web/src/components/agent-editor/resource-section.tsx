@@ -73,14 +73,9 @@ export function ResourceSection({
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  // The picker offers what the working space RUNS: activation governs what a
-  // space offers — hints, CLI sync, this list — so the index (placed there and
-  // switched on, every type) is the offer. It is narrower than what a manifest
-  // may declare: resolving a DECLARED dependency name stays org-wide (RBAC
-  // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
-  // package that space does not run, and the entry below stays visible for it.
-  // The definition is the package's, the same in every space: in « Tous les
-  // espaces » the offer is what runs in any space the reader reaches.
+  // The picker offers the index, what the working space runs (in « Tous les espaces », any space
+  // the reader reaches: the definition is the same everywhere). A declared dependency resolves
+  // org-wide (RBAC §6.9), so one outside the index stays listed below.
   const { on: anySpace } = useOverviewMode();
   const { data: items, isLoading, error } = usePackageList(type, anySpace);
   // Without the type's read the catalog never loads: the declared

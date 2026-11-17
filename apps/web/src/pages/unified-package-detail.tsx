@@ -13,13 +13,13 @@ import {
   useAgentBundleExport,
   usePackageDownload,
   useVersionInfo,
+  useAgentsAmong,
   type Versioned,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
-import { usePackageActivationState } from "../hooks/use-library";
 import { EmptyState } from "../components/page-states";
 import { UnreadableDetail } from "../components/unreadable-detail";
 import { ApiError } from "../api/client";
@@ -94,30 +94,35 @@ export function UnifiedPackageDetailPage({ type }: { type: "agent" | "skill" }) 
 function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
-  // Only an agent has a narrower read: without `agents:read` a runner launches
-  // it and follows its own runs, but does not see what it is made of.
-  const fullRead = type !== "agent" || can("agents:read");
   const {
     scope,
     name,
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  // Each tab below is fed by a read of its own, none implied by this route. In « Tous les
-  // espaces » the runs and the memory span spaces: some space the reader reaches grants them.
-  const { on: overview } = useOverviewMode();
-  const runSpaces = useAdmittingSpaces("runs");
-  const memoryReach = useSpacesFor({ permission: "persistence:read" });
-  const tabReads = {
-    runs: overview ? runSpaces.length > 0 : canReadRuns(can),
-    memory: memoryReach.offered,
-    usedBy: packageSightPermissions("agent").some(can),
-  };
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
   const detailQuery = usePackageDetail(type, packageId);
   const { data: detail, error } = detailQuery;
+
+  // Each tab below is fed by a read of its own, none implied by this route. In « Tous les
+  // espaces » a tab listing rows across spaces opens where some space admits its list (runs,
+  // agents) or grants its read (memory); the agent's own content where some space it is active
+  // in grants reading it.
+  const { on: overview } = useOverviewMode();
+  const runSpaces = useAdmittingSpaces("runs");
+  const agentSpaces = useAdmittingSpaces("agents");
+  const memoryReach = useSpacesFor({ permission: "persistence:read" });
+  const agentReach = useSpacesFor({ permission: "agents:read" }, detail?.space_ids);
+  const tabReads = {
+    runs: overview ? runSpaces.length > 0 : canReadRuns(can),
+    memory: memoryReach.offered,
+    usedBy: overview ? agentSpaces.length > 0 : packageSightPermissions("agent").some(can),
+  };
+  // Only an agent has a narrower read: without `agents:read` a runner launches
+  // it and follows its own runs, but does not see what it is made of.
+  const fullRead = type !== "agent" || agentReach.offered;
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
   // The model verdict alone: it holds whatever else blocks the run first. Read
   // here, beside the detail, so the alert does not wait for the loading gate.
@@ -164,12 +169,11 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
     (!latestVersionForDiff ||
       hasActualChanges(latestVersionForDiff, currentManifest, currentContent));
 
+  // The agents « Utilisé par » lists, which the overview counts.
+  const usedByIds = pkgDetail?.agents.map((agent) => agent.id);
+  const usedBy = useAgentsAmong(usedByIds, overview);
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // A skill detail carries no `active`; an agent's does, so the query is not mounted there.
-  const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
-    enabled: type !== "agent",
-  });
   // The detail response is the authority on the home contract; `undefined` (not loaded) reads as "no".
   const homeSpaceId = base?.home_space_id;
   const homeWritable = base?.home_writable;
@@ -361,7 +365,6 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
                   onDownload={downloadPackage}
                   onCreateVersion={() => setCreatingVersion(true)}
                   createVersionBlockedReason={unsavedReason}
-                  isActiveHere={isActiveInCurrentSpace}
                   catalogueVersion={catalogueVersion}
                 />
               </>
@@ -455,7 +458,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
                 <PackageOverview
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
                   historical={isHistoricalVersion}
-                  agentCount={pkgDetail.agents.length}
+                  agentCount={!tabReads.usedBy || usedBy.isError ? null : usedBy.data?.length}
                   onOpenFiles={() => setTab("settings")}
                   onOpenUsage={() => setTab("usedBy")}
                 />
@@ -475,7 +478,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
               {!tabReads.usedBy ? (
                 <RoleLimitNotice>{t("detail.roleLimit.usedBy")}</RoleLimitNotice>
               ) : (
-                pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
+                usedByIds && <PackageUsage agentIds={usedByIds} />
               )}
             </DetailTabPanel>
           </>

@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Layers } from "lucide-react";
-import { useAgents } from "../../hooks/use-packages";
+import { useAgentsAmong } from "../../hooks/use-packages";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { agentCardItem, type CardItem } from "../../lib/package-card-item";
 import { useLocalListParams } from "../../lib/list-params";
@@ -17,16 +17,13 @@ import { EmptyState, NoMatchState } from "../page-states";
  * stands: the working space's, or in « Tous les espaces » every reached space's, each naming its
  * space and opening there.
  */
-export function PackageUsage({ agentIds }: { agentIds: string[] }) {
+export function PackageUsage({ agentIds }: { agentIds: readonly string[] }) {
   const { t } = useTranslation("agents");
   const { on } = useOverviewMode();
-  const { data: agents, isLoading, error } = useAgents({ spanning: on });
+  const { data: agents, isLoading, error } = useAgentsAmong(agentIds, on);
   const list = useLocalListParams();
   const columns = usePackageColumns("agent", on);
-  const ids = new Set(agentIds);
-  const items: CardItem[] = (agents ?? [])
-    .filter((agent) => ids.has(agent.id))
-    .map((agent) => agentCardItem(agent));
+  const items: CardItem[] = (agents ?? []).map((agent) => agentCardItem(agent));
   return (
     <>
       <ListToolbar

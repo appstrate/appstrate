@@ -71,7 +71,7 @@ const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
 const ACTIONS_DROPDOWN = read("../package-detail/package-actions-dropdown.tsx");
-const AGENT_DEEDS = read("../package-detail/use-agent-deeds.ts");
+const AGENT_ACTIONS_HOOK = read("../package-detail/use-agent-actions.tsx");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
@@ -105,8 +105,10 @@ describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
     expect(code(AGENT_ACTIONS)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
     expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
-    // With a working space the deed reads the detail; only « Tous les espaces » asks each space.
-    expect(AGENT_DEEDS).toContain("!!detail?.last_run");
+    // With a working space the deed reads the detail; in « Tous les espaces », the spanning reads
+    // the overview shares, never one probe per space.
+    expect(AGENT_ACTIONS_HOOK).toContain("!!detail?.last_run");
+    expect(code(AGENT_ACTIONS_HOOK)).not.toMatch(/useQueries\(|use(FirstRunsPage|Runs)\(/);
   });
 
   it("marks the run lists stale on launch without refetching the page being left", () => {

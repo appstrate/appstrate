@@ -95,18 +95,19 @@ interface SpaceActionOptions {
    */
   preferWorkingSpace?: boolean;
   /**
-   * Read before entering a space other than the working one, so the screen the switch redraws has
-   * what it shows; the space is not entered when it fails, which it reports itself.
+   * Reads, before entering a space other than the working one, what the screen the switch redraws
+   * shows, and resolves to `act` holding it: that is what runs once the space is entered, and
+   * nothing runs when the read fails (it reports itself) or the switch is cancelled.
    */
-  prepare?: (spaceId: string) => Promise<unknown>;
+  prepare?: (spaceId: string, act: () => void) => Promise<() => void>;
 }
 
 /**
  * An action naming no space. `offered`: whether to show it at all. `run(act)`: performs `act` in
  * the space that grants `need`, among `among` when given (out of the mode, the working space);
  * between several it does nothing, the reader choosing in `choose(label, act)`, the menu its
- * trigger becomes — `undefined` when there is nothing to choose. `link(to)`: a link going to `to`
- * the same way.
+ * trigger becomes — `undefined` when there is nothing to choose. `target`: in the mode, the one
+ * space `run` acts in without asking. `link(to)`: a link going to `to` the same way.
  */
 export function useSpaceAction(
   need: SpaceNeed,
@@ -118,11 +119,13 @@ export function useSpaceAction(
   const navigate = useNavigate();
   const workingSpaceId = useCurrentSpaceId();
   const choice = on ? spaceChoice(eligible, preferWorkingSpace ? workingSpaceId : null) : null;
+  const target =
+    choice?.kind === "one" ? eligible.find((space) => space.id === choice.spaceId) : undefined;
 
   const actIn = (spaceId: string, act: () => void) => {
     if (!prepare || spaceId === spaceStore.getState().id) return actInSpace(spaceId, act);
-    prepare(spaceId).then(
-      () => actInSpace(spaceId, act),
+    prepare(spaceId, act).then(
+      (prepared) => actInSpace(spaceId, prepared),
       () => undefined,
     );
   };
@@ -133,7 +136,9 @@ export function useSpaceAction(
   };
 
   return {
+    on,
     offered,
+    target,
     run,
     /** The menu of the spaces to act in, labelled `label` (« Créer dans… »); `undefined` unless the reader must choose. */
     choose: (label: string, act: () => void): SpaceChoiceMenu | undefined =>

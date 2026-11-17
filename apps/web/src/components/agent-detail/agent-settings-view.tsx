@@ -21,7 +21,9 @@ import type { Versioned } from "../../hooks/use-packages";
 import { RoleLimitNotice } from "../role-limit-notice";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAdmittingSpaces, useOverviewMode } from "../../hooks/use-overview-mode";
-import { agentConnectionsTabVisible } from "../../lib/route-access";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpacesFor } from "../../hooks/use-space-action";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import {
   AGENT_DEFINITION_SECTIONS,
   type AgentDefinitionSection,
@@ -30,7 +32,7 @@ import {
   type ConfigurationSection,
 } from "../../lib/settings-section-href";
 import { SettingsRailView } from "../settings/settings-rail-view";
-import { AgentConfigurationView } from "./agent-configuration-view";
+import { AgentConfigurationView, ConfigurationSpace } from "./agent-configuration-view";
 import { EditorPanelSkeleton } from "../loading-skeletons";
 import {
   PackageCommonSection,
@@ -91,6 +93,21 @@ const isDefinitionSection = (section: string) =>
 /** A system agent has no history of its own to browse. */
 const applies = (section: string, isSystem: boolean) => section !== "versions" || !isSystem;
 
+/** The permission a section asks of the space it is read or set from. */
+const SECTION_PERMISSION: Partial<Record<AgentSettingsSection, string>> = {
+  model: "agents:configure",
+  proxy: "agents:configure",
+  inputs: "agents:configure",
+  // Its integration reads are not implied by the route.
+  connections: "integrations:read",
+  files: "agents:read",
+  versions: "agents:read",
+};
+
+/** The sections set in one space (`space_packages`). */
+const isSpaceSetting = (section: string) =>
+  section === "model" || section === "proxy" || section === "inputs" || section === "connections";
+
 export function AgentSettingsView({
   packageId,
   detail,
@@ -108,29 +125,38 @@ export function AgentSettingsView({
 }) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
-  // The schedules section spans spaces in « Tous les espaces »: some space grants reading them.
+  const workingSpaceId = useCurrentSpaceId();
+  const spaceLabelOf = useSpaceLabelOf();
+  // In « Tous les espaces » a section opens where some space of the agent's grants it, and the
+  // schedules, which span spaces, where some space admits their list. With a space selected,
+  // each is that space's verdict.
   const { on: overview } = useOverviewMode();
   const scheduleSpaces = useAdmittingSpaces("schedules");
   const readsSchedules = overview ? scheduleSpaces.length > 0 : can("schedules:read");
+  const configures = useSpacesFor({ permission: "agents:configure" }, detail.space_ids).offered;
+  const readsIntegrations = useSpacesFor(
+    { permission: "integrations:read" },
+    detail.space_ids,
+  ).offered;
+  const readsAgent = useSpacesFor({ permission: "agents:read" }, detail.space_ids).offered;
+  const grants: Record<string, boolean | undefined> = {
+    "agents:configure": configures,
+    "integrations:read": readsIntegrations,
+    "agents:read": readsAgent,
+  };
   // Write authority is the package's HOME space (`home_writable`), never the
   // space being browsed; nobody writes a system agent or a pinned version.
   const canEditDefinition = !!detail.home_writable && !isHistorical;
-  // Three permissions behind one rail: configuring the agent, reading its
-  // schedules, reading what it is made of. Connections are open to anyone who
-  // reaches the agent.
   // Every section stays in the rail for every role; one the role does not open
   // is marked with a lock and its panel says why (`RoleLimitNotice`). Only a
   // section that does not apply to this agent at all leaves the rail.
   const isSystem = detail.source === "system";
   const visible = (section: AgentSettingsSection) => {
-    if (section === "model" || section === "proxy" || section === "inputs") {
-      return can("agents:configure");
-    }
-    if (section === "schedules") return readsSchedules;
-    if (section === "connections") return agentConnectionsTabVisible(can);
-    if (section === "files") return can("agents:read");
+    const permission = SECTION_PERMISSION[section];
     // A system agent has no history of its own to browse.
-    if (section === "versions") return can("agents:read") && detail.source !== "system";
+    if (section === "versions" && detail.source === "system") return false;
+    if (permission) return !!grants[permission];
+    if (section === "schedules") return readsSchedules;
     // The definition is edited where it is read, by whoever may write it, on
     // an org-owned draft. Everyone else keeps Fichiers to read it.
     if (isDefinitionSection(section)) return canEditDefinition;
@@ -167,8 +193,39 @@ export function AgentSettingsView({
       resolve={resolve}
       definitionSections={AGENT_DEFINITION_SECTIONS}
     >
-      {({ active, file, href }) =>
-        !visible(active) ? (
+      {({ active, file, href }) => {
+        const permission = SECTION_PERMISSION[active];
+        const shownFrom = workingSpaceId && detail.space_ids.includes(workingSpaceId);
+        // In the mode, a section another space opens, from a space the header does not name or
+        // whose role refuses it: the space to show it from comes first.
+        const elsewhere =
+          overview &&
+          visible(active) &&
+          !!permission &&
+          ((isSpaceSetting(active) && !shownFrom) || !can(permission));
+        if (elsewhere) {
+          return (
+            <div className="p-6">
+              <ConfigurationSpace
+                packageId={packageId}
+                spaceIds={detail.space_ids}
+                permission={permission}
+              />
+              {shownFrom || !isSpaceSetting(active) ? (
+                <RoleLimitNotice>
+                  {t("detail.roleLimit.sectionIn", {
+                    space: spaceLabelOf(workingSpaceId) ?? "",
+                  })}
+                </RoleLimitNotice>
+              ) : (
+                <p className="text-muted-foreground text-sm">
+                  {t("detail.configuration.pickSpaceHint")}
+                </p>
+              )}
+            </div>
+          );
+        }
+        return !visible(active) ? (
           <div className="p-6">
             <RoleLimitNotice>
               {t(
@@ -202,9 +259,10 @@ export function AgentSettingsView({
             isHistorical={isHistorical}
             // Past the branches above, only configuration sections remain.
             section={active as ConfigurationSection}
+            permission={permission}
           />
-        )
-      }
+        );
+      }}
     </SettingsRailView>
   );
 }

@@ -24,7 +24,8 @@ export function isNeverPublishedForReader(detail: AgentDetail | undefined): bool
   return !!detail && detail.definition === "draft" && !detail.home_writable;
 }
 
-type AgentLaunchRefusal = "detail.titleNotActive" | "detail.titleNeverPublished";
+type AgentLaunchRefusal =
+  "detail.titleNotActive" | "detail.titleNotActiveAnySpace" | "detail.titleNeverPublished";
 type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
 type AgentRunBlocker =
   AgentLaunchRefusal | "detail.titleEmptyPrompt" | "detail.titleMissingSkill" | AgentModelBlocker;
@@ -32,6 +33,7 @@ type AgentRunBlocker =
 /** Every blocker key, checked exhaustive by `satisfies`: the run button renders `t(blocker)`, so a test holds each in both locales. */
 export const AGENT_RUN_BLOCKERS = Object.keys({
   "detail.titleNotActive": true,
+  "detail.titleNotActiveAnySpace": true,
   "detail.titleNeverPublished": true,
   "detail.titleEmptyPrompt": true,
   "detail.titleMissingSkill": true,
@@ -53,6 +55,7 @@ export function agentLaunchRefusal(
   { anySpace = false }: VerdictScope = {},
 ): AgentLaunchRefusal | null {
   if (!anySpace && !detail.active) return "detail.titleNotActive";
+  if (anySpace && detail.space_ids.length === 0) return "detail.titleNotActiveAnySpace";
   if (isNeverPublishedForReader(detail)) return "detail.titleNeverPublished";
   return null;
 }

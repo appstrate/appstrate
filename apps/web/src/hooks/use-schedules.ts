@@ -83,22 +83,28 @@ export function useSchedules(
   return useQuery({
     // Key pinned (under the prefix use-global-run-sync invalidates).
     queryKey: scheduleKeys.listForAgent(scope.orgId, scope.keySpace, packageId),
-    queryFn: async (): Promise<EnrichedSchedule[]> => {
-      if (scope.acrossOrgId) {
-        const { data } = await client.GET("/api/orgs/{orgId}/schedules", {
-          params: { path: { orgId: scope.acrossOrgId }, query: { packageId: packageId! } },
-        });
-        return data?.data ?? [];
-      }
-      const { scope: packageScope, name } = splitPackageRef(packageId!);
-      const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
-        params: { path: { scope: packageScope, name } },
-      });
-      return data?.data ?? [];
-    },
+    queryFn: () => fetchAgentSchedules(packageId!, scope.acrossOrgId),
     enabled: scope.enabled && !!packageId,
     refetchInterval: scope.refetchInterval,
   });
+}
+
+/** An agent's schedules in the current space, or every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchAgentSchedules(
+  packageId: string,
+  acrossOrgId: string | null,
+): Promise<EnrichedSchedule[]> {
+  if (acrossOrgId) {
+    const { data } = await client.GET("/api/orgs/{orgId}/schedules", {
+      params: { path: { orgId: acrossOrgId }, query: { packageId } },
+    });
+    return data?.data ?? [];
+  }
+  const { scope, name } = splitPackageRef(packageId);
+  const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
+    params: { path: { scope, name } },
+  });
+  return data?.data ?? [];
 }
 
 /**

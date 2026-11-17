@@ -8,12 +8,24 @@
  * With a space selected, every deed acts there as before.
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
-installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+installFakeStorage({
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  location: { origin: "https://app.example.test" },
+  matchMedia: () => ({ matches: false, addEventListener: () => {} }),
+});
+await import("sonner");
+Object.defineProperty(globalThis, "document", {
+  configurable: true,
+  value: { documentElement: { classList: { add: () => {}, remove: () => {} } } },
+});
+afterAll(() => {
+  Reflect.deleteProperty(globalThis, "document");
+});
 
 const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
@@ -23,8 +35,10 @@ const { spaceStore } = await import("../../stores/space-store.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
 const { overviewStore } = await import("../../stores/overview-store.ts");
 const { packageDetailQueryOptions } = await import("../../hooks/use-packages.ts");
+const { ACROSS_SPACES, paginatedRunsKeys, persistenceKeys } =
+  await import("../../lib/query-keys.ts");
 const { usePackageActions } = await import("../package-detail/use-package-actions.tsx");
-const { useBundleDeed, useClearRunsDeed } = await import("../package-detail/use-agent-deeds.ts");
+const { useAgentActions } = await import("../package-detail/use-agent-actions.tsx");
 const { AgentRunButton } = await import("../package-detail/agent-run-button.tsx");
 
 await i18nReady;
@@ -47,11 +61,13 @@ const space = (id: string, permissions: string[]) => ({
   role: null,
 });
 
+const DEEDS = ["agents:read", "agents:write", "agents:run", "runs:delete", "runs:read-all"];
+
 /** The working space (Atelier, hidden in the mode) and two others. */
 const SPACES = [
   space("spc_a", ["agents:read", "agents:run"]),
-  space("spc_b", ["agents:read", "agents:write", "agents:run", "runs:delete", "runs:read-all"]),
-  space("spc_c", ["agents:read", "agents:write", "agents:run", "runs:delete", "runs:read-all"]),
+  space("spc_b", [...DEEDS, "schedules:write", "persistence:read", "persistence:delete"]),
+  space("spc_c", [...DEEDS, "persistence:read", "persistence:delete"]),
 ];
 
 function detail(over: Partial<AgentDetail> = {}): AgentDetail {
@@ -181,18 +197,20 @@ function renderIn(
 
 const NONE = { offered: false };
 
-/** The menu's visible entries: `id|label|spaces of its sub-menu`. */
+/** The menu's visible entries: `id|label|spaces of its sub-menu`, `data-disabled` when greyed. */
 function MenuProbe({
   isActiveHere,
   source = "local",
+  deletable = false,
 }: {
   isActiveHere?: boolean;
   source?: AgentDetail["source"];
+  deletable?: boolean;
 }) {
   const { sections } = usePackageActions({
     packageId: PACKAGE_ID,
     type: "agent",
-    detail: detail({ source }),
+    detail: detail({ source, home_deletable: deletable }),
     isHistoricalVersion: false,
     isActiveHere,
     agent: {
@@ -209,7 +227,7 @@ function MenuProbe({
       {sections
         .flatMap((section) => section.entries)
         .map((entry) => (
-          <li key={entry.id}>
+          <li key={entry.id} data-disabled={entry.disabled ? "" : undefined}>
             {`${entry.id}|${entry.label}|${entry.inSpaces?.spaces.map((s) => s.id).join(",") ?? ""}`}
           </li>
         ))}
@@ -218,7 +236,9 @@ function MenuProbe({
 }
 
 const entry = (html: string, id: string) =>
-  html.match(new RegExp(`<li>${id}\\|([^<]*)</li>`))?.[1] ?? null;
+  html.match(new RegExp(`<li[^>]*>${id}\\|([^<]*)</li>`))?.[1] ?? null;
+const disabledEntry = (html: string, id: string) =>
+  new RegExp(`<li data-disabled="">${id}\\|`).test(html);
 
 describe("the Actions menu in the mode", () => {
   it("asks the space of each placement deed, from the organization library", () => {
@@ -234,7 +254,7 @@ describe("the Actions menu in the mode", () => {
   it("asks the space a copy goes to, among those the reader writes agents in", () => {
     // A system agent is duplicated, never edited in place.
     expect(entry(renderIn(true, <MenuProbe source="system" />), "fork")).toBe(
-      "Dupliquer|spc_b,spc_c",
+      "Dupliquer dans…|spc_b,spc_c",
     );
   });
 
@@ -262,57 +282,147 @@ describe("the Actions menu in the mode", () => {
   });
 });
 
-/** One deed of the agent: `offered|label|spaces of its sub-menu`. */
-function DeedProbe({ of }: { of: "clearRuns" | "bundle" }) {
-  const agent = detail();
-  const deeds = {
-    clearRuns: useClearRunsDeed(PACKAGE_ID, agent, () => {}),
-    bundle: useBundleDeed(agent, () => {}),
-  };
-  const deed = deeds[of];
+type AgentDeed = "runWithOptions" | "addSchedule" | "bundle" | "clearRuns" | "clearMemories";
+
+/** One deed of the agent menu: `offered|label|spaces of its sub-menu|disabled`. */
+function DeedProbe({ of }: { of: AgentDeed }) {
+  const { dropdown } = useAgentActions({
+    packageId: PACKAGE_ID,
+    isHistoricalVersion: false,
+    downloadVersion: "1.0.0",
+    downloadPackage: () => {},
+    downloadBundle: () => {},
+    onCreateVersion: () => {},
+  });
+  const deed = dropdown?.agent?.[of];
+  if (!deed) return <p>none</p>;
   return (
-    <p>{`${deed.offered}|${deed.label ?? ""}|${deed.inSpaces?.spaces.map((s) => s.id).join(",") ?? ""}`}</p>
+    <p>{`${deed.offered}|${deed.label ?? ""}|${deed.inSpaces?.spaces.map((s) => s.id).join(",") ?? ""}|${deed.disabled ? "disabled" : ""}`}</p>
   );
 }
 
-const runsKey = (spaceId: string) =>
-  $api.queryOptions("get", "/api/agents/{scope}/{name}/runs", {
-    params: {
-      path: { scope: "@acme", name: "reporter" },
-      query: { limit: 1 },
-      header: { "X-Org-Id": "org_1", "X-Space-Id": spaceId },
-    },
-  }).queryKey;
+const detailKey = (spaceId: string) =>
+  packageDetailQueryOptions("agent", { orgId: "org_1", spaceId }, PACKAGE_ID).queryKey;
 
-describe("« Supprimer les runs » in the mode", () => {
-  it("is offered in the spaces where the agent has runs the reader may delete, naming one", () => {
-    const html = renderIn(true, <DeedProbe of="clearRuns" />, (qc) => {
-      qc.setQueryData(runsKey("spc_b"), {
+/** The agent's runs across spaces: its latest one and those in flight, as the overview reads them. */
+function seedRuns(qc: QueryClient, { latest, inFlight }: { latest: string[]; inFlight: string[] }) {
+  const page = (spaceIds: string[]) => ({
+    pages: [
+      {
         object: "list",
-        data: [{ id: "run_1" }],
+        data: spaceIds.map((spaceId, i) => ({ id: `run_${i}`, status: "running", spaceId })),
+        total: spaceIds.length,
         hasMore: false,
-      });
-      qc.setQueryData(runsKey("spc_c"), { object: "list", data: [], hasMore: false });
-    });
-    expect(html).toContain("true|Supprimer les runs dans Studio|");
+      },
+    ],
+    pageParams: [undefined],
+  });
+  const key = (status: string | undefined, limit: number) =>
+    paginatedRunsKeys.list(
+      "org_1",
+      ACROSS_SPACES,
+      `/agents/${PACKAGE_ID}/runs`,
+      undefined,
+      undefined,
+      status,
+      undefined,
+      undefined,
+      limit,
+    );
+  qc.setQueryData(key(undefined, 1), page(latest));
+  qc.setQueryData(key("pending,running", 25), page(inFlight));
+}
+
+const seedMemories = (qc: QueryClient, spaceIds: string[]) =>
+  qc.setQueryData(
+    persistenceKeys.list("org_1", ACROSS_SPACES, "agent-memories", PACKAGE_ID, { kind: "memory" }),
+    spaceIds.map((spaceId, i) => ({
+      id: i,
+      content: "note",
+      runId: null,
+      actor_type: "shared",
+      actor_id: null,
+      createdAt: null,
+      spaceId,
+    })),
+  );
+
+const probe = (overview: boolean, of: AgentDeed, seed: (qc: QueryClient) => void = () => {}) =>
+  renderIn(overview, <DeedProbe of={of} />, (qc) => {
+    qc.setQueryData(detailKey("spc_a"), detail());
+    seed(qc);
   });
 
-  it("is absent when no such space holds a run, whatever the hidden space says", () => {
-    const html = renderIn(true, <DeedProbe of="clearRuns" />, (qc) => {
-      qc.setQueryData(runsKey("spc_b"), { object: "list", data: [], hasMore: false });
-      qc.setQueryData(runsKey("spc_c"), { object: "list", data: [], hasMore: false });
-    });
-    expect(html).toContain("<p>false||</p>");
+describe("the agent's deeds in the mode", () => {
+  it("ask the space among several, the menu labelled « … dans… »", () => {
+    expect(probe(true, "runWithOptions")).toContain(
+      "<p>true|Lancer avec options dans…|spc_b,spc_c|</p>",
+    );
+  });
+
+  it("name the one space they act in", () => {
+    // Studio alone grants writing schedules.
+    expect(probe(true, "addSchedule")).toContain("<p>true|Planifier dans Studio||</p>");
+  });
+
+  it("CONTROL: act in the working space under their own label out of the mode", () => {
+    expect(probe(false, "runWithOptions")).toContain("<p>true|||</p>");
+    expect(probe(false, "addSchedule")).toContain("<p>false|||</p>");
+  });
+
+  it("offer « Supprimer les runs » where runs may be deleted and none is in flight", () => {
+    // Runs in Studio and Coffre may be deleted; Coffre has one in flight.
+    const html = probe(true, "clearRuns", (qc) =>
+      seedRuns(qc, { latest: ["spc_c"], inFlight: ["spc_c"] }),
+    );
+    expect(html).toContain("<p>true|Supprimer les runs dans Studio||</p>");
+  });
+
+  it("hold « Supprimer les runs » back while every such space has a run in flight", () => {
+    const html = probe(true, "clearRuns", (qc) =>
+      seedRuns(qc, { latest: ["spc_b"], inFlight: ["spc_b", "spc_c"] }),
+    );
+    expect(html).toContain("|disabled</p>");
+  });
+
+  it("offer no « Supprimer les runs » for an agent that never ran, whatever the hidden space says", () => {
+    expect(probe(true, "clearRuns", (qc) => seedRuns(qc, { latest: [], inFlight: [] }))).toContain(
+      "<p>false|||</p>",
+    );
+  });
+
+  it("offer « Supprimer les mémoires » in the spaces that hold memory and grant deleting it", () => {
+    expect(probe(true, "clearMemories", (qc) => seedMemories(qc, ["spc_b", "spc_b"]))).toContain(
+      "<p>true|Supprimer les mémoires dans Studio||</p>",
+    );
+    expect(probe(true, "clearMemories", (qc) => seedMemories(qc, ["spc_b", "spc_c"]))).toContain(
+      "<p>true|Supprimer les mémoires dans…|spc_b,spc_c|</p>",
+    );
+    expect(probe(true, "clearMemories", (qc) => seedMemories(qc, []))).toContain("<p>false|||</p>");
+  });
+
+  it("offer the bundle from a space the agent runs in, though off in the hidden one, naming none", () => {
+    expect(probe(true, "bundle")).toContain("<p>true|||</p>");
+  });
+
+  it("CONTROL: offer the bundle out of the mode only where the agent is active", () => {
+    expect(probe(false, "bundle")).toContain("<p>false|||</p>");
   });
 });
 
-describe("« Télécharger le bundle »", () => {
-  it("is offered in the mode where the agent runs in a space the reader reads, though off in the hidden one", () => {
-    expect(renderIn(true, <DeedProbe of="bundle" />)).toContain("<p>true||</p>");
+describe("« Supprimer » in the mode", () => {
+  const runsInFlight = (inFlight: string[]) => (qc: QueryClient) =>
+    seedRuns(qc, { latest: inFlight, inFlight });
+
+  it("waits for the agent's runs in flight in every space", () => {
+    const html = renderIn(true, <MenuProbe deletable />, runsInFlight(["spc_c"]));
+    expect(disabledEntry(html, "delete")).toBe(true);
   });
 
-  it("CONTROL: follows the working space out of the mode", () => {
-    expect(renderIn(false, <DeedProbe of="bundle" />)).toContain("<p>false||</p>");
+  it("is open once no run is in flight anywhere, whatever the hidden space counts", () => {
+    const html = renderIn(true, <MenuProbe deletable />, runsInFlight([]));
+    expect(entry(html, "delete")).not.toBeNull();
+    expect(disabledEntry(html, "delete")).toBe(false);
   });
 });
 
@@ -332,6 +442,16 @@ describe("« Lancer » in the mode", () => {
     );
     expect(button(html)).not.toContain('disabled=""');
     expect(html).not.toContain(i18n.t("detail.titleNotActive", { ns: "agents" }));
+  });
+
+  it("is held back, saying so, when the agent is active in none of the reader's spaces", () => {
+    const html = renderIn(
+      true,
+      <AgentRunButton packageId={PACKAGE_ID} versionLabel={undefined} />,
+      (qc) => qc.setQueryData(detailKey("spc_a"), detail({ space_ids: [] })),
+    );
+    expect(button(html)).toContain('disabled=""');
+    expect(html).toContain(i18n.t("detail.titleNotActiveAnySpace", { ns: "agents" }));
   });
 
   it("CONTROL: is held back out of the mode, the working space being named", () => {

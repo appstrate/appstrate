@@ -127,6 +127,41 @@ export function useFirstRunsPage(options: UseRunsOptions) {
   return { ...query, data: query.data?.pages[0] };
 }
 
+/**
+ * An agent's latest run in every space the reader reaches (« Tous les espaces »): the overview's
+ * « Dernier run » and whether the agent ran at all. One query, whoever asks.
+ */
+export function useAgentLatestRunAcross(packageId: string, { enabled }: { enabled: boolean }) {
+  return useFirstRunsPage({ packageId, spanning: true, limit: 1, enabled });
+}
+
+/** Enough runs in flight on one page to name the spaces they run in. */
+const IN_FLIGHT_PAGE = 25;
+const IN_FLIGHT: RunStatus[] = ["pending", "running"];
+
+/**
+ * An agent's runs in flight (`pending`, `running`) in every space the reader reaches: the count
+ * the overview shows and the verdicts of « Supprimer » and « Supprimer les runs » in « Tous les
+ * espaces », from one query. `busyIn(spaceId)`: a run is in flight there, or might be (the page
+ * not loaded, or not holding them all).
+ */
+export function useAgentRunsInFlightAcross(packageId: string, { enabled }: { enabled: boolean }) {
+  const query = useFirstRunsPage({
+    packageId,
+    spanning: true,
+    status: IN_FLIGHT,
+    limit: IN_FLIGHT_PAGE,
+    enabled,
+  });
+  const page = query.data;
+  return {
+    ...query,
+    total: page?.total,
+    busyIn: (spaceId: string) =>
+      !page || page.hasMore || page.data.some((run) => run.spaceId === spaceId),
+  };
+}
+
 /** One page's question: the hook's filters, the cursor, and the org when it spans its spaces. */
 type RunPageRequest = Omit<UseRunsOptions, "spanning" | "enabled"> & {
   limit: number;

@@ -27,8 +27,7 @@ const { spaceStore } = await import("../../stores/space-store.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
 const { overviewStore } = await import("../../stores/overview-store.ts");
 const { NavOrg } = await import("../../components/nav-org.tsx");
-const { PackageDetailSpaces } =
-  await import("../../components/package-detail/package-detail-bar.tsx");
+const { PackageDetailSpaces } = await import("../../components/package-spaces.tsx");
 const { useActivationChoice } = await import("../../hooks/use-activation-choice.ts");
 const { linkedSpaceIn } = await import("../../hooks/use-current-space.ts");
 const { useOverlayState, withBackground } = await import("../../lib/modal-route.ts");

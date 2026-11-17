@@ -59,6 +59,7 @@ export function ForkPackageModal({ onClose, packageId, defaultName, type }: Prop
 
   return (
     <FormModal
+      inSpace
       onClose={onClose}
       title={t("fork.title")}
       onSubmit={onSubmit}

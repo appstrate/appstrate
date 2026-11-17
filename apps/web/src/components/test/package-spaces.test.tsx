@@ -14,8 +14,7 @@ import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import { PackageSpaces } from "../package-spaces.tsx";
-import { AgentDetailSpaces } from "../agent-detail/agent-detail-bar.tsx";
+import { PackageDetailSpaces, PackageSpaces } from "../package-spaces.tsx";
 import { overviewStore } from "../../stores/overview-store.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
@@ -110,7 +109,7 @@ describe("PackageSpaces", () => {
   });
 });
 
-describe("AgentDetailSpaces", () => {
+describe("PackageDetailSpaces", () => {
   const detail = { homeSpaceId: "spc_b", spaceIds: ["spc_b", "spc_a"], source: "local" };
 
   it("names the agent's spaces as its index row does, the home first and the others stacked", () => {
@@ -120,7 +119,7 @@ describe("AgentDetailSpaces", () => {
         chosen: overview ? { "u_1:org_1": true } : {},
       });
       try {
-        const html = renderInSpaces(<AgentDetailSpaces detail={detail} />);
+        const html = renderInSpaces(<PackageDetailSpaces detail={detail} />);
         expect(html).toContain(">Studio<");
         expect(html).toContain('data-testid="space-tile-stack"');
         expect(html).toContain('aria-label="Partagé avec Atelier"');

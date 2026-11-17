@@ -19,6 +19,7 @@ import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { NewScheduleModal } from "../new-schedule-modal";
+import { deedEntry, deedOfAction, spaceDeedLabels } from "./space-deed";
 import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
@@ -120,9 +121,13 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
               <EmptyStateAction
                 action={{
                   label: t("schedule.titleNew"),
-                  onSelect: () => create.run(openNew),
-                  inSpaces: create.choose(t("common:spaceChoice.schedule"), openNew),
-                  hidden: !create.offered,
+                  ...deedEntry(
+                    deedOfAction(
+                      create,
+                      spaceDeedLabels(t, "spaceChoice.schedule", "spaceChoice.scheduleIn"),
+                      openNew,
+                    ),
+                  ),
                 }}
               />
             </EmptyState>

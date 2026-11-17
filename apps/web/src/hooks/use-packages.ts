@@ -216,7 +216,8 @@ export function packageDetailQueryOptions<T extends PackageType>(
       id,
       version ?? null,
     ),
-    queryFn: () => fetchPackageDetail(type, id, version),
+    // Read FROM the key's space: a read made before entering it must not carry the working space.
+    queryFn: () => fetchPackageDetail(type, id, version, scope.spaceId ?? undefined),
   };
 }
 
@@ -317,6 +318,20 @@ export function useAgents({ spanning = false, enabled = true } = {}) {
   });
 }
 
+/**
+ * The agents of `agentIds` (a package's dependents, organization-wide) that the agent index lists
+ * where the reader stands (`spanning` as {@link useAgents}): what a package's « Utilisé par » lists
+ * and its overview counts. `data` is `undefined` until both are known; no `agentIds`, no read.
+ */
+export function useAgentsAmong(agentIds: readonly string[] | undefined, spanning: boolean) {
+  const query = useAgents({ spanning, enabled: agentIds !== undefined });
+  const ids = new Set(agentIds);
+  return {
+    ...query,
+    data: agentIds && query.data ? query.data.filter((agent) => ids.has(agent.id)) : undefined,
+  };
+}
+
 /** The current space's agent index, or every space's of `acrossOrgId`. Exported for its test. */
 export async function fetchAgents(acrossOrgId: string | null): Promise<AgentListItem[]> {
   const { data } = acrossOrgId
@@ -342,14 +357,16 @@ export async function fetchAgents(acrossOrgId: string | null): Promise<AgentList
 
 // --- Package download ---
 
+/** Downloads one version's `.afps`, read in `spaceId` (a space where the package is readable), the current space when absent. */
 export function usePackageDownload(scope: string | undefined, name: string | undefined) {
   return useCallback(
-    async (version: string) => {
+    async (version: string, spaceId?: string) => {
       if (!scope || !name) return;
       await downloadOrToast(
         () =>
           client.GET("/api/packages/{scope}/{name}/{version}/download", {
             params: { path: { scope, name, version } },
+            ...(spaceId ? { headers: { "X-Space-Id": spaceId } } : {}),
             parseAs: "blob",
           }),
         `${stripScope(scope)}-${name}-${version}.afps`,
@@ -359,15 +376,20 @@ export function usePackageDownload(scope: string | undefined, name: string | und
   );
 }
 
-/** Exports an agent as a multi-package `.afps-bundle` via `downloadOrToast`; `version` pins a release, defaulting to the one resolved in the current space. */
+/**
+ * Exports an agent as a multi-package `.afps-bundle` via `downloadOrToast`; `version` pins a
+ * release. The export answers in a space where the agent is active: `spaceId` names it, the
+ * current space when absent.
+ */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
   return useCallback(
-    async (version?: string) => {
+    async (version?: string, spaceId?: string) => {
       if (!scope || !name) return;
       await downloadOrToast(
         () =>
           client.GET("/api/agents/{scope}/{name}/bundle", {
             params: { path: { scope, name }, query: { version } },
+            ...(spaceId ? { headers: { "X-Space-Id": spaceId } } : {}),
             parseAs: "blob",
           }),
         `${stripScope(scope)}-${name}.afps-bundle`,

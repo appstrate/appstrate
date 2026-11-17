@@ -9,7 +9,7 @@ import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { PackageOriginMeta } from "../package-origin-meta";
-import { PackageSpaces } from "../package-spaces";
+import { PackageDetailSpaces } from "../package-spaces";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
 interface AgentDetailBarDetail {
@@ -78,7 +78,7 @@ export function AgentDetailBar<T extends string>({
         />
       }
       trail={[listCrumb]}
-      spaces={detail.spaceIds.length > 0 ? <AgentDetailSpaces detail={detail} /> : undefined}
+      spaces={detail.spaceIds.length > 0 ? <PackageDetailSpaces detail={detail} /> : undefined}
       meta={
         <>
           <DetailBarId id={detail.id} />
@@ -87,23 +87,6 @@ export function AgentDetailBar<T extends string>({
       }
       actions={actions}
       tabs={tabs}
-    />
-  );
-}
-
-/** The spaces the agent is active in, as its index row names them: the home's tile and name first, the others stacked behind and counted. Exported for its test. */
-export function AgentDetailSpaces({
-  detail,
-}: {
-  detail: Pick<AgentDetailBarDetail, "homeSpaceId" | "spaceIds" | "source">;
-}) {
-  return (
-    <PackageSpaces
-      item={{
-        homeSpaceId: detail.homeSpaceId,
-        spaceIds: [...detail.spaceIds],
-        source: detail.source === "system" ? "system" : "local",
-      }}
     />
   );
 }

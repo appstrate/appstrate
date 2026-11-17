@@ -16,7 +16,6 @@ import { useAgentSpaceAction } from "../../hooks/use-agent-run-space";
 import { useAgentModelBlocker } from "../../hooks/use-agent-readiness";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { useSpacesFor } from "../../hooks/use-space-action";
 import { useSpaces } from "../../hooks/use-spaces";
 import { spaceLabel } from "../../lib/space-label";
 import type { ConfigurationSection } from "../../lib/settings-section-href";
@@ -51,26 +50,30 @@ const CONFIGURATION_SECTION_TEXT: Record<
 const isSpaceSetting = (section: ConfigurationSection) => section !== "schedules";
 
 /**
- * The space whose configuration the view shows, in « Tous les espaces »: the working space, named,
- * and the menu of the agent's other spaces the reader configures. Picking one enters it, the
- * agent already read there, so every read and write below is that space's.
+ * The space a section is shown from, in « Tous les espaces »: one of the agent's active spaces
+ * (`spaceIds`, the header's tiles), named, with the menu of the others that grant `permission`.
+ * The working space is named only when it is one of them, so the line never names a space the
+ * header does not; otherwise the button asks for one. Picking one enters it, the agent already
+ * read there, so every read and write below is that space's.
  */
-function ConfigurationSpace({
+export function ConfigurationSpace({
   packageId,
   spaceIds,
+  permission,
 }: {
   packageId: string;
   spaceIds: readonly string[];
+  permission: string;
 }) {
   const { t } = useTranslation("agents");
   const workingSpaceId = useCurrentSpaceId();
-  const enter = useAgentSpaceAction(packageId, "agents:configure", spaceIds, {
+  const enter = useAgentSpaceAction(packageId, permission, spaceIds, {
     preferWorkingSpace: false,
   });
-  const { eligible } = useSpacesFor({ permission: "agents:configure" }, spaceIds);
+  const named = !!workingSpaceId && spaceIds.includes(workingSpaceId);
   const choice = enter.choose(t("detail.configuration.spaceChoice"), () => enter.enteredDetail());
-  // Elsewhere than here: a menu between several, the one other space at a click.
-  const elsewhere = eligible.some((space) => space.id !== workingSpaceId);
+  // A space to go to: a menu between several, the one other space at a click.
+  const elsewhere = enter.target ? enter.target.id !== workingSpaceId : !!choice;
 
   return (
     <div className="mb-6 flex flex-wrap items-center gap-2 text-sm" data-configuration-space>
@@ -84,13 +87,13 @@ function ConfigurationSpace({
             disabled={enter.entering}
             onClick={choice ? undefined : () => enter.run(() => enter.enteredDetail())}
           >
-            <SpaceNameOf spaceId={workingSpaceId} />
+            {named ? <SpaceNameOf spaceId={workingSpaceId} /> : t("detail.configuration.pickSpace")}
             <ChevronsUpDown className="text-muted-foreground" aria-hidden />
           </Button>
         </SpaceChoiceDropdown>
-      ) : (
+      ) : named ? (
         <SpaceNameOf spaceId={workingSpaceId} size="md" />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -107,9 +110,12 @@ export function AgentConfigurationView({
   inputWrapperOverride,
   isHistorical,
   section,
+  permission,
 }: {
   packageId: string;
   detail: AgentDetail;
+  /** What the section asks of the space it is set in; absent for the schedules, which span them. */
+  permission?: string;
   /** The pinned version's input wrapper, when a version is pinned. */
   inputWrapperOverride?: SchemaWrapper;
   isHistorical?: boolean;
@@ -149,7 +155,13 @@ export function AgentConfigurationView({
 
   return (
     <section className="min-w-0 p-6">
-      {namesSpace && <ConfigurationSpace packageId={packageId} spaceIds={detail.space_ids} />}
+      {namesSpace && permission && (
+        <ConfigurationSpace
+          packageId={packageId}
+          spaceIds={detail.space_ids}
+          permission={permission}
+        />
+      )}
       {namesSpace && section === "model" && <SpaceModelAlert packageId={packageId} />}
       <SettingsHeading title={t(text.labelKey)} description={description} />
       <div>{sectionBody}</div>

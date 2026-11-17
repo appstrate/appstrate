@@ -68,3 +68,23 @@ export function PackageSpaces({ item }: { item: PackageSpacesOf }) {
     </span>
   );
 }
+
+/**
+ * The header line of a detail page (agent or package): the spaces the package is active in, as
+ * its index row names them, the home's tile and name first, the others stacked behind and counted.
+ */
+export function PackageDetailSpaces({
+  detail,
+}: {
+  detail: { homeSpaceId: string | null; spaceIds: readonly string[]; source: string };
+}) {
+  return (
+    <PackageSpaces
+      item={{
+        homeSpaceId: detail.homeSpaceId,
+        spaceIds: [...detail.spaceIds],
+        source: detail.source === "system" ? "system" : "local",
+      }}
+    />
+  );
+}

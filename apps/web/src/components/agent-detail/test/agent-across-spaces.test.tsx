@@ -41,6 +41,7 @@ const { ACROSS_SPACES, persistenceKeys, scheduleKeys } = await import("../../../
 const { AgentSchedulesTab, AgentMemoryTab } = await import("../../package-detail/agent-tabs.tsx");
 const { AgentOverviewTab } = await import("../agent-overview-tab.tsx");
 const { AgentConfigurationView } = await import("../agent-configuration-view.tsx");
+const { AgentSettingsView } = await import("../agent-settings-view.tsx");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -66,7 +67,13 @@ const space = (id: string, permissions: string[]) => ({
 /** The working space (Atelier, hidden in the mode), and Studio and Coffre where the agent runs. */
 const SPACES = [
   space("spc_a", READS),
-  space("spc_b", [...READS, "agents:configure", "schedules:write", "persistence:delete"]),
+  space("spc_b", [
+    ...READS,
+    "agents:configure",
+    "integrations:read",
+    "schedules:write",
+    "persistence:delete",
+  ]),
   space("spc_c", READS),
 ];
 
@@ -128,17 +135,17 @@ function schedule(id: string, spaceId: string, nextRunAt: string): EnrichedSched
   };
 }
 
-const memory = (id: number, spaceId: string | undefined, content: string): AgentMemoryItem => ({
+const memory = (id: number, spaceId: string, content: string): AgentMemoryItem => ({
   id,
   content,
   runId: null,
   actor_type: "shared",
   actor_id: null,
   createdAt: "2026-11-10T00:00:00Z",
-  ...(spaceId ? { spaceId } : {}),
+  spaceId,
 });
 
-const pinned = (id: number, spaceId: string | undefined): AgentPinnedSlotItem => ({
+const pinned = (id: number, spaceId: string): AgentPinnedSlotItem => ({
   id,
   key: `slot_${id}`,
   content: "épinglé",
@@ -147,7 +154,7 @@ const pinned = (id: number, spaceId: string | undefined): AgentPinnedSlotItem =>
   actor_id: null,
   createdAt: "2026-11-10T00:00:00Z",
   updatedAt: "2026-11-10T00:00:00Z",
-  ...(spaceId ? { spaceId } : {}),
+  spaceId,
 });
 
 let stubs: { mockRestore: () => void }[] = [];
@@ -221,7 +228,7 @@ function renderIn(overview: boolean, node: React.ReactElement, initialEntries?: 
   ]);
   qc.setQueryData(
     persistenceKeys.list("org_1", "spc_a", "agent-memories", PACKAGE_ID, { kind: "memory" }),
-    [memory(5, undefined, "Note d'Atelier")],
+    [memory(5, "spc_a", "Note d'Atelier")],
   );
   qc.setQueryData(
     persistenceKeys.list("org_1", "spc_a", "agent-pinned", PACKAGE_ID, { kind: "pinned" }),
@@ -306,20 +313,42 @@ describe("the overview's figures", () => {
 
 describe("the configuration view", () => {
   const label = () => i18n.t("detail.configuration.spaceLabel", { ns: "agents" });
+  // Active in Atelier, the working space, and in Studio.
+  const placedHere: AgentDetail = { ...DETAIL, space_ids: ["spc_a", "spc_b"] };
 
   it("names the space whose configuration it shows in the mode, and offers the others", () => {
     const html = renderIn(
       true,
-      <AgentConfigurationView packageId={PACKAGE_ID} detail={DETAIL} section="connections" />,
+      <AgentConfigurationView
+        packageId={PACKAGE_ID}
+        detail={placedHere}
+        section="connections"
+        permission="integrations:read"
+      />,
     );
     expect(html).toContain(label());
     expect(html).toContain("data-configuration-space");
     expect(html).toContain(">Atelier<");
-    // Studio is configurable: the space can be changed.
+    // Studio grants it: the space can be changed.
     expect(html).toMatch(/data-configuration-space[\s\S]*<button/);
     expect(html).toContain(
       i18n.t("detail.configuration.connectionsDescriptionIn", { ns: "agents", space: "Atelier" }),
     );
+  });
+
+  it("never names a working space the header does not: it asks for one of the agent's", () => {
+    // Active in Studio and Coffre only, as the header's tiles say.
+    const html = renderIn(
+      true,
+      <AgentConfigurationView
+        packageId={PACKAGE_ID}
+        detail={DETAIL}
+        section="connections"
+        permission="integrations:read"
+      />,
+    );
+    expect(html).toContain(i18n.t("detail.configuration.pickSpace", { ns: "agents" }));
+    expect(html).not.toMatch(/data-configuration-space[\s\S]*>Atelier</);
   });
 
   it("names no space for the schedules, which span them", () => {
@@ -333,9 +362,45 @@ describe("the configuration view", () => {
   it("CONTROL: names no space out of the mode", () => {
     const html = renderIn(
       false,
-      <AgentConfigurationView packageId={PACKAGE_ID} detail={DETAIL} section="connections" />,
+      <AgentConfigurationView
+        packageId={PACKAGE_ID}
+        detail={placedHere}
+        section="connections"
+        permission="integrations:read"
+      />,
     );
     expect(html).not.toContain(label());
     expect(html).toContain(i18n.t("detail.configuration.connectionsDescription", { ns: "agents" }));
+  });
+});
+
+describe("the settings rail when the hidden space refuses configuring", () => {
+  // Atelier (working, hidden) reads but does not configure; Studio configures.
+  const placedHere = { ...DETAIL, space_ids: ["spc_a", "spc_b"], etag: null };
+  const settings = (overview: boolean) =>
+    renderIn(
+      overview,
+      <AgentSettingsView
+        packageId={PACKAGE_ID}
+        detail={placedHere}
+        isHistorical={false}
+        versions={{ canRestore: false, canDelete: false }}
+      />,
+      ["/agents/@acme/reporter?agentSettings=model#settings"],
+    );
+  const t = (key: string, options?: Record<string, string>) =>
+    i18n.t(key, { ns: "agents", ...options });
+
+  it("opens the section another of the agent's spaces grants, with the way to it", () => {
+    const html = settings(true);
+    expect(html).toContain("data-configuration-space");
+    expect(html).toContain(t("detail.roleLimit.sectionIn", { space: "Atelier" }));
+    expect(html).not.toContain(t("detail.roleLimit.section"));
+  });
+
+  it("CONTROL: is a role limit out of the mode, the working space's verdict", () => {
+    const html = settings(false);
+    expect(html).toContain(t("detail.roleLimit.section"));
+    expect(html).not.toContain("data-configuration-space");
   });
 });

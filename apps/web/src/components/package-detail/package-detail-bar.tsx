@@ -8,7 +8,7 @@ import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { PackageOriginMeta } from "../package-origin-meta";
-import { PackageSpaces } from "../package-spaces";
+import { PackageDetailSpaces } from "../package-spaces";
 import { SkeletonLine } from "../skeleton-line";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
@@ -92,7 +92,7 @@ export function PackageDetailBar<T extends string>({
         detail.spaceIds === undefined ? (
           <SkeletonLine className="w-24 text-xs leading-5" />
         ) : detail.spaceIds.length > 0 ? (
-          <PackageDetailSpaces detail={detail} />
+          <PackageDetailSpaces detail={{ ...detail, spaceIds: detail.spaceIds }} />
         ) : undefined
       }
       meta={
@@ -107,23 +107,6 @@ export function PackageDetailBar<T extends string>({
       }
       actions={actions}
       tabs={tabs}
-    />
-  );
-}
-
-/** The spaces the package is active in, as its index row names them: the home's tile and name first, the others stacked behind and counted. Exported for its test. */
-export function PackageDetailSpaces({
-  detail,
-}: {
-  detail: Pick<PackageDetailBarDetail, "homeSpaceId" | "spaceIds" | "source">;
-}) {
-  return (
-    <PackageSpaces
-      item={{
-        homeSpaceId: detail.homeSpaceId,
-        spaceIds: [...(detail.spaceIds ?? [])],
-        source: detail.source === "system" ? "system" : "local",
-      }}
     />
   );
 }

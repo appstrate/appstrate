@@ -14,7 +14,8 @@ import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
 import { packageDetailQueryOptions, usePackageDetail } from "../hooks/use-packages";
-import { useAgentRunSpace } from "../hooks/use-agent-run-space";
+import { useAgentSpaceAction } from "../hooks/use-agent-run-space";
+import { useSpacesFor } from "../hooks/use-space-action";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { spaceStore } from "../stores/space-store";
@@ -28,8 +29,8 @@ interface RunAgentButtonProps {
   packageId: string;
   /**
    * The spaces the agent runs in, from its index row or its detail: a click enters the granting
-   * space before running; several granting it, the button opens their menu. The working space when
-   * absent.
+   * space before running; several granting it, the button opens their menu. Read in « Tous les
+   * espaces » only.
    */
   spaceIds?: readonly string[];
   /**
@@ -74,8 +75,11 @@ export function RunAgentButton({
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const workingSpaceId = useCurrentSpaceId();
-  const runAction = useAgentRunSpace(packageId, spaceIds, { preferWorkingSpace });
+  const runAction = useAgentSpaceAction(packageId, "agents:run", spaceIds, { preferWorkingSpace });
   const canRun = runAction.offered;
+  // A reader who runs agents somewhere sees a blocked button with its reason, even where this
+  // agent runs in none of the spaces offered.
+  const runsAgents = useSpacesFor({ permission: "agents:run" }).offered;
   // A row not of the working space: the detail query below reads the working space, so nothing
   // it holds is this row's until a click enters the row's space.
   const elsewhere = spaceIds.length > 0 && !spaceIds.includes(workingSpaceId ?? "");
@@ -163,7 +167,7 @@ export function RunAgentButton({
         ? t("detail.titleNeverPublished")
         : undefined;
 
-  if (!canRun) return null;
+  if (!canRun && !(runsAgents && disabled && blockedTitle)) return null;
 
   // Non-blocking warning dot — surfaced when integration connections aren't
   // ready, but the button stays clickable (recovery via MissingConnectionsModal).
