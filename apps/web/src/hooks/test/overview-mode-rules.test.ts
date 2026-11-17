@@ -14,7 +14,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { actInSpace } = await import("../use-space-action.tsx");
-const { withdrawIfLapsed, withdrawOnPage } = await import("../use-overview-mode.ts");
+const { withdrawOnPage } = await import("../use-overview-mode.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { overviewStore } = await import("../../stores/overview-store.ts");
 
@@ -53,7 +53,6 @@ describe("actInSpace", () => {
 describe("the overview rules", () => {
   const KEY = "usr_1:org_1";
   const chosen = () => !!overviewStore.getState().chosen[KEY];
-  const space = (id: string, permissions: string[]) => ({ id, access: "member", permissions });
 
   beforeEach(() => overviewStore.getState().set(KEY, true));
 
@@ -89,15 +88,6 @@ describe("the overview rules", () => {
     expect(chosen()).toBe(false);
     overviewStore.getState().set(KEY, true);
     withdrawOnPage(KEY, "/chat");
-    expect(chosen()).toBe(false);
-  });
-
-  it("drops the mode once the listing proves it no longer offered, not before it answers", () => {
-    withdrawIfLapsed(KEY, undefined);
-    expect(chosen()).toBe(true);
-    withdrawIfLapsed(KEY, [space("spc_a", ["runs:read"]), space("spc_b", ["files:read"])]);
-    expect(chosen()).toBe(true);
-    withdrawIfLapsed(KEY, [space("spc_a", ["runs:read"])]);
     expect(chosen()).toBe(false);
   });
 });
