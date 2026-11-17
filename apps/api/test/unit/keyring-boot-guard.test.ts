@@ -7,7 +7,7 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import { encrypt } from "@appstrate/connect";
 import type { KidCount } from "@appstrate/db/encrypted-columns";
-import { assertKeyringCoversCiphertexts } from "../../src/lib/boot.ts";
+import { assertKeyringCoversCiphertexts } from "../../src/lib/boot-guards/schema-invariants.ts";
 import { logger } from "../../src/lib/logger.ts";
 
 const KEYRING = new Set(["k2", "k1"]);

@@ -267,6 +267,7 @@
   "apiError.sync_url_templated": "Le serveur MCP de cette intégration dépend de chaque connexion : il ne peut pas être synchronisé.",
   "apiError.missing_integration_connection": "Une connexion d'intégration manque ou doit être choisie avant de lancer.",
   "apiError.model_not_configured": "Aucun modèle n'est configuré pour cet agent. Choisissez-en un ou définissez le modèle par défaut de l'organisation.",
+  "apiError.run_capacity_starting": "Le démarrage de l'exécution est en cours, réessayez dans quelques secondes.",
   "apiError.model_credential_missing": "La clé de ce modèle est introuvable. Choisissez à nouveau ses modèles dans Paramètres › Modèles.",
   "apiError.model_needs_reconnection": "La clé de ce modèle doit être reconnectée.",
   "apiError.model_disabled": "Le modèle par défaut doit rester accessible à l'organisation. Choisissez d'abord un autre modèle par défaut, ou redonnez l'accès à celui-ci.",

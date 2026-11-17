@@ -94,7 +94,7 @@ If you track the repository's Compose file, diff it against yours before you rep
 
 </Tabs>
 
-Migrations are applied automatically. The tier templates run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform starts, and the platform checks again at boot. Runs that were in flight when the old version stopped are finalized as `failed`.
+Migrations are applied automatically. The tier templates run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform starts, and the platform checks again at boot (with `MIGRATIONS_ON_BOOT=verify`, as in `deploy/docker-compose.yml`, boot applies nothing and refuses to start while a core migration is pending; run `bun packages/db/src/migrate.ts` first). The standalone migrator and boot hold the same advisory lock, so they cannot run at once. Runs that were in flight when the old version stopped are finalized as `failed`, shortly after the API starts answering: launches get `503` `run_capacity_starting` until that is done.
 
 ## 5. Verify
 

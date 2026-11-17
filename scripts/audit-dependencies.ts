@@ -233,6 +233,18 @@ const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
       "own OpenAPI spec and commitlint config at build time; CPU DoS only.",
     expires: "2026-12-31",
   },
+
+  // ── picomatch — every published version is in range (<=4.0.7): no upgrade exists ──
+  {
+    id: 1247710,
+    packageName: "picomatch",
+    reason:
+      "Dev tree only — every dependent is a devDependency: vite, knip, lint-staged, " +
+      "@redocly/openapi-core, typescript-eslint (tinyglobby) and shadcn (@dotenvx/dotenvx, " +
+      "fast-glob). It matches globs this repo's own configs write, at build and lint time; " +
+      "CPU DoS only, and no fixed version is published.",
+    expires: "2026-12-31",
+  },
 ];
 
 /** Advisory counts by severity, plus the three verdict counts. */

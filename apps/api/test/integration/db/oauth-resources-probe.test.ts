@@ -22,7 +22,7 @@
 import { describe, it, expect } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
-import { assertOAuthResourceColumnsPresent } from "../../../src/lib/boot.ts";
+import { assertOAuthResourceColumnsPresent } from "../../../src/lib/boot-guards/schema-invariants.ts";
 
 describe("assertOAuthResourceColumnsPresent — live information_schema probe", () => {
   it("resolves against a database the migration chain has been replayed on", async () => {

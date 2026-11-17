@@ -29,6 +29,7 @@ import { fileUri, extractFileIdsFromText, isFileUri, parseFileUri } from "@appst
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import { INLINE_SHADOW_SCOPE } from "@appstrate/core/naming";
 import { invalidRequest, validationFailed } from "../lib/errors.ts";
+import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 
 /**
  * Return true when the package id belongs to the reserved inline scope.
@@ -379,6 +380,8 @@ export async function triggerInlineRun(params: {
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
+  // Before the shadow package below: nothing may be written while run capacity is starting.
+  assertRunCapacityReady();
   const { orgId, spaceId, actor, payerUserId, runId, preflight, parsed, apiKeyId, traceparent } =
     params;
   const { manifest, prompt, modelIdOverride, proxyIdOverride, launchOverrides } = preflight;

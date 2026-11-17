@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { resolve } from "node:path";
-import { assertOAuthResourceColumnsPresent } from "../../src/lib/boot.ts";
+import { assertOAuthResourceColumnsPresent } from "../../src/lib/boot-guards/schema-invariants.ts";
 
 describe("assertOAuthResourceColumnsPresent", () => {
   it("returns without throwing when the 0006 columns are present", async () => {

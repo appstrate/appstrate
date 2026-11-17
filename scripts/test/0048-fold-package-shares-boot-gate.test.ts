@@ -18,9 +18,11 @@ import { drizzle } from "drizzle-orm/pglite";
 import { db, getPGliteClient } from "@appstrate/db/client";
 import { packageShares } from "@appstrate/db/schema";
 import {
-  assertPackageSharesFolded,
-  unfoldedPackageShareCount,
-} from "../../apps/api/src/lib/boot.ts";
+  assertNoPendingDataScripts,
+  PENDING_DATA_SCRIPTS,
+  type PendingDatabase,
+  type PendingDataScript,
+} from "../../apps/api/src/lib/boot-guards/pending-data-scripts.ts";
 import { runFoldPackageShares } from "../migration/0048-fold-package-shares.ts";
 import { revokePackageShare } from "../../apps/api/src/services/package-shares.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
@@ -36,22 +38,39 @@ let ctx: TestContext;
 const share = (spaceId: string) =>
   db.insert(packageShares).values({ packageId: AGENT, spaceId, sharedBy: ctx.user.id });
 const apply0048 = () => runFoldPackageShares({ apply: true, out: () => {} });
-const guard = () => assertPackageSharesFolded(null);
+const ENTRY = PENDING_DATA_SCRIPTS.find((e) => e.after === "0100")!;
+const withCount = (pending: PendingDataScript["pending"]) => [{ ...ENTRY, pending }];
+const assertEntry = (dir: string | null, database?: PendingDatabase) =>
+  assertNoPendingDataScripts(dir, [ENTRY], database);
+const guard = () => assertEntry(null);
 
-describe("assertPackageSharesFolded — injected count", () => {
+describe("0048 entry — injected count", () => {
   it("returns once the table is empty", async () => {
-    expect(await assertPackageSharesFolded(null, async () => 0)).toBeUndefined();
+    expect(
+      await assertNoPendingDataScripts(
+        null,
+        withCount(async () => 0),
+      ),
+    ).toBeUndefined();
   });
 
   it("refuses to boot, naming the count and the operator command", async () => {
-    await expect(assertPackageSharesFolded(null, async () => 3)).rejects.toThrow(
-      /package_shares still holds 3 row\(s\)[\s\S]*Refusing to boot[\s\S]*0048-fold-package-shares\.ts --apply`, with this DATABASE_URL/,
+    await expect(
+      assertNoPendingDataScripts(
+        null,
+        withCount(async () => 3),
+      ),
+    ).rejects.toThrow(
+      /0048-fold-package-shares\.ts \(after drizzle 0100\): 3 pending[\s\S]*then `bun scripts\/migration\/0048-fold-package-shares\.ts --apply`, with this DATABASE_URL[\s\S]*Refusing to boot/,
     );
   });
 
   it("names the embedded database's directory on an embedded database", async () => {
     await expect(
-      assertPackageSharesFolded("/srv/appstrate/data/pglite", async () => 1),
+      assertNoPendingDataScripts(
+        "/srv/appstrate/data/pglite",
+        withCount(async () => 1),
+      ),
     ).rejects.toThrow(
       "`PGLITE_DATA_DIR=/srv/appstrate/data/pglite bun scripts/migration/0048-fold-package-shares.ts` (dry run), then the same with `--apply`",
     );
@@ -59,11 +78,16 @@ describe("assertPackageSharesFolded — injected count", () => {
 
   it("propagates a failing probe instead of assuming the fold ran", async () => {
     const boom = new Error("connection terminated");
-    await expect(assertPackageSharesFolded(null, () => Promise.reject(boom))).rejects.toThrow(boom);
+    await expect(
+      assertNoPendingDataScripts(
+        null,
+        withCount(() => Promise.reject(boom)),
+      ),
+    ).rejects.toThrow(boom);
   });
 });
 
-describe("assertPackageSharesFolded — live database", () => {
+describe("0048 entry — live database", () => {
   const dirs: string[] = [];
   const tempDir = (prefix: string) => {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -93,7 +117,7 @@ describe("assertPackageSharesFolded — live database", () => {
     await expect(guard()).rejects.toThrow(COMMAND);
 
     await runFoldPackageShares({ apply: false, out: () => {} });
-    await expect(guard()).rejects.toThrow(/package_shares still holds 1 row\(s\)/);
+    await expect(guard()).rejects.toThrow(/: 1 pending/);
 
     expect((await apply0048()).inserted).toBe(1);
     expect(await guard()).toBeUndefined();
@@ -134,9 +158,7 @@ describe("assertPackageSharesFolded — live database", () => {
       await share(team);
       const dataDir = tempDir("pglite-0048-");
       const seeded = new PGlite(dataDir, { loadDataDir: await getPGliteClient()!.dumpDataDir() });
-      await expect(
-        assertPackageSharesFolded(dataDir, () => unfoldedPackageShareCount(drizzle(seeded))),
-      ).rejects.toThrow(
+      await expect(assertEntry(dataDir, drizzle(seeded))).rejects.toThrow(
         `PGLITE_DATA_DIR=${dataDir} bun scripts/migration/0048-fold-package-shares.ts`,
       );
       await seeded.close();
@@ -163,11 +185,7 @@ describe("assertPackageSharesFolded — live database", () => {
 
       const migrated = new PGlite(dataDir);
       try {
-        expect(
-          await assertPackageSharesFolded(dataDir, () =>
-            unfoldedPackageShareCount(drizzle(migrated)),
-          ),
-        ).toBeUndefined();
+        expect(await assertEntry(dataDir, drizzle(migrated))).toBeUndefined();
       } finally {
         await migrated.close();
       }

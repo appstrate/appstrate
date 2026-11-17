@@ -102,7 +102,7 @@ The `docker` backend needs the socket, and access to it is root on the host. Kee
 
 ## Set up monitoring
 
-- **Health.** `GET /health` returns `healthy`, `degraded`, `unhealthy` or `starting` with per-subsystem checks, answering `503` when the database is unhealthy or the server is still starting. `GET /` serves the dashboard and is not a health signal.
+- **Health.** `GET /health` returns `healthy`, `degraded`, `unhealthy` or `starting` with per-subsystem checks, answering `503` when the database is unhealthy or the server is still starting. Right after startup it reports `degraded` for a short window while the run capacity initializes, and launches answer `503` `run_capacity_starting` (retry after `Retry-After`) until it is ready. `GET /` serves the dashboard and is not a health signal.
 - **Logs.** The platform writes structured JSON to stdout. `LOG_LEVEL=info` is the default. Use `debug` during incidents (it adds one access line per request), and `warn` for steady state. Forward the logs to your stack and correlate on the `Request-Id` response header.
 - **Traces and metrics.** Append `@appstrate/module-observability` to `MODULES` and set `OTEL_EXPORTER_OTLP_ENDPOINT` to export OpenTelemetry over OTLP/HTTP. It is off by default. See [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md).
 - Log levels and messages change between releases. Check the operator notes before you rely on a log line for an alert.
@@ -123,7 +123,7 @@ Set `LEGAL_TERMS_URL` and `LEGAL_PRIVACY_URL` to show your policies in the foote
 
 ## Plan upgrades
 
-Migrations run at boot, there is no built-in rollback, and some releases need operator steps before the deploy. Pin versions, rehearse in staging, take a database backup and read the operator notes of every release you skip. See [Upgrading](/self-hosting/upgrading).
+Migrations run at boot (set `MIGRATIONS_ON_BOOT=verify` when a separate step owns them: boot then applies nothing and refuses to start while one is pending), there is no built-in rollback, and some releases need operator steps before the deploy. Pin versions, rehearse in staging, take a database backup and read the operator notes of every release you skip. See [Upgrading](/self-hosting/upgrading).
 
 ## Sanity check before go-live
 

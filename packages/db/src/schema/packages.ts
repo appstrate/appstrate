@@ -111,7 +111,8 @@ export const spacePackages = pgTable(
  * RETIRED — folded into {@link spacePackages} (#2045). Read only by
  * `scripts/migration/0048-fold-package-shares.ts`, which copies every row into
  * a `space_packages` row, and by the boot guard that refuses to start until it
- * has (`assertPackageSharesFolded`, `apps/api/src/lib/boot.ts`). The follow-up
+ * has (the `0048` entry of `PENDING_DATA_SCRIPTS`,
+ * `apps/api/src/lib/boot-guards/pending-data-scripts.ts`). The follow-up
  * migration drops it.
  */
 export const packageShares = pgTable(

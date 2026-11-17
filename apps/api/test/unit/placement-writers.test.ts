@@ -78,14 +78,19 @@ describe("space_packages writers", () => {
 });
 
 describe("the retired package_shares table", () => {
-  const ALLOWED = ["apps/api/src/lib/boot.ts", "packages/db/src/schema/packages.ts"];
+  const ALLOWED = [
+    "apps/api/src/lib/boot-guards/pending-data-scripts.ts",
+    "packages/db/src/schema/packages.ts",
+  ];
 
-  it("is named only by its schema declaration and the boot guard", () => {
+  it("is named only by its schema declaration and the `0048` entry of PENDING_DATA_SCRIPTS", () => {
     const named = [
       ...grepFiles("packageShares", SOURCE_ROOTS, {
         expectMatch: ["packages/db/src/schema/packages.ts"],
       }),
-      ...grepFiles("package_shares", SOURCE_ROOTS, { expectMatch: ["apps/api/src/lib/boot.ts"] }),
+      ...grepFiles("package_shares", SOURCE_ROOTS, {
+        expectMatch: ["apps/api/src/lib/boot-guards/pending-data-scripts.ts"],
+      }),
     ];
     expect([...new Set(named)].sort()).toEqual(ALLOWED);
   });

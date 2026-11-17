@@ -44,6 +44,7 @@ import { encrypt } from "@appstrate/connect";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
+import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -362,6 +363,9 @@ export async function freezeRunSpawnDependencies(params: {
  * catch `ApiError` to translate into their own failure semantics.
  */
 export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<void> {
+  // Before anything is written: refused until the boot's run-capacity phase is
+  // done (see `assertRunCapacityReady`).
+  assertRunCapacityReady();
   const {
     runId,
     orgId,

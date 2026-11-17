@@ -138,6 +138,9 @@ export const envSchema = z
       }),
     // Database (optional — falls back to PGlite embedded Postgres when absent)
     DATABASE_URL: z.string().optional(),
+    // What boot does with the core migrations: `apply` runs them, `verify` refuses to start
+    // while any is pending (a separate migrate step owns them). `verify` needs DATABASE_URL.
+    MIGRATIONS_ON_BOOT: z.enum(["apply", "verify"]).default("apply"),
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
@@ -969,6 +972,11 @@ export const envSchema = z
       path: ["TRUST_PROXY"],
     },
   )
+  .refine((env) => env.MIGRATIONS_ON_BOOT !== "verify" || !!env.DATABASE_URL, {
+    message:
+      "MIGRATIONS_ON_BOOT=verify requires DATABASE_URL: an embedded PGlite database opens in one process, so nothing else can have migrated it. Use MIGRATIONS_ON_BOOT=apply (the default) without DATABASE_URL.",
+    path: ["MIGRATIONS_ON_BOOT"],
+  })
   // The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not
   // three independent knobs: the agent runtime and the sidecar speak a wire
   // protocol to each other, and both speak a container boundary to the
