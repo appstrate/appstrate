@@ -168,6 +168,24 @@ describe("package indexes across the organization's spaces", () => {
     return listing.filter((spaceId) => ids.includes(spaceId));
   }
 
+  it("names on the agent detail the spaces its index row names", async () => {
+    const detail = async (spaceId: string) => {
+      const res = await app.request(`/api/packages/agents/${id("a")}`, {
+        headers: { ...session(member), "X-Org-Id": owner.orgId, "X-Space-Id": spaceId },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      return (await res.json()) as { active: boolean; space_ids: string[] };
+    };
+    expect((await detail(s.deux)).space_ids).toEqual(
+      (await rows("agents", session(member))).a!.space_ids,
+    );
+    // Switched off in the space read from: still readable there, no longer named.
+    await seedSpacePackage(s.deux, id("a"), { enabled: false });
+    const off = await detail(s.deux);
+    expect(off.active).toBe(false);
+    expect(off.space_ids).toEqual([s.un]);
+  });
+
   it("lists each agent once, its spaces read, its counters over them", async () => {
     const agents = await rows("agents", session(member));
     expect(Object.keys(agents).sort()).toEqual(["a", "b"]);

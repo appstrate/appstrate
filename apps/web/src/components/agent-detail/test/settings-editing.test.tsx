@@ -65,6 +65,7 @@ function agent(over: Partial<AgentDetail> = {}): Versioned<AgentDetail> {
     home_shareable: false,
     effective_timeout_seconds: 300,
     active: true,
+    space_ids: ["spc_home"],
     etag: null,
     ...over,
   };

@@ -83,6 +83,7 @@ function agent(over: Partial<AgentDetail> = {}): AgentDetail {
     home_shareable: false,
     effective_timeout_seconds: 300,
     active: true,
+    space_ids: ["spc_1"],
     ...over,
   };
 }

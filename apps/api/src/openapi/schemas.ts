@@ -1098,6 +1098,7 @@ export const schemas = {
       "last_run",
       "effective_timeout_seconds",
       "active",
+      "space_ids",
       "home_space_id",
       "home_writable",
       "home_deletable",
@@ -1258,6 +1259,12 @@ export const schemas = {
         type: "boolean",
         description:
           "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted.",
+      },
+      space_ids: {
+        type: "array",
+        items: { type: "string", pattern: SPACE_ID_RE.source },
+        description:
+          "The spaces the caller reaches where the agent is ACTIVE (spc_ prefix), as the agent's row of `GET /api/orgs/{orgId}/agents` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted.",
       },
     },
   },

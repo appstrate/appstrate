@@ -744,6 +744,12 @@ export interface AgentDetail {
    * answer there would only ever be `true`.
    */
   active: boolean;
+  /**
+   * The spaces the caller reaches where the agent is active, as its row of the
+   * org agent index names them: its home first when it is one of them, then in
+   * the order of the space listing. Empty when it is active in none.
+   */
+  space_ids: string[];
 }
 
 // --- Organization Package Types ---

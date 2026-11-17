@@ -6,6 +6,7 @@ import { eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { parseListLimit } from "@appstrate/core/list-query";
+import { scopedNameRegex } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { GLOBAL_RUN_KINDS, type GlobalRunListFilters } from "../services/state/runs.ts";
 import { invalidRequest, zodIssuesToFieldErrors } from "./errors.ts";
@@ -84,6 +85,14 @@ const runListQuerySchema = () =>
       start_date: z.string().optional(),
       end_date: z.string().optional(),
       chat_session_id: z.string().optional(),
+      // An empty value reads as absent, as on the closed sets.
+      packageId: z.preprocess(
+        (value) => (value === "" ? undefined : value),
+        z
+          .string()
+          .regex(scopedNameRegex, { error: "packageId must be a package id (@scope/name)" })
+          .optional(),
+      ),
       // Checked by `parseListLimit` (anything but 1..100 is a 400).
       limit: z.string().optional(),
       startingAfter: z.string().optional(),
@@ -129,5 +138,6 @@ export function parseGlobalRunListQuery(
     startDate: parseDate(query.start_date, "start_date"),
     endDate: parseDate(query.end_date, "end_date"),
     chatSessionId: query.chat_session_id || undefined,
+    packageId: query.packageId,
   };
 }

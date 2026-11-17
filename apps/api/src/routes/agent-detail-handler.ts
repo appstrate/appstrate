@@ -20,7 +20,12 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import { getSpacePackageSettings, isPackageActiveHere } from "../services/space-packages.ts";
+import {
+  getSpacePackageSettings,
+  isPackageActiveHere,
+  listActiveSpaceIdsOf,
+} from "../services/space-packages.ts";
+import { packageSightPermissions } from "@appstrate/core/permissions";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -209,7 +214,8 @@ export async function buildAgentDetailDto(
   // `runs:read-all` the last run and the in-flight count are the caller's own
   // runs, not a colleague's.
   const visibility = runVisibilityFilter(c);
-  const [lastRun, runningCount, active] = await Promise.all([
+  const sight = packageSightPermissions("agent");
+  const [lastRun, runningCount, active, spaceIds] = await Promise.all([
     getLastRun(scope, agent.id, visibility),
     getRunningRunsForPackage(scope, agent.id, visibility),
     // The space's switch, answered by the page that carries it. Reading an
@@ -217,6 +223,15 @@ export async function buildAgentDetailDto(
     // caller opens to put a switched-off agent back on — so the verdict travels
     // in the payload instead of turning the read into a 404.
     isPackageActiveHere(scope, agent.id),
+    // The spaces the org agent index would list it in for this caller.
+    listActiveSpaceIdsOf(
+      orgId,
+      agent.id,
+      "agent",
+      accessible
+        .filter((space) => sight.some((permission) => space.permissions.has(permission)))
+        .map((space) => space.id),
+    ),
   ]);
 
   const parsed = parseScopedName(m.name);
@@ -288,6 +303,9 @@ export async function buildAgentDetailDto(
     // second endpoint to learn it. Unconditional, including on a summary read:
     // a launcher needs it most.
     active,
+    // Every space the caller reaches where the agent is active, as the org
+    // agent index's `space_ids`: the page names them and runs in one of them.
+    space_ids: spaceIds,
     // Which space's `agents:write` governs this agent, and whether THIS caller
     // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted
     // UNCONDITIONALLY, for the same reason as the timeout above: a summary read

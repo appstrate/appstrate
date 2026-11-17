@@ -379,20 +379,42 @@ export function activePackagesFilter(scope: OrgScope, type: PackageType) {
  * Narrow `query` (a `$dynamic()` select from `packages`) to the packages of one
  * `type` active in any of `spaceIds`, one row per package ({@link activeSpaceIds}
  * names the spaces). A column `query` selects beyond `packages`' own goes in
- * `groupBy`.
+ * `groupBy`; `packageId` narrows it to that one package.
  */
 export function activeInSpaces<Q extends PgSelect>(
   query: Q,
   orgId: string,
   spaceIds: readonly string[],
   type: PackageType,
-  groupBy: AnyPgColumn[] = [],
+  { groupBy = [], packageId }: { groupBy?: AnyPgColumn[]; packageId?: string } = {},
 ) {
   return query
     .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(activePackagesFilter({ orgId }, type))
+    .where(
+      and(
+        activePackagesFilter({ orgId }, type),
+        packageId === undefined ? undefined : eq(packages.id, packageId),
+      ),
+    )
     .groupBy(packages.id, ...groupBy);
+}
+
+/**
+ * The spaces of `spaceIds` where one package is active, in the order of
+ * {@link activeSpaceIds} — the `space_ids` an index row of it carries. Empty
+ * when it is active in none of them.
+ */
+export async function listActiveSpaceIdsOf(
+  orgId: string,
+  packageId: string,
+  type: PackageType,
+  spaceIds: readonly string[],
+): Promise<string[]> {
+  if (spaceIds.length === 0) return [];
+  const query = db.select({ spaceIds: activeSpaceIds() }).from(packages).$dynamic();
+  const [row] = await activeInSpaces(query, orgId, spaceIds, type, { packageId });
+  return row?.spaceIds ?? [];
 }
 
 /**
@@ -449,9 +471,9 @@ export async function listActivePackages(
     .from(packages)
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .$dynamic();
-  return activeInSpaces(query, orgId, spaceIds, type, [packageDistTags.versionId]).orderBy(
-    ...packageListingOrder(),
-  );
+  return activeInSpaces(query, orgId, spaceIds, type, {
+    groupBy: [packageDistTags.versionId],
+  }).orderBy(...packageListingOrder());
 }
 
 // ---------------------------------------------------------------------------

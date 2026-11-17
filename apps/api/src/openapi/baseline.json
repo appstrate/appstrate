@@ -2968,6 +2968,15 @@
             "description": "Return only runs launched from this chat session."
           },
           {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
+          },
+          {
             "$ref": "#/components/parameters/RunSearch"
           },
           {
@@ -3111,6 +3120,15 @@
               "type": "string"
             },
             "description": "Return only runs launched from this chat session."
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
           },
           {
             "$ref": "#/components/parameters/RunSearch"
@@ -34787,6 +34805,7 @@
           "last_run",
           "effective_timeout_seconds",
           "active",
+          "space_ids",
           "home_space_id",
           "home_writable",
           "home_deletable",
@@ -35009,6 +35028,14 @@
           "active": {
             "type": "boolean",
             "description": "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted."
+          },
+          "space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The spaces the caller reaches where the agent is ACTIVE (spc_ prefix), as the agent's row of `GET /api/orgs/{orgId}/agents` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted."
           }
         }
       },

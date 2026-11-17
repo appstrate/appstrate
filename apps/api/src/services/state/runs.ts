@@ -1791,6 +1791,8 @@ export interface GlobalRunListFilters {
   startDate?: Date;
   endDate?: Date;
   chatSessionId?: string;
+  /** Only the runs of this package; one the grants do not reach yields no row. */
+  packageId?: string;
   /**
    * Free text: the agent a run executed (its scope and name, as stamped on the
    * run) and the error it ended on; digits also match the run number
@@ -1805,7 +1807,7 @@ export interface GlobalRunListFilters {
 
 /**
  * Runs of `orgId` across the spaces of `grants`, paginated, with optional
- * kind / status / date / chat-session filters. Powers `GET /api/runs` (one
+ * kind / status / date / package / chat-session filters. Powers `GET /api/runs` (one
  * grant, the request's space) and `GET /api/orgs/{orgId}/runs` (one per space
  * the caller reaches): a space where the caller reads every run contributes
  * all of them, any other its actor's own (`runReadCondition`), and a row shows
@@ -1825,6 +1827,7 @@ export async function listGlobalRuns(
     startDate,
     endDate,
     chatSessionId,
+    packageId,
     search,
     unread = false,
     ownOnly = false,
@@ -1836,6 +1839,7 @@ export async function listGlobalRuns(
   if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
+  if (packageId) conditions.push(eq(runs.packageId, packageId));
   if (chatSessionId) {
     conditions.push(eq(runs.chatSessionId, chatSessionId));
     conditions.push(

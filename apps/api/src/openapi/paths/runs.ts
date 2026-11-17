@@ -99,6 +99,16 @@ const runListQueryParameters = [
     schema: { type: "string" },
     description: "Return only runs launched from this chat session.",
   },
+  {
+    name: "packageId",
+    in: "query",
+    schema: {
+      type: "string",
+      pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+    },
+    description:
+      "Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent.",
+  },
   { $ref: "#/components/parameters/RunSearch" },
   {
     name: "unread",

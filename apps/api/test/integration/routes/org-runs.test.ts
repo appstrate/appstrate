@@ -230,6 +230,27 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("narrows to one agent's runs across spaces with packageId, within the caller's reach", async () => {
+    const pkg = await seedPackage({
+      id: "@orgruns/filtered",
+      orgId: owner.orgId,
+      homeSpaceId: un,
+      createdBy: owner.user.id,
+    });
+    const seed = (spaceId: string, userId: string) =>
+      seedRun({ packageId: pkg.id, orgId: owner.orgId, spaceId, userId, status: "success" });
+    const inUn = await seed(un, owner.user.id);
+    const inDeux = await seed(deux, member.user.id);
+    // Deux reads the member's own runs only; Fermé is not reached.
+    await seed(deux, owner.user.id);
+    await seed(ferme, owner.user.id);
+    const page = await list(session(member), `?packageId=${pkg.id}`);
+    expect(ids(page)).toEqual(sorted(inUn.id, inDeux.id));
+    expect(page.total).toBe(2);
+    // An agent the caller reaches in no space yields an empty page, not a refusal.
+    expect((await list(session(member), "?packageId=@orgruns/nowhere")).total).toBe(0);
+  });
+
   it("serves a guest its own runs where it holds a row", async () => {
     const guestUser = await createTestUser();
     await addOrgMember(owner.orgId, guestUser.id, "guest");
