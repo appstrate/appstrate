@@ -76,11 +76,11 @@ Migrations are applied automatically at boot and there is no built-in rollback. 
 
 ## What happens at boot
 
-- Pending database migrations are applied. The tier Compose templates also run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform binds a port.
+- Pending core migrations are applied under an advisory lock, unless `MIGRATIONS_ON_BOOT=verify`: boot then applies nothing and refuses to start while a migration is pending, naming each and the fix (`bun packages/db/src/migrate.ts`). `verify` requires `DATABASE_URL`. The `@appstrate/module-ee` journal is not covered, the module applies it itself. The tier Compose templates also run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform binds a port.
 - Runs left in `running` or `pending` by a previous process are stopped and finalized as `failed` ("Server restarted while run was in progress"). On Docker, orphaned `appstrate-exec-*` networks are reclaimed too.
 - System packages shipped in the image are synced to the database.
 - On Docker, the agent and sidecar images are pre-pulled, and a warmer keeps them on the host so `docker image prune -a` cannot force a cold pull on the next run (`RUNTIME_IMAGE_WARM_INTERVAL_SECONDS`).
-- Until startup finishes, `/health` answers `503` with `status: "starting"`.
+- Until the platform is serving (system packages synced, realtime listeners and metering recovery up), `/health` answers `503` with `status: "starting"`. Orphan-run cleanup and the first runtime initialization (image pre-pull) run after that, in the background: until they finish, launches (agent runs, inline runs, a connect login that starts a sidecar, not remote runs) answer `503` `run_capacity_starting` with `Retry-After: 5` and `/health` answers `200` with `status: "degraded"`.
 - On shutdown the platform drains in-flight work for up to 30 seconds. The shipped root Compose file sets `stop_grace_period: 45s` to leave room for it.
 
 ## Recommendation

@@ -19,13 +19,13 @@ curl http://localhost:3000/health
 
 The endpoint needs no authentication. The response has `status`, `version`, `uptime_ms` and a `checks` object:
 
-| Check      | Healthy when                                          | Counts toward `status`                        |
-| ---------- | ----------------------------------------------------- | --------------------------------------------- |
-| `database` | A `SELECT 1` succeeds (`latency_ms` reports the time) | Yes: a failure makes `status` `unhealthy`     |
-| `agents`   | The run orchestrator has initialized                  | Yes: until then `status` is `degraded`        |
-| `realtime` | The live-stream fan-out behind SSE is installed       | No, it is advisory and never changes `status` |
+| Check      | Healthy when                                                                     | Counts toward `status`                        |
+| ---------- | -------------------------------------------------------------------------------- | --------------------------------------------- |
+| `database` | A `SELECT 1` succeeds (`latency_ms` reports the time)                            | Yes: a failure makes `status` `unhealthy`     |
+| `agents`   | The run orchestrator has initialized (retried in the background after a failure) | Yes: until then `status` is `degraded`        |
+| `realtime` | The live-stream fan-out behind SSE is installed                                  | No, it is advisory and never changes `status` |
 
-The HTTP status is `503` when `status` is `unhealthy` and `200` otherwise, so a `degraded` platform still answers `200`. While the server is still starting, `/health` answers `503` with `status: "starting"` and a `Retry-After: 1` header, and every other path answers a `503` problem document with the code `starting`.
+The HTTP status is `503` when `status` is `unhealthy` and `200` otherwise, so a `degraded` platform still answers `200`. While the server is still starting, `/health` answers `503` with `status: "starting"` and a `Retry-After: 1` header, and every other path answers a `503` problem document with the code `starting`. That gate lifts once the platform is serving, before its run capacity is ready. Until then, `/health` answers `200` with `checks.agents` and `status` at `degraded`, and every launch that starts a container (agent runs, inline runs, a connect login that starts a sidecar, but not remote runs) answers a `503` problem document with the code `run_capacity_starting` and a `Retry-After: 5` header, with nothing written. The rest of the API answers.
 
 The platform image has a built-in container health check. It polls `/health` every 30 seconds and counts the container as healthy only when `status` is exactly `healthy`, so a `degraded` platform shows as unhealthy to Docker. The root `docker-compose.yml` keeps that check, but the self-hosting templates in `examples/self-hosting` (the ones `appstrate install` writes) replace it with a request to `GET /`, which only shows that the server answers. Whichever you run, point an external uptime monitor at `/health`. Alert on a non-`200` answer, and also on any `status` other than `healthy` if you want to catch `degraded`. See [Docker Compose](/self-hosting/docker-compose#verify) for a first check after install.
 
@@ -44,6 +44,8 @@ The platform writes one JSON object per line to stdout. Fields passed with a mes
 | `durationMs` | Handler time in milliseconds. For a streamed response it is the time to the headers, not the stream lifetime |
 
 Every response carries a `Request-Id` header of the form `req_<uuid>`, and error bodies repeat it as `request_id` (see [Errors](/api/errors)). The error lines written by the error handler (`Request failed` and `Unhandled error`) carry the same `requestId`, so a request id from a customer leads to the server-side cause. When a request arrives with a valid W3C `traceparent` header, the platform echoes it back and attaches its trace id to the logs of that request.
+
+Every boot step logs one `Boot step` line with `phase` (`critical`, `serving`, `run-capacity` or `housekeeping`), `step`, `durationMs` and `outcome`. `Server ready` then carries `startupMs`, `criticalMs` and `servingMs`, and `Run capacity ready` carries `runCapacityMs`. To see what makes a start slow, sort the `Boot step` lines by `durationMs`.
 
 The live model catalog logs `model catalog applied` at `info` when a new file is accepted, and a `model catalog not refreshed` warning when the hourly read fails (see [Isolation and Security](/self-hosting/isolation-and-security#live-model-catalog)).
 
