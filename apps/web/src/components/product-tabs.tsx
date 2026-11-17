@@ -92,7 +92,8 @@ export function ProductTabs() {
   ].filter((p) => p.enabled);
 
   // A toggle with one choice is noise; a slot still being decided keeps the row.
-  if (products.length < 2 && !(chatPending && !chatShown)) return null;
+  const chatDeciding = chatPending && !chatShown;
+  if (products.length < 2 && !chatDeciding) return null;
 
   return (
     <div className="px-2 pt-4 pb-1">
@@ -125,7 +126,7 @@ export function ProductTabs() {
             </Link>
           </SpaceChoiceDropdown>
         ))}
-        {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
+        {chatDeciding && <Skeleton className="h-7 flex-1 rounded-md" />}
       </nav>
     </div>
   );

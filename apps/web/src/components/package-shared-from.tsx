@@ -1,24 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Share2 } from "lucide-react";
+import { FolderInput } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { useSharedFromText } from "../hooks/use-shared-from-text";
 
-/** {@link useSharedFromText} as a table's icon, the text in a tooltip. */
+/**
+ * {@link useSharedFromText} under a provenance icon: in a table the icon alone, the text in a
+ * tooltip; `inline` on a card's meta line, the text beside it.
+ */
 export function PackageSharedFrom({
   homeSpaceId,
   system,
+  inline = false,
 }: {
   homeSpaceId: string | null | undefined;
   system: boolean;
+  inline?: boolean;
 }) {
   const text = useSharedFromText(homeSpaceId, system);
   if (!text) return null;
+  if (inline) {
+    return (
+      <span className="flex min-w-0 items-center gap-1">
+        <FolderInput className="size-3 shrink-0" aria-hidden />
+        <span className="truncate" title={text}>
+          {text}
+        </span>
+      </span>
+    );
+  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span tabIndex={0} className="text-muted-foreground relative z-10 shrink-0">
-          <Share2 className="size-3.5" role="img" aria-label={text} />
+          <FolderInput className="size-3.5" role="img" aria-label={text} />
         </span>
       </TooltipTrigger>
       <TooltipContent>{text}</TooltipContent>
