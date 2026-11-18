@@ -15,7 +15,7 @@
   "composer.send": "Envoyer",
   "composer.stop": "Arrêter",
   "welcome.hint": "Lancez un agent, inspectez un run, créez un package ou cherchez dans vos fichiers.",
-  "thread.disclaimer": "L’assistant peut se tromper et exécute de vraies actions : vérifiez avant de confirmer.",
+  "thread.disclaimer": "L’IA peut se tromper. Vérifiez avant de confirmer.",
   "thread.scrollToBottom": "Aller en bas",
   "turn.stepLimitReached": "Réponse partielle : limite d'étapes atteinte.",
   "context.label": "Contexte de la conversation",
