@@ -252,7 +252,6 @@
   "apiError.home_move_into_personal_space": "Un package ne peut pas être déplacé vers un espace personnel : dupliquez-le pour en obtenir une copie privée.",
   "apiError.share_target_is_home": "Ce package appartient déjà à cet espace.",
   "apiError.no_published_version": "Ce package n'a aucune version publiée.",
-  "apiError.version_not_found": "Cette version est introuvable.",
   "apiError.version_yanked": "Cette version a été retirée : {{message}}",
   "apiError.not_an_agent": "Ce package n'est pas un agent.",
   "apiError.invalid_draft_manifest": "Le manifeste du brouillon est invalide : {{message}}",

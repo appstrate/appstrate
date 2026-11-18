@@ -28,7 +28,7 @@
  * broken PDF, never HTML. `image`/`pdf`/`text` are inert and need no sandbox.
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Markdown } from "./markdown";
@@ -144,11 +144,10 @@ function usePinnedPreviewUrl(fileId: string, url: string | null | undefined) {
   return next.url;
 }
 
-function UnavailablePreview({ message, action }: { message: string; action?: ReactNode }) {
+function UnavailablePreview({ message }: { message: string }) {
   return (
     <div className="text-muted-foreground flex h-full flex-col items-center justify-center p-6 text-center">
       <p>{message}</p>
-      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
@@ -160,7 +159,6 @@ export function FileViewer({
   local = false,
   isLoading,
   error,
-  unavailableAction,
   className,
 }: {
   fileId: string;
@@ -171,7 +169,6 @@ export function FileViewer({
   context?: FileContext;
   isLoading: boolean;
   error: unknown;
-  unavailableAction?: ReactNode;
   className?: string;
 }) {
   const { t } = useTranslation("files");
@@ -181,7 +178,7 @@ export function FileViewer({
     if (isLoading) return <TextSkeleton lines={6} />;
     if (error) return <ErrorState error={error} />;
     if (!file || !previewUrl) {
-      return <UnavailablePreview message={t("preview.unavailable")} action={unavailableAction} />;
+      return <UnavailablePreview message={t("preview.unavailable")} />;
     }
 
     const frameTitle = t("preview.frameTitle", { name: file.name });

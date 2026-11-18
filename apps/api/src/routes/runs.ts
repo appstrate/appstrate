@@ -210,6 +210,24 @@ async function replayRun(c: Context<AppEnv>, response: Response): Promise<Respon
   return c.json({ ...cached, ...run }, 201, { "Idempotent-Replayed": "true" });
 }
 
+/** Agent and schedule histories read the same visible runs and expose the same pagination. */
+export async function respondScopedRunList(
+  c: Context<AppEnv>,
+  id: string,
+  list: typeof listPackageRuns,
+) {
+  const result = await list(getSpaceScope(c), id, {
+    limit: parseListLimit(c, { defaultLimit: 20 }),
+    ...parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") }),
+    startingAfter: c.req.query("startingAfter") || undefined,
+    actor: getActor(c),
+    visibility: runVisibilityFilter(c),
+    canReadAgentInput: !agentReadIsSummary(c),
+  });
+  setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
+  return c.json(result);
+}
+
 /** The global run list over `grants`: `GET /api/runs` and `GET /api/orgs/{orgId}/runs`. */
 export async function respondRunList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
   const filters = parseGlobalRunListQuery(c);
@@ -481,26 +499,9 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const scope = getSpaceScope(c);
-    const limit = parseListLimit(c, { defaultLimit: 20 });
-    const { status, search } = parseRunListFilters({
-      status: c.req.query("status"),
-      q: c.req.query("q"),
-    });
-    const result = await listPackageRuns(scope, agent.id, {
-      limit,
-      startingAfter: c.req.query("startingAfter") || undefined,
-      actor: getActor(c),
-      status,
-      search,
-      visibility: runVisibilityFilter(c),
-      canReadAgentInput: !agentReadIsSummary(c),
-    });
-    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
-    return c.json(result);
-  });
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), (c) =>
+    respondScopedRunList(c, c.get("package").id, listPackageRuns),
+  );
 
   // GET /api/runs — global run list across the space, keyset-paged on `startingAfter` (a run
   // id) + `limit`.

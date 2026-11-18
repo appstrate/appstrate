@@ -6,7 +6,8 @@
  * Provides a Drizzle db instance connected to the test database
  * and helpers for cleaning up between tests.
  */
-import { db, closeDb } from "@appstrate/db/client";
+import { spyOn } from "bun:test";
+import { db, closeDb, getPGliteClient } from "@appstrate/db/client";
 import { sql } from "drizzle-orm";
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +15,19 @@ import { withDeadlockRetry } from "./deadlock-retry.ts";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 
 export { db, closeDb };
+
+/** Count SQL reads on the embedded driver for a single completed request. */
+export async function countTestSelects(action: () => Promise<unknown>, pattern = /^select/i) {
+  const client = getPGliteClient();
+  if (!client) throw new Error("SQL counts require the embedded test database");
+  const query = spyOn(client, "query");
+  try {
+    await action();
+    return query.mock.calls.filter(([sql]) => pattern.test(sql)).length;
+  } finally {
+    query.mockRestore();
+  }
+}
 
 /**
  * Reset the filesystem storage namespace between tests (tier0 / FS mode).

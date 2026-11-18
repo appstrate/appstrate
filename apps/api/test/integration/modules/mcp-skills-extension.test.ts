@@ -20,7 +20,7 @@ import {
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { getTestApp } from "../../helpers/app.ts";
-import { db, truncateAll } from "../../helpers/db.ts";
+import { countTestSelects, db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -34,6 +34,7 @@ import {
   seedSpaceMember,
   seedSpacePackage,
   seedSpaceRole,
+  seedSystemSkill,
 } from "../../helpers/seed.ts";
 import { mcpRpc, type JsonRpcEnvelope, inSpace } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
@@ -41,6 +42,11 @@ import {
   AGENT_PACKAGES_BUCKET,
   versionZipKey,
 } from "../../../src/services/package-storage-keys.ts";
+import {
+  PACKAGE_ITEMS_BUCKET,
+  SYSTEM_STORAGE_NAMESPACE,
+  packageItemKey,
+} from "../../../src/services/package-items/config.ts";
 // By path, as `mcp-read-skill.test.ts` does: the minting secret is process-local
 // to the module instance whose auth strategy the app registered.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
@@ -252,6 +258,47 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
   const archivePath = (uri: string) =>
     `/api/packages/skills/served/archive?uri=${encodeURIComponent(uri)}`;
 
+  it.skipIf(process.env.TEST_TIER !== "0")(
+    "keeps the warm catalogue query count constant as skills are published",
+    async () => {
+      const measure = async (size: number) => {
+        const list = async () => {
+          const response = await rest(ownerHeaders(), "/api/packages/skills/served");
+          expect(response.status).toBe(200);
+          expect(
+            ((await response.json()) as { data: Entry[] }).data.filter((entry) =>
+              entry.uri.includes("/skillsext/"),
+            ),
+          ).toHaveLength(size);
+        };
+        await list();
+        return countTestSelects(list);
+      };
+      const one = await measure(1);
+      expect(one).toBeGreaterThan(0);
+      for (let i = 1; i < 10; i++)
+        await seedPublishedSkill(`@skillsext/test-${i}`, `test-${i}`, owner.defaultSpaceId);
+      expect(await measure(10)).toBe(one);
+    },
+  );
+
+  it("omits a latest tag pointing at another package's version", async () => {
+    const [team] = await db
+      .select()
+      .from(packageDistTags)
+      .where(eq(packageDistTags.packageId, TEAM));
+    await db
+      .update(packageDistTags)
+      .set({ versionId: team!.versionId })
+      .where(eq(packageDistTags.packageId, TONE));
+    const response = await rest(ownerHeaders(), "/api/packages/skills/served");
+    expect(response.status).toBe(200);
+    expect(
+      ((await response.json()) as { data: Entry[] }).data.map((entry) => entry.uri),
+    ).not.toContain(toneUri());
+    expect((await rest(ownerHeaders(), archivePath(toneUri()))).status).toBe(404);
+  });
+
   it("serves the entries and bytes the MCP endpoint serves to the same caller", async () => {
     const mcp = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});
     const listed = await rest(ownerHeaders(), "/api/packages/skills/served");
@@ -298,6 +345,48 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
       expect((await rest(ownerHeaders(), archivePath(uri))).status).toBe(404);
     }
     expect((await rest(ownerHeaders(), archivePath(toneUri()))).status).toBe(200);
+  });
+
+  it("fails the whole catalogue when an active published archive is unavailable, then recovers", async () => {
+    const id = "@skillsext/restore";
+    await seedPublishedSkill(id, "restore", owner.defaultSpaceId);
+    const key = versionZipKey(id, "1.0.0");
+    const bytes = await storage.downloadFile(AGENT_PACKAGES_BUCKET, key);
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, key);
+    const endpoint = "/api/packages/skills/served";
+    const incomplete = await rest(ownerHeaders(), endpoint);
+    expect(incomplete.status).toBe(422);
+    expect(await incomplete.json()).toMatchObject({ code: "version_artifact_unavailable" });
+    expect((await call(ownerHeaders(), "skills/list", {})).error).toBeDefined();
+    await storage.uploadFile(AGENT_PACKAGES_BUCKET, key, new Uint8Array(bytes!));
+    const recovered = await rest(ownerHeaders(), endpoint);
+    expect(recovered.status).toBe(200);
+    expect(await recovered.text()).toContain("/restore/");
+  });
+
+  it("refuses a missing system archive and serves all its original resources after restoration", async () => {
+    const id = "@appstrate/restore-system";
+    await seedSystemSkill(id, skillMd("restore-system"), {
+      "references/guide.md": encode("guide"),
+    });
+    const key = packageItemKey("skills", SYSTEM_STORAGE_NAMESPACE, id);
+    const bytes = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, key);
+    const endpoint = "/api/packages/skills/served";
+    const uri = `skill://${owner.defaultSpaceId}/appstrate/restore-system/restore-system/SKILL.md`;
+    const original = (await (await rest(ownerHeaders(), endpoint)).json()) as { data: Entry[] };
+    const entry = original.data.find((skill) => skill.uri === uri);
+    expect(entry?.resources.some((file) => file.uri.endsWith("/references/guide.md"))).toBe(true);
+
+    await storage.deleteFile(PACKAGE_ITEMS_BUCKET, key);
+    for (const path of [endpoint, archivePath(uri)]) {
+      const res = await rest(ownerHeaders(), path);
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({ code: "version_artifact_unavailable" });
+    }
+    expect((await call(ownerHeaders(), "skills/list", {})).error).toBeDefined();
+    await storage.uploadFile(PACKAGE_ITEMS_BUCKET, key, new Uint8Array(bytes!));
+    const restored = (await (await rest(ownerHeaders(), endpoint)).json()) as { data: Entry[] };
+    expect(restored.data.find((skill) => skill.uri === uri)).toEqual(entry);
   });
 
   it("lists the drafts an author may read with definition=draft, and none to a reader", async () => {
@@ -446,14 +535,7 @@ describe("skills/get and resources/read in a chat turn", () => {
 
   it("serves an injected system skill as the platform ships it, and refuses its @draft", async () => {
     const system = "@appstrate/system-tone";
-    await seedPackage({
-      id: system,
-      orgId: null,
-      source: "system",
-      type: "skill",
-      draftManifest: { name: system, version: "1.0.0", type: "skill" },
-      draftContent: skillMd("system-tone"),
-    });
+    await seedSystemSkill(system, skillMd("system-tone"));
     const headers = turnHeaders({ [system]: { definition: "published", version: null } });
     const dir = `skill://${owner.defaultSpaceId}/appstrate/system-tone`;
     expect(await readText(headers, `${dir}/system-tone/SKILL.md`)).toContain("version: 1.0.0");

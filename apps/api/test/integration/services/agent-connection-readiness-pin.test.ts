@@ -33,9 +33,13 @@ import {
 } from "../../../src/services/integration-pins-service.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageVersion,
+  seedPublishedVersion,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 
 const INTEG = "@readyorg/integ";
 const AGENT = "@readyorg/agent";
@@ -183,16 +187,10 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     // Same reason as above: the agent has to be ACTIVE here, or every verdict
     // below carries `agent_not_active` and says nothing about the selector.
     await seedSpacePackage(ctx.defaultSpaceId, AGENT);
-    await seedPackageVersion({
-      packageId: AGENT,
-      version: "1.0.0",
+    await seedPublishedVersion(AGENT, "1.0.0", {
       manifest: agentManifest({ withIntegration: false }),
+      content: "Published prompt.",
     });
-    await uploadPackageZip(
-      AGENT,
-      "1.0.0",
-      buildMinimalZip(agentManifest({ withIntegration: false }), "Published prompt.", "prompt.md"),
-    );
 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
