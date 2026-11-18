@@ -164,7 +164,23 @@ function replayFileResult(text: string, toolName: string): string {
 }
 
 /** Persisted tool results replay as text. Binary blocks become pointers; their contents are transient. */
-function toolResultContent(value: unknown, scope: OfferScope, toolName: string): ToolResultContent {
+function toolResultContent(
+  value: unknown,
+  scope: OfferScope,
+  toolName: string,
+  input: unknown,
+): ToolResultContent {
+  const uri = record(input).uri;
+  // Older threads recorded read_resource appfile text verbatim (including arbitrary JSON).
+  // Only the platform envelope can attest to a new receipt, never the document's own text.
+  if (
+    (toolName === "read_file" || toolName === "read_resource") &&
+    typeof uri === "string" &&
+    uri.startsWith("appfile://") &&
+    record(value).fileReceipt !== true
+  ) {
+    return [{ type: "text", text: `[File content omitted on replay: ${uri}]` }];
+  }
   if (value && typeof value === "object") {
     const content = (value as { content?: unknown }).content;
     if (Array.isArray(content)) {
@@ -275,6 +291,7 @@ function assistantMessages(
             relayed: (result as { relayed?: unknown } | null)?.relayed === true,
           }),
           toolName,
+          part.input,
         ),
         isError,
       });

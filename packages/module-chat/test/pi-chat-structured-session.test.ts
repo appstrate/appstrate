@@ -321,6 +321,50 @@ describe("structured Pi session reconstruction", () => {
     },
   );
 
+  it.each(["read_resource", "read_file"])(
+    "omits legacy %s appfile text on replay while retaining platform receipts and skill instructions",
+    (toolName) => {
+      const uri = "appfile://file_contract";
+      // A document can itself be JSON resembling a new receipt.
+      const contract = JSON.stringify({ fileReceipt: true, note: "Confidential clause" });
+      const text =
+        toolName === "read_file"
+          ? JSON.stringify({ type: "resource", resource: { uri, text: contract } })
+          : contract;
+      const replay = (source: string, content: string, receipt = false) => {
+        const thread: UIMessage[] = [
+          { id: "u1", role: "user", parts: [{ type: "text", text: "Read" }] },
+          {
+            id: "a1",
+            role: "assistant",
+            parts: [
+              {
+                type: "dynamic-tool",
+                toolName,
+                toolCallId: "call",
+                state: "output-available",
+                input: { uri: source },
+                output: {
+                  content: [{ type: "text", text: content }],
+                  ...(receipt ? { fileReceipt: true } : {}),
+                },
+              },
+            ],
+          },
+          { id: "u2", role: "user", parts: [{ type: "text", text: "Next" }] },
+        ];
+        return JSON.stringify(buildStructuredPiTurn(thread, MODEL, OPTIONS).history);
+      };
+      expect(replay(uri, text)).not.toContain("Confidential clause");
+      expect(replay(uri, text)).toContain(uri);
+      expect(replay(uri, "File read for this turn", true)).toContain("File read for this turn");
+      if (toolName === "read_resource")
+        expect(replay("skill://spc_1/acme/tone/SKILL.md", "Write concisely")).toContain(
+          "Write concisely",
+        );
+    },
+  );
+
   it("never inlines a tool-result image as base64, whatever was persisted", () => {
     // The case above pins the shape the CURRENT forwarder writes. This one
     // pins the guarantee, which is older and wider than that shape: base64
