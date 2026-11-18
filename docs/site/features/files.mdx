@@ -73,6 +73,12 @@ Listing and downloading need `files:read`. Deleting or keeping a file needs `fil
 
 ## Chaining runs
 
+### What a model can read
+
+`read_file` (and `resources/read`) on an `appfile://` URI never returns base64 of an arbitrary binary. Text comes back as text (up to 1 MiB). A PNG, JPEG, GIF or WebP image (up to 5 MiB) comes back as an image. A PDF, `.docx`, `.xlsx`, `.pptx` or OpenDocument file (up to 25 MiB) comes back as extracted text with page, sheet or slide markers, cut at 120 000 characters with a note; a PDF with no text layer (a scan) answers that it has no extractable text, as there is no OCR. Everything else returns metadata and a `content_url`.
+
+In the [chat](/using-appstrate/chat), an integration `api_call` can store a response as a file of the conversation (`save_as_file`, up to 20 MiB): it is a `user_upload` of that chat session, readable by its owner alone, and counts against the same per-file cap and organization quota as an upload.
+
 An `appfile://` URI is stable for the file's life. Pass the output of run A as an input of run B and the platform records the dependency. Deleting run A, a chat session or an end-user **detaches** files that another run still needs instead of removing them, so a rerun of run B still resolves its inputs. Files nothing references are deleted with their container.
 
 ## Limits and retention

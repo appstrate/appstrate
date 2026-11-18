@@ -21,10 +21,20 @@ Things the assistant can do for you:
 - **Run your agents.** Ask for an agent by name, or describe the task. The conversation shows a progress card for the run with its status, a link to the run page, and the files it produced.
 - **Read and explain.** Look up runs, files and anything else the API shows your role.
 - **Connect accounts.** When an agent needs an integration you have not connected, the chat shows a connect card that starts the sign-in flow. If your browser blocks the window, use the link to open it in a new tab.
-- **Work with files.** Attach files to a message. A side panel next to the conversation has Preview, Runs, Files and Info tabs for what the conversation touched.
+- **Work with files.** Attach files to a message. A side panel next to the conversation has Preview, Runs, Files and Info tabs for what the conversation touched. See [What the assistant reads of your files](#what-the-assistant-reads-of-your-files).
 - **Schedule runs and create agents**, where your role allows it (see below).
 
 The assistant shows its reasoning as a collapsible row while it thinks, and names the model that answered. If a turn fails, the message says why (a provider refused the key, a rate limit, the organization out of credits, a connection that needs to be renewed) and offers **Retry**. When the server returned one, the failure shows a request ID that an administrator can look up in the logs.
+
+## What the assistant reads of your files
+
+The assistant reads an attached or imported file without launching a run, as far as the model you chose can read it.
+
+- **Images** (PNG, JPEG, GIF, WebP): with a model that accepts images, the assistant sees them, downscaled to 1568 px. The newest three messages with images, at most four images each, are sent; older ones stay a reference the assistant can read again. With a model that cannot read images, the attachment chip says so, and the assistant is told it cannot see the picture: it says so instead of guessing.
+- **Documents** (PDF, Word, Excel, PowerPoint, OpenDocument): the assistant reads their text, with page, sheet or slide markers, up to 120 000 characters (it says when it cut). A scanned PDF has no text to read, and the assistant says so: there is no OCR. Old binary Office files (`.doc`, `.xls`, `.ppt`) are not read.
+- **Files behind a connector** (a Drive file, for instance): ask the assistant to fetch it. It stores it in the conversation (up to 20 MiB, counted in your organization's storage like an upload), shows it in the thread, and then reads it like an attachment.
+
+The pixels and the text of a file leave Appstrate for the **provider of the model you chose**, like the rest of the conversation. Which models your organization allows, and which provider each one calls, is set by your administrators.
 
 ## Control what it can do
 
