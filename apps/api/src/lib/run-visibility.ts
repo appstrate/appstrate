@@ -50,10 +50,7 @@ export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
 export const requireRunsRead = requireAnyPermission(RUNS_READ_PERMISSIONS);
 
 /** The in-memory twin of `actorFilter` on a loaded run row: did this principal launch it? */
-export function ownsRun(
-  actor: Actor,
-  row: { userId: string | null; endUserId: string | null },
-): boolean {
+function ownsRun(actor: Actor, row: { userId: string | null; endUserId: string | null }): boolean {
   return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
 }
 
