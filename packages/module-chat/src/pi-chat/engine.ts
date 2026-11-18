@@ -54,11 +54,7 @@ import {
 } from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
-import {
-  ATTACHMENT_IMAGE_ENCODED_MAX_BYTES,
-  ATTACHMENT_IMAGE_MAX_EDGE,
-  loadAttachmentImages,
-} from "./attachment-images.ts";
+import { loadAttachmentImages, resizeWithPi } from "./attachment-images.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -446,14 +442,7 @@ export function runPiChat(input: PiChatInput): Response {
             ? await untilAborted(
                 loadAttachmentImages(input.messages, {
                   read: input.readImage,
-                  resize: async (bytes, mime) => {
-                    const resized = await sdk.resizeImage(bytes, mime, {
-                      maxWidth: ATTACHMENT_IMAGE_MAX_EDGE,
-                      maxHeight: ATTACHMENT_IMAGE_MAX_EDGE,
-                      maxBytes: ATTACHMENT_IMAGE_ENCODED_MAX_BYTES,
-                    });
-                    return resized && { data: resized.data, mimeType: resized.mimeType };
-                  },
+                  resize: resizeWithPi,
                 }),
               )
             : undefined;

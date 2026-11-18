@@ -15,7 +15,7 @@
 
 import type { UIMessage } from "ai";
 import type { ChatImageContent } from "@appstrate/core/chat-contract";
-import type { Message } from "@appstrate/runner-pi";
+import { loadPiCodingAgentSdk, type Message } from "@appstrate/runner-pi";
 import { logger } from "../logger.ts";
 
 type UserContent = Extract<Message, { role: "user" }>["content"];
@@ -38,11 +38,79 @@ export const ATTACHMENT_IMAGE_ENCODED_MAX_BYTES = 1.5 * 1024 * 1024;
 /** Base64 bytes of every image one request carries, replayed turns included. */
 export const ATTACHMENT_IMAGES_REQUEST_MAX_BYTES = 6 * 1024 * 1024;
 
+/** Downscale to the limits above; `null` when it cannot be brought under them. */
+export type ImageResizer = (
+  bytes: Uint8Array,
+  mime: string,
+) => Promise<{ data: string; mimeType: string } | null>;
+
+/**
+ * The one resizer every image bound for a provider goes through, an attachment or a tool result:
+ * Pi's `resizeImage` (Photon, in a worker) at the limits above.
+ */
+export const resizeWithPi: ImageResizer = async (bytes, mime) => {
+  const sdk = await loadPiCodingAgentSdk();
+  const resized = await sdk.resizeImage(bytes, mime, {
+    maxWidth: ATTACHMENT_IMAGE_MAX_EDGE,
+    maxHeight: ATTACHMENT_IMAGE_MAX_EDGE,
+    maxBytes: ATTACHMENT_IMAGE_ENCODED_MAX_BYTES,
+  });
+  return resized && { data: resized.data, mimeType: resized.mimeType };
+};
+
 export interface AttachmentImageDeps {
   /** The platform read (`PlatformServices.readChatImage`): `null` for a file that cannot be sent. */
   read(uri: string): Promise<ChatImageContent | null>;
-  /** Downscale to the limits above; `null` when it cannot be brought under them. */
-  resize(bytes: Uint8Array, mime: string): Promise<{ data: string; mimeType: string } | null>;
+  resize: ImageResizer;
+}
+
+/** Base64 bytes of the images the tools of ONE turn may put in front of the model, in all. */
+export const TOOL_IMAGES_TURN_MAX_BYTES = 4 * 1024 * 1024;
+
+/** What is left of a turn's tool-image budget; shared by every tool of the turn. */
+export interface ToolImageBudget {
+  remaining: number;
+}
+
+type ToolContentBlock =
+  { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
+/**
+ * Bring the image blocks of a tool result under the provider's limits: each is downscaled like an
+ * attachment, and charged to the turn's budget ({@link TOOL_IMAGES_TURN_MAX_BYTES}), so a model
+ * that chains `read_file` calls cannot grow the request without bound. An image that cannot be
+ * downscaled, or that no longer fits the budget, becomes a text pointer saying so.
+ */
+export async function fitToolImages(
+  content: readonly ToolContentBlock[],
+  budget: ToolImageBudget,
+  resize: ImageResizer,
+): Promise<ToolContentBlock[]> {
+  const fitted: ToolContentBlock[] = [];
+  for (const block of content) {
+    if (block.type !== "image") {
+      fitted.push(block);
+      continue;
+    }
+    let resized: Awaited<ReturnType<ImageResizer>> = null;
+    try {
+      resized = await resize(Buffer.from(block.data, "base64"), block.mimeType);
+    } catch (error) {
+      logger.warn("chat tool image skipped", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (resized && resized.data.length <= budget.remaining) {
+      budget.remaining -= resized.data.length;
+      fitted.push({ type: "image", data: resized.data, mimeType: resized.mimeType });
+    } else {
+      fitted.push({
+        type: "text",
+        text: `[image ${block.mimeType} — not shown: it could not be downscaled to the provider's limits, or this turn's image budget is spent]`,
+      });
+    }
+  }
+  return fitted;
 }
 
 function imageParts(message: UIMessage): { url: string }[] {

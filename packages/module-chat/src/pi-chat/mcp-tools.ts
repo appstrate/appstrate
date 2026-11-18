@@ -44,11 +44,25 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
+import {
+  fitToolImages,
+  resizeWithPi,
+  TOOL_IMAGES_TURN_MAX_BYTES,
+  type ImageResizer,
+  type ToolImageBudget,
+} from "./attachment-images.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 const READ_RESOURCE_TOOL = "read_resource";
 const LIST_SKILLS_TOOL = "list_skills";
+
+/** What a tool that may return an image needs to show it to the model within the turn's limits. */
+interface ToolResultImageOptions {
+  modelSeesImages: boolean;
+  budget: ToolImageBudget;
+  resize: ImageResizer;
+}
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
@@ -247,6 +261,11 @@ type BuildPlatformMcpToolsOptions = {
    */
   modelSeesImages?: boolean;
   /**
+   * Downscales an image a tool returns before the model sees it. Production omits it (Pi's
+   * `resizeImage`); a test swaps it because a real resize needs a decodable image and a worker.
+   */
+  resizeImage?: ImageResizer;
+  /**
    * The model the turn's INLINE runs launch on (the composer's opt-in): handed to the
    * launch client, never declared on the tool, so the model cannot set it.
    */
@@ -376,6 +395,12 @@ export async function buildPlatformMcpTools(
 
   const runOrigin = new URL(opts.url).origin;
   const { organization } = opts;
+  // One budget for every image any tool of this turn returns (`fitToolImages`).
+  const imageOptions: ToolResultImageOptions = {
+    modelSeesImages: opts.modelSeesImages === true,
+    budget: { remaining: TOOL_IMAGES_TURN_MAX_BYTES },
+    resize: opts.resizeImage ?? resizeWithPi,
+  };
   const toolFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
@@ -390,15 +415,18 @@ export async function buildPlatformMcpTools(
           turnBudget: opts.turnBudget,
           ...(opts.inlineRunModel ? { inlineRunModel: opts.inlineRunModel } : {}),
         })
-      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization, {
-          modelSeesImages: opts.modelSeesImages === true,
-        }),
+      : makeForwardExtension(
+          tool,
+          getClient,
+          opts.signal,
+          opts.turnBudget,
+          organization,
+          imageOptions,
+        ),
   );
   const extensionFactories = [
     ...toolFactories,
-    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization, {
-      modelSeesImages: opts.modelSeesImages === true,
-    }),
+    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization, imageOptions),
     ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
   ];
 
@@ -437,7 +465,7 @@ function makeForwardExtension(
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
   organization: TurnSpaces,
-  options: { modelSeesImages: boolean },
+  options: ToolResultImageOptions,
 ): ExtensionFactory {
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
@@ -473,7 +501,9 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        return withTurnBudgetNote(mcpResultToPi(result as never, scope, options), turnBudget);
+        const adapted = mcpResultToPi(result as never, scope, options);
+        adapted.content = await fitToolImages(adapted.content, options.budget, options.resize);
+        return withTurnBudgetNote(adapted, turnBudget);
       },
     });
   };
@@ -493,7 +523,7 @@ function makeReadResourceExtension(
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
   organization: TurnSpaces,
-  options: { modelSeesImages: boolean },
+  options: ToolResultImageOptions,
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -548,7 +578,13 @@ function makeReadResourceExtension(
           }
           return { type: "text", text: inlineResourceContent(c) };
         });
-        return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
+        return withTurnBudgetNote(
+          {
+            content: await fitToolImages(content, options.budget, options.resize),
+            details: { uri },
+          },
+          turnBudget,
+        );
       },
     });
   };
