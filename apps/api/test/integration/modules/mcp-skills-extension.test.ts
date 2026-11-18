@@ -300,6 +300,23 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
     expect((await rest(ownerHeaders(), archivePath(toneUri()))).status).toBe(200);
   });
 
+  it("fails the whole catalogue when an active published archive is unavailable, then recovers", async () => {
+    const id = "@skillsext/restore";
+    await seedPublishedSkill(id, "restore", owner.defaultSpaceId);
+    const key = versionZipKey(id, "1.0.0");
+    const bytes = await storage.downloadFile(AGENT_PACKAGES_BUCKET, key);
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, key);
+    const endpoint = "/api/packages/skills/served";
+    const incomplete = await rest(ownerHeaders(), endpoint);
+    expect(incomplete.status).toBe(422);
+    expect((await incomplete.json()).code).toBe("version_artifact_unavailable");
+    expect((await call(ownerHeaders(), "skills/list", {})).error).toBeDefined();
+    await storage.uploadFile(AGENT_PACKAGES_BUCKET, key, new Uint8Array(bytes!));
+    const recovered = await rest(ownerHeaders(), endpoint);
+    expect(recovered.status).toBe(200);
+    expect(await recovered.text()).toContain("/restore/");
+  });
+
   it("lists the drafts an author may read with definition=draft, and none to a reader", async () => {
     const draftUri = `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
     const mcp = await call(ownerHeaders(), "skills/get", { uri: draftUri });

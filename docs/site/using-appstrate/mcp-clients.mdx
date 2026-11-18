@@ -71,6 +71,8 @@ The server offers every agent you can launch as an MCP prompt named `run-<agent>
 
 The server offers skills through the MCP Skills extension (`io.modelcontextprotocol/skills`): `skills/list` returns, for every space the connection reaches (the space of a space URL, every space of an organization URL), the published skills your permissions in that space let you read. Each entry carries its `SKILL.md` URI, its frontmatter (where `metadata.version` is the published version) and every file with a SHA-256 digest; `resources/read` returns a file. Skill URIs have the form `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md`. A skill's draft lives at `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md`: its authors read it there, and `skills/list` lists the drafts they may read only when the request carries the `_meta` `{"dev.appstrate/definition": "draft"}`.
 
+If a published archive is unavailable, the list reports an error. Restore the archive and retry. This lets `appstrate code sync` preserve the managed local files until it receives a complete catalogue.
+
 ## The tools
 
 The server does not declare one tool per API operation. It exposes a small set that lets the client find and call any operation, and the list you see depends on your permissions:

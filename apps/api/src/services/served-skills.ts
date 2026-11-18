@@ -166,7 +166,7 @@ export function buildServedSkills(ctx: ServedSkillsContext): ServedSkills {
       return { skill: served.skill, address, lockVersion };
     } catch (err) {
       if (isInjectedDraftChanged(err)) throw err;
-      if (err instanceof ApiError) return null;
+      if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return null;
       throw err;
     }
   }
@@ -208,14 +208,16 @@ export function buildServedSkills(ctx: ServedSkillsContext): ServedSkills {
         })),
       ),
     );
-    const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
-      // A changed injected draft refuses its own reads explicitly; the list leaves it out.
-      load(skill.spaceId, skill.packageId, definition).catch((err: unknown) => {
+    const entries = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, async (skill) => {
+      try {
+        const served = await load(skill.spaceId, skill.packageId, definition);
+        return served ? servedEntry(served) : null;
+      } catch (err) {
         if (isInjectedDraftChanged(err)) return null;
         throw err;
-      }),
-    );
-    return loaded.filter((served): served is Served => served !== null).map(servedEntry);
+      }
+    });
+    return entries.filter((entry): entry is SkillEntry => entry !== null);
   };
 
   return { list, entry, file, skillFiles };

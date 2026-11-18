@@ -473,6 +473,7 @@ describe("the served skill cache", () => {
       name: "tone",
       frontmatter: { name: "tone", description: "d" },
       files: { "SKILL.md": new Uint8Array(bytes) },
+      resources: [],
     });
     const cache = createServedSkillCache(10);
     cache.set("a", skill(4));

@@ -47,6 +47,7 @@ export interface ServedSkill {
   name: string;
   frontmatter: SkillEntry["frontmatter"];
   files: Record<string, Uint8Array>;
+  resources: Array<{ path: string; size: number; digest: string }>;
 }
 
 type ServeSkillResult = { ok: true; skill: ServedSkill } | { ok: false; reason: string };
@@ -100,6 +101,11 @@ export function serveSkill(
       // Verbatim: `parseSkillFrontmatter` read `name` and `description` as strings from these fields.
       frontmatter: parsed.fields as SkillEntry["frontmatter"],
       files,
+      resources: Object.entries(files).map(([path, bytes]) => ({
+        path,
+        size: bytes.byteLength,
+        digest: skillFileDigest(bytes),
+      })),
     },
   };
 }
@@ -113,11 +119,10 @@ export function skillEntry(
   return {
     uri: uriOf(SKILL_ENTRY),
     frontmatter: skill.frontmatter,
-    resources: Object.keys(skill.files)
-      .sort()
-      .map((path) => {
-        const bytes = skill.files[path]!;
-        return { uri: uriOf(path), digest: skillFileDigest(bytes), size: bytes.byteLength };
-      }),
+    resources: skill.resources.map(({ path, digest, size }) => ({
+      uri: uriOf(path),
+      digest,
+      size,
+    })),
   };
 }
