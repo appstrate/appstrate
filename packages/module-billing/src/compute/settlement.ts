@@ -182,14 +182,20 @@ export async function settleTerminalRuns(
 
 let inFlight: Promise<void> | null = null;
 let rerun = false;
+/** A pass that must re-read the replay window was asked for while another was running. */
+let replayRequested = false;
 
 /**
- * Run a settlement pass, single-flight per process: a call during a pass asks for one more
+ * Run a settlement pass, single-flight per process. Only the timer's pass (`replay`) re-reads
+ * the window below the watermark: it is what recovers a run that committed late, once a
+ * minute, instead of every terminal event re-reading and re-claiming the whole window. A pass
+ * triggered by an event starts at the watermark. A call made during a pass asks for one more
  * pass when it ends instead of stacking a second concurrent one, and shares the promise of the
  * one in flight. Never rejects: a failing pass is logged, and the next trigger or the timer
  * repairs it.
  */
-function settleSingleFlight(): Promise<void> {
+function settleSingleFlight(replay: boolean): Promise<void> {
+  if (replay) replayRequested = true;
   if (inFlight) {
     rerun = true;
     return inFlight;
@@ -197,8 +203,10 @@ function settleSingleFlight(): Promise<void> {
   inFlight = (async () => {
     do {
       rerun = false;
+      const replayWindowMs = replayRequested ? REPLAY_WINDOW_MS : 0;
+      replayRequested = false;
       try {
-        await settleTerminalRuns();
+        await settleTerminalRuns({ replayWindowMs });
       } catch (err) {
         logger.error("compute settlement failed", {
           err: err instanceof Error ? err.message : String(err),
@@ -216,7 +224,7 @@ function settleSingleFlight(): Promise<void> {
  * fail a run's finalize, and the sweep timer repairs whatever this missed.
  */
 export function requestSettlement(): void {
-  void settleSingleFlight();
+  void settleSingleFlight(false);
 }
 
 /** Test-only: await the pass a {@link requestSettlement} started, if any. */
@@ -240,7 +248,7 @@ function scheduleNext(): void {
   timer = setTimeout(() => {
     // Shares the event-poked passes' single flight, so a tick and an event never both read
     // and claim the same window.
-    void settleSingleFlight().finally(scheduleNext);
+    void settleSingleFlight(true).finally(scheduleNext);
   }, SWEEP_INTERVAL_MS * jitter);
   // A trailing tick must not keep the process alive.
   timer.unref?.();

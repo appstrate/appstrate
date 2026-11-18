@@ -344,6 +344,31 @@ describe("requestSettlement and the terminal event", () => {
     expect(await secondsUsed()).toBe(0);
   });
 
+  it("does not re-read the replay window on an event-triggered pass", async () => {
+    seedTerminalRun({
+      orgId,
+      id: "run_head",
+      durationMs: 5_000,
+      completedAt: new Date(NOW.getTime() + 10_000),
+    });
+    await settleTerminalRuns();
+    // A run that committed below the watermark, within the window.
+    seedTerminalRun({
+      orgId,
+      id: "run_below",
+      durationMs: 7_000,
+      completedAt: new Date(NOW.getTime() + 10_000 - 60_000),
+    });
+
+    requestSettlement();
+    await _awaitSettlementForTests();
+    expect(await secondsUsed()).toBe(5);
+
+    // The timer's pass is what recovers it.
+    await settleTerminalRuns();
+    expect(await secondsUsed()).toBe(12);
+  });
+
   it("coalesces calls made during a pass and never throws on a failing read", async () => {
     seedTerminalRun({ orgId, durationMs: 15_000, completedAt: NOW });
     setMockRunsError();
