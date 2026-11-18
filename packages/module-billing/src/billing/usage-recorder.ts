@@ -15,10 +15,7 @@ import { getBillingEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
 import { dollarsToCredits, CREDITS_PER_DOLLAR } from "../credits.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
-import { getPlans, isPlanId } from "../config.ts";
-
-/** Threshold at which we send a quota warning email (80%) */
-const QUOTA_WARNING_THRESHOLD = 0.8;
+import { QUOTA_WARNING_THRESHOLD, getPlans, isPlanId } from "../config.ts";
 
 /**
  * Decimal places of `ee_usage_records.cost_usd` (`numeric(24,12)`). Every

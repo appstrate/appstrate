@@ -5,7 +5,11 @@ import type { components } from "../api/client";
 /** The org's compute month, as `GET /api/billing` projects it. */
 type BillingCompute = components["schemas"]["EeBillingCompute"];
 
-/** Usage at which the gauge turns into a warning: the same 80 % the warning email fires at. */
+/**
+ * Usage at which the page warns: the same 80 % the warning email fires at
+ * (`QUOTA_WARNING_THRESHOLD` in `@appstrate/module-billing`). The bar itself turns yellow earlier,
+ * at `USAGE_WARN` (70 %), like every other gauge: a colour cue first, then the explicit warning.
+ */
 const COMPUTE_WARNING_PERCENT = 80;
 
 /** Minutes shown for a counter held in seconds. Whole minutes, rounded down: 59 s reads 0. */

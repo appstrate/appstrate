@@ -11,6 +11,7 @@ import {
   desc,
   isNull,
   inArray,
+  isNotNull,
   count,
   gte,
   lte,
@@ -2197,7 +2198,7 @@ export async function listTerminalRuns(args: {
     .where(
       and(
         inArray(runs.status, [...terminalRunStatusValues]),
-        sql`${runs.completedAt} IS NOT NULL`,
+        isNotNull(runs.completedAt),
         args.after
           ? sql`(${runs.completedAt}, ${runs.id}) > (${args.after.completedAt.toISOString()}::timestamptz, ${args.after.id})`
           : undefined,

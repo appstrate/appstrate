@@ -28,7 +28,7 @@ import { eq } from "drizzle-orm";
 import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { getPlans, isPlanId } from "../config.ts";
-import { SECONDS_PER_MINUTE, periodEndOf, periodStartOf } from "./period.ts";
+import { periodEndOf, periodStartOf, quotaStanding } from "./period.ts";
 import { readComputeSecondsUsed } from "./usage.ts";
 
 type RunParams = Extract<BeforeUsageParams, { context: "run" }>;
@@ -40,10 +40,6 @@ export function ownsPlatformCompute(params: BeforeUsageParams): params is RunPar
     params.executionPlane === "platform" &&
     params.timeoutSeconds !== null
   );
-}
-
-function formatDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 /**
@@ -71,10 +67,9 @@ export async function checkComputeAdmission(
   }
 
   if (plan.includedComputeMinutes !== null) {
-    const quotaSeconds = plan.includedComputeMinutes * SECONDS_PER_MINUTE;
     const usedSeconds = await readComputeSecondsUsed(params.orgId, now);
-    if (usedSeconds >= quotaSeconds) {
-      const renewal = formatDay(periodEndOf(periodStartOf(now)));
+    if (quotaStanding(usedSeconds, plan.includedComputeMinutes).exhausted) {
+      const renewal = periodEndOf(periodStartOf(now)).toISOString().slice(0, 10);
       return {
         code: "compute_quota_exceeded",
         message: `The ${plan.name} plan's ${plan.includedComputeMinutes.toLocaleString("en-US")} compute minutes are used up for this month. New runs resume on ${renewal}, or upgrade to the Team plan to keep running now. Runs already started are not interrupted.`,

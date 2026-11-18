@@ -28,8 +28,8 @@ export interface PlanDefinition {
 export const FREE_INCLUDED_COMPUTE_MINUTES = 1000;
 export const FREE_MAX_CONCURRENT_RUNS = 3;
 
-/** Share of the compute quota at which the org is warned (UI gauge and email). */
-export const COMPUTE_WARNING_THRESHOLD = 0.8;
+/** Share of a quota (credits or compute minutes) at which the org is warned by email: 80 %. */
+export const QUOTA_WARNING_THRESHOLD = 0.8;
 
 /** Byte multiplier for plan storage entitlements. */
 export const GIB = 1024 * 1024 * 1024;
