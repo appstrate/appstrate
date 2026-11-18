@@ -156,6 +156,14 @@ describe("extractDocumentTextUncached", () => {
     expect(note).toMatch(/Truncated: the text of \d of 3 pages is shown/);
   });
 
+  it("flags a truncation when the cap is reached exactly at a page boundary", async () => {
+    // "--- Page 1 ---\nAAAA" is 19 characters: the cap fills page 1 to the character.
+    const result = await extractDocumentTextUncached(pdf(["AAAA", "BBBB", "CCCC"]), "pdf", 19);
+    expect(result).toMatchObject({ status: "text", truncated: true });
+    expect((result as { note: string }).note).toMatch(/1 of 3 pages/);
+    expect((result as { text: string }).text).not.toContain("BBBB");
+  });
+
   it("refuses a decompression bomb instead of inflating it", async () => {
     const bomb = zipSync({ "word/document.xml": new Uint8Array(40 * 1024 * 1024) });
     expect(bomb.byteLength).toBeLessThan(1024 * 1024);

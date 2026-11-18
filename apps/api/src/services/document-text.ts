@@ -529,7 +529,9 @@ async function extract(
 
     const unit = UNIT[format];
     const cutByPages = format === "pdf" && units > PDF_MAX_PAGES;
-    const truncated = budget.truncated || cutByPages;
+    // The cap can be reached exactly, with nothing cut inside a unit but units left unread: that is
+    // a truncation too, and it must say so.
+    const truncated = budget.truncated || cutByPages || (budget.full && budget.written < units);
     const note = truncated
       ? units > 1
         ? `Truncated: the text of ${budget.written} of ${units} ${unit}s is shown (the first ${DOCUMENT_TEXT_MAX_CHARS.toLocaleString("en-US")} characters at most).`
