@@ -17,7 +17,7 @@
     "@appstrate/afps-runtime": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@opentelemetry/api": "^1.10.0",
-    "@opentelemetry/context-async-hooks": "^2.12.0",
+    "@opentelemetry/context-async-hooks": "^3.1.1",
     "@opentelemetry/core": "^2.12.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.301.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.301.1",
