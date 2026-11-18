@@ -16,20 +16,15 @@ export function useIntegrationSpaceAction(
   spaceIds: readonly string[],
 ) {
   const orgId = useCurrentOrgId();
-  return useSpaceEntry(
-    permission,
-    spaceIds,
-    (spaceId) => [
-      spaceRead(
-        $api.queryOptions("get", "/api/integrations/{packageId}", {
-          params: {
-            path: { packageId },
-            header: { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId },
-          },
-        }),
-      ),
-      spaceRead(packageDetailQueryOptions("integration", { orgId, spaceId }, packageId)),
-    ],
-    { preferWorkingSpace: false },
-  );
+  return useSpaceEntry(permission, spaceIds, (spaceId) => [
+    spaceRead(
+      $api.queryOptions("get", "/api/integrations/{packageId}", {
+        params: {
+          path: { packageId },
+          header: { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId },
+        },
+      }),
+    ),
+    spaceRead(packageDetailQueryOptions("integration", { orgId, spaceId }, packageId)),
+  ]);
 }

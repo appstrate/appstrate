@@ -9,21 +9,21 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { IntegrationOverview } = await import("../integration-overview.tsx");
 const { agentsKeys } = await import("../../../lib/query-keys.ts");
-const { renderInSpace } = await import("../../../test/space-context.ts");
+const { memberSpaceClient, renderInSpace, testSpace } =
+  await import("../../../test/space-context.ts");
 const i18nModule = await import("../../../i18n.ts");
 type IntegrationDetailWire = import("../../../hooks/use-integrations.ts").IntegrationDetailWire;
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
-const ORG_ID = "org_a";
+const ORG_ID = "org_1";
 const SPACE_ID = "spc_a";
 
 const DETAIL = {
@@ -42,17 +42,6 @@ const connection = (
   space: spaceId ? { id: spaceId, name: spaceId } : null,
   needs_reconnection: needsReconnection,
   auth_key: authKey,
-});
-
-const listedSpace = (id: string, name: string) => ({
-  id,
-  object: "space",
-  access: "member",
-  permissions: ["integrations:read"],
-  personal: false,
-  isDefault: id === "spc_a",
-  name,
-  role: null,
 });
 
 const MY_CONNECTIONS = {
@@ -76,13 +65,11 @@ function renderOverview(
   dependentIds: string[],
   { overview = false, spaceIds }: { overview?: boolean; spaceIds?: string[] } = {},
 ): string {
-  const queryClient = new QueryClient();
+  const queryClient = memberSpaceClient([
+    testSpace("spc_a", ["integrations:read"], "Studio"),
+    testSpace("spc_b", ["integrations:read"], "Coffre"),
+  ]);
   queryClient.setQueryData(["get", "/api/me/connections", {}], MY_CONNECTIONS);
-  queryClient.setQueryData(["get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } }], {
-    object: "list",
-    hasMore: false,
-    data: [listedSpace("spc_a", "Studio"), listedSpace("spc_b", "Coffre")],
-  });
   queryClient.setQueryData(agentsKeys.list(ORG_ID, SPACE_ID), [
     { id: "@acme/here", display_name: "Ici" },
     { id: "@acme/unrelated", display_name: "Sans rapport" },

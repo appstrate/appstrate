@@ -8,7 +8,7 @@ import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { PackageOriginMeta } from "../package-origin-meta";
-import { PackageDetailSpaces } from "../package-spaces";
+import { homeNameBesideTiles, PackageSpaces } from "../package-spaces";
 import { SkeletonLine } from "../skeleton-line";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
@@ -23,7 +23,7 @@ interface PackageDetailBarDetail {
   /**
    * Name of the space this package lives in — the one whose permissions decide
    * who may edit it. Absent for the org catalog and for a home the reader
-   * cannot enter. Said only when no space tile names it.
+   * cannot enter. Said only when no space tile names it (`homeNameBesideTiles`).
    */
   homeSpaceName?: string | null;
   /** The home, when the reader reaches it (`home_space_id`). */
@@ -92,17 +92,13 @@ export function PackageDetailBar<T extends string>({
         detail.spaceIds === undefined ? (
           <SkeletonLine className="w-24 text-xs leading-5" />
         ) : detail.spaceIds.length > 0 ? (
-          <PackageDetailSpaces detail={{ ...detail, spaceIds: detail.spaceIds }} />
+          <PackageSpaces item={detail} />
         ) : undefined
       }
       meta={
         <>
           <DetailBarId id={detail.id} />
-          <PackageOriginMeta
-            source={detail.source}
-            // The first tile names the home.
-            homeSpaceName={detail.spaceIds?.length ? null : detail.homeSpaceName}
-          />
+          <PackageOriginMeta source={detail.source} homeSpaceName={homeNameBesideTiles(detail)} />
         </>
       }
       actions={actions}

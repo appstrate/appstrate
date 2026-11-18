@@ -817,6 +817,7 @@
   "integration.tabs.connections": "Connections",
   "integration.connections.spaceLabel": "Connections available in",
   "integration.connections.spaceChoice": "Show the connections of…",
+  "integration.connections.spaceChoiceIn": "Show the connections of {{space}}",
   "integration.tabs.settings": "Settings",
   "integration.tabs.tools": "Tools",
   "integration.tools.wildcardNotice.title": "Wildcard tools permitted",

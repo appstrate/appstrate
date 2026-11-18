@@ -25,7 +25,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
 import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
 import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
-import { grantedForRow } from "../../lib/space-lists";
+import { connectionRowConfigures } from "../../lib/space-lists";
 import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../../components/integration-connect/connection-share-editor";
 
@@ -54,12 +54,7 @@ function ConnectionRow({
   const { data: spaces } = useSpaces();
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // A pin or default names it: delete answers 409 until removed there. Whether the reader may
-  // remove it is judged in the row's space (any space they reach for an org-wide row) of the
-  // current organization, never the working space; another organization's row asks.
-  const configures =
-    conn.org.id === orgId &&
-    grantedForRow(spaces, orgPermissions, conn.space?.id ?? null, "integrations:configure");
+  const configures = connectionRowConfigures(conn, orgId, spaces, orgPermissions);
   const lockKey = connectionLockHintKey(conn.locked_by, configures);
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");

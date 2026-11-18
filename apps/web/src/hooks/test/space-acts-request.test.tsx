@@ -9,12 +9,12 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { reporter } from "../../test/agent-detail.ts";
-import { installFakeStorage } from "../../test/fake-storage.ts";
+import { installSpaStorage } from "../../test/fake-storage.ts";
 
-installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+installSpaStorage();
 
 const { client } = await import("../../api/client.ts");
-const { renderInSpace, testSpace } = await import("../../test/space-context.ts");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { useAgentSpaceAction } = await import("../use-agent-run-space.ts");
 const { packageDetailQueryOptions, useDeletePackage, useForkPackage, usePackageVersions } =
@@ -25,7 +25,7 @@ const { useDeleteAgentMemories, useDeletePersistenceRow, fetchAgentPersistence }
 const { useCanReachInSpace } = await import("../use-can-reach.ts");
 const { useIntegrationDetail } = await import("../use-integrations.ts");
 const { useImportPackage, useImportFromGithub } = await import("../use-mutations.ts");
-const { fetchAgentSchedules } = await import("../use-schedules.ts");
+const { fetchSchedules } = await import("../use-schedules.ts");
 const { useRowSpaceGrants } = await import("../use-permissions.ts");
 
 const PACKAGE_ID = "@acme/reporter";
@@ -55,13 +55,7 @@ afterEach(() => {
 /** Renders `node` in Atelier, « Tous les espaces » on, with the space listing seeded. */
 function renderInMode(node: React.ReactElement): QueryClient {
   spaceStore.getState().setId("spc_a");
-  const qc = new QueryClient();
-  qc.setQueryData(["orgs"], [{ id: "org_1", permissions: [] }]);
-  qc.setQueryData(["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }], {
-    object: "list",
-    hasMore: false,
-    data: SPACES,
-  });
+  const qc = memberSpaceClient(SPACES);
   renderInSpace(node, { overview: true, queryClient: qc });
   return qc;
 }
@@ -93,11 +87,7 @@ describe("entering a space to act there", () => {
   afterEach(() => get.mockRestore());
 
   it("reads the agent from the CHOSEN space before entering it, and acts with that read", async () => {
-    const action = capture(() =>
-      useAgentSpaceAction(PACKAGE_ID, "agents:run", ["spc_b", "spc_c"], {
-        preferWorkingSpace: false,
-      }),
-    );
+    const action = capture(() => useAgentSpaceAction(PACKAGE_ID, "agents:run", ["spc_b", "spc_c"]));
     const qc = renderInMode(<action.Probe />);
     let entered: unknown = "not run";
     const menu = action.current!.choose("Lancer dans…", () => {
@@ -121,11 +111,7 @@ describe("entering a space to act there", () => {
 
   it("does not enter a space whose read fails", async () => {
     get.mockRejectedValue(new Error("404"));
-    const action = capture(() =>
-      useAgentSpaceAction(PACKAGE_ID, "agents:run", ["spc_b", "spc_c"], {
-        preferWorkingSpace: false,
-      }),
-    );
+    const action = capture(() => useAgentSpaceAction(PACKAGE_ID, "agents:run", ["spc_b", "spc_c"]));
     renderInMode(<action.Probe />);
     let ran = false;
     action.current!.choose("Lancer dans…", () => (ran = true))!.onPick("spc_b");
@@ -149,11 +135,8 @@ describe("the deletions name their space", () => {
   afterEach(() => del.mockRestore());
 
   const spaceOf = (call: unknown[]) => {
-    const init = call[1] as {
-      headers?: Record<string, string>;
-      params?: { header?: Record<string, string> };
-    };
-    return init.headers?.["X-Space-Id"] ?? init.params?.header?.["X-Space-Id"];
+    const init = call[1] as { headers?: Record<string, string> };
+    return init.headers?.["X-Space-Id"];
   };
 
   it("« Supprimer les runs » in the chosen space", async () => {
@@ -220,18 +203,15 @@ describe("the spanning reads of an agent", () => {
     ]);
   });
 
-  it("ask the organization's schedules narrowed to the agent", async () => {
-    await fetchAgentSchedules(PACKAGE_ID, "org_1");
-    await fetchAgentSchedules(PACKAGE_ID, null);
+  it("ask the schedules narrowed to the agent, the organization's or the space's", async () => {
+    await fetchSchedules("org_1", PACKAGE_ID);
+    await fetchSchedules(null, PACKAGE_ID);
     expect(get.mock.calls).toEqual([
       [
         "/api/orgs/{orgId}/schedules",
         { params: { path: { orgId: "org_1" }, query: { packageId: PACKAGE_ID } } },
       ],
-      [
-        "/api/agents/{scope}/{name}/schedules",
-        { params: { path: { scope: "@acme", name: "reporter" } } },
-      ],
+      ["/api/schedules", { params: { query: { packageId: PACKAGE_ID } } }],
     ]);
   });
 });
@@ -311,7 +291,7 @@ describe("resources opened from a spanning list", () => {
       "/api/packages/import-github",
     ]);
     for (const [, init] of calls) {
-      expect(init).toMatchObject({ params: { header: { "X-Space-Id": "spc_b" } } });
+      expect(init).toMatchObject({ headers: { "X-Space-Id": "spc_b" } });
     }
     expect(spaceStore.getState().id).toBe("spc_a");
   });

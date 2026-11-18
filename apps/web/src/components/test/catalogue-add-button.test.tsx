@@ -76,7 +76,7 @@ describe("with a working space", () => {
     expect(html).not.toContain("<button");
   });
 
-  it("draws nothing where the reader may not add it", () => {
+  it("draws nothing where the reader may not add it in the working space, though another space may", () => {
     expect(slot([space("spc_b", "Beta", false)], "spc_a")).toBe("");
   });
 });
@@ -97,11 +97,12 @@ describe("in « Tous les espaces »", () => {
       [space("spc_a", "Alpha", true), space("spc_b", "Beta", true), space("spc_c", "Gamma", false)],
       null,
     );
-    // One trigger, and no space named on it: the spaces are the menu's.
+    // One trigger asking the space, none named on it: the spaces are the menu's.
     expect([...html.matchAll(/<button/g)]).toHaveLength(1);
     expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain(`</svg>${settingsFr["catalogue.addToMenu"]}<`);
     expect(html).not.toMatch(/Alpha|Beta|Gamma/);
-    expect(html).toContain(`title="${addedCount(2)}"`);
+    expect(html).not.toContain("title=");
     expect(html).toContain(`<span class="sr-only">${addedCount(2)}</span>`);
   });
 

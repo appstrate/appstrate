@@ -113,19 +113,17 @@ export function AgentSettingsView({
   const { can } = usePermissions();
   const workingSpaceId = useCurrentSpaceId();
   const spaceLabelOf = useSpaceLabelOf();
-  // In « Tous les espaces » a section opens where some space of the agent's grants it, and the
-  // schedules, which span spaces, where some space admits their list. With a space selected,
-  // each is that space's verdict.
+  // In « Tous les espaces » a section opens where some space of the agent's grants it: a space
+  // setting among its active spaces (the header's tiles), the others among its readable
+  // placements; the schedules, which span spaces, where some space admits their list. With a
+  // space selected, each is that space's verdict.
   const { on: overview } = useOverviewMode();
   const scheduleSpaces = useAdmittingSpaces("schedules");
   const readsSchedules = overview ? scheduleSpaces.length > 0 : can("schedules:read");
-  const configures = useSpacesFor(
-    { permission: "agents:configure" },
-    detail.read_space_ids,
-  ).offered;
+  const configures = useSpacesFor({ permission: "agents:configure" }, detail.space_ids).offered;
   const readsIntegrations = useSpacesFor(
     { permission: "integrations:read" },
-    detail.read_space_ids,
+    detail.space_ids,
   ).offered;
   const readsAgent = useSpacesFor({ permission: "agents:read" }, detail.read_space_ids).offered;
   const grants: Record<string, boolean | undefined> = {
@@ -184,7 +182,8 @@ export function AgentSettingsView({
     >
       {({ active, file, href }) => {
         const permission = SECTION_PERMISSION[active];
-        const shownFrom = workingSpaceId && detail.read_space_ids.includes(workingSpaceId);
+        const placements = isSpaceSetting(active) ? detail.space_ids : detail.read_space_ids;
+        const shownFrom = !!workingSpaceId && placements.includes(workingSpaceId);
         // In the mode, a section another space opens, from a space the header does not name or
         // whose role refuses it: the space to show it from comes first.
         const elsewhere =
@@ -197,10 +196,11 @@ export function AgentSettingsView({
             <div className="p-6">
               <AgentConfigurationSpace
                 packageId={packageId}
-                spaceIds={detail.read_space_ids}
+                spaceIds={placements}
                 permission={permission}
               />
-              {shownFrom || !isSpaceSetting(active) ? (
+              {/* The working space is named only where the page shows it. */}
+              {shownFrom ? (
                 <RoleLimitNotice>
                   {t("detail.roleLimit.sectionIn", {
                     space: spaceLabelOf(workingSpaceId) ?? "",

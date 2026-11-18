@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { schemaHasFileFields } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useAgentMemories, useDeleteAgentMemories } from "../../hooks/use-persistence";
@@ -20,7 +19,7 @@ import { launchFromOptions } from "../../lib/run-launch";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
 import { RunLaunchRecovery } from "../run-launch-recovery";
-import { NewScheduleModal } from "../new-schedule-modal";
+import { useScheduleCreation } from "./use-schedule-creation";
 import type { PackageActionsDropdownProps } from "./use-package-actions";
 import { deedInSpaces, deedOfAction, spaceDeedLabels, type SpaceDeed } from "../space-deed";
 
@@ -81,15 +80,10 @@ export function useAgentActions({
     kind: Confirmation;
     spaceId: string;
   } | null>(null);
-  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
 
-  const runSpace = useAgentSpaceAction(packageId, "agents:run", spaceIds, {
-    preferWorkingSpace: false,
-  });
-  const scheduleSpace = useAgentSpaceAction(packageId, "schedules:write", spaceIds, {
-    preferWorkingSpace: false,
-  });
+  const runSpace = useAgentSpaceAction(packageId, "agents:run", spaceIds);
+  const schedule = useScheduleCreation(packageId, detail);
 
   // « Supprimer les runs » deletes every run of the agent in one space, which the route asks of
   // `runs:delete` and `runs:read-all` there. In the mode: among its readable placements, once
@@ -177,15 +171,7 @@ export function useAgentActions({
         () => setRunOptionsOpen(true),
       ),
       runBlockedReason,
-      addSchedule: {
-        ...deedOfAction(
-          scheduleSpace,
-          spaceDeedLabels(t, "spaceChoice.schedule", "spaceChoice.scheduleIn"),
-          () => setNewScheduleOpen(true),
-        ),
-        // A schedule cannot carry a file input.
-        offered: scheduleSpace.offered && !schemaHasFileFields(detail.input?.schema),
-      },
+      addSchedule: schedule.deed,
       bundle,
       clearRuns,
       clearMemories,
@@ -201,9 +187,7 @@ export function useAgentActions({
         isPending={launcher.isPending}
         onSubmit={(submit) => launcher.launch(launchFromOptions(submit))}
       />
-      {newScheduleOpen && (
-        <NewScheduleModal initialAgentId={packageId} onClose={() => setNewScheduleOpen(false)} />
-      )}
+      {schedule.dialog}
       <RunLaunchRecovery
         launcher={launcher}
         packageId={packageId}

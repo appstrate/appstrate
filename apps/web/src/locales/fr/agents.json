@@ -125,6 +125,7 @@
   "detail.configuration.connectionsDescription": "Le bundle déclare les intégrations requises. Cet espace de travail leur associe les comptes concrets utilisés lors des exécutions.",
   "detail.configuration.connectionsDescriptionIn": "Le bundle déclare les intégrations requises. {{space}} leur associe les comptes concrets utilisés lors des exécutions.",
   "detail.configuration.spaceChoice": "Configurer dans…",
+  "detail.configuration.spaceChoiceIn": "Configurer dans {{space}}",
   "detail.configuration.spaceLabel": "Configuration de l’espace",
   "detail.configuration.pickSpace": "Choisir un espace",
   "detail.configuration.pickSpaceHint": "Choisissez l'un des espaces où l'agent est actif pour voir sa configuration.",

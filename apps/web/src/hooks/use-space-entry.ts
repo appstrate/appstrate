@@ -26,7 +26,8 @@ export function spaceRead<T, E, K extends QueryKey>(
 }
 
 /**
- * `useSpaceAction` among `spaceIds` where `permission` holds (`preferWorkingSpace` as there).
+ * `useSpaceAction` among `spaceIds` where `permission` holds; the reader chooses even when the
+ * working space is among them unless `preferWorkingSpace` (a row of the working space).
  * Entering another space makes `readsIn(spaceId)` from that space first and puts them back once
  * entered (the switch drops the space's caches), so the screen redrawn there, and what the act
  * opens, hold that space's data without waiting. A failed read reports itself and enters nothing.
@@ -36,7 +37,7 @@ export function useSpaceEntry(
   permission: string,
   spaceIds: readonly string[],
   readsIn: (spaceId: string) => readonly SpaceRead[],
-  { preferWorkingSpace }: { preferWorkingSpace?: boolean } = {},
+  { preferWorkingSpace = false }: { preferWorkingSpace?: boolean } = {},
 ) {
   const { t } = useTranslation("common");
   const qc = useQueryClient();

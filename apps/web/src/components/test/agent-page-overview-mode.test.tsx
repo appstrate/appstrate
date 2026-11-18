@@ -373,6 +373,37 @@ describe("« Lancer » in the mode", () => {
     expect(html).toContain(i18n.t("detail.titleNotActiveAcross", { ns: "agents" }));
   });
 
+  const label = (html: string) => button(html).match(/title="([^"]*)"/)?.[1] ?? null;
+
+  it("asks its space among several, « Lancer dans… »", () => {
+    const html = renderIn(
+      true,
+      <AgentRunButton packageId={PACKAGE_ID} versionLabel={undefined} />,
+      seedDetail,
+    );
+    expect(label(html)).toBe("Lancer dans…");
+    expect(html).toContain("Lancer dans…</button>");
+  });
+
+  it("names the one space it runs in", () => {
+    const html = renderIn(
+      true,
+      <AgentRunButton packageId={PACKAGE_ID} versionLabel={undefined} />,
+      (qc) => qc.setQueryData(detailKey("spc_a"), reporter({ space_ids: ["spc_b"] })),
+    );
+    expect(label(html)).toBe("Lancer dans Studio");
+    expect(html).toContain("Lancer dans Studio</button>");
+  });
+
+  it("CONTROL: reads plain « Lancer » with a space selected", () => {
+    const html = renderIn(
+      false,
+      <AgentRunButton packageId={PACKAGE_ID} versionLabel={undefined} />,
+      (qc) => qc.setQueryData(detailKey("spc_a"), reporter({ active: true, space_ids: ["spc_a"] })),
+    );
+    expect(label(html)).toBe(i18n.t("detail.run", { ns: "agents" }));
+  });
+
   it("CONTROL: is held back out of the mode, the working space being named", () => {
     const html = renderIn(
       false,

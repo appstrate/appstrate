@@ -7,12 +7,10 @@
  * eligible space is one click naming it, several open their menu, none hides it.
  */
 
-import { useTranslation } from "react-i18next";
 import { HeaderActionButton } from "../header-action-button";
-import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
+import { ActivateIntegrationButton } from "../activate-integration-button";
 import { SpaceChoiceDropdown } from "../space-choice-menu";
 import { usePlacementDeeds } from "../space-deed";
-import { usePackageActivation } from "../../hooks/use-library";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 
 export function IntegrationActivateButton({
@@ -27,7 +25,7 @@ export function IntegrationActivateButton({
   return on ? (
     <ActivateAcross packageId={packageId} />
   ) : activeHere ? null : (
-    <ActivateHere packageId={packageId} />
+    <ActivateIntegrationButton packageId={packageId} variant="header" />
   );
 }
 
@@ -45,24 +43,5 @@ function ActivateAcross({ packageId }: { packageId: string }) {
         {activate.label}
       </HeaderActionButton>
     </SpaceChoiceDropdown>
-  );
-}
-
-function ActivateHere({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["settings", "common"]);
-  const activation = usePackageActivation(packageId);
-  return (
-    <DisabledReasonTooltip
-      reason={activation.mayActivate ? null : t("library.cannotActivate", { ns: "common" })}
-    >
-      <HeaderActionButton
-        primary
-        onClick={() => activation.activate()}
-        disabled={activation.pending || !activation.mayActivate}
-        data-testid="detail-activate-btn"
-      >
-        {t("integrations.btn.activate")}
-      </HeaderActionButton>
-    </DisabledReasonTooltip>
   );
 }

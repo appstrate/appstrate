@@ -32,7 +32,7 @@ export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = 
   );
 }
 
-/** One space's own library page; `enabled: false` is for a caller already holding the answer (e.g. a package detail), and still reads a cached snapshot. */
+/** The working space's library; `enabled: false` reads only the cache. */
 function useSpaceLibrary(options: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
@@ -132,7 +132,7 @@ export function useSetPackageActive() {
   const invalidate = useInvalidatePackageActivation();
   const scope = useOrgOnlyScope();
   const currentSpaceId = useCurrentSpaceId();
-  // Both library queries render the same row: patching only one snaps the clicked switch back until the refetch.
+  // Both libraries render the row: both are patched.
   const libraryKey = $api.queryOptions("get", "/api/library", {
     params: { header: scope.header },
   }).queryKey;
@@ -167,7 +167,7 @@ export function useSetPackageActive() {
       });
     },
     onMutate: async ({ spaceId, packageId, active }) => {
-      // The space form answers only for its own space: patched only for a write aimed at it.
+      // The space library holds the working space only.
       const keys: ReadonlyArray<readonly unknown[]> = [
         libraryKey,
         ...(spaceId === currentSpaceId ? [spaceLibraryKey] : []),
@@ -204,13 +204,10 @@ function libraryRow(
 }
 
 /**
- * One package's placement switches, the one source of every « Activer », « Désactiver » and
- * « Retirer de » (`usePlacementDeeds` turns it into deeds): with `spanning` (« Tous les
- * espaces »), every space the organization library grades (`/api/library`); otherwise the working
- * space alone, from its own library. `activateIn`: where the reader may switch it on (placed and
- * off, or not placed yet); `deactivateIn`: where it runs and the reader may switch it off;
- * `removeFrom`: a placement shared to the space the reader may take out. Each in the library's
- * space order; a package the library does not carry offers none.
+ * One package's placement switches (`usePlacementDeeds` turns them into deeds), over every space
+ * of `/api/library` with `spanning`, else the working space's library: `activateIn` (off or not
+ * placed, and the reader may switch it on), `deactivateIn` (runs, and may be switched off),
+ * `removeFrom` (a share the reader may take out). In the library's space order.
  */
 export function usePackageActivationInSpaces(
   packageId: string,
@@ -241,11 +238,7 @@ export function usePackageActivationInSpaces(
   };
 }
 
-/**
- * The working space's « Activer » for a button that offers only that (a band, a hint): whether the
- * server lets the reader switch the package on there (`activation` on its library row, whatever
- * its state), and the act.
- */
+/** The working space's « Activer »: whether its library row lets the reader switch it on, and the act. */
 export function usePackageActivation(packageId: string) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();

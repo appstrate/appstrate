@@ -7,17 +7,30 @@
 
 import type { AgentSettingsSection } from "./settings-section-href";
 
+/** The Connexions section's: its integration reads are not implied by the agent's route. */
+const CONNECTIONS_PERMISSION = "integrations:read";
+
 /** The permission a section asks of the space it is read or set from. */
 export const SECTION_PERMISSION: Partial<Record<AgentSettingsSection, string>> = {
   model: "agents:configure",
   proxy: "agents:configure",
   inputs: "agents:configure",
-  // Its integration reads are not implied by the route.
-  connections: "integrations:read",
+  connections: CONNECTIONS_PERMISSION,
   files: "agents:read",
   versions: "agents:read",
 };
 
+const SPACE_SETTINGS: ReadonlySet<string> = new Set<AgentSettingsSection>([
+  "model",
+  "proxy",
+  "inputs",
+  "connections",
+]);
+
 /** The sections set in one space (`space_packages`). */
-export const isSpaceSetting = (section: string) =>
-  section === "model" || section === "proxy" || section === "inputs" || section === "connections";
+export const isSpaceSetting = (section: string) => SPACE_SETTINGS.has(section);
+
+/** Whether the agent page's Connexions section shows for the working space's grants. */
+export function agentConnectionsTabVisible(can: (permission: string) => boolean): boolean {
+  return can(CONNECTIONS_PERMISSION);
+}

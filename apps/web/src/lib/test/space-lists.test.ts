@@ -9,6 +9,7 @@ installFakeStorage();
 
 const {
   actingSpaces,
+  connectionRowConfigures,
   grantedInSomeActingSpace,
   grantedForRow,
   grantsInRowSpace,
@@ -337,5 +338,40 @@ describe("grantedForRow", () => {
       ),
     ).toBe(true);
     expect(grantedForRow(undefined, [], null, "integrations:configure")).toBe(false);
+  });
+});
+
+const CONNECTION_SPACES = [
+  space("spc_a", ["integrations:read"]),
+  space("spc_b", ["integrations:read", "integrations:configure"]),
+];
+const connectionRow = (orgId: string, spaceId: string | null) => ({
+  org: { id: orgId, name: "Acme" },
+  space: spaceId ? { id: spaceId, name: spaceId } : null,
+});
+
+describe("connectionRowConfigures (Préférences › Connexions)", () => {
+  it("follows the row's own space in the current organization", () => {
+    expect(
+      connectionRowConfigures(connectionRow("org_1", "spc_b"), "org_1", CONNECTION_SPACES, []),
+    ).toBe(true);
+    expect(
+      connectionRowConfigures(connectionRow("org_1", "spc_a"), "org_1", CONNECTION_SPACES, []),
+    ).toBe(false);
+  });
+
+  it("is any reached space's grant for an org-wide row", () => {
+    expect(
+      connectionRowConfigures(connectionRow("org_1", null), "org_1", CONNECTION_SPACES, []),
+    ).toBe(true);
+  });
+
+  it("is refused for another organization's row, whatever the current one grants", () => {
+    expect(
+      connectionRowConfigures(connectionRow("org_2", "spc_b"), "org_1", CONNECTION_SPACES, []),
+    ).toBe(false);
+    expect(
+      connectionRowConfigures(connectionRow("org_2", null), "org_1", CONNECTION_SPACES, []),
+    ).toBe(false);
   });
 });

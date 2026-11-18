@@ -216,3 +216,20 @@ export function grantedInSomeActingSpace(
     gateIn(space, orgPermissions)(permission),
   );
 }
+
+/**
+ * Whether the reader may remove the pins or defaults naming `conn` (its delete answers 409 until
+ * then): judged in the row's space, any space they reach for an org-wide row, of the current
+ * organization; never for another organization's row.
+ */
+export function connectionRowConfigures(
+  conn: { org: { id: string }; space: { id: string } | null },
+  orgId: string | null | undefined,
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+): boolean {
+  return (
+    conn.org.id === orgId &&
+    grantedForRow(spaces, orgPermissions, conn.space?.id ?? null, "integrations:configure")
+  );
+}

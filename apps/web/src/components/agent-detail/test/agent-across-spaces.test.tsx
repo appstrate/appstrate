@@ -118,8 +118,13 @@ const pinned = (id: number, spaceId: string): AgentPinnedSlotItem => ({
 });
 
 /** Renders `node` in Atelier, the mode on or off, with both the lists spanning spaces and Atelier's seeded. */
-function renderIn(overview: boolean, node: React.ReactElement, initialEntries?: string[]) {
-  const qc = memberSpaceClient(SPACES);
+function renderIn(
+  overview: boolean,
+  node: React.ReactElement,
+  initialEntries?: string[],
+  spaces: readonly unknown[] = SPACES,
+) {
+  const qc = memberSpaceClient(spaces);
   qc.setQueryData(
     packageDetailQueryOptions("agent", { orgId: "org_1", spaceId: "spc_a" }, PACKAGE_ID).queryKey,
     DETAIL,
@@ -233,11 +238,12 @@ describe("the overview's figures", () => {
 });
 
 /**
- * The markup of the configuration's space line (`data-configuration-space`), up to its own closing
- * tag: an assertion on what the line holds must not be met by a later part of the page.
+ * The markup of the configuration's space line: from its label's span to the line's own closing
+ * tag, so an assertion on what the line holds is not met by a later part of the page.
  */
 function configurationSpace(html: string): string | null {
-  const marker = html.indexOf("data-configuration-space");
+  const label = i18n.t("detail.configuration.spaceLabel", { ns: "agents" });
+  const marker = html.indexOf(`>${label}</span>`);
   if (marker < 0) return null;
   const start = html.lastIndexOf("<div", marker);
   const tag = /<(\/?)div\b[^>]*>/g;
@@ -253,7 +259,11 @@ function configurationSpace(html: string): string | null {
 describe("the configuration view", () => {
   const label = () => i18n.t("detail.configuration.spaceLabel", { ns: "agents" });
   // Active in Atelier, the working space, and in Studio.
-  const placedHere: AgentDetail = { ...DETAIL, read_space_ids: ["spc_a", "spc_b"] };
+  const placedHere: AgentDetail = {
+    ...DETAIL,
+    space_ids: ["spc_a", "spc_b"],
+    read_space_ids: ["spc_a", "spc_b"],
+  };
 
   it("names the space whose configuration it shows in the mode, and offers the others", () => {
     const html = renderIn(
@@ -267,15 +277,18 @@ describe("the configuration view", () => {
     );
     expect(html).toContain(label());
     const line = configurationSpace(html);
-    // The line names Atelier, on the button that changes it: Studio grants it too.
-    expect(line).toMatch(/<button[^>]*>[\s\S]*>Atelier<[\s\S]*<\/button>/);
+    // The line names Atelier, then the one other space granting it, entered at a click.
+    expect(line).toContain(">Atelier<");
+    expect(line).toContain(
+      `>${i18n.t("detail.configuration.spaceChoiceIn", { ns: "agents", space: "Studio" })}</button>`,
+    );
     expect(html).toContain(
       i18n.t("detail.configuration.connectionsDescriptionIn", { ns: "agents", space: "Atelier" }),
     );
   });
 
   it("never names a working space the header does not: it asks for one of the agent's", () => {
-    // Active in Studio and Coffre only, as the header's tiles say.
+    // Active in Studio and Coffre only, as the header's tiles say; both read its integrations.
     const html = renderIn(
       true,
       <AgentConfigurationView
@@ -284,6 +297,8 @@ describe("the configuration view", () => {
         section="connections"
         permission="integrations:read"
       />,
+      undefined,
+      [SPACES[0], SPACES[1], testSpace("spc_c", [...READS, "integrations:read"])],
     );
     const line = configurationSpace(html);
     expect(line).toContain(i18n.t("detail.configuration.pickSpace", { ns: "agents" }));
@@ -291,12 +306,48 @@ describe("the configuration view", () => {
     expect(line).not.toContain(">Atelier<");
   });
 
+  it("names the one other space it enters at a click, and the working space no more", () => {
+    // Active in Studio alone, where configuring is granted.
+    const html = renderIn(
+      true,
+      <AgentConfigurationView
+        packageId={PACKAGE_ID}
+        detail={{ ...DETAIL, space_ids: ["spc_b"], read_space_ids: ["spc_b"] }}
+        section="model"
+        permission="agents:configure"
+      />,
+    );
+    const line = configurationSpace(html);
+    expect(line).toContain(
+      `>${i18n.t("detail.configuration.spaceChoiceIn", { ns: "agents", space: "Studio" })}</button>`,
+    );
+    expect(line).not.toContain(i18n.t("detail.configuration.pickSpace", { ns: "agents" }));
+    expect(line).not.toContain(">Atelier<");
+    // The button is described by the line's label.
+    const labelId = line?.match(/<span id="([^"]+)"/)?.[1];
+    expect(line).toContain(`aria-describedby="${labelId}"`);
+  });
+
+  it("asks among the agent's active spaces, not a switched-off placement in the hidden one", () => {
+    // Readable in Atelier, switched off there: not a header tile, never named.
+    const html = renderIn(
+      true,
+      <AgentConfigurationView
+        packageId={PACKAGE_ID}
+        detail={{ ...DETAIL, read_space_ids: ["spc_a", "spc_b", "spc_c"] }}
+        section="connections"
+        permission="integrations:read"
+      />,
+    );
+    expect(configurationSpace(html)).not.toContain(">Atelier<");
+  });
+
   it("names no space for the schedules, which span them", () => {
     const html = renderIn(
       true,
       <AgentConfigurationView packageId={PACKAGE_ID} detail={DETAIL} section="schedules" />,
     );
-    expect(html).not.toContain("data-configuration-space");
+    expect(configurationSpace(html)).toBeNull();
   });
 
   it("CONTROL: names no space out of the mode", () => {
@@ -309,14 +360,19 @@ describe("the configuration view", () => {
         permission="integrations:read"
       />,
     );
-    expect(html).not.toContain(label());
+    expect(configurationSpace(html)).toBeNull();
     expect(html).toContain(i18n.t("detail.configuration.connectionsDescription", { ns: "agents" }));
   });
 });
 
 describe("the settings rail when the hidden space refuses configuring", () => {
   // Atelier (working, hidden) reads but does not configure; Studio configures.
-  const placedHere = { ...DETAIL, read_space_ids: ["spc_a", "spc_b"], etag: null };
+  const placedHere = {
+    ...DETAIL,
+    space_ids: ["spc_a", "spc_b"],
+    read_space_ids: ["spc_a", "spc_b"],
+    etag: null,
+  };
   const settings = (overview: boolean) =>
     renderIn(
       overview,
@@ -333,14 +389,31 @@ describe("the settings rail when the hidden space refuses configuring", () => {
 
   it("opens the section another of the agent's spaces grants, with the way to it", () => {
     const html = settings(true);
-    expect(html).toContain("data-configuration-space");
+    expect(configurationSpace(html)).not.toBeNull();
     expect(html).toContain(t("detail.roleLimit.sectionIn", { space: "Atelier" }));
     expect(html).not.toContain(t("detail.roleLimit.section"));
+  });
+
+  it("never names the hidden space in its notice when the header does not show it", () => {
+    // The files, read in the agent's placements; Atelier (hidden) refuses them and is none of them.
+    const html = renderIn(
+      true,
+      <AgentSettingsView
+        packageId={PACKAGE_ID}
+        detail={{ ...DETAIL, etag: null }}
+        isHistorical={false}
+        versions={{ canRestore: false, canDelete: false }}
+      />,
+      ["/agents/@acme/reporter?agentSettings=files#settings"],
+      [testSpace("spc_a", []), ...SPACES.slice(1)],
+    );
+    expect(html).not.toContain(t("detail.roleLimit.sectionIn", { space: "Atelier" }));
+    expect(html).toContain(t("detail.configuration.pickSpaceHint"));
   });
 
   it("CONTROL: is a role limit out of the mode, the working space's verdict", () => {
     const html = settings(false);
     expect(html).toContain(t("detail.roleLimit.section"));
-    expect(html).not.toContain("data-configuration-space");
+    expect(configurationSpace(html)).toBeNull();
   });
 });

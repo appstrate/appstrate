@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { $api } from "../api/client";
+import { $api, ApiError } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useOrgScope } from "../hooks/use-org-scope";
 import { fetchSchedules } from "../hooks/use-schedules";
@@ -22,9 +22,30 @@ import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaces } from "../hooks/use-spaces";
 import { useRowSpaceGrants } from "../hooks/use-permissions";
 import { ACROSS_SPACES, scheduleKeys } from "../lib/query-keys";
-import { detailElsewhere, isUnreadableHere } from "../lib/detail-elsewhere";
+import { linkedSpacePath } from "../lib/across-spaces";
 import { isSpaceEnterable } from "../lib/space-lists";
 import { ResourceErrorState } from "./page-states";
+
+/** Whether a detail read failed for want of the resource here (403, 404, or a 404 read as `null`). */
+function isUnreadableHere(error: unknown): boolean {
+  return !error || (error instanceof ApiError && (error.status === 403 || error.status === 404));
+}
+
+/**
+ * Where the page reopens: `target` in the first enterable space of `spaceIds` after the one that
+ * refused, so repeated refusals cannot loop; `null` when none is left. Exported for its test.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function detailElsewhere(
+  spaceIds: readonly string[],
+  target: string,
+  currentSpaceId: string | null,
+  enterable: (spaceId: string) => boolean,
+): string | null {
+  if (!currentSpaceId) return null;
+  const next = spaceIds.slice(spaceIds.indexOf(currentSpaceId) + 1).find(enterable);
+  return next ? linkedSpacePath(target, next, currentSpaceId) : null;
+}
 
 type DetailKind = "agent" | "skill" | "integration" | "schedule" | "run" | "notification";
 
@@ -59,7 +80,7 @@ export function UnreadableDetail(props: UnreadableDetailProps) {
 function PackageElsewhere(props: UnreadableDetailProps) {
   const scope = useOrgScope();
   const grants = useRowSpaceGrants();
-  const { data, isError } = $api.useQuery(
+  const { data, isError, isLoading } = $api.useQuery(
     "get",
     "/api/packages/{scope}/{name}/home",
     {
@@ -71,36 +92,32 @@ function PackageElsewhere(props: UnreadableDetailProps) {
     !isError && data?.type === props.kind
       ? data.read_space_ids.filter((id) => !props.version || grants(id, `${data.type}s:read`))
       : [];
-  return <Elsewhere {...props} loading={!data && !isError} spaceIds={spaceIds} />;
+  return <Elsewhere {...props} loading={isLoading} spaceIds={spaceIds} />;
 }
 
 function ScheduleElsewhere(props: UnreadableDetailProps) {
   const orgId = useCurrentOrgId();
   // The spanning list's cache, read without its polling: this observer sets no interval.
-  const { data, isError } = useQuery({
+  const { data, isError, isLoading } = useQuery({
     queryKey: scheduleKeys.list(orgId, ACROSS_SPACES),
     queryFn: () => fetchSchedules(orgId),
     enabled: !!orgId,
   });
   const row = data?.find((schedule) => schedule.id === props.id);
   return (
-    <Elsewhere
-      {...props}
-      loading={!data && !isError}
-      spaceIds={!isError && row ? [row.spaceId] : []}
-    />
+    <Elsewhere {...props} loading={isLoading} spaceIds={!isError && row ? [row.spaceId] : []} />
   );
 }
 
 function RowElsewhere(props: UnreadableDetailProps) {
   const orgId = useCurrentOrgId();
-  const { data, isPending } = $api.useQuery(
+  const { data, isLoading } = $api.useQuery(
     "get",
     props.kind === "run" ? "/api/orgs/{orgId}/runs/{id}" : "/api/orgs/{orgId}/notifications/{id}",
     { params: { path: { orgId: orgId ?? "", id: props.id } } },
     { enabled: !!orgId && !!props.id },
   );
-  return <Elsewhere {...props} loading={isPending} spaceIds={data ? [data.spaceId] : []} />;
+  return <Elsewhere {...props} loading={isLoading} spaceIds={data ? [data.spaceId] : []} />;
 }
 
 function Elsewhere({
@@ -113,10 +130,11 @@ function Elsewhere({
   const { t } = useTranslation();
   const { pathname, search, hash } = useLocation();
   const currentSpaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
+  const { data: spaces, isLoading: spacesLoading } = useSpaces();
   const enterable = (spaceId: string) =>
     !!spaces?.some((space) => space.id === spaceId && isSpaceEnterable(space));
-  if (loading) return <>{pending}</>;
+  // `isLoading` throughout: a look-up that cannot run (its scope unresolved) is not waited for.
+  if (loading || spacesLoading) return <>{pending}</>;
   const to = detailElsewhere(spaceIds, `${pathname}${search}${hash}`, currentSpaceId, enterable);
   if (to !== null) return <Navigate to={to} replace />;
   return (

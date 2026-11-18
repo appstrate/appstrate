@@ -15,6 +15,7 @@ import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateLibraries } from "./use-library";
 import { runDetailPath, splitPackageRef } from "../lib/package-paths";
+import { spaceHeader } from "../lib/scoping-headers";
 import i18n from "../i18n";
 import {
   packageKeys,
@@ -24,7 +25,6 @@ import {
   invalidatePackageFiles,
   invalidatePackageCaches,
   invalidateVersionInfo,
-  invalidatePaths,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -201,7 +201,8 @@ export function useImportPackage(meta?: MutationMeta) {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const { data } = await client.POST("/api/packages/import-bundle", {
-          params: { header: { "X-Space-Id": spaceId }, query: { type } },
+          params: { query: { type } },
+          ...spaceHeader(spaceId),
           // Multipart gap: the generated body types the binary part as `string`; FormData passes through the serializer.
           body: { file },
           bodySerializer: () => fd,
@@ -214,7 +215,8 @@ export function useImportPackage(meta?: MutationMeta) {
         };
       }
       const { data } = await client.POST("/api/packages/import", {
-        params: { header: { "X-Space-Id": spaceId }, query: { force: force || undefined, type } },
+        params: { query: { force: force || undefined, type } },
+        ...spaceHeader(spaceId),
         // Multipart gap — see above.
         body: { file },
         bodySerializer: () => fd,
@@ -239,7 +241,8 @@ export function useImportFromGithub() {
       spaceId?: string;
     }) => {
       const { data } = await client.POST("/api/packages/import-github", {
-        params: { header: { "X-Space-Id": spaceId }, query: { type } },
+        params: { query: { type } },
+        ...spaceHeader(spaceId),
         body: { url },
       });
       return data!;
@@ -270,12 +273,12 @@ export function useDeleteAgentRuns(packageId: string) {
   return useMutation({
     mutationFn: async (spaceId: string) => {
       const { data } = await client.DELETE("/api/agents/{scope}/{name}/runs", {
-        params: { path: splitPackageRef(packageId), header: { "X-Space-Id": spaceId } },
+        params: { path: splitPackageRef(packageId) },
+        ...spaceHeader(spaceId),
       });
       return data!;
     },
     onSuccess: () => {
-      void invalidatePaths(qc, ["/api/agents/{scope}/{name}/runs"]);
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });

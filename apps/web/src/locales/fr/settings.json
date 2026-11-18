@@ -818,6 +818,7 @@
   "integration.tabs.connections": "Connexions",
   "integration.connections.spaceLabel": "Connexions disponibles dans",
   "integration.connections.spaceChoice": "Voir les connexions de…",
+  "integration.connections.spaceChoiceIn": "Voir les connexions de {{space}}",
   "integration.tabs.settings": "Paramètres",
   "integration.tabs.tools": "Catalogue d’outils",
   "integration.tools.wildcardNotice.title": "Caractère générique autorisé",

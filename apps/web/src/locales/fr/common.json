@@ -41,6 +41,7 @@
   "spaceChoice.importIn": "Importer dans {{space}}",
   "spaceChoice.import": "Importer dans…",
   "spaceChoice.run": "Lancer dans…",
+  "spaceChoice.runIn": "Lancer dans {{space}}",
   "spaceChoice.runOptions": "Lancer avec options dans…",
   "spaceChoice.runOptionsIn": "Lancer avec options dans {{space}}",
   "spaceChoice.useInAgent": "Utiliser dans un agent de…",

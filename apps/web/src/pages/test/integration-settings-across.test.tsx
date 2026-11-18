@@ -7,12 +7,10 @@
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
-import { installFakeStorage } from "../../test/fake-storage.ts";
+import { installSpaStorage } from "../../test/fake-storage.ts";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations.ts";
 
-installFakeStorage({
-  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+installSpaStorage({
   location: { pathname: "/", origin: "http://localhost" },
   matchMedia: () => ({ matches: false, addEventListener: () => {} }),
 });
@@ -27,24 +25,15 @@ afterAll(() => {
 });
 
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
-const { renderInSpace } = await import("../../test/space-context.ts");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const { IntegrationSettings } = await import("../integration-detail.tsx");
+const { useIntegrationSpaceAction } =
+  await import("../../components/integration-detail/use-integration-space.ts");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 const agentsT = i18n.getFixedT("fr", "agents");
 const settingsT = i18n.getFixedT("fr", "settings");
-
-const space = (id: string, name: string, permissions: string[]) => ({
-  id,
-  object: "space",
-  access: "member",
-  permissions,
-  personal: false,
-  isDefault: id === "spc_a",
-  name,
-  role: null,
-});
 
 const DETAIL = {
   active: true,
@@ -54,34 +43,32 @@ const DETAIL = {
   block_user_connections: false,
 } as unknown as IntegrationDetailWire;
 
-function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a", "spc_b"]) {
-  const queryClient = new QueryClient();
-  queryClient.setQueryData(
-    ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-    {
-      object: "list",
-      hasMore: false,
-      data: [
-        space("spc_a", "Studio", ["integrations:read", ...workingGrants]),
-        space("spc_b", "Coffre", ["integrations:read", "integrations:configure"]),
-      ],
-    },
-  );
-  return renderInSpace(
+/** The page's wiring: the configuration space is the page's, handed down. */
+function Settings({ spaceIds }: { spaceIds: string[] }) {
+  const configureIn = useIntegrationSpaceAction("@acme/crm", "integrations:configure", spaceIds);
+  return (
     <IntegrationSettings
       packageId="@acme/crm"
       detail={DETAIL}
       blockUserConnections={false}
       spaceIds={spaceIds}
+      configureIn={configureIn}
       isOwned={false}
       versionGrants={{ canRestore: false, canDelete: false }}
-    />,
-    {
-      overview,
-      queryClient,
-      initialEntries: ["/integrations/@acme/crm?integrationSettings=authentication#settings"],
-    },
+    />
   );
+}
+
+function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a", "spc_b"]) {
+  const queryClient = memberSpaceClient([
+    testSpace("spc_a", ["integrations:read", ...workingGrants], "Studio"),
+    testSpace("spc_b", ["integrations:read", "integrations:configure"], "Coffre"),
+  ]);
+  return renderInSpace(<Settings spaceIds={spaceIds} />, {
+    overview,
+    queryClient,
+    initialEntries: ["/integrations/@acme/crm?integrationSettings=authentication#settings"],
+  });
 }
 
 const GROUP = `>${agentsT("detail.settings.configurationGroup")}<`;

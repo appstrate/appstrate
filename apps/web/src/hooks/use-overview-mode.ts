@@ -54,14 +54,14 @@ export function useOverviewMode() {
 /**
  * A sentence about the working space, its keys in `ns`: `plain` (« cet espace ») with a space
  * selected; in « Tous les espaces », where the page names it, `named` with that space as
- * `{{space}}`.
+ * `{{space}}`, and nothing until its name is known.
  */
 export function useWorkingSpaceWording(ns: string) {
   const { t } = useTranslation(ns);
   const { on } = useOverviewMode();
   const space = useSpaceLabelOf()(useCurrentSpaceId());
   return (plain: string, named: string, options: Record<string, unknown> = {}): string =>
-    on && space ? t(named, { ...options, space }) : t(plain, options);
+    !on ? t(plain, options) : space ? t(named, { ...options, space }) : "";
 }
 
 /**

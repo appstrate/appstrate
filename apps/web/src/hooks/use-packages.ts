@@ -11,6 +11,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { $api, client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
+import { spaceHeader } from "../lib/scoping-headers";
 import { generatedKeyPackage, keepPreviousWithin } from "../lib/query-state";
 import { useListScope, useOrgScope, useSpaceReadScope } from "./use-org-scope";
 import { useCurrentOrgId } from "./use-org";
@@ -125,7 +126,7 @@ async function fetchPackageDetail(
   const path = splitPackageRef(packageId);
   // Omitted: the server picks the draft for a writer, else the latest version. An explicit `draft` is an author's read (`403 draft_not_writable` for others).
   const query = version ? { query: { version } } : {};
-  const headers = spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
+  const headers = spaceHeader(spaceId);
   if (type === "agent") {
     const { data, response } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...query },
@@ -367,7 +368,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
         () =>
           client.GET("/api/packages/{scope}/{name}/{version}/download", {
             params: { path: { scope, name, version } },
-            ...(spaceId ? { headers: { "X-Space-Id": spaceId } } : {}),
+            ...spaceHeader(spaceId),
             parseAs: "blob",
           }),
         `${stripScope(scope)}-${name}-${version}.afps`,
@@ -390,7 +391,7 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
         () =>
           client.GET("/api/agents/{scope}/{name}/bundle", {
             params: { path: { scope, name }, query: { version } },
-            ...(spaceId ? { headers: { "X-Space-Id": spaceId } } : {}),
+            ...spaceHeader(spaceId),
             parseAs: "blob",
           }),
         `${stripScope(scope)}-${name}.afps-bundle`,
@@ -565,7 +566,8 @@ export function useForkPackage() {
       // 201 → the forked package resource, bare: `id` is the new
       // package ID under org scope, `forked_from` the source package ID.
       const { data } = await client.POST("/api/packages/{scope}/{name}/fork", {
-        params: { path: splitPackageRef(packageId), header: { "X-Space-Id": spaceId } },
+        params: { path: splitPackageRef(packageId) },
+        ...spaceHeader(spaceId),
         body: name ? { name } : {},
       });
       return { id: data!.id, forked_from: data!.forked_from ?? null };

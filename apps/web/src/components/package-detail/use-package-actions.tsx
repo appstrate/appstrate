@@ -174,25 +174,35 @@ export function usePackageActions({
     onRemove: setRemoving,
   });
 
+  const useInAgentEntry = deedEntry(
+    deedOfAction(
+      useInAgent,
+      spaceDeedLabels(t, "spaceChoice.useInAgent", "spaceChoice.useInAgentIn"),
+      () => navigate(agentCreationWithIntegrationPath(packageId)),
+    ),
+  );
+  const forkEntry = deedEntry(
+    deedInSpaces(
+      overview,
+      forkAction.targets,
+      spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"),
+      setForkSpaceId,
+    ),
+  );
+
   const entries: PackageMenuEntry[] = [
     {
       id: "use-in-agent",
       group: "build",
       icon: PACKAGE_TYPE_ICON.agent,
       label: t("integrationWizard.ready.useInAgent"),
-      ...deedEntry(
-        deedOfAction(
-          useInAgent,
-          spaceDeedLabels(t, "spaceChoice.useInAgent", "spaceChoice.useInAgentIn"),
-          () => navigate(agentCreationWithIntegrationPath(packageId)),
-        ),
-      ),
+      ...useInAgentEntry,
       // With a space selected, only where it is active.
       hidden:
+        useInAgentEntry.hidden ||
         type !== "integration" ||
         !published ||
-        (!overview && isActiveHere !== true) ||
-        !useInAgent.offered,
+        (!overview && isActiveHere !== true),
     },
     {
       id: "catalogue",
@@ -224,15 +234,8 @@ export function usePackageActions({
       group: "build",
       icon: GitFork,
       label: t("fork.button"),
-      ...deedEntry(
-        deedInSpaces(
-          overview,
-          forkAction.targets,
-          spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"),
-          setForkSpaceId,
-        ),
-      ),
-      hidden: !showFork,
+      ...forkEntry,
+      hidden: forkEntry.hidden || isOwned,
     },
     {
       id: "run-options",

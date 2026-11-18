@@ -9,7 +9,8 @@ const NO_SPACES: readonly string[] = [];
 /**
  * An act on an agent where `permission` holds, among `spaceIds`, the spaces the agent is active in
  * (in « Tous les espaces », none offers nothing): {@link useSpaceEntry} reading the agent's detail
- * in the space entered, so the act finds it on that space's key.
+ * in the space entered, so the act finds it on that space's key. `preferWorkingSpace`: a row of the
+ * working space runs there without asking.
  */
 export function useAgentSpaceAction(
   packageId: string,

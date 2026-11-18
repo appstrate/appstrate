@@ -8,35 +8,26 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
 import { Route, Routes } from "react-router-dom";
-import { installFakeStorage } from "../../test/fake-storage.ts";
+import { installSpaStorage } from "../../test/fake-storage.ts";
 
-installFakeStorage({
-  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+installSpaStorage({
   location: { pathname: "/", origin: "http://localhost" },
 });
 
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { NotificationDetailPage } = await import("../notification-detail.tsx");
 const { RouteGate } = await import("../../components/route-gate.tsx");
-const { renderInSpace } = await import("../../test/space-context.ts");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const { holdsOverview } = await import("../../lib/space-lists.ts");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-const space = (id: string, name: string) => ({
-  id,
-  object: "space",
-  access: "member",
-  permissions: ["runs:read"],
-  personal: false,
-  isDefault: id === "spc_a",
-  name,
-  role: null,
-});
-const SPACES = [space("spc_a", "Studio"), space("spc_b", "Coffre")];
+const SPACES = [
+  testSpace("spc_a", ["runs:read"], "Studio"),
+  testSpace("spc_b", ["runs:read"], "Coffre"),
+];
 
 const NOTIFICATION = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -49,15 +40,7 @@ const NOTIFICATION = {
 };
 
 function renderAt(url: string, workingSpaceId: string) {
-  const queryClient = new QueryClient();
-  queryClient.setQueryData(
-    ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-    {
-      object: "list",
-      hasMore: false,
-      data: SPACES,
-    },
-  );
+  const queryClient = memberSpaceClient(SPACES);
   // The notification as its own space answers it; the hidden working space would answer 404.
   queryClient.setQueryData(
     [

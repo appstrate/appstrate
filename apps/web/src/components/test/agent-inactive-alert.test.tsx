@@ -16,35 +16,33 @@
  * §3.6).
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { AgentInactiveAlert } = await import("../package-detail/agent-inactive-alert.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { render } = await import("../../test/render.tsx");
 const { $api } = await import("../../api/client.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
 const i18n = i18nModule.default;
-const ORG_ID = "org_a";
 const SPACE_ID = "spc_a";
 
 type Verdict = "allowed" | "not_shareable" | "forbidden";
 
-function renderAlert(verdict: Verdict, seed: (qc: QueryClient) => void = () => {}): string {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
+/** The banner in Atelier, whose library row carries `verdict`; across spaces when `overview`. */
+function renderAlert(verdict: Verdict, overview = false): string {
+  const queryClient = memberSpaceClient([
+    testSpace(SPACE_ID, ["agents:read"]),
+    testSpace("spc_b", ["agents:read"]),
+  ]);
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/spaces/{id}/library", {
-      params: { path: { id: SPACE_ID }, header: { "X-Org-Id": ORG_ID } },
+      params: { path: { id: SPACE_ID }, header: { "X-Org-Id": "org_1" } },
     }).queryKey,
     {
       object: "library",
@@ -62,21 +60,11 @@ function renderAlert(verdict: Verdict, seed: (qc: QueryClient) => void = () => {
       },
     },
   );
-  seed(queryClient);
-  const org = spyOn(orgStore, "getInitialState").mockReturnValue({
-    ...orgStore.getInitialState(),
-    id: ORG_ID,
+  return renderInSpace(<AgentInactiveAlert packageId="@acme/worker" />, {
+    overview,
+    queryClient,
+    spaceId: SPACE_ID,
   });
-  const current = spyOn(spaceStore, "getInitialState").mockReturnValue({
-    ...spaceStore.getInitialState(),
-    id: SPACE_ID,
-  });
-  try {
-    return render(<AgentInactiveAlert packageId="@acme/worker" />, { queryClient });
-  } finally {
-    org.mockRestore();
-    current.mockRestore();
-  }
 }
 
 /** The activation control, by the label it carries. */
@@ -106,35 +94,6 @@ describe("the switched-off banner", () => {
 
 describe("the switched-off banner in « Tous les espaces »", () => {
   it("is silent: it would speak of a space the page does not name", () => {
-    const mode = [
-      spyOn(authStore, "getInitialState").mockReturnValue({
-        ...authStore.getInitialState(),
-        user: { id: "u_1", email: "u@example.test", emailVerified: true },
-      }),
-      spyOn(overviewStore, "getInitialState").mockReturnValue({
-        ...overviewStore.getInitialState(),
-        chosen: { [`u_1:${ORG_ID}`]: true },
-      }),
-    ];
-    try {
-      const html = renderAlert("allowed", (qc) =>
-        qc.setQueryData(
-          $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
-            .queryKey,
-          {
-            object: "list",
-            hasMore: false,
-            data: [SPACE_ID, "spc_b"].map((id) => ({
-              id,
-              access: "member",
-              permissions: ["agents:read"],
-            })),
-          },
-        ),
-      );
-      expect(html).toBe("");
-    } finally {
-      for (const stub of mode) stub.mockRestore();
-    }
+    expect(renderAlert("allowed", true)).toBe("");
   });
 });

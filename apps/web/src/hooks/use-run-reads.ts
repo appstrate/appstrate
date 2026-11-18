@@ -58,8 +58,8 @@ export function useMarkAllRunsRead() {
   return useMutation({
     mutationFn: (spaceIds: readonly string[] | null) =>
       Promise.all(
-        markAllRunsReadRequests(spaceIds).map((params) =>
-          client.PUT("/api/runs/read-all", { params }),
+        markAllRunsReadRequests(spaceIds).map((inSpace) =>
+          client.PUT("/api/runs/read-all", inSpace),
         ),
       ),
     onSettled: () => invalidateRunReadState(qc),

@@ -12,8 +12,8 @@ describe("markAllRunsReadRequests", () => {
 
   it("marks each spanned space's runs in a request naming it", () => {
     expect(markAllRunsReadRequests(["spc_a", "spc_b"])).toEqual([
-      { header: { "X-Space-Id": "spc_a" } },
-      { header: { "X-Space-Id": "spc_b" } },
+      { headers: { "X-Space-Id": "spc_a" } },
+      { headers: { "X-Space-Id": "spc_b" } },
     ]);
   });
 

@@ -43,7 +43,8 @@ const CONFIGURATION_SECTION_TEXT: Record<
 
 /**
  * The space an agent's section is shown from, in « Tous les espaces » (`ConfigurationSpace`):
- * one of its active spaces (`spaceIds`) granting `permission`, the agent read there on entering.
+ * one of `spaceIds` granting `permission` — its active spaces (`space_ids`, the header's tiles)
+ * for a space setting — the agent read there on entering.
  */
 export function AgentConfigurationSpace({
   packageId,
@@ -55,9 +56,7 @@ export function AgentConfigurationSpace({
   permission: string;
 }) {
   const { t } = useTranslation("agents");
-  const enter = useAgentSpaceAction(packageId, permission, spaceIds, {
-    preferWorkingSpace: false,
-  });
+  const enter = useAgentSpaceAction(packageId, permission, spaceIds);
   return (
     <ConfigurationSpace
       label={t("detail.configuration.spaceLabel")}
@@ -123,7 +122,7 @@ export function AgentConfigurationView({
       {namesSpace && permission && (
         <AgentConfigurationSpace
           packageId={packageId}
-          spaceIds={detail.read_space_ids}
+          spaceIds={detail.space_ids}
           permission={permission}
         />
       )}

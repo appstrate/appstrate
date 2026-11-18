@@ -17,7 +17,7 @@
  * (« Par espace ») is where several spaces are set at once.
  */
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { Check, Plus } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { SpaceChoiceDropdown } from "./space-choice-menu";
@@ -97,7 +97,7 @@ export function CatalogueAddButton({
   }
 
   // Where it already runs stays in the menu, ticked and inert: the picture is whole, and a space
-  // does not vanish after a click. The trigger counts those spaces.
+  // does not vanish after a click. The trigger asks the space (« Ajouter à… ») and counts those.
   const alreadyIn =
     activeIn.size > 0 ? t("catalogue.addedCount", { count: activeIn.size }) : undefined;
   return (
@@ -107,9 +107,9 @@ export function CatalogueAddButton({
         done: activeIn.has(spaceId) ? t("catalogue.filter.active") : undefined,
       })}
     >
-      <Button size="sm" variant="outline" className={SLOT} disabled={busy} title={alreadyIn}>
+      <Button size="sm" variant="outline" className={SLOT} disabled={busy}>
         <Plus aria-hidden />
-        {t("common:btn.add")}
+        {t("catalogue.addToMenu")}
         {alreadyIn && (
           <>
             <span aria-hidden className="text-success flex items-center gap-0.5 tabular-nums">
@@ -119,7 +119,6 @@ export function CatalogueAddButton({
             <span className="sr-only">{alreadyIn}</span>
           </>
         )}
-        <ChevronDown aria-hidden />
       </Button>
     </SpaceChoiceDropdown>
   );

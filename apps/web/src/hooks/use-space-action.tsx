@@ -25,9 +25,8 @@ import { useSpaces } from "./use-spaces";
 type SpaceNeed = { permission: string } | { route: RoutePath };
 
 /**
- * Performs `act` in `spaceId`: at once in the working space, else after entering it as the
- * working space (behind the unsaved-drafts question a scope change asks), so every request
- * `act` sends, and every screen it opens, is that space's. Exported for its test.
+ * Performs `act` in `spaceId`: at once in the working space, else after entering it (behind the
+ * unsaved-drafts question). Exported for its test.
  */
 export function actInSpace(
   spaceId: string,
@@ -47,10 +46,9 @@ function useActInSpace(): (spaceId: string, act: () => void) => void {
 }
 
 /**
- * Where an action naming no space may act. Out of the mode: `offered` is the working space's
- * verdict and its space when offered. In it: the spaces that grant `need`, only those of `among`
- * when given, `offered` when there is one, and `anyOf` the one an act answering the same from
- * any of them reads (the working space when it is one).
+ * Where an action naming no space may act: `targets`, the spaces granting `need` (among `among`
+ * when given) in the mode, else the working space when it grants it; `offered` when there is one;
+ * `anyOf`, the one to read from when any of them answers the same (the working space first).
  */
 export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { on } = useOverviewMode();
@@ -80,26 +78,20 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
 
 /** How {@link useSpaceAction} picks and enters a space. */
 interface SpaceActionOptions {
-  /**
-   * Whether the working space is taken without asking when it is among `among` — a row's action
-   * continues there. `false` on a page whose working space it does not name: the reader chooses.
-   * Defaults to whether `among` is given.
-   */
+  /** Whether the working space is taken without asking when it is among `among`. Defaults to whether `among` is given. */
   preferWorkingSpace?: boolean;
   /**
-   * Reads, before entering a space other than the working one, what the screen the switch redraws
-   * shows, and resolves to `act` holding it: that is what runs once the space is entered, and
-   * nothing runs when the read fails (it reports itself) or the switch is cancelled.
+   * Before entering another space, reads what the redrawn screen needs and resolves to the `act`
+   * to run once entered; a failed read (it reports itself) runs nothing.
    */
   prepare?: (spaceId: string, act: () => void) => Promise<() => void>;
 }
 
 /**
- * An action naming no space. `offered`: whether to show it at all. `run(act)`: performs `act` in
- * the space that grants `need`, among `among` when given (out of the mode, the working space);
- * between several it does nothing, the reader choosing in `choose(label, act)`, the menu its
- * trigger becomes — `undefined` when there is nothing to choose. `target`: in the mode, the one
- * space `run` acts in without asking. `link(to)`: a link going to `to` the same way.
+ * An action naming no space. `offered`: whether to show it. `run(act)`: performs `act` in the one
+ * space granting `need` (out of the mode, the working space); between several it does nothing and
+ * `choose(label, act)` is the menu of them (`undefined` otherwise). `target`: in the mode, the
+ * space `run` acts in. `link(to)`: a link going to `to` the same way.
  */
 export function useSpaceAction(
   need: SpaceNeed,

@@ -9,7 +9,7 @@ import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { PackageOriginMeta } from "../package-origin-meta";
-import { PackageDetailSpaces } from "../package-spaces";
+import { homeNameBesideTiles, PackageSpaces } from "../package-spaces";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
 interface AgentDetailBarDetail {
@@ -17,6 +17,8 @@ interface AgentDetailBarDetail {
   source: string;
   /** The home, when the reader reaches it (`home_space_id`). */
   homeSpaceId: string | null;
+  /** The home's name, said only when no space tile names it (`homeNameBesideTiles`). */
+  homeSpaceName?: string | null;
   /** The spaces the reader reaches where the agent is active, home first (`space_ids`). */
   spaceIds: readonly string[];
   version?: string | null;
@@ -78,11 +80,11 @@ export function AgentDetailBar<T extends string>({
         />
       }
       trail={[listCrumb]}
-      spaces={detail.spaceIds.length > 0 ? <PackageDetailSpaces detail={detail} /> : undefined}
+      spaces={detail.spaceIds.length > 0 ? <PackageSpaces item={detail} /> : undefined}
       meta={
         <>
           <DetailBarId id={detail.id} />
-          <PackageOriginMeta source={detail.source} />
+          <PackageOriginMeta source={detail.source} homeSpaceName={homeNameBesideTiles(detail)} />
         </>
       }
       actions={actions}

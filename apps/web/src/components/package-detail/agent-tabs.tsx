@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { useAgentSpaceAction } from "../../hooks/use-agent-run-space";
 import { ScopedRunList } from "../scoped-run-list";
 import { SchedulesTable } from "../schedules-table";
 import { useScheduleColumns } from "../schedule-columns";
@@ -18,8 +16,8 @@ import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
-import { NewScheduleModal } from "../new-schedule-modal";
-import { deedEntry, deedOfAction, spaceDeedLabels } from "../space-deed";
+import { deedEntry } from "../space-deed";
+import { useScheduleCreation } from "./use-schedule-creation";
 import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
@@ -59,12 +57,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const list = useLocalListParams();
   const states = list.values("state", ["active", "disabled"] as const);
   const columns = useScheduleColumns({ showAgentName: false, spanning });
-  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  // A schedule is created in one space: in « Tous les espaces », one of the agent's that the
-  // reader picks; the page enters it with the agent already read there.
-  const create = useAgentSpaceAction(packageId, "schedules:write", detail?.space_ids, {
-    preferWorkingSpace: false,
-  });
+  const create = useScheduleCreation(packageId, detail);
 
   if (detail && schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
@@ -117,22 +110,14 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
               <EmptyStateAction
                 action={{
                   label: t("schedule.titleNew"),
-                  ...deedEntry(
-                    deedOfAction(
-                      create,
-                      spaceDeedLabels(t, "spaceChoice.schedule", "spaceChoice.scheduleIn"),
-                      () => setNewScheduleOpen(true),
-                    ),
-                  ),
+                  ...deedEntry(create.deed),
                 }}
               />
             </EmptyState>
           )
         }
       />
-      {newScheduleOpen && (
-        <NewScheduleModal initialAgentId={packageId} onClose={() => setNewScheduleOpen(false)} />
-      )}
+      {create.dialog}
     </>
   );
 }

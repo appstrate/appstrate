@@ -12,7 +12,7 @@
 import { describe, expect, it } from "bun:test";
 import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
-import type { AgentDetail } from "@appstrate/shared-types";
+import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
@@ -249,8 +249,8 @@ describe("the agent index in the mode", () => {
 
   it("offers a row's run where one of its spaces grants it, whatever the working space grants", () => {
     const run = (spaces: typeof SPACES) =>
-      renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, spaces).html.includes(
-        'aria-label="Lancer"',
+      /aria-label="Lancer dans [^"]+"/.test(
+        renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, spaces).html,
       );
     const without = (space: (typeof SPACES)[number]) => ({
       ...space,
@@ -278,11 +278,17 @@ describe("the agent index in the mode", () => {
         (qc) => qc.setQueryData(["agents", "org_1", "across-spaces"], [agent(spaceIds)]),
         [SPACES[0]!, runner("spc_b"), runner("spc_c")],
       );
-      const at = html.indexOf('aria-label="Lancer"');
+      const at = html.indexOf('aria-label="Lancer dans');
       return html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at));
     };
-    expect(runButton(["spc_a", "spc_b"])).not.toContain('aria-haspopup="menu"');
-    expect(runButton(["spc_b", "spc_c"])).toContain('aria-haspopup="menu"');
+    // In the working space, named: one click.
+    const here = runButton(["spc_a", "spc_b"]);
+    expect(here).toContain('aria-label="Lancer dans Studio"');
+    expect(here).not.toContain('aria-haspopup="menu"');
+    // Elsewhere, between two spaces: the menu, asking.
+    const between = runButton(["spc_b", "spc_c"]);
+    expect(between).toContain('aria-label="Lancer dans…"');
+    expect(between).toContain('aria-haspopup="menu"');
   });
 
   it("offers no write while the space listing has not answered: it appears once, never flips", () => {
@@ -291,7 +297,7 @@ describe("the agent index in the mode", () => {
       qc.setQueryData(["agents", "org_1", "spc_a"], [agent(["spc_a"])]);
     });
     expect(html).not.toContain("data-page-actions-trigger");
-    expect(html).not.toContain('aria-label="Lancer"');
+    expect(html).not.toContain('aria-label="Lancer');
   });
 
   it("offers the creation, import and catalogue a space grants", () => {
@@ -537,8 +543,8 @@ describe("the dashboard in the mode", () => {
   it("offers the assistant, and an agent's run on its card where a space grants it", () => {
     const { html } = renderIn(true, <DashboardPage />, "/", seed);
     expect(html).toContain("data-page-actions-trigger");
-    // One card for the agent of two spaces; only spc_a grants `agents:run`.
-    expect(html.match(/aria-label="Lancer"/g)).toHaveLength(1);
+    // One card for the agent of two spaces; only spc_a grants `agents:run`: named.
+    expect(html.match(/aria-label="Lancer dans Studio"/g)).toHaveLength(1);
     // Out of the mode, a working space that reads runs offers the assistant and the agent's run.
     const here = renderIn(
       false,
@@ -608,27 +614,8 @@ describe("the gate", () => {
 describe("an agent's page", () => {
   const runner = (id: string) => space(id, ["agents:read", "agents:run", "runs:read"]);
   const reader = (id: string) => space(id, ["agents:read", "runs:read"]);
-  const detail = (space_ids: string[]): AgentDetail => ({
-    id: "@acme/reporter",
-    icon: null,
-    color: null,
-    source: "local",
-    dependencies: { integrations: [] },
-    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
-    running_runs: 0,
-    last_run: null,
-    scope: "@acme",
-    version: "1.0.0",
-    definition: "published",
-    home_space_id: "spc_a",
-    home_writable: false,
-    home_deletable: false,
-    home_shareable: false,
-    effective_timeout_seconds: 300,
-    active: true,
-    space_ids,
-    read_space_ids: space_ids,
-  });
+  const detail = (space_ids: string[]) =>
+    reporter({ active: true, home_space_id: "spc_a", space_ids, read_space_ids: space_ids });
 
   /** The page's « Lancer »: its opening tag, or `null` when it is absent. */
   const runButton = (overview: boolean, spaceIds: string[], spaces: ReturnType<typeof space>[]) => {
@@ -645,7 +632,7 @@ describe("an agent's page", () => {
       () => {},
       spaces,
     );
-    const at = html.indexOf(">Lancer<");
+    const at = html.search(/>Lancer( dans[^<]*)?</);
     return at < 0
       ? null
       : html.slice(
@@ -655,18 +642,18 @@ describe("an agent's page", () => {
   };
 
   it("asks which space between the agent's spaces that run it, the working one included", () => {
-    expect(runButton(true, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")])).toContain(
-      'aria-haspopup="menu"',
-    );
+    const html = runButton(true, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")]);
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('title="Lancer dans…"');
   });
 
   it("asks nothing with one space running it, and runs in the working space out of the mode", () => {
     const one = runButton(true, ["spc_a", "spc_b"], [reader("spc_a"), runner("spc_b")]);
-    expect(one).not.toBeNull();
+    expect(one).toContain('title="Lancer dans spc_b"');
     expect(one).not.toContain('aria-haspopup="menu"');
-    expect(runButton(false, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")])).not.toContain(
-      'aria-haspopup="menu"',
-    );
+    const here = runButton(false, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")]);
+    expect(here).toContain('title="Lancer"');
+    expect(here).not.toContain('aria-haspopup="menu"');
   });
 
   it("offers no run where none of its spaces runs it", () => {

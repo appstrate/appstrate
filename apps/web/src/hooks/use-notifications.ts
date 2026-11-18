@@ -10,6 +10,7 @@ import { $api, client } from "../api/client";
 import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useListScope, useOrgScope } from "./use-org-scope";
+import { spaceHeader } from "../lib/scoping-headers";
 
 /**
  * The notification feed — the dashboard bell: a failed run, a share. A run's
@@ -148,9 +149,7 @@ export function useMarkAllRead() {
 }
 
 function markReadInSpace(spaceId: string | null): Promise<unknown> {
-  return client.PUT("/api/notifications/read-all", {
-    params: spaceId ? { header: { "X-Space-Id": spaceId } } : {},
-  });
+  return client.PUT("/api/notifications/read-all", spaceHeader(spaceId));
 }
 
 /** {@link useMarkAllRead}'s requests, `put` sending one. Exported for its test. */

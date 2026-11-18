@@ -126,7 +126,7 @@ export function enterableSpaceId(
 }
 
 /** The space a URL's search names with `?enterSpace=`, or null. */
-export function linkedSpaceIn(search: string): string | null {
+function linkedSpaceIn(search: string): string | null {
   return new URLSearchParams(search).get(ENTER_SPACE_PARAM);
 }
 

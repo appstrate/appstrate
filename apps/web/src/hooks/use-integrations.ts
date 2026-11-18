@@ -88,13 +88,6 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
 // Hooks
 // ─────────────────────────────────────────────
 
-/** Every integration read guards on `integrations:read`, which no agent or run read implies. */
-function useIntegrationsReadScope() {
-  const scope = useOrgScope();
-  const { can } = usePermissions();
-  return { header: scope.header, enabled: scope.enabled && can("integrations:read") };
-}
-
 type IntegrationNameOf = (integrationId: string) => string;
 
 /** Display names of `integrationIds` from the detail query cache (fetched when uncached and readable); the id stands in for an unreadable name. */
@@ -124,7 +117,7 @@ export function useIntegrationNames(): (
   integrationIds: readonly string[],
 ) => Promise<IntegrationNameOf> {
   const qc = useQueryClient();
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   return (integrationIds) => loadIntegrationNames(qc, scope, integrationIds);
 }
 
@@ -147,7 +140,7 @@ export function useIntegrationsById(
   isPlaceholderData: boolean;
   error: unknown;
 } {
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   // Sorted and unique, so the same set is the same keys whatever order it came in.
   const unique = [...new Set(ids)].sort();
   const chunks: string[][] = [];
@@ -202,7 +195,7 @@ export function useIntegrationDetail(packageId: string | undefined, spaceId?: st
 
 /** The detail of each of `packageIds`, in order. `active` and `block_user_connections` are read here: the list is paginated and would misreport them past 100 integrations. */
 export function useIntegrationDetails(packageIds: readonly string[]) {
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   return useQueries({
     queries: packageIds.map((packageId) => ({
       ...$api.queryOptions("get", "/api/integrations/{packageId}", {
@@ -216,7 +209,7 @@ export function useIntegrationDetails(packageIds: readonly string[]) {
 }
 
 export function useIntegrationConnections(packageId: string | undefined) {
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/connections",
@@ -352,7 +345,7 @@ export function useIntegrationClients(
   packageId: string | undefined,
   authKey: string | undefined,
 ) {
-  const spaceScope = useIntegrationsReadScope();
+  const spaceScope = useSpaceReadScope("integrations:read");
   const orgScope = useOrgOnlyScope();
   const path = { packageId: packageId ?? "", authKey: authKey ?? "" };
   const ready = !!packageId && !!authKey;
@@ -481,7 +474,7 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
 // ─────────────────────────────────────────────
 
 export function useIntegrationPins(packageId: string | undefined) {
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/pins",
@@ -497,7 +490,7 @@ export function useIntegrationPins(packageId: string | undefined) {
 
 /** The space's agents that declare this integration as a dependency (feeds the "pin a new agent" picker). */
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/consuming-agents",
@@ -547,7 +540,7 @@ export function useDeleteIntegrationPin() {
 // ─── Org default connection (cross-agent governance) ───────────────────────
 
 export function useIntegrationOrgDefault(packageId: string | undefined) {
-  const scope = useIntegrationsReadScope();
+  const scope = useSpaceReadScope("integrations:read");
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/default",

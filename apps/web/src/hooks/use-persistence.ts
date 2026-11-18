@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AgentMemoryItem, AgentPinnedSlotItem } from "@appstrate/shared-types";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
+import { spaceHeader } from "../lib/scoping-headers";
 import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { persistenceKeys } from "../lib/query-keys";
@@ -108,10 +109,6 @@ export function useRunPinned(packageId: string | undefined, runId: string | unde
 
 // --- Mutations -------------------------------------------------------------
 
-/** The space a request acts in: `spaceId` when given, the current space otherwise. */
-const inSpace = (spaceId: string | undefined) =>
-  spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
-
 /** One row of the memory list, deleted in its own space (`spaceId`; the current space when absent). */
 export interface PersistenceRowRef {
   kind: "pinned" | "archive";
@@ -128,12 +125,12 @@ export function useDeletePersistenceRow(packageId: string) {
       if (kind === "pinned") {
         await client.DELETE("/api/agents/{scope}/{name}/persistence/pinned/{id}", {
           params: { path: { scope, name, id } },
-          ...inSpace(spaceId),
+          ...spaceHeader(spaceId),
         });
       } else {
         await client.DELETE("/api/agents/{scope}/{name}/persistence/memories/{id}", {
           params: { path: { scope, name, id } },
-          ...inSpace(spaceId),
+          ...spaceHeader(spaceId),
         });
       }
     },
@@ -153,7 +150,7 @@ export function useDeleteAgentMemories(packageId: string) {
     mutationFn: async (spaceId: string) => {
       const { data } = await client.DELETE("/api/agents/{scope}/{name}/persistence", {
         params: { path: splitPackageRef(packageId), query: { kind: "memory" } },
-        ...inSpace(spaceId),
+        ...spaceHeader(spaceId),
       });
       return data!;
     },

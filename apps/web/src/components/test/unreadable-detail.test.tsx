@@ -5,7 +5,7 @@
  * is no refusal, it says so; in the mode it waits for the look-up across spaces, reopens where the
  * resource is (rendering nothing on its way: `Navigate` acts in an effect), and says it is
  * unavailable in none of the reader's spaces only when no reached space holds it. Where it reopens
- * is `detailElsewhere` (`lib/test/detail-elsewhere.test.ts`).
+ * is `detailElsewhere`.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -18,7 +18,7 @@ installFakeStorage({
 });
 
 const { $api, ApiError } = await import("../../api/client.ts");
-const { UnreadableDetail } = await import("../unreadable-detail.tsx");
+const { detailElsewhere, UnreadableDetail } = await import("../unreadable-detail.tsx");
 const { renderInSpace } = await import("../../test/space-context.ts");
 const i18nModule = await import("../../i18n.ts");
 await i18nModule.i18nReady;
@@ -100,6 +100,10 @@ describe("UnreadableDetail", () => {
     expect(detail({ overview: true })).toContain(PENDING);
   });
 
+  it("looks a resource read as nothing (a 404 answered `null`) up across spaces", () => {
+    expect(detail({ overview: true, error: null })).toContain(PENDING);
+  });
+
   it("locates the live agent with launch-only sight and a version only with full read", () => {
     const placements =
       (readable: boolean, currentPlaced = true) =>
@@ -166,5 +170,25 @@ describe("UnreadableDetail", () => {
       seed: (qc) => qc.setQueryData(runKey, { id: "run_1", spaceId: "spc_hidden" }),
     });
     expect(html).toContain(HINT_ACROSS());
+  });
+});
+
+describe("detailElsewhere", () => {
+  const target = "/agents/@acme/a?agentSettings=connections#settings";
+  const placements = ["spc_b", "spc_c"];
+  const open = () => true;
+
+  it("keeps the page, query and hash, entering the next enterable placement after the refusal", () => {
+    expect(detailElsewhere(placements, target, "spc_a", open)).toBe(
+      "/agents/@acme/a?agentSettings=connections&enterSpace=spc_b#settings",
+    );
+    const inC = "/agents/@acme/a?agentSettings=connections&enterSpace=spc_c#settings";
+    expect(detailElsewhere(placements, target, "spc_b", open)).toBe(inC);
+    expect(detailElsewhere(placements, target, "spc_a", (id) => id !== "spc_b")).toBe(inC);
+  });
+
+  it("stops after the last refusal, or before the working space resolves", () => {
+    expect(detailElsewhere(placements, target, "spc_c", open)).toBeNull();
+    expect(detailElsewhere(placements, target, null, open)).toBeNull();
   });
 });

@@ -18,7 +18,11 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
-import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
+import {
+  canReadRuns,
+  packagePermission,
+  packageSightPermissions,
+} from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { EmptyState } from "../components/page-states";
 import { UnreadableDetail } from "../components/unreadable-detail";
@@ -192,7 +196,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading))
     return <PackageDetailSkeleton type={type} />;
-  if (error || !detail || (overview && isVersionView && !can(`${type}s:read`)))
+  if (error || !detail || (overview && isVersionView && !can(packagePermission(type, "read"))))
     return (
       <UnreadableDetail
         kind={type}

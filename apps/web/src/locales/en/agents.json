@@ -125,6 +125,7 @@
   "detail.configuration.connectionsDescription": "The bundle declares the required integrations. This workspace maps them to the concrete accounts used by runs.",
   "detail.configuration.connectionsDescriptionIn": "The bundle declares the required integrations. {{space}} maps them to the concrete accounts used by runs.",
   "detail.configuration.spaceChoice": "Configure in…",
+  "detail.configuration.spaceChoiceIn": "Configure in {{space}}",
   "detail.configuration.spaceLabel": "Configuration for",
   "detail.configuration.pickSpace": "Pick a space",
   "detail.configuration.pickSpaceHint": "Pick one of the spaces the agent is active in to see its configuration.",

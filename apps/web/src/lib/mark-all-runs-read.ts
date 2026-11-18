@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { spaceHeader } from "./scoping-headers";
+
 /**
  * The `PUT /api/runs/read-all` requests behind « Tout marquer comme lu »: the route marks the
  * runs of one space, so a list spanning spaces sends one per space it spans, each naming its
@@ -7,7 +9,7 @@
  */
 export function markAllRunsReadRequests(
   spaceIds: readonly string[] | null,
-): { header?: { "X-Space-Id": string } }[] {
+): ReturnType<typeof spaceHeader>[] {
   if (spaceIds === null) return [{}];
-  return spaceIds.map((spaceId) => ({ header: { "X-Space-Id": spaceId } }));
+  return spaceIds.map((spaceId) => spaceHeader(spaceId));
 }

@@ -3,6 +3,7 @@
 // Pure verdicts on what a reader may DO to a package: controls read them so none offers what the server refuses.
 
 import type { LibraryPackageItem } from "../hooks/use-library";
+import type { CataloguePlacement } from "./catalogue-placement";
 import { linkedSpacePath } from "./across-spaces";
 import { packageDetailPath } from "./package-paths";
 
@@ -90,18 +91,13 @@ export function catalogueDeeds(
   };
 }
 
+type PagePlacement = Pick<CataloguePlacement, "here" | "activeIn" | "inactiveIn" | "homeSpaceId">;
+
 /**
  * The space a package's own page opens in from the catalogue: the current one when it holds the
  * package; with none (« Tous les espaces »), a space the reader can enter where it runs, else
  * where it is placed switched off, else its home. `null`: nowhere the page could be read.
  */
-interface PagePlacement {
-  here: unknown;
-  activeIn: readonly string[];
-  inactiveIn: readonly string[];
-  homeSpaceId: string | null;
-}
-
 export function pageSpace(
   placement: PagePlacement,
   enterable: readonly string[],

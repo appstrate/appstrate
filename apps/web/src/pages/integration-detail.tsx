@@ -61,6 +61,7 @@ import { AccessRulesSection } from "../components/integration-detail/access-rule
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
+import { spaceLabel } from "../lib/space-label";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
@@ -72,6 +73,7 @@ import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
 import { useIntegrationSpaceAction } from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
+import type { SpaceEntry } from "../hooks/use-space-entry";
 import { useOverviewMode, useWorkingSpaceWording } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -106,6 +108,7 @@ export function IntegrationSettings({
   detail,
   blockUserConnections,
   spaceIds,
+  configureIn,
   definition,
   isOwned,
   versionGrants,
@@ -113,6 +116,8 @@ export function IntegrationSettings({
   packageId: string;
   /** The spaces the integration is active in: in « Tous les espaces », where it is configured from. */
   spaceIds: readonly string[];
+  /** Where it is configured from: `useIntegrationSpaceAction` on `integrations:configure`. */
+  configureIn: SpaceEntry;
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
   blockUserConnections: boolean;
   /**
@@ -129,7 +134,6 @@ export function IntegrationSettings({
   const { can } = usePermissions();
   const { on: overview } = useOverviewMode();
   const workingSpace = useSpaceLabelOf()(useCurrentSpaceId());
-  const configureIn = useIntegrationSpaceAction(packageId, "integrations:configure", spaceIds);
   const canConfigure = configureIn.offered;
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
@@ -251,8 +255,8 @@ export function IntegrationSettings({
               allowUndeclaredTools={detail.allow_undeclared_tools}
             />
           </div>
-        ) : !detail.active || (overview && !can("integrations:configure")) ? (
-          // In « Tous les espaces » the space it is set in comes first, then why it is not shown.
+        ) : (
+          // In « Tous les espaces » the space it is set in comes first.
           <div className="p-6">
             {overview && (
               <ConfigurationSpace
@@ -264,82 +268,76 @@ export function IntegrationSettings({
             )}
             {!detail.active ? (
               <ActivationHint packageId={packageId} />
+            ) : overview && !can("integrations:configure") ? (
+              workingSpace && (
+                <RoleLimitNotice>
+                  {t("integration.config.roleLimitIn", { space: workingSpace })}
+                </RoleLimitNotice>
+              )
             ) : (
-              <RoleLimitNotice>
-                {t("integration.config.roleLimitIn", { space: workingSpace ?? "" })}
-              </RoleLimitNotice>
-            )}
-          </div>
-        ) : (
-          <div className="p-6">
-            {overview && (
-              <ConfigurationSpace
-                label={t("detail.configuration.spaceLabel", { ns: "agents" })}
-                choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
-                spaceIds={spaceIds}
-                enter={configureIn}
-              />
-            )}
-            <SettingsHeading
-              title={t(
-                active === "access"
-                  ? "integration.admin.accessRules.title"
-                  : "integration.presentation.authentication",
-              )}
-              description={t(
-                active === "access"
-                  ? "integration.config.accessDescription"
-                  : "integration.presentation.authenticationDescription",
-              )}
-            />
-            {active === "authentication" && (
-              <div className="flex flex-col gap-4">
-                <SetupGuideSteps steps={steps} />
-                {detail.auths.length === 0 && (
-                  <p className="text-sm">{t("integration.auth.none")}</p>
+              <>
+                <SettingsHeading
+                  title={t(
+                    active === "access"
+                      ? "integration.admin.accessRules.title"
+                      : "integration.presentation.authentication",
+                  )}
+                  description={t(
+                    active === "access"
+                      ? "integration.config.accessDescription"
+                      : "integration.presentation.authenticationDescription",
+                  )}
+                />
+                {active === "authentication" && (
+                  <div className="flex flex-col gap-4">
+                    <SetupGuideSteps steps={steps} />
+                    {detail.auths.length === 0 && (
+                      <p className="text-sm">{t("integration.auth.none")}</p>
+                    )}
+                    <div className="flex flex-col gap-8">
+                      {detail.auths.map((status) => {
+                        const authDecl = detail.manifest.auths?.[status.auth_key];
+                        if (!authDecl) return null;
+                        return (
+                          <section
+                            key={status.auth_key}
+                            id={`auth-${status.auth_key}`}
+                            className="min-w-0"
+                          >
+                            <div className="mb-4 flex items-center gap-3">
+                              <h3 className="text-base font-semibold">
+                                {authMethodLabel(
+                                  status,
+                                  detail.auths,
+                                  t(`integration.auth.type.${status.type}`),
+                                )}
+                              </h3>
+                              <Badge variant="secondary">
+                                {t(
+                                  status.required
+                                    ? "integration.auth.required"
+                                    : "integration.auth.optional",
+                                )}
+                              </Badge>
+                            </div>
+                            <ConfigAuthBlock
+                              packageId={packageId}
+                              status={status}
+                              authDecl={authDecl}
+                            />
+                          </section>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
-                <div className="flex flex-col gap-8">
-                  {detail.auths.map((status) => {
-                    const authDecl = detail.manifest.auths?.[status.auth_key];
-                    if (!authDecl) return null;
-                    return (
-                      <section
-                        key={status.auth_key}
-                        id={`auth-${status.auth_key}`}
-                        className="min-w-0"
-                      >
-                        <div className="mb-4 flex items-center gap-3">
-                          <h3 className="text-base font-semibold">
-                            {authMethodLabel(
-                              status,
-                              detail.auths,
-                              t(`integration.auth.type.${status.type}`),
-                            )}
-                          </h3>
-                          <Badge variant="secondary">
-                            {t(
-                              status.required
-                                ? "integration.auth.required"
-                                : "integration.auth.optional",
-                            )}
-                          </Badge>
-                        </div>
-                        <ConfigAuthBlock
-                          packageId={packageId}
-                          status={status}
-                          authDecl={authDecl}
-                        />
-                      </section>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {active === "access" && (
-              <AccessRulesSection
-                packageId={packageId}
-                blockUserConnections={blockUserConnections}
-              />
+                {active === "access" && (
+                  <AccessRulesSection
+                    packageId={packageId}
+                    blockUserConnections={blockUserConnections}
+                  />
+                )}
+              </>
             )}
           </div>
         );
@@ -408,7 +406,7 @@ export function IntegrationDetailPage() {
   const spaceIds = pkg?.space_ids ?? [];
   // The working space's verdict, for what acts in it.
   const canConfigure = can("integrations:configure");
-  const configures = useSpacesFor({ permission: "integrations:configure" }, spaceIds).offered;
+  const configureIn = useIntegrationSpaceAction(packageId, "integrations:configure", spaceIds);
   const connectionsIn = useIntegrationSpaceAction(packageId, "integrations:read", spaceIds);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
@@ -553,6 +551,9 @@ export function IntegrationDetailPage() {
           <ConfigurationSpace
             label={t("integration.connections.spaceLabel")}
             choiceLabel={t("integration.connections.spaceChoice")}
+            targetLabel={(space) =>
+              t("integration.connections.spaceChoiceIn", { space: spaceLabel(space, t) })
+            }
             spaceIds={spaceIds}
             enter={connectionsIn}
           />
@@ -582,6 +583,7 @@ export function IntegrationDetailPage() {
             detail={detail}
             blockUserConnections={detail.block_user_connections}
             spaceIds={spaceIds}
+            configureIn={configureIn}
             // Write authority is the package's HOME space, never the space being browsed.
             definition={homeWritable && pkg ? pkg : undefined}
             isOwned={isOwned}
@@ -603,7 +605,7 @@ export function IntegrationDetailPage() {
           spaceIds={pkgLoading ? undefined : spaceIds}
           dependentIds={pkg?.agents.map((agent) => agent.id)}
           onOpenConnections={openConnections}
-          onConfigureAuth={configures ? openAuthentication : undefined}
+          onConfigureAuth={configureIn.offered ? openAuthentication : undefined}
         />
       </DetailTabPanel>
     </DetailTabs>

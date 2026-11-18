@@ -54,3 +54,8 @@ export function installFakeStorage(windowExtras?: Record<string, unknown>): Stor
 
   return storage;
 }
+
+/** {@link installFakeStorage} with the SPA's `window`: an empty app config, plus `extras`. */
+export function installSpaStorage(extras: Record<string, unknown> = {}): Storage {
+  return installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] }, ...extras });
+}

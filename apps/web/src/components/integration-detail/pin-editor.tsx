@@ -18,7 +18,6 @@ import { errorMessage } from "../../lib/mutation-error";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import {
   ADDITIONS_REFUSAL_KEYS,
-  ADDITIONS_REFUSAL_KEYS_IN,
   PIN_MODE_HELP_KEYS,
   PIN_MODE_KEYS,
   PIN_MODES,
@@ -233,10 +232,12 @@ export function PinFormFields({
         </FormItem>
         {verdict.refusal && (
           <p className="text-muted-foreground text-xs" data-testid="pin-form-mode-refusal">
-            {spaceWording(
-              ADDITIONS_REFUSAL_KEYS[verdict.refusal],
-              ADDITIONS_REFUSAL_KEYS_IN[verdict.refusal] ?? ADDITIONS_REFUSAL_KEYS[verdict.refusal],
-            )}
+            {verdict.refusal === "inactive_agent"
+              ? spaceWording(
+                  ADDITIONS_REFUSAL_KEYS.inactive_agent,
+                  "integration.admin.pinManagement.additionsInactiveAgentIn",
+                )
+              : t(ADDITIONS_REFUSAL_KEYS[verdict.refusal])}
           </p>
         )}
       </div>
