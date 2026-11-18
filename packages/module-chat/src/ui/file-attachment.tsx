@@ -33,10 +33,10 @@ const CHIP_MEDIA_CLASS = "size-6 shrink-0 rounded-md";
 const CHIP_THUMBNAIL_CLASS = `${CHIP_MEDIA_CLASS} border object-cover`;
 
 /** The file type's icon in the media square — every non-image, and an image without a thumbnail. */
-function MimeMedia({ mime }: { mime?: string | null }) {
+function MimeMedia({ mime, name }: { mime?: string | null; name?: string }) {
   return (
     <span className={`${CHIP_MEDIA_CLASS} bg-muted flex items-center justify-center`}>
-      <MimeIcon mime={mime ?? ""} className="text-muted-foreground size-3.5" />
+      <MimeIcon mime={mime ?? ""} name={name} className="text-muted-foreground size-3.5" />
     </span>
   );
 }
@@ -71,7 +71,7 @@ export function AttachmentChip({
 }) {
   const content = (
     <>
-      {media ?? <MimeMedia mime={mime} />}
+      {media ?? <MimeMedia mime={mime} name={name} />}
       <span className="text-foreground truncate text-xs font-medium">{name || UNNAMED_FILE}</span>
     </>
   );
