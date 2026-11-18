@@ -30,9 +30,10 @@ it("attaches PDF bytes only to the live user message and the function result tha
   const prompt = { role: "user", content: [{ type: "input_text", text: receipt }] };
   const other = { type: "function_call_output", call_id: "another", output: toolReceipt };
   const result = { type: "function_call_output", call_id: "call_1", output: toolReceipt };
-  const input = [prompt, prompt, other, result];
+  const input = [prompt, result, prompt, other, result];
   expect(transform(turn, input)).toEqual([
     prompt,
+    result,
     { ...prompt, content: [...prompt.content, nativeFile] },
     other,
     { ...result, output: [{ type: "input_text", text: toolReceipt }, nativeFile] },

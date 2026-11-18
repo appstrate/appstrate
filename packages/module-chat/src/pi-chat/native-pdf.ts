@@ -61,7 +61,10 @@ export function createTurnPdfInput(api: Api): TurnPdfInput {
         )
           return;
         const currentUser = payload.input.findLastIndex((item) => item?.role === "user");
+        if (currentUser < 0) return;
         const input = payload.input.map((item, index) => {
+          // A provider can reuse a call id that already appears in replayed history.
+          if (index < currentUser) return item;
           const user = index === currentUser;
           if (!user && item?.type !== "function_call_output") return item;
           const content = user ? item.content : item.output;
