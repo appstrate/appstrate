@@ -79,6 +79,8 @@ import {
   ASSISTANT_MESSAGE_CLASS,
   COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_CLASS,
   THREAD_FOOTER_CLASS,
   THREAD_VIEWPORT_CLASS,
   USER_MESSAGE_CLASS,
@@ -228,12 +230,14 @@ function ThreadWelcome({
           <h1 className="text-2xl font-semibold tracking-tight">
             {name ? t("welcome.greeting", { name }) : t("welcome.greetingAnonymous")}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className={cn("text-muted-foreground mt-1", READING_TEXT_CLASS)}>
             {/* A reader asks nothing: what there is to do is reread. */}
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
           </p>
           {outsideActingSet && (
-            <p className="text-muted-foreground mt-1 text-sm">{t("welcome.spaceNotActing")}</p>
+            <p className={cn("text-muted-foreground mt-1", READING_TEXT_CLASS)}>
+              {t("welcome.spaceNotActing")}
+            </p>
           )}
         </div>
         <Composer
@@ -338,12 +342,12 @@ function ComposerAttachmentChip() {
         }
       />
       {notice && (
-        <span role="status" className="text-muted-foreground max-w-56 text-xs">
+        <span role="status" className={cn("text-muted-foreground max-w-56", NOTE_TEXT_CLASS)}>
           {notice}
         </span>
       )}
       {status.type === "incomplete" && status.reason === "error" && status.message && (
-        <span role="alert" className="text-destructive text-xs">
+        <span role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
           <span className="sr-only">{name}. </span>
           {status.message}
         </span>
@@ -426,7 +430,7 @@ function ComposerAttachmentError() {
   useAuiEvent("composer.send", () => setMessage(null));
   if (!message) return null;
   return (
-    <p role="alert" className="text-destructive text-xs">
+    <p role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
       {message}
     </p>
   );

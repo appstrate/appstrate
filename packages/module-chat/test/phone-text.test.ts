@@ -12,6 +12,9 @@ import {
   COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_CLASS,
+  READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
   THREAD_FOOTER_CLASS,
   THREAD_VIEWPORT_CLASS,
@@ -30,6 +33,8 @@ describe.each([
   ["conversation search", SEARCH_INPUT_CLASS],
   ["user message", USER_MESSAGE_CLASS],
   ["assistant message", ASSISTANT_MESSAGE_CLASS],
+  ["reading text", READING_TEXT_CLASS],
+  ["dense reading text", READING_TEXT_DENSE_CLASS],
 ])("%s", (_name, classes) => {
   it("is 16 px on a phone", () => {
     const sizes = phoneSizes(classes);
@@ -65,5 +70,12 @@ describe("thread layout on a phone", () => {
   it("the disclaimer steps aside while the composer has the focus, below md only", () => {
     expect(THREAD_FOOTER_CLASS.split(/\s+/)).toContain("group/footer");
     expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:group-focus-within/footer:hidden");
+  });
+});
+
+describe("secondary text", () => {
+  it("is 14 px on a phone, never the 12 px of the dense size", () => {
+    expect(phoneSizes(NOTE_TEXT_CLASS)).toEqual(["text-sm"]);
+    expect(NOTE_TEXT_CLASS.split(/\s+/)).toContain("md:text-xs");
   });
 });
