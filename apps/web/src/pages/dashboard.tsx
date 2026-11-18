@@ -25,6 +25,7 @@ export function DashboardPage() {
     isLoading: runsLoading,
     error: runsError,
   } = useFirstRunsPage({ limit: 15, spanning });
+  const running = useFirstRunsPage({ status: ["running"], limit: 1, spanning });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents({ spanning });
   // The same query as the agents above: no second request.
   const agentName = useRunAgentName({ spanning });
@@ -34,7 +35,7 @@ export function DashboardPage() {
 
   // A disabled query is not loading, so an unresolved permission set (or listing) must be.
   const isLoading = !ready || !known || runsLoading || agentsLoading || schedulesLoading;
-  const error = runsError || agentsError;
+  const error = runsError || agentsError || running.error;
 
   // The greeting is known before any read: only the body waits.
   if (isLoading)
@@ -82,6 +83,7 @@ export function DashboardPage() {
         agents: orderedAgents,
         runs,
         runTotal: runsData?.total ?? runs.length,
+        runningTotal: running.isEnabled ? running.data?.total : null,
         schedules: schedules ?? [],
         agentName,
       }}

@@ -47,6 +47,7 @@ export interface DashboardData {
   agents: AgentListItem[];
   runs: EnrichedRun[];
   runTotal: number;
+  runningTotal: number | null | undefined;
   /** Every schedule: the active ones are counted, the soonest listed. */
   schedules: EnrichedSchedule[];
   agentName: (run: EnrichedRun) => string;
@@ -77,7 +78,7 @@ export function DashboardHeader({
   runningCount,
 }: {
   firstName: string;
-  runningCount?: number;
+  runningCount?: number | null;
 }) {
   const { t, i18n } = useTranslation("agents");
   const canReach = useCanReach();
@@ -118,7 +119,9 @@ export function DashboardHeader({
             <SkeletonLine className="w-56 text-sm" />
           ) : (
             <span className="block first-letter:uppercase">
-              {t("dashboard.subtitle", { date, count: runningCount })}
+              {runningCount === null
+                ? date
+                : t("dashboard.subtitle", { date, count: runningCount })}
             </span>
           )
         }
@@ -329,7 +332,6 @@ function dashboardMetrics(
     .map(({ schedule }) => schedule);
 
   return {
-    running,
     upcomingSchedules,
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
@@ -393,7 +395,7 @@ export function DashboardContent(data: DashboardData) {
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
       <div>
-        <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+        <DashboardHeader firstName={data.firstName} runningCount={data.runningTotal} />
         <EmptyState
           message={t("dashboard.empty")}
           hint={t("dashboard.emptyHint")}
@@ -405,7 +407,7 @@ export function DashboardContent(data: DashboardData) {
 
   return (
     <>
-      <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+      <DashboardHeader firstName={data.firstName} runningCount={data.runningTotal} />
       <div className="flex flex-col gap-8">
         {metrics.cards.length > 0 && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

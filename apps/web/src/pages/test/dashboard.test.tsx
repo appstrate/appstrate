@@ -60,6 +60,7 @@ function content(overrides: Partial<DashboardData> = {}): DashboardData {
     agents: [],
     runs: [],
     runTotal: 0,
+    runningTotal: 0,
     schedules: [],
     agentName: (run) => run.agent_name ?? run.id,
     ...overrides,
@@ -187,6 +188,19 @@ describe("the dashboard", () => {
     expect(html).toMatch(/Planifications actives<\/span><div><p[^>]*>1<\/p>/);
     expect(html).toContain("Aucun run prévu");
     expect(html).not.toContain("Planifications à venir");
+  });
+
+  it("shows the active total even when the latest fifteen runs have finished", () => {
+    const recent = Array.from({ length: 15 }, (_, i) =>
+      makeRun({ id: `run_${i}`, status: "success" }),
+    );
+    const html = asOrgMember(
+      READER,
+      <DashboardContent
+        {...content({ runs: recent, runTotal: 16, runningTotal: 1, spanning: true })}
+      />,
+    );
+    expect(html).toContain("1 run en cours");
   });
 
   it("titles the page with its one h1", () => {

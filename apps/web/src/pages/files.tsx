@@ -13,7 +13,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { useOrgStorage } from "../hooks/use-org-storage";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useListScope } from "../hooks/use-org-scope";
 import { useFilesPaged, type FileDto } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
 import { ListViewTabs } from "../components/list-view-tabs";
@@ -28,9 +28,10 @@ import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode"
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
 export function FilesPage() {
-  // Remount on space switch so the loaded pages reset.
-  const spaceId = useCurrentSpaceId();
-  return <DocumentsPageContent key={spaceId ?? "none"} />;
+  const { on: spanning } = useOverviewMode();
+  const { orgId, keySpace } = useListScope(spanning, true);
+  // This also closes pending file confirmations when the active collection changes.
+  return <DocumentsPageContent key={JSON.stringify([orgId, keySpace])} />;
 }
 
 function DocumentsPageContent() {
