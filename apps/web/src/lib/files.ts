@@ -14,6 +14,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
+import { localPreviewKind } from "@appstrate/core/mime";
+import type { ViewableFile } from "../components/file-viewer";
 import { runDetailPath } from "./package-paths";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
@@ -171,4 +173,26 @@ export function mimeKind(mime: string): string {
     return "archive";
   if (normalized.includes("spreadsheet") || normalized.includes("excel")) return "spreadsheet";
   return "file";
+}
+
+/** A file the viewer shows from the browser's own copy (`local`): it has no stored id or content route. */
+export type LocalViewableFile = ViewableFile & { local: true };
+
+/**
+ * A picked, not yet sent file as the viewer reads it, `url` being its object URL. That URL also
+ * stands for its id, which keys the viewer. Its kind is `localPreviewKind`: null (nothing to
+ * preview) for any other mime, html included.
+ */
+export function localViewableFile(file: File, url: string): LocalViewableFile {
+  const kind = localPreviewKind(file.type);
+  // No URL without a kind: the viewer would otherwise frame it as html.
+  return {
+    id: url,
+    name: file.name,
+    mime: file.type,
+    size: file.size,
+    preview_url: kind ? url : null,
+    preview_kind: kind,
+    local: true,
+  };
 }

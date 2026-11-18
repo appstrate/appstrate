@@ -124,8 +124,15 @@ export function useSelectConversation(): SelectConversation | null {
  * `spaceId` names the file's space when known (the space of the call of the conversation that
  * produced it): the host reads it there, and reads in the working space when it is the same one.
  * The download and the image hook below take it the same way.
+ *
+ * `{ local }` is a file picked in the composer and not yet sent: the host shows the browser's own
+ * copy in the same panel. The composer offers it only for a `localPreviewKind`
+ * (`@appstrate/core/mime`), the kinds such a copy can be shown as.
  */
-export type OpenFile = (file: { id: string; name: string; spaceId?: string }) => void;
+export type OpenFile = (file: OpenFileTarget) => void;
+
+/** What {@link OpenFile} presents: a stored file, or a picked one not yet sent. */
+export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
 
 /**
  * The host's authenticated file download (typed API client + user-facing

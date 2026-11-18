@@ -62,6 +62,7 @@ export type {
   ChatTransport,
   GetHeaders,
   OpenFile,
+  OpenFileTarget,
   RenderSpaces,
   SelectConversation,
   SpaceChoiceMenu,

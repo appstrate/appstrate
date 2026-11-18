@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`previewKind`, `PreviewKind`, `localPreviewKind`** (`@appstrate/core/mime`): the in-browser
+  preview kind of a mime (`html` | `image` | `pdf` | `text`, or null), moved from the API so the
+  web shell and the chat module classify a file the same way, and the subset (`image` | `pdf` | `text`) a
+  browser shows from its own copy of a file not yet sent.
+
 - `findCause` in `@appstrate/core/error-cause` finds the first matching object in an error's cause chain, up to eight levels deep.
 
 - **`InlineRunModel`, `RunAndWaitClientOptions.inlineRunModel`** (`@appstrate/core/run-and-wait-client`, #2262):

@@ -40,7 +40,7 @@ import {
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { useFileDownload, useFileTextCopy } from "../hooks/use-files";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { mimeKind } from "../lib/files";
+import { mimeKind, type LocalViewableFile } from "../lib/files";
 import { fileReaderPath, fileReaderUrl, type FileContext } from "../lib/file-link";
 import { ExpiryBadge, MimeIcon } from "./file-badges";
 import { FileViewer, type ViewableFile } from "./file-viewer";
@@ -58,11 +58,14 @@ export function FileArtifact({
   className,
 }: {
   fileId: string;
-  file?: ViewableFile & {
-    spaceId: string;
-    expiresAt: string | null;
-    capabilities: { download: boolean };
-  };
+  /** A stored file, or a picked one not yet sent (`local`: no download, link or retention). */
+  file?:
+    | (ViewableFile & {
+        spaceId: string;
+        expiresAt: string | null;
+        capabilities: { download: boolean };
+      })
+    | LocalViewableFile;
   /** The file's organization and space when not the current ones (the reader page). */
   context?: FileContext;
   isLoading: boolean;
@@ -92,10 +95,12 @@ export function FileArtifact({
   }, []);
 
   const name = fallbackName || file?.name || "";
-  const canDownload = file?.capabilities.download === true;
-  const canCopy = canDownload && file?.preview_kind === "text";
+  const local = file !== undefined && "local" in file;
+  const stored = local ? undefined : file;
+  const canDownload = stored?.capabilities.download === true;
+  const canCopy = canDownload && stored?.preview_kind === "text";
   const orgId = context?.orgId ?? currentOrgId;
-  const linkContext = file && orgId ? { orgId, spaceId: file.spaceId } : undefined;
+  const linkContext = stored && orgId ? { orgId, spaceId: stored.spaceId } : undefined;
 
   return (
     <Artifact ref={frameRef} className={className}>
@@ -108,7 +113,7 @@ export function FileArtifact({
               <ArtifactDescription className="flex flex-wrap items-center gap-x-2">
                 <span>{t(`type.${mimeKind(file.mime)}`)}</span>
                 <span className="tabular-nums">{formatBytes(file.size)}</span>
-                <ExpiryBadge expiresAt={file.expiresAt} />
+                {stored && <ExpiryBadge expiresAt={stored.expiresAt} />}
               </ArtifactDescription>
             )}
           </div>
@@ -161,6 +166,7 @@ export function FileArtifact({
           fileId={fileId}
           file={file}
           context={context}
+          local={local}
           isLoading={isLoading}
           error={error}
           className="rounded-none border-0"

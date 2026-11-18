@@ -55,6 +55,37 @@ export function InertAttachmentChip({
 }
 
 /**
+ * A pending composer file: the inert chip, whose icon and name open `preview` (the host's panel
+ * on the picked file) when given. `trailing` (size, remove button) stays outside that button.
+ */
+export function PendingAttachmentChip({
+  name,
+  preview,
+  trailing,
+}: {
+  name: string;
+  preview: { label: string; onActivate: () => void } | null;
+  trailing: ReactNode;
+}) {
+  if (!preview) return <InertAttachmentChip name={name} trailing={trailing} />;
+  return (
+    <div className={ATTACHMENT_CHIP_CLASS}>
+      <button
+        type="button"
+        onClick={preview.onActivate}
+        title={preview.label}
+        aria-label={preview.label}
+        className="inline-flex min-w-0 items-center gap-1.5 hover:underline"
+      >
+        <EyeIcon className="text-muted-foreground size-3.5 shrink-0" />
+        <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
+      </button>
+      {trailing}
+    </div>
+  );
+}
+
+/**
  * Clickable chip: the action glyph (eye when an in-app preview opener is
  * present, download arrow otherwise — mirroring `fileActivation`'s label) +
  * the truncated name. `stopPropagation` keeps a chip click from also firing an

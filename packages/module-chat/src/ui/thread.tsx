@@ -61,8 +61,13 @@ import { useAttachTarget, useConversationScope, useSpaceName } from "./conversat
 import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
-import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
-import { isImageMime } from "@appstrate/core/mime";
+import {
+  FileAttachment,
+  InertAttachmentChip,
+  PendingAttachmentChip,
+  ATTACHMENT_IMAGE_CLASS,
+} from "./file-attachment.tsx";
+import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
   flushDecision,
@@ -276,14 +281,25 @@ function PendingImage({ file, name }: { file: File; name: string }) {
   );
 }
 
-/** A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both removable. */
+/**
+ * A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both
+ * removable. Either opens the host's panel on the picked file when the browser can show its own
+ * copy (`localPreviewKind`); the remove button never does.
+ */
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const file = useAuiState((s) => s.attachment.file);
   const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
-  const { formatBytes, t } = useChatHost();
+  const { formatBytes, openFile, t } = useChatHost();
   const previewFile = file && isImageMime(file.type) ? file : undefined;
+  const preview =
+    openFile && file && localPreviewKind(file.type)
+      ? {
+          label: t("file.previewOf", { name: name || t("file.unnamed") }),
+          onActivate: () => openFile({ local: file }),
+        }
+      : null;
   const remove = (
     <AttachmentPrimitive.Remove asChild>
       <button
@@ -303,12 +319,25 @@ function ComposerAttachmentChip() {
     <AttachmentPrimitive.Root className="inline-flex min-w-0 flex-col items-start gap-1">
       {previewFile ? (
         <span className="relative inline-flex">
-          <PendingImage file={previewFile} name={name} />
+          {preview ? (
+            <button
+              type="button"
+              onClick={preview.onActivate}
+              title={preview.label}
+              aria-label={preview.label}
+              className="rounded-md"
+            >
+              <PendingImage file={previewFile} name={name} />
+            </button>
+          ) : (
+            <PendingImage file={previewFile} name={name} />
+          )}
           {remove}
         </span>
       ) : (
-        <InertAttachmentChip
+        <PendingAttachmentChip
           name={name}
+          preview={preview}
           trailing={
             <>
               {size > 0 && (

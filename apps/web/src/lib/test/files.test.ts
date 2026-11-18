@@ -9,6 +9,7 @@ import {
   producedRunFiles,
   isMarkdownFile,
   isPublishedFileLogEvent,
+  localViewableFile,
   mimeIconFor,
   mimeKind,
   pinPreviewUrl,
@@ -348,5 +349,43 @@ describe("mimeKind", () => {
     expect(mimeKind("text/html; charset=utf-8")).toBe("html");
     expect(mimeKind("application/xhtml+xml")).toBe("html");
     expect(mimeKind("text/plain")).toBe("text");
+  });
+});
+
+describe("localViewableFile", () => {
+  // `File` is lucide's icon in this file.
+  const picked = (name: string, type: string) => new globalThis.File(["abc"], name, { type });
+
+  it("shows an image or a text file from its object URL", () => {
+    expect(localViewableFile(picked("a.png", "image/png"), "blob:a")).toEqual({
+      id: "blob:a",
+      name: "a.png",
+      mime: "image/png",
+      size: 3,
+      preview_url: "blob:a",
+      preview_kind: "image",
+      local: true,
+    });
+    expect(localViewableFile(picked("n.md", "text/markdown"), "blob:n").preview_kind).toBe("text");
+    expect(localViewableFile(picked("d.json", "application/json"), "blob:d").preview_kind).toBe(
+      "text",
+    );
+    expect(localViewableFile(picked("p.pdf", "application/pdf"), "blob:p")).toMatchObject({
+      preview_kind: "pdf",
+      preview_url: "blob:p",
+    });
+  });
+
+  it("previews neither html nor office files, and hands the viewer no URL for them", () => {
+    for (const [name, type] of [
+      ["p.html", "text/html"],
+      ["d.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      ["x", ""],
+    ] as const) {
+      expect(localViewableFile(picked(name, type), "blob:x")).toMatchObject({
+        preview_kind: null,
+        preview_url: null,
+      });
+    }
   });
 });
