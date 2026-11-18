@@ -198,6 +198,15 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
       });
       expect(space.status, query).toBe(400);
     }
+    // The bulk delete reads the same filters, without `runId`; a refused query deletes nothing.
+    for (const query of ["?bogus=1", "?kind=all", `?runId=${runOf[s.deux]}`]) {
+      const removed = await app.request(`/api/agents/${AGENT}/persistence${query}`, {
+        method: "DELETE",
+        headers: spaceHeaders,
+      });
+      expect(removed.status, query).toBe(400);
+    }
+    expect((await read({ Cookie: member.cookie })).memories.length).toBeGreaterThan(0);
   });
 
   it("narrows to one run's rows with runId", async () => {

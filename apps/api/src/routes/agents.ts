@@ -5,8 +5,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { parseStrictQuery } from "../lib/list-query.ts";
-import { closedSet } from "../lib/list-query.ts";
+import { closedSet, parseStrictQuery } from "../lib/list-query.ts";
 import { listAgentIndex } from "../services/package-index.ts";
 import {
   listPinnedSlots,

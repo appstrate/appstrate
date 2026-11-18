@@ -389,7 +389,7 @@ export async function packagePlacementsInSpaces(
   orgId: string,
   packageId: string,
   spaceIds: readonly string[],
-  type?: PackageType,
+  type: PackageType,
 ) {
   if (!spaceIds.length) return [];
   return db
@@ -400,7 +400,7 @@ export async function packagePlacementsInSpaces(
     .where(
       and(
         eq(packages.id, packageId),
-        type && eq(packages.type, type),
+        eq(packages.type, type),
         orgOrSystemFilter(orgId),
         notEphemeralFilter(),
         placementReadFilter(spaces.id),

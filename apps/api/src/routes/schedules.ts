@@ -75,9 +75,8 @@ import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
-import { packageIdFilter } from "../lib/list-query.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { parseStrictQuery } from "../lib/list-query.ts";
+import { packageIdFilter, parseStrictQuery } from "../lib/list-query.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
