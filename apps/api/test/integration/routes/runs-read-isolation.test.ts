@@ -244,6 +244,30 @@ describe("run read isolation between members", () => {
     }
   });
 
+  it("keeps tied runs in id order across pages of an agent or schedule", async () => {
+    const tied = await seedRun({
+      packageId: AGENT_ID,
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      userId: operatorA.user.id,
+      scheduleId,
+      startedAt: T2,
+    });
+    const [first, second] = [runAScheduled, tied.id].sort().reverse();
+    for (const path of [`/api/agents/${AGENT_PATH}/runs`, `/api/schedules/${scheduleId}/runs`]) {
+      for (const [cursor, expected] of [
+        ["", first],
+        [`&startingAfter=${first}`, second],
+      ]) {
+        const response = await app.request(`${path}?limit=1${cursor}`, {
+          headers: authHeaders(operatorA),
+        });
+        expect(response.status).toBe(200);
+        expect(((await response.json()) as RunList).data.map((run) => run.id)).toEqual([expected]);
+      }
+    }
+  });
+
   it("scopes a schedule's run counters to the runs the caller may read", async () => {
     // The counters ride on the schedule DTO, which `schedules:read` hands to
     // the whole space — so a colleague reads A's schedule row and must still
