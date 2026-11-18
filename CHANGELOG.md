@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.69] - 2026-11-18
+
 ### Client upgrade from beta.68
 
-Chat now belongs to the organization. Substitute the organization ID in these routes, keeping the same HTTP verb and session ID. Existing conversations migrate with `restricted=false`. Clients that need to limit a conversation to one accessible origin space can set `restricted: true` and `spaceId` on the session.
+Chat now belongs to the organization. Substitute the organization ID in these routes, keeping the same HTTP verb and session ID. Existing conversations migrate with `restricted=false`. Clients that need to limit a conversation to one accessible origin space can set `restricted: true` on the session. Supply `spaceId` when assigning an origin to a session that has none.
 
 | Operation                       | beta.68                                      | beta.69                                                   |
 | ------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
@@ -23,6 +25,8 @@ The run, schedule, notification, file and agent-persistence list handlers valida
 If an active skill archive becomes unavailable, the served skill catalogue returns an error. Retry the sync after restoring the archive. A successful listing still removes genuinely withdrawn skills from managed CLI directories.
 
 ### Operators
+
+Follow the [beta.68 to beta.69 maintenance procedure](docs/deployment/BETA_69.md) for the ordering of package publication, database and object backups, signatures and schema migrations.
 
 - **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
   `0103` creates `run_reads` and renames the stored run notifications to
