@@ -127,6 +127,38 @@ export interface ResolvedChatAttachment {
   spaceId: string;
 }
 
+/**
+ * Ask for the pixels of one attached image, for a turn whose model reads images.
+ * Resolved under the same container ACL as {@link ChatAttachmentRequest}, in the
+ * space the file belongs to (one of `spaces`), but read-only: it touches nothing
+ * and creates nothing.
+ */
+export interface ChatImageRequest {
+  orgId: string;
+  /** The chat session owner (chat sessions are per dashboard user). */
+  userId: string;
+  /** A canonical `appfile://file_x` URI, as persisted in the transcript. */
+  uri: string;
+  /** The spaces the file may resolve in, each with the caller's effective permission set there. */
+  spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
+  /** Largest stored size, in bytes, the caller accepts: a bigger file is not read. */
+  maxBytes: number;
+}
+
+/**
+ * The bytes of an attached image, base64 encoded, or `null` when the file cannot
+ * be shown to the model: missing, not readable by the caller, not an image the
+ * providers accept (`image/png`, `image/jpeg`, `image/gif`, `image/webp`), over
+ * `maxBytes`, or gone from storage. The caller keeps the textual pointer
+ * whatever the answer, so a `null` never loses the attachment.
+ */
+export interface ChatImageContent {
+  mime: string;
+  /** Base64 of the file's bytes, unmodified (the engine downsizes). */
+  data: string;
+  size: number;
+}
+
 /** One chat turn's metered usage — inserted as an `llm_usage` row (runId null). */
 export interface ChatUsageRecord {
   orgId: string;

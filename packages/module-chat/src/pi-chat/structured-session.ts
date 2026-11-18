@@ -17,6 +17,7 @@ import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { Api, Message } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
+import type { AttachmentImages, PiImageContent } from "./attachment-images.ts";
 import { offerScopeOf, splitJsonText, type OfferScope } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
 import { PI_CHAT_CWD } from "./resource-loader.ts";
@@ -38,11 +39,22 @@ export interface BuildStructuredPiTurnOptions {
    * so the figure is a floor, not a measurement.
    */
   baseTokens: number;
+  /**
+   * The pixels of the attachments this request shows the model, by user message
+   * id (`loadAttachmentImages`). Omitted = a model that sees no images: every
+   * attachment stays its pointer line. Never persisted — rebuilt from the files
+   * each turn.
+   */
+  images?: AttachmentImages;
+  /** Whether the model accepts image input, for the wording of the pointer lines. */
+  modelSeesImages?: boolean;
 }
 
 interface StructuredPiTurn {
   history: Message[];
   prompt: string;
+  /** The images of the prompt message itself; the history ones ride their own messages. */
+  promptImages: PiImageContent[];
   branchHeadId: string;
   sourceMessageCount: number;
   toolCallCount: number;
@@ -173,13 +185,18 @@ function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent
   return [{ type: "text", text: json(scope(value).redacted) }];
 }
 
-function userMessage(message: UIMessage, nextTimestamp: () => number): Message | null {
-  const content = message.parts.flatMap((part) =>
+function userMessage(
+  message: UIMessage,
+  nextTimestamp: () => number,
+  images: readonly PiImageContent[] = [],
+): Message | null {
+  const text = message.parts.flatMap((part) =>
     part.type === "text" && part.text.length > 0
       ? [{ type: "text" as const, text: part.text }]
       : [],
   );
-  if (content.length === 0) return null;
+  if (text.length === 0) return null;
+  const content = [...text, ...images];
   return { role: "user", content, timestamp: nextTimestamp() };
 }
 
@@ -295,9 +312,13 @@ function assistantMessages(
 export function buildStructuredPiTurn(
   input: UIMessage[],
   model: PiHistoryModel,
-  { estimateTokens, baseTokens }: BuildStructuredPiTurnOptions,
+  { estimateTokens, baseTokens, images, modelSeesImages = false }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
-  const messages = messagesWithAttachmentsAsText(input);
+  const sentImages: AttachmentImages = images ?? new Map();
+  const messages = messagesWithAttachmentsAsText(input, {
+    modelSeesImages,
+    sent: sentImages,
+  });
   const last = messages.at(-1);
   if (!last || last.role !== "user") {
     throw new Error("The active Pi chat branch must end with a user message.");
@@ -309,7 +330,9 @@ export function buildStructuredPiTurn(
   let toolResultCount = 0;
   for (const message of messages.slice(0, -1)) {
     if (message.role === "user") {
-      const converted = userMessage(message, nextTimestamp);
+      const converted = userMessage(message, nextTimestamp, [
+        ...(sentImages.get(message.id)?.values() ?? []),
+      ]);
       if (converted) history.push(converted);
       continue;
     }
@@ -335,6 +358,7 @@ export function buildStructuredPiTurn(
   return {
     history,
     prompt: uiMessageText(last.parts),
+    promptImages: [...(sentImages.get(last.id)?.values() ?? [])],
     branchHeadId: last.id,
     sourceMessageCount: messages.length - 1,
     toolCallCount,

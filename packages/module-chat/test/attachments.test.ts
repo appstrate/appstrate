@@ -30,7 +30,7 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
-import { resolveChatAttachment } from "../../../apps/api/src/services/files.ts";
+import { readChatImage, resolveChatAttachment } from "../../../apps/api/src/services/files.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "../src/attachments.ts";
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
@@ -265,5 +265,65 @@ describe("chat attachments", () => {
     // No file row survives the rejected materialization.
     const rows = await db.select().from(files).where(eq(files.chatSessionId, sessionId));
     expect(rows.length).toBe(0);
+  });
+  describe("readChatImage (the pixels of an attachment, for a vision model)", () => {
+    const PNG = new Uint8Array(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+
+    /** Materialize `bytes` as an attachment of a fresh session and return its appfile:// URI. */
+    async function attach(name: string, bytes: Uint8Array, mime: string): Promise<string> {
+      const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
+      const uploadId = await stageUpload(scope, ctx.user.id, name, bytes, mime);
+      const resolved = await resolverFor(scope, ctx.user.id, sessionId)(`upload://${uploadId}`);
+      return resolved.uri;
+    }
+
+    const request = (uri: string, over: { userId?: string; maxBytes?: number } = {}) => ({
+      orgId: ctx.orgId,
+      userId: over.userId ?? ctx.user.id,
+      uri,
+      spaces: [{ id: ctx.defaultSpaceId, permissions: new Set<string>() }],
+      maxBytes: over.maxBytes ?? 4096,
+    });
+
+    it("returns the base64 bytes and the normalized mime of an image the owner attached", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      const image = await readChatImage(request(uri));
+      expect(image).toEqual({
+        mime: "image/png",
+        data: Buffer.from(PNG).toString("base64"),
+        size: PNG.byteLength,
+      });
+    });
+
+    it("is null for a file that is not an image a provider accepts", async () => {
+      const text = await attach("note.txt", new TextEncoder().encode("hi"), "text/plain");
+      const svg = await attach("logo.svg", new TextEncoder().encode("<svg/>"), "image/svg+xml");
+      expect(await readChatImage(request(text))).toBeNull();
+      expect(await readChatImage(request(svg))).toBeNull();
+    });
+
+    it("is null past the caller's byte cap", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      expect(await readChatImage(request(uri, { maxBytes: PNG.byteLength - 1 }))).toBeNull();
+    });
+
+    it("is null for another user's file (container ACL) and for a space the caller cannot reach", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+      expect(await readChatImage(request(uri, { userId: other.id }))).toBeNull();
+      expect(await readChatImage({ ...request(uri), spaces: [] })).toBeNull();
+    });
+
+    it("is null for a malformed or non-appfile URI", async () => {
+      expect(await readChatImage(request("upload://upl_x"))).toBeNull();
+      expect(await readChatImage(request("https://evil.example.com/a.png"))).toBeNull();
+      expect(await readChatImage(request("appfile://not-a-file"))).toBeNull();
+    });
   });
 });

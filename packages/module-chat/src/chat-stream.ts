@@ -35,6 +35,7 @@ import { selfOrigin } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
+import { ATTACHMENT_IMAGE_SOURCE_MAX_BYTES } from "./pi-chat/attachment-images.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
@@ -692,15 +693,15 @@ export async function handleChatStream(
   // because resolving an attachment touches its space on the conversation, which a
   // refused turn must not widen. Only the last message can carry fresh uploads —
   // earlier turns already hold rewritten `appfile://` URIs.
+  // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
+  // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
+  // `runs:read-all` widens to the whole space's run outputs — must still resolve when
+  // they attach it. Picker and attach answer the same set; so does the read of an image's pixels.
+  const attachmentSpaces = spaces.map((space) => ({
+    id: space.id,
+    permissions: new Set(space.permissions),
+  }));
   if (sessionId && lastMessage) {
-    // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
-    // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
-    // `runs:read-all` widens to the whole space's run outputs — must still resolve when
-    // they attach it. Picker and attach answer the same set.
-    const attachmentSpaces = spaces.map((space) => ({
-      id: space.id,
-      permissions: new Set(space.permissions),
-    }));
     try {
       lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
         return deps.resolveChatAttachment({
@@ -840,6 +841,16 @@ export async function handleChatStream(
         chatSessionId: meteringSessionId,
         requestId,
         messages,
+        // The pixels of an attached image, for a model that accepts images. Same ACL and
+        // spaces as the attach itself; the engine decides whether the model gets any.
+        readImage: (uri) =>
+          deps.readChatImage({
+            orgId,
+            userId: user.id,
+            uri,
+            spaces: attachmentSpaces,
+            maxBytes: ATTACHMENT_IMAGE_SOURCE_MAX_BYTES,
+          }),
         system,
         generation: generationSettings,
         platformMcp: {

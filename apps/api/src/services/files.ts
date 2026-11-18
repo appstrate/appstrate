@@ -70,7 +70,12 @@ import {
   fileCountExceeded,
 } from "../lib/errors.ts";
 import { resolveAgentOutputMime } from "./mime-policy.ts";
-import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
+import type {
+  ChatAttachmentRequest,
+  ChatImageContent,
+  ChatImageRequest,
+  ResolvedChatAttachment,
+} from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, parseUploadUri } from "./uploads.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import {
@@ -1381,6 +1386,57 @@ export async function resolveChatAttachment(
     size: row.size,
     spaceId: space.id,
   };
+}
+
+/**
+ * The image MIME types a model provider accepts as an image block (Anthropic,
+ * OpenAI, Gemini all take these four). Anything else a user attaches (HEIC, SVG,
+ * TIFF, BMP…) stays a pointer line: the platform has no converter, and sending
+ * bytes a provider rejects would fail the whole turn instead of one attachment.
+ */
+export const MODEL_IMAGE_MIMES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/**
+ * The seam behind `PlatformServices.readChatImage`: the bytes of an attached
+ * image for a model that reads images, under the container ACL
+ * {@link resolveChatAttachment} applies. Every miss — malformed URI, foreign or
+ * missing file, not downloadable, not a {@link MODEL_IMAGE_MIMES} type, over the
+ * caller's cap, object gone from storage — is `null`: the chat keeps the textual
+ * pointer for it, so a refusal here never loses the attachment and never fails
+ * the turn.
+ */
+export async function readChatImage(request: ChatImageRequest): Promise<ChatImageContent | null> {
+  const fileId = isFileUri(request.uri) ? parseFileUri(request.uri) : null;
+  if (!fileId || !FILE_ID_RE.test(fileId)) return null;
+
+  const [owner] = await db
+    .select({ spaceId: files.spaceId })
+    .from(files)
+    .where(and(eq(files.id, fileId), eq(files.orgId, request.orgId)))
+    .limit(1);
+  const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
+  if (!space) return null;
+
+  const resolved = await getFileForActor(
+    { orgId: request.orgId, spaceId: space.id },
+    { type: "user", id: request.userId },
+    fileId,
+    space.permissions,
+  );
+  if (!resolved?.capabilities.download) return null;
+  const { row } = resolved;
+  const mime = row.mime.split(";")[0]!.trim().toLowerCase();
+  if (!MODEL_IMAGE_MIMES.has(mime) || row.size > request.maxBytes) return null;
+
+  const stream = await streamFileContent(row.storageKey);
+  if (!stream) return null;
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  return { mime, data: Buffer.from(bytes).toString("base64"), size: bytes.byteLength };
 }
 
 // ---------------------------------------------------------------------------

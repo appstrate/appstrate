@@ -40,6 +40,8 @@ let orgDefaultModelId: string | null = null;
 const listeners = new Set<() => void>();
 const generationListeners = new Set<() => void>();
 let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
+/** The input modalities each catalog model declares; an absent or `null` entry = not known. */
+let inputModalities = new Map<string, readonly string[]>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
 let generationCache: ModelGenerationSettings = (() => {
@@ -139,8 +141,12 @@ export function setModelCatalog(
     is_default?: boolean;
     needs_reconnection?: boolean;
     generation?: ModelGenerationCapabilities | null;
+    input?: readonly string[] | null;
   }>,
 ): void {
+  inputModalities = new Map(
+    models.flatMap((model) => (model.input ? [[model.id, model.input]] : [])),
+  );
   generationCapabilities = new Map(
     models.flatMap((model) => (model.generation ? [[model.id, model.generation] as const] : [])),
   );
@@ -160,6 +166,18 @@ export function setModelCatalog(
 function defaultCapabilities(): ModelGenerationCapabilities | undefined {
   const id = defaultModel();
   return id === null ? undefined : generationCapabilities.get(id);
+}
+
+/**
+ * Whether the selected model reads images: `false` when its catalog entry lists
+ * its modalities and `image` is not one of them, `null` when they are not known
+ * (a model alias hides them, and so does a catalog still loading) — the composer
+ * warns on `false` only, never on a guess.
+ */
+export function getSelectedModelAcceptsImages(): boolean | null {
+  const id = getSelectedModel();
+  const input = id === null ? undefined : inputModalities.get(id);
+  return input ? input.includes("image") : null;
 }
 
 export function subscribeGeneration(listener: () => void): () => void {

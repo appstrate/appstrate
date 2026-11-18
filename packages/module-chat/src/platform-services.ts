@@ -38,6 +38,8 @@ type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 import {
   chatActsIn,
   type ChatAttachmentRequest,
+  type ChatImageContent,
+  type ChatImageRequest,
   type ChatUsageRecord,
   type ResolvedChatAttachment,
   type ChatModelResolution,
@@ -128,6 +130,11 @@ export interface ChatPlatformDeps {
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
   /**
+   * The pixels of an attached `appfile://` image, read for a turn whose model accepts images:
+   * `null` when the file cannot be sent (see `PlatformServices.readChatImage`).
+   */
+  readChatImage(request: ChatImageRequest): Promise<ChatImageContent | null>;
+  /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (kept, container NULLed);
    * an unconsumed one is deleted (row + counter + storage). The module has no
@@ -185,6 +192,7 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
       ctx.services.resolveChatModel(orgId, presetId, userId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
+    readChatImage: (request) => ctx.services.readChatImage(request),
     cleanupSessionFiles: (chatSessionId, orgId, tx) =>
       ctx.services.cleanupSessionFiles(chatSessionId, orgId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),

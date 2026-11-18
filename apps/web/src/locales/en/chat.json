@@ -7,6 +7,7 @@
   "composer.placeholder": "Message Appstrate…",
   "composer.attach": "Attach files",
   "composer.removeAttachment": "Remove attachment",
+  "composer.imageNotSeen": "This model cannot view images: the assistant only gets the file name.",
   "composer.send": "Send",
   "composer.stop": "Stop",
   "welcome.hint": "Launch an agent, inspect a run, create a package or search your files.",

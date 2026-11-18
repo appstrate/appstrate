@@ -7,6 +7,7 @@
   "composer.placeholder": "Message Appstrate…",
   "composer.attach": "Joindre des fichiers",
   "composer.removeAttachment": "Retirer la pièce jointe",
+  "composer.imageNotSeen": "Ce modèle ne sait pas lire les images : l’assistant ne reçoit que le nom du fichier.",
   "composer.send": "Envoyer",
   "composer.stop": "Arrêter",
   "welcome.hint": "Lancez un agent, inspectez un run, créez un package ou cherchez dans vos fichiers.",

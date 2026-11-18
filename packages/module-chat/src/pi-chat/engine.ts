@@ -38,7 +38,7 @@ import {
   type PiCodingAgentSdk,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
-import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import type { ChatImageContent, ChatUsageRecord } from "@appstrate/core/chat-contract";
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
@@ -54,6 +54,11 @@ import {
 } from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
+import {
+  ATTACHMENT_IMAGE_ENCODED_MAX_BYTES,
+  ATTACHMENT_IMAGE_MAX_EDGE,
+  loadAttachmentImages,
+} from "./attachment-images.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -78,6 +83,12 @@ export interface PiChatInput {
   requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
+  /**
+   * Read the pixels of an attached `appfile://` image (`null` when it cannot be
+   * sent). Called only for a model that accepts images; omitted = the turn shows
+   * no image to the model whatever its modalities.
+   */
+  readImage?: (uri: string) => Promise<ChatImageContent | null>;
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
@@ -424,6 +435,26 @@ export function runPiChat(input: PiChatInput): Response {
         const system = mcpInstructions ? `${input.system}\n\n${mcpInstructions}` : input.system;
 
         const projectionStartedAt = Date.now();
+        // A model that accepts images gets the pixels of the newest attachments,
+        // rebuilt from the files and downscaled; one that does not keeps the
+        // pointer lines it always had.
+        const modelSeesImages = sessionModel.input.includes("image");
+        const images =
+          modelSeesImages && input.readImage
+            ? await untilAborted(
+                loadAttachmentImages(input.messages, {
+                  read: input.readImage,
+                  resize: async (bytes, mime) => {
+                    const resized = await sdk.resizeImage(bytes, mime, {
+                      maxWidth: ATTACHMENT_IMAGE_MAX_EDGE,
+                      maxHeight: ATTACHMENT_IMAGE_MAX_EDGE,
+                      maxBytes: ATTACHMENT_IMAGE_ENCODED_MAX_BYTES,
+                    });
+                    return resized && { data: resized.data, mimeType: resized.mimeType };
+                  },
+                }),
+              )
+            : undefined;
         const projectedTurn = buildStructuredPiTurn(
           input.messages,
           {
@@ -433,6 +464,8 @@ export function runPiChat(input: PiChatInput): Response {
           },
           {
             estimateTokens,
+            images,
+            modelSeesImages,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
             // Still a floor, not a measurement: tool schemas and this turn's own
@@ -564,7 +597,12 @@ export function runPiChat(input: PiChatInput): Response {
             // is user prose, never a Pi command: the resource loader already
             // disables skills and prompt templates, and the chat extensions
             // register tools only — pin the invariant rather than depend on it.
-            typedSession.prompt(projectedTurn.prompt, { expandPromptTemplates: false }),
+            typedSession.prompt(projectedTurn.prompt, {
+              expandPromptTemplates: false,
+              ...(projectedTurn.promptImages.length > 0
+                ? { images: projectedTurn.promptImages }
+                : {}),
+            }),
           );
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
