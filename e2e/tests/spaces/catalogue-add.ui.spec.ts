@@ -3,8 +3,8 @@
 /**
  * A Découvrir card's « Ajouter » adds where the reader works. With a space selected, it posts to
  * that space in one click and turns into « Ajouté ». In « Tous les espaces » no space is the
- * context: the same card opens the menu of spaces, those where the package already runs ticked
- * and inert, and adding to one posts to THAT space, never the hidden working one.
+ * context: the same card opens a menu of checkboxes, those where the package already runs ticked,
+ * and ticking one posts to THAT space, never the hidden working one; unticking takes it out there.
  */
 
 import type { Locator, Page } from "@playwright/test";
@@ -81,14 +81,16 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
     await trigger.click();
     const menu = page.getByRole("menu").filter({ hasText: "Ajouter à…" });
     await expect(menu).toBeVisible();
-    const entry = (spaceName: string) => menu.getByRole("menuitem").filter({ hasText: spaceName });
-    // Where it runs: ticked and inert.
+    const entry = (spaceName: string) =>
+      menu.getByRole("menuitemcheckbox").filter({ hasText: spaceName });
+    // Where it runs: ticked, and undoable.
     for (const running of [alpha.name, beta.name]) {
-      await expect(entry(running)).toHaveAttribute("data-disabled", "");
+      await expect(entry(running)).toHaveAttribute("aria-checked", "true");
+      await expect(entry(running)).not.toHaveAttribute("data-disabled", "");
       await expect(entry(running)).toContainText("Actif");
     }
-    // Where it may be added: offered.
-    await expect(entry("Default")).not.toHaveAttribute("data-disabled", "");
+    // Where it may be added: offered, unticked.
+    await expect(entry("Default")).toHaveAttribute("aria-checked", "false");
     await expect(entry("Default")).not.toContainText("Actif");
 
     const posted = addedTo(page);
@@ -100,6 +102,22 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
     expect(response.status()).toBe(201);
     // The count follows: it runs in three spaces now.
     await expect(trigger).toHaveAccessibleName(/\b3 espaces$/);
+    await trigger.click();
+    await expect(menu).toBeVisible();
+
+    // Unticking takes it out of THAT space.
+    const removed = page.waitForResponse(
+      (candidate) =>
+        candidate.request().method() === "DELETE" &&
+        /\/api\/spaces\/[^/]+\/packages\//.test(candidate.url()),
+    );
+    await entry(beta.name).click();
+    const removal = await removed;
+    expect(decodeURIComponent(new URL(removal.url()).pathname)).toBe(
+      `/api/spaces/${beta.id}/packages/${scope}/${name}`,
+    );
+    expect(removal.ok()).toBe(true);
+    await expect(trigger).toHaveAccessibleName(/\b2 espaces$/);
   } finally {
     await context.close();
   }
