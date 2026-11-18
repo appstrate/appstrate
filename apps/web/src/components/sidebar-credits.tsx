@@ -2,15 +2,19 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Coins } from "lucide-react";
+import { Coins, Timer } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SidebarGroup } from "@appstrate/ui/components/sidebar";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useBilling } from "../hooks/use-billing";
 import { UsageBar } from "./usage-bar";
 import { formatNumber } from "../lib/format-number";
+import { usedComputeMinutes } from "../lib/billing-compute";
 
-/** The organization's credit gauge, at the foot of the navigation. */
+/**
+ * The organization's gauges at the foot of the navigation: compute minutes used this month
+ * (when the plan carries a quota) above the LLM credits.
+ */
 export function SidebarCredits() {
   const { t } = useTranslation();
   // The gauge links to the billing tab: fetched and drawn only where that tab
@@ -34,6 +38,27 @@ export function SidebarCredits() {
   return (
     <SidebarGroup className="mt-auto">
       <Link to="/org-settings/billing" className="block rounded-md px-2 py-2">
+        {billing.compute.included_minutes !== null && (
+          <div className="mb-3">
+            <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+              <span className="text-sidebar-foreground/70 flex items-center gap-1.5">
+                <Timer className="size-3.5" />
+                {t("nav.compute")}
+              </span>
+              <span className="text-sidebar-foreground font-medium tabular-nums">
+                {t("nav.computeCount", {
+                  used: formatNumber(usedComputeMinutes(billing.compute)),
+                  included: formatNumber(billing.compute.included_minutes),
+                })}
+              </span>
+            </div>
+            <UsageBar
+              percent={billing.compute.usage_percent}
+              label={t("nav.compute")}
+              className="bg-sidebar-border h-1.5"
+            />
+          </div>
+        )}
         <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
           <span className="text-sidebar-foreground/70 flex items-center gap-1.5">
             <Coins className="size-3.5" />

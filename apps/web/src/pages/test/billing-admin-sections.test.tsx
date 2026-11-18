@@ -89,6 +89,14 @@ function seed({ permissions, managers = [], contact, orgError }: SeedOptions): Q
     {
       plan: { id: "free", name: "Free" },
       plans: [],
+      compute: {
+        used_seconds: 0,
+        included_minutes: 1000,
+        usage_percent: 0,
+        period_start: "2026-11-01T00:00:00.000Z",
+        period_end: "2026-12-01T00:00:00.000Z",
+        max_concurrent_runs: 3,
+      },
       usage_percent: 0,
       credits_used: 0,
       credit_quota: 5000,
