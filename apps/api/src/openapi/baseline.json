@@ -27998,7 +27998,7 @@
         "operationId": "getFile",
         "tags": ["Files"],
         "summary": "Get file metadata",
-        "description": "Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. Requires the `files:read` permission; on top of it access is inherited from the file's container, so an id the caller cannot read returns 404.",
+        "description": "Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space. A session reaches every space where it holds a role; an API key, an end-user or a token issued for one space reaches only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). On top of it access is inherited from the file's container, so an id the caller cannot read returns 404.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28428,7 +28428,7 @@
         "operationId": "getFileContent",
         "tags": ["Files"],
         "summary": "Download file content",
-        "description": "Download the file bytes with `Content-Disposition: attachment`. Requires the `files:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
+        "description": "Download the file bytes with `Content-Disposition: attachment`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space. A session reaches every space where it holds a role; an API key, an end-user or a token issued for one space reaches only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"

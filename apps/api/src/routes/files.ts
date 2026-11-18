@@ -10,11 +10,13 @@
  *
  * Authorization is TWO layers, and both are load-bearing:
  *
- *   1. `files:read` (this file) — "may this principal touch the files
- *      family at all". Exactly what `runs:read` does for runs. Without it a
- *      key minted with the narrowest possible scope set (even `scopes: []`,
- *      which `validateScopes` accepts) could list and download every
- *      `agent_output` of the space.
+ *   1. `files:read` — "may this principal touch the files family at all".
+ *      Exactly what `runs:read` does for runs. Without it a key minted with
+ *      the narrowest possible scope set (even `scopes: []`, which
+ *      `validateScopes` accepts) could list and download every
+ *      `agent_output` of the space. The list asks it in the entered space;
+ *      a read by id asks it in the FILE's space (`resolveFileAcrossSpaces`,
+ *      the rule of every door reading a file by id), behind a ceiling guard.
  *   2. The per-file container ACL (`getFileForActor` /
  *      `getFileCapabilities`) — "may this ACTOR touch THIS file",
  *      inherited from the run read-ACL or the chat-session owner. The
@@ -29,9 +31,10 @@ import { Hono, type Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireCeiling, requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
+import { requestFileAccess } from "../lib/file-access.ts";
 import {
   callerPermissions,
   callerSpaceGrant,
@@ -47,6 +50,7 @@ import { attachmentDisposition } from "@appstrate/core/naming";
 import { previewKind } from "@appstrate/core/mime";
 import {
   getFileForActor,
+  resolveFileAcrossSpaces,
   listFilesForActor,
   deleteFile,
   clearFileExpiry,
@@ -55,6 +59,7 @@ import {
   loadFileForPreview,
   getFileCapabilities,
   parseStorageKey,
+  type FileAccess,
 } from "../services/files.ts";
 import { parseListFilesQuery } from "../lib/list-query.ts";
 import {
@@ -66,11 +71,33 @@ import {
   PREVIEW_MAX_BYTES,
 } from "../services/file-preview.ts";
 
-/** The gallery list over `grants`: `GET /api/files` and `GET /api/orgs/{orgId}/files`. */
-export async function respondFileList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+/**
+ * The gallery list over `grants`: `GET /api/files` and `GET /api/orgs/{orgId}/files`. A run's
+ * inputs resolve in their own spaces under `fileAccess` (the request's, in a space it entered).
+ */
+export async function respondFileList(
+  c: Context<AppEnv>,
+  orgId: string,
+  grants: SpaceGrant[],
+  fileAccess?: FileAccess,
+) {
   const filters = parseListFilesQuery(c);
   return c.json(
-    await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c)),
+    await listFilesForActor(orgId, grants, getActor(c), filters, {
+      ...fileLifecycleCeiling(c),
+      ...(fileAccess ? { fileAccess } : {}),
+    }),
+  );
+}
+
+/** The file the path names, in its own space under the request's reach (`requestFileAccess`). */
+function resolveFileById(c: Context<AppEnv>) {
+  return resolveFileAcrossSpaces(
+    getSpaceScope(c).orgId,
+    getActor(c),
+    c.req.param("id")!,
+    requestFileAccess(c, getSpaceScope(c).spaceId),
+    fileLifecycleCeiling(c),
   );
 }
 
@@ -79,23 +106,21 @@ export function createFilesRouter() {
 
   // GET /api/files — gallery list.
   router.get("/files", rateLimit(120), requirePermission("files", "read"), (c) =>
-    respondFileList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+    respondFileList(
+      c,
+      getSpaceScope(c).orgId,
+      [callerSpaceGrant(c)],
+      requestFileAccess(c, getSpaceScope(c).spaceId),
+    ),
   );
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
-  // On every by-id route layer 1 is mounted, layer 2 — the per-file container
-  // ACL — is decided on the row the handler loads.
-  router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
-    const scope = getSpaceScope(c);
+  // A file read by id (here and `/content`) resolves in its own space, as the MCP
+  // `read_file` that hands out its `content_url` does.
+  router.get("/files/:id", rateLimit(120), requireCeiling("files", "read"), async (c) => {
     const actor = getActor(c);
-    const resolved = await getFileForActor(
-      scope,
-      actor,
-      c.req.param("id")!,
-      callerPermissions(c),
-      fileLifecycleCeiling(c),
-    );
+    const resolved = await resolveFileById(c);
     if (!resolved) throw notFound("File not found");
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   });
@@ -104,66 +129,53 @@ export function createFilesRouter() {
   // `downloadable` flag (a user upload is served only to its creator). 307 to a
   // presigned GET when storage supports it (S3 with a public endpoint), else
   // proxy-stream. Content-Disposition: attachment.
-  router.get(
-    "/files/:id/content",
-    rateLimit(120),
-    requirePermission("files", "read"),
-    async (c) => {
-      const scope = getSpaceScope(c);
-      const actor = getActor(c);
-      const resolved = await getFileForActor(
-        scope,
-        actor,
-        c.req.param("id")!,
-        callerPermissions(c),
-        fileLifecycleCeiling(c),
-      );
-      if (!resolved) throw notFound("File not found");
-      if (!resolved.capabilities.download) {
-        throw forbidden("This file is not downloadable by the current actor");
-      }
-      const { row } = resolved;
+  router.get("/files/:id/content", rateLimit(120), requireCeiling("files", "read"), async (c) => {
+    const resolved = await resolveFileById(c);
+    if (!resolved) throw notFound("File not found");
+    if (!resolved.capabilities.download) {
+      throw forbidden("This file is not downloadable by the current actor");
+    }
+    const { row } = resolved;
 
-      // RFC 9530 representation digest of the stored bytes — exposed only when
-      // the caller has the `metadata` capability (so a private upload's hash is
-      // never disclosed to a non-creator; download already implies metadata
-      // for these).
-      const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
+    // RFC 9530 representation digest of the stored bytes — exposed only when
+    // the caller has the `metadata` capability (so a private upload's hash is
+    // never disclosed to a non-creator; download already implies metadata
+    // for these).
+    const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
 
-      const parsed = parseStorageKey(row.storageKey);
-      const presigned = parsed
-        ? await createDownloadUrl(parsed.bucket, parsed.path, {
-            filename: row.name,
-            contentType: row.mime,
-          })
-        : null;
-      if (presigned) {
-        // The presigned GET serves the bytes from the blob store (we can't set
-        // headers on that response), but carry the digest on the 307 so a
-        // client that inspects the redirect still learns the authoritative hash.
-        if (reprDigest) c.header("Repr-Digest", reprDigest);
-        return c.redirect(presigned, 307);
-      }
+    const parsed = parseStorageKey(row.storageKey);
+    const presigned = parsed
+      ? await createDownloadUrl(parsed.bucket, parsed.path, {
+          filename: row.name,
+          contentType: row.mime,
+        })
+      : null;
+    if (presigned) {
+      // The presigned GET serves the bytes from the blob store (we can't set
+      // headers on that response), but carry the digest on the 307 so a
+      // client that inspects the redirect still learns the authoritative hash.
+      if (reprDigest) c.header("Repr-Digest", reprDigest);
+      return c.redirect(presigned, 307);
+    }
 
-      const stream = await streamFileContent(row.storageKey);
-      if (!stream) throw notFound("File content not found");
-      return new Response(stream, {
-        status: 200,
-        headers: {
-          "Content-Type": row.mime,
-          // The MIME is agent/uploader-controlled — forbid content-type
-          // sniffing so a mislabelled body can never be reinterpreted as
-          // active content (S3). Attachment disposition already prevents
-          // inline rendering.
-          "X-Content-Type-Options": "nosniff",
-          "Content-Length": String(row.size),
-          "Content-Disposition": attachmentDisposition(row.name),
-          "Cache-Control": "private, no-store",
-          ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
-        },
-      });
-    },
-  );
+    const stream = await streamFileContent(row.storageKey);
+    if (!stream) throw notFound("File content not found");
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": row.mime,
+        // The MIME is agent/uploader-controlled — forbid content-type
+        // sniffing so a mislabelled body can never be reinterpreted as
+        // active content (S3). Attachment disposition already prevents
+        // inline rendering.
+        "X-Content-Type-Options": "nosniff",
+        "Content-Length": String(row.size),
+        "Content-Disposition": attachmentDisposition(row.name),
+        "Cache-Control": "private, no-store",
+        ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
+      },
+    });
+  });
 
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.

@@ -142,7 +142,7 @@ function buildTurn(
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: {
-      spaces: [{ id: "spc_1", name: "One", role: "owner" }],
+      spaces: [{ id: "spc_1", name: "One", role: "owner", permissions: [] }],
       touch: async () => {},
       fileSpaces: async () => new Map(),
     },

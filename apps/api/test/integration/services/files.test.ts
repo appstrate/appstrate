@@ -489,7 +489,13 @@ describe("files service + routes", () => {
     const runId = await seedRunRow(scope, { input: { file: `appfile://${docA.id}` } });
     const { row: docB } = await publishStream(scope, runId, "out.txt", "produced");
 
-    const page = await listFilesIn(scope, userActor, { runId }, READS_EVERY_RUN);
+    // A consumed input is read by id in its own space, which asks `files:read` there.
+    const page = await listFilesIn(
+      scope,
+      userActor,
+      { runId },
+      new Set([...READS_EVERY_RUN, "files:read"]),
+    );
     const ids = page.data.map((d) => d.id);
     expect(ids).toContain(docA.id); // consumed input
     expect(ids).toContain(docB.id); // produced output
@@ -519,8 +525,10 @@ describe("files service + routes", () => {
     });
 
     const runId = await seedRunRow(scope, { input: { a: { b: [`appfile://${docA.id}`] } } });
-    const page = await listFilesIn(scope, userActor, { runId }, NO_GRANTS);
+    const page = await listFilesIn(scope, userActor, { runId }, new Set(["files:read"]));
     expect(page.data.map((d) => d.id)).toContain(docA.id);
+    // Without `files:read` in its space, an input is as absent as a missing one.
+    expect((await listFilesIn(scope, userActor, { runId }, NO_GRANTS)).data).toEqual([]);
   });
 
   it("a file ref in input that belongs to another org is not returned (org scope holds)", async () => {
@@ -1467,14 +1475,18 @@ describe("files service + routes", () => {
     const announced: string[] = [];
     // A limited conversation: the turn acts in the team space alone, the personal space is
     // neither one of its spaces nor touched.
-    const attach = (uri: string) =>
+    const teamGrant = { id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) };
+    const attach = (
+      uri: string,
+      reach = [{ id: personal.id, permissions: new Set(["files:read"]) }],
+    ) =>
       resolveChatAttachment({
         orgId: ctx.orgId,
         userId: ctx.user.id,
         chatSessionId,
         uri,
-        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) }],
-        reach: [{ id: personal.id, permissions: new Set(["files:read"]) }],
+        spaces: [teamGrant],
+        reach,
         beforeResolve: async (spaceId) => {
           announced.push(spaceId);
         },
@@ -1497,6 +1509,12 @@ describe("files service + routes", () => {
       "perso.txt",
       new TextEncoder().encode("contenu"),
     );
+    // Under a role preview the reach holds no personal space: an upload staged there before
+    // the preview is refused, and nothing materializes.
+    await expect(attach(`upload://${upload}`, [teamGrant])).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await filesOfSession()).toEqual([]);
     const materialized = await attach(`upload://${upload}`);
     expect(materialized.spaceId).toBe(personal.id);
     expect(await filesOfSession()).toEqual([{ spaceId: personal.id }]);

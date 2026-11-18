@@ -1342,7 +1342,8 @@ export async function resolveChatAttachment(
     if (!uploadId)
       throw invalidRequest("Attachment URI must be an 'upload://' or 'appfile://' URI");
     // A chat upload lives in the caller's personal space, reached through the conversation
-    // that holds it: it touches no space, so a limited conversation stays limited.
+    // that holds it: it touches no space, so a limited conversation stays limited. That space
+    // must be in the reach, which a role preview's lacks.
     const [staged] = await db
       .select({ spaceId: uploads.spaceId })
       .from(uploads)
@@ -1352,6 +1353,10 @@ export async function resolveChatAttachment(
           eq(uploads.id, uploadId),
           eq(uploads.orgId, request.orgId),
           eq(spaces.ownerUserId, request.userId),
+          inArray(
+            uploads.spaceId,
+            request.reach.map((space) => space.id),
+          ),
         ),
       )
       .limit(1);
@@ -1406,6 +1411,7 @@ export async function resolveFileAcrossSpaces(
   actor: Actor,
   fileId: string,
   access: FileAccess,
+  opts: { creatorCanManage?: boolean } = {},
 ): Promise<ResolvedFile | null> {
   if (!FILE_ID_RE.test(fileId)) return null;
   const [location] = await db
@@ -1428,7 +1434,7 @@ export async function resolveFileAcrossSpaces(
     (await access.grantIn(location.spaceId)) ??
     (conversationUpload ? await access.conversation!.grantIn(location.spaceId) : undefined);
   if (!permissions || !mayReadFileContent(permissions)) return null;
-  return getFileForActor({ orgId, spaceId: location.spaceId }, actor, fileId, permissions);
+  return getFileForActor({ orgId, spaceId: location.spaceId }, actor, fileId, permissions, opts);
 }
 
 /** The chat's {@link FileAccess}: the turn's spaces, and the caller's real set where its uploads live. */
@@ -1514,28 +1520,37 @@ export interface ListFilesFilters {
 }
 
 /**
- * The `run_id` filter clause for the file gallery. A run's files are not
- * only the ones it PRODUCED (`files.run_id = run`) — a run also CONSUMES
- * files passed as input (`appfile://file_xxx` references in `runs.input`),
- * whose own container is wherever they were first materialized (a chat session,
- * or another run). So the filter is the union: rows anchored to the run, OR rows
- * whose id is referenced by the run's input JSONB.
+ * The rows of one run in the file gallery. A run's files are not only the ones it PRODUCED
+ * (`files.run_id = run`, under the gallery's `visible`) — it also CONSUMES files passed as input
+ * (`appfile://file_xxx` references in `runs.input`), which may live in another space (a team
+ * run reading its launcher's personal upload). Each input resolves in its own space under the
+ * rule of every read by id (`resolveFileAcrossSpaces`), so whoever may read it there sees it
+ * and nobody else does.
  *
- * The run is looked up in the listed spaces only, so a run of another org or
- * of a space outside the list resolves to nothing and its input refs never
- * widen the result (the referenced-id `inArray` is AND-ed with each row's own
- * space visibility on `files` regardless). When the run has no input or no
- * file refs, this collapses to the plain `run_id =` equality.
+ * The run is looked up in the listed spaces only, so a run of another org or of a space outside
+ * the list resolves to nothing and its input refs never widen the result.
  */
-async function runContainerFilter(orgId: string, spaceIds: string[], runId: string): Promise<SQL> {
+async function runFilesFilter(
+  orgId: string,
+  spaceIds: string[],
+  runId: string,
+  visible: SQL,
+  actor: Actor,
+  access: FileAccess,
+): Promise<SQL> {
   const [run] = await db
     .select({ input: runs.input })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId), inArray(runs.spaceId, spaceIds)))
     .limit(1);
-  const inputDocIds = run ? extractFileIds(run.input) : [];
-  if (inputDocIds.length === 0) return eq(files.runId, runId);
-  return or(eq(files.runId, runId), inArray(files.id, inputDocIds))!;
+  const resolved = await Promise.all(
+    (run ? extractFileIds(run.input) : []).map((id) =>
+      resolveFileAcrossSpaces(orgId, actor, id, access),
+    ),
+  );
+  const inputIds = resolved.flatMap((file) => (file ? [file.row.id] : []));
+  const produced = and(visible, eq(files.runId, runId))!;
+  return inputIds.length === 0 ? produced : or(produced, inArray(files.id, inputIds))!;
 }
 
 /**
@@ -1629,7 +1644,7 @@ export async function listFilesForActor(
   grants: readonly SpaceGrant[],
   actor: Actor,
   filters: ListFilesFilters,
-  opts: { creatorCanManage?: boolean } = {},
+  opts: { creatorCanManage?: boolean; fileAccess?: FileAccess } = {},
 ): Promise<ListEnvelope<FileDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   if (grants.length === 0) return listResponse([], { hasMore: false });
@@ -1637,8 +1652,7 @@ export async function listFilesForActor(
   const spaceIds = grants.map((g) => g.spaceId);
   const supervised = grants.filter((g) => canReadEveryRun(g.permissions)).map((g) => g.spaceId);
 
-  // The rows the caller may read — and so the rows a cursor may name: a file it
-  // cannot read is no pivot, as for the run lists.
+  // The rows the caller may read in the listed spaces.
   const visible = and(
     eq(files.orgId, orgId),
     inArray(files.spaceId, spaceIds),
@@ -1680,10 +1694,24 @@ export async function listFilesForActor(
           eq(files.userId, actor.id),
         )!,
   )!;
-  const conditions: SQL[] = [visible];
+  // The rows a cursor may name: a file the caller cannot read is no pivot, as for the run lists.
+  // A run's inputs follow their own space (`runFilesFilter`), by default the listed grants.
+  const readable = filters.runId
+    ? await runFilesFilter(
+        orgId,
+        spaceIds,
+        filters.runId,
+        visible,
+        actor,
+        opts.fileAccess ?? {
+          grantIn: async (spaceId) =>
+            grants.find((grant) => grant.spaceId === spaceId)?.permissions,
+        },
+      )
+    : visible;
+  const conditions: SQL[] = [readable];
   if (filters.purpose) conditions.push(eq(files.purpose, filters.purpose));
   if (filters.packageId) conditions.push(eq(files.packageId, filters.packageId));
-  if (filters.runId) conditions.push(await runContainerFilter(orgId, spaceIds, filters.runId));
   if (filters.chatSessionId) conditions.push(eq(files.chatSessionId, filters.chatSessionId));
   if (filters.contextChatSessionId) {
     conditions.push(
@@ -1696,7 +1724,7 @@ export async function listFilesForActor(
     const [cursor] = await db
       .select({ createdAt: files.createdAt, id: files.id })
       .from(files)
-      .where(and(eq(files.id, filters.startingAfter), visible))
+      .where(and(eq(files.id, filters.startingAfter), readable))
       .limit(1);
     // Next page (older rows), DESC order: (createdAt, id) < (cursor.createdAt, cursor.id).
     // A cursor id that no longer exists, or that the caller cannot read, drops

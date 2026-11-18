@@ -302,7 +302,7 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
       },
       organization: {
         // The skills live in the default space: the turn's, which a `skill://` read names.
-        spaces: [{ id: owner.defaultSpaceId, name: "Default", role: "admin" }],
+        spaces: [{ id: owner.defaultSpaceId, name: "Default", role: "admin", permissions: [] }],
         touch: async () => {},
         fileSpaces: async () => new Map(),
       },

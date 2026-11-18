@@ -169,7 +169,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `files:read` there gets `not_found`, no longer `not_granted`). The space-pinned MCP endpoint
   (`/api/mcp/o/{org}/s/{space}`) now confines every direct tool of the request to its space, not
   only its dispatched operations: file reads, package authorisation and placement included, so a
-  package homed in another space is out of its reach there.
+  package homed in another space is out of its reach there. `GET /api/files/{id}` and
+  `GET /api/files/{id}/content` follow the same rule: the file is resolved in its own space, which
+  may differ from `X-Space-Id`, so the `content_url` an MCP read returns for a large file works
+  with the credential that read it. A caller without `files:read` in the space it entered, but
+  holding it in the file's, now reads the file; one without it in the file's space gets `404`
+  instead of `403` (a credential whose scopes omit `files:read` still gets `403`). A run's file
+  list (`GET /api/files?runId=`) shows each consumed input under the same rule, so a team run's
+  input from its launcher's personal space is listed for the launcher and nobody else.
 
 - **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
   the chat goes to « Mon espace » from every screen, private to you, and adds no space to the

@@ -20,7 +20,7 @@ import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
 /** The turn's one space; nothing here records a touched space. */
 const ORGANIZATION: TurnSpaces = {
-  spaces: [{ id: "spc_1", name: "One", role: "admin" }],
+  spaces: [{ id: "spc_1", name: "One", role: "admin", permissions: [] }],
   touch: async () => {},
   fileSpaces: async () => new Map(),
 };

@@ -229,6 +229,14 @@ const fileListQueryParameters = [
 ];
 
 /** The page both galleries answer. */
+/** How a read by id reaches a file: the rule of run inputs and the MCP file tools. */
+const FILE_BY_ID_REACH =
+  "The file is resolved in its own space, which may differ from `X-Space-Id`: the caller " +
+  "needs `files:read` there, as its credential reaches that space. A session reaches every " +
+  "space where it holds a role; an API key, an end-user or a token issued for one space " +
+  "reaches only that space; a chat turn's credential also reaches its own conversation's " +
+  "uploads. A credential whose scopes omit `files:read` is refused (403).";
+
 const fileListResponses = {
   "200": {
     description: "A page of files.",
@@ -297,9 +305,10 @@ export const filesPaths = {
       summary: "Get file metadata",
       description:
         "Fetch a file's metadata, including the derived `downloadable` flag and — for a " +
-        "previewable file — a freshly minted `preview_url`. Requires the `files:read` " +
-        "permission; on top of it access is inherited from the file's container, so an id " +
-        "the caller cannot read returns 404.",
+        "previewable file — a freshly minted `preview_url`. " +
+        FILE_BY_ID_REACH +
+        " On top of it access is inherited from the file's container, so an id the caller " +
+        "cannot read returns 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -396,8 +405,9 @@ export const filesPaths = {
       tags: ["Files"],
       summary: "Download file content",
       description:
-        "Download the file bytes with `Content-Disposition: attachment`. Requires the " +
-        "`files:read` permission. When object storage supports it (S3 with a public " +
+        "Download the file bytes with `Content-Disposition: attachment`. " +
+        FILE_BY_ID_REACH +
+        " When object storage supports it (S3 with a public " +
         "endpoint), responds `307` with a short-lived presigned `Location`; otherwise " +
         "proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag " +
         "— a user upload is served only to its creator (403 otherwise).",

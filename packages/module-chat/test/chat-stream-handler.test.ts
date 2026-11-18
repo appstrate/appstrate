@@ -906,7 +906,7 @@ describe("handleChatStream", () => {
       chatSessionId: sessionId,
       uri: `upload://${await stage()}`,
       spaces: [],
-      reach: [],
+      reach: [{ id: personal.id, permissions: new Set() }],
       beforeResolve: async () => {},
     });
     const question: UIMessage = {
@@ -989,7 +989,9 @@ describe("handleChatStream", () => {
 
     // `read_resource` neither refuses nor touches a space for a file the conversation holds; a
     // file of a space outside the turn's still names it, and is refused there.
-    expect(await input.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(new Map());
+    expect(await input.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(
+      new Map([[earlier.uri, null]]),
+    );
     const run = await seedRun({ ...personalScope, userId: ctx.user.id });
     const { row: output } = await createFileFromStream(
       personalScope,
@@ -1000,7 +1002,12 @@ describe("handleChatStream", () => {
     );
     expect(
       await input.platformMcp!.organization.fileSpaces([`appfile://${output.id}`, earlier.uri]),
-    ).toEqual(new Map([[`appfile://${output.id}`, personal.id]]));
+    ).toEqual(
+      new Map([
+        [`appfile://${output.id}`, personal.id],
+        [earlier.uri, null],
+      ]),
+    );
   });
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {

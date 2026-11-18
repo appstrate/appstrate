@@ -227,9 +227,10 @@ function buildTurn(
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-surface": surface },
     organization: {
-      spaces: [{ id: "spc_1", name: "One", role: "owner" }],
+      spaces: [{ id: "spc_1", name: "One", role: "owner", permissions: [] }],
       touch: async () => {},
-      fileSpaces: async () => new Map(),
+      // Every file named here is the conversation's own.
+      fileSpaces: async (uris) => new Map(uris.map((uri) => [uri, null])),
     },
     writeChunk: () => {},
     signal,

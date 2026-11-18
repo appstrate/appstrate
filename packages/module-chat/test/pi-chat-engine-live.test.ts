@@ -42,7 +42,7 @@ const ANSWER = "Bonjour le monde";
 
 /** The turn's one space; nothing here records a touched space. */
 const LIVE_ORGANIZATION: TurnSpaces = {
-  spaces: [{ id: "spc_live", name: "Live", role: "admin" }],
+  spaces: [{ id: "spc_live", name: "Live", role: "admin", permissions: [] }],
   touch: async () => {},
   fileSpaces: async () => new Map(),
 };

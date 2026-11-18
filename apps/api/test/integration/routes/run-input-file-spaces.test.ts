@@ -324,6 +324,31 @@ describe("run inputs across spaces", () => {
     await launchedRunId(await launch(previewing, teamB, [await runOutput(teamB, ctx.user.id)]));
   });
 
+  it("a run's file list shows a consumed input by its own space's rule", async () => {
+    const uri = await chatUpload(ctx.user.id, `chs_${crypto.randomUUID()}`);
+    const fileId = uri.replace("appfile://", "");
+    const runId = await launchedRunId(await launch(authHeaders(ctx), teamB, [uri]));
+    const listed = async (headers: Record<string, string>) => {
+      const res = await app.request(`/api/files?runId=${runId}`, {
+        headers: { ...headers, "X-Space-Id": teamB },
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { data: { id: string }[] }).data.map((file) => file.id);
+    };
+
+    // The author reaches their personal space: the input is listed with the run.
+    expect(await listed(authHeaders(ctx))).toEqual([fileId]);
+    // A colleague reading every run of B does not reach it: the run lists nothing of it.
+    const colleague = await memberContext(ctx, "member");
+    await seedSpaceGrant({
+      orgId: ctx.orgId,
+      spaceId: teamB,
+      userId: colleague.user.id,
+      permissions: ["runs:read", "runs:read-all", "files:read"],
+    });
+    expect(await listed(authHeaders(colleague))).toEqual([]);
+  });
+
   it("a team run keeps no claim on a personal upload: it dies with its conversation", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
     const uri = await chatUpload(ctx.user.id, sessionId);

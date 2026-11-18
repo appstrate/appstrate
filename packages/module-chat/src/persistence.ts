@@ -156,23 +156,24 @@ export async function createSession(input: {
 }
 
 /**
- * The space each of `fileIds` belongs to, in one read: ids `orgId` does not hold, and those the
- * conversation `chatSessionId` holds (reached through their container), are left out.
+ * The space each of `fileIds` belongs to, in one read: ids `orgId` does not hold are left out,
+ * and those the conversation `chatSessionId` holds (reached through their container) map to null.
  */
 export async function fileSpaceIds(
   orgId: string,
   fileIds: readonly string[],
   chatSessionId: string | null,
-): Promise<Map<string, string>> {
+): Promise<Map<string, string | null>> {
   if (fileIds.length === 0) return new Map();
   const rows = await db
     .select({ id: files.id, spaceId: files.spaceId, chatSessionId: files.chatSessionId })
     .from(files)
     .where(and(inArray(files.id, [...fileIds]), eq(files.orgId, orgId)));
   return new Map(
-    rows.flatMap((row) =>
-      chatSessionId && row.chatSessionId === chatSessionId ? [] : [[row.id, row.spaceId] as const],
-    ),
+    rows.map((row) => [
+      row.id,
+      chatSessionId && row.chatSessionId === chatSessionId ? null : row.spaceId,
+    ]),
   );
 }
 

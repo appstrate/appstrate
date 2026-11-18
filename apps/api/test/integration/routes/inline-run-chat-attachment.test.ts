@@ -123,7 +123,9 @@ describe("inline run launched from the chat with an attached file", () => {
       chatSessionId: sessionId,
       uri: `upload://${uploadId}`,
       spaces: [{ id: ctx.defaultSpaceId, permissions: new Set() }],
-      reach: [],
+      reach: [
+        { id: (await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id)).id, permissions: new Set() },
+      ],
       beforeResolve: async () => {},
     });
     return { uri: resolved.uri, fileId: parseFileUri(resolved.uri)! };

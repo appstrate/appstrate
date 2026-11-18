@@ -205,7 +205,8 @@ export interface PiTurnBudget {
  * conversation touched.
  */
 export interface TurnSpaces {
-  spaces: readonly NamedSpace[];
+  /** The turn's spaces, each with the caller's effective permissions there. */
+  spaces: readonly (NamedSpace & { permissions: readonly string[] })[];
   /**
    * Record `spaceId` (one of `spaces`: callers refuse the others first) on the session BEFORE
    * the call naming it is dispatched. Throws, and the call is not made, when the space cannot
@@ -213,10 +214,11 @@ export interface TurnSpaces {
    */
   touch(spaceId: string): Promise<void>;
   /**
-   * The space of each `appfile://` of `uris` that exists, in one read; a file the conversation
-   * holds is left out (it is reached through its container, not a space).
+   * The space of each `appfile://` of `uris` that exists, in one read; null for a file the
+   * conversation holds (it is reached through its container, not a space). A missing file is
+   * left out.
    */
-  fileSpaces(uris: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  fileSpaces(uris: readonly string[]): Promise<ReadonlyMap<string, string | null>>;
 }
 
 type BuildPlatformMcpToolsOptions = {
@@ -458,10 +460,11 @@ const CROSS_SPACE_FILE_TOOLS = new Set([
 type CallRefusal = Record<string, unknown>;
 
 /**
- * Admit a call: the spaces it names must be the turn's, and so must the spaces of the files it
- * names (a conversation's own file names none). A call `pinned` to its named space (it is
- * dispatched there) reaches no file of another space. A file refused here answers what a
- * missing one does, naming no space. Everything is checked before anything is recorded.
+ * Admit a call: the spaces it names must be the turn's, and each file it names must be the
+ * conversation's own or live in a turn space where the caller reads files. A call `pinned` to
+ * its named space (it is dispatched there) reaches no file of another space. A missing file and
+ * a refused one get the same answer, naming no space. Everything is checked before anything is
+ * recorded.
  */
 async function admitCall(
   organization: TurnSpaces,
@@ -480,10 +483,15 @@ async function admitCall(
   }
   const fileSpaces = await organization.fileSpaces([...uris]);
   const spaces = new Set(call.named);
-  for (const [uri, space] of fileSpaces) {
-    const reachable = call.pinned
-      ? call.named.includes(space)
-      : organization.spaces.some((turnSpace) => turnSpace.id === space);
+  for (const uri of uris) {
+    const space = fileSpaces.get(uri);
+    if (space === null) continue;
+    const reachable =
+      space !== undefined &&
+      (!call.pinned || call.named.includes(space)) &&
+      organization.spaces.some(
+        (turnSpace) => turnSpace.id === space && turnSpace.permissions.includes("files:read"),
+      );
     if (!reachable) return { code: "not_found", error: `File not found: ${uri}` };
     spaces.add(space);
   }

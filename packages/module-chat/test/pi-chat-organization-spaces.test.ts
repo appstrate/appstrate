@@ -24,8 +24,10 @@ import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools
 const ORIGIN = "http://127.0.0.1:1";
 const RUN_ID = "run_org_1";
 const SPACES = [
-  { id: "spc_alpha", name: "Alpha", role: "operator" },
-  { id: "spc_beta", name: "Beta", role: "admin" },
+  { id: "spc_alpha", name: "Alpha", role: "operator", permissions: ["files:read"] },
+  { id: "spc_beta", name: "Beta", role: "admin", permissions: ["files:read"] },
+  // Acted in, but its files are not the caller's to read.
+  { id: "spc_delta", name: "Delta", role: "custom", permissions: ["chat:read"] },
 ];
 
 interface RegisteredTool {
@@ -137,12 +139,14 @@ function organizationOf({ events, lookups }: ReturnType<typeof transcript>): Tur
       events.push(`touch ${spaceId}`);
     },
     // A file id names its space here (`file_beta…` → `spc_beta`); `file_own…` is a file the
-    // conversation holds, which names none. Each lookup is kept: one per call.
+    // conversation holds, which names none; any other id is missing. Each lookup is kept: one
+    // per call.
     fileSpaces: async (uris) => {
       lookups.push([...uris]);
       return new Map(
         uris.flatMap((uri) => {
-          const space = uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1];
+          if (uri.startsWith("appfile://file_own")) return [[uri, null] as const];
+          const space = uri.match(/^appfile:\/\/file_(alpha|beta|gamma|delta)/)?.[1];
           return space ? [[uri, `spc_${space}`] as const] : [];
         }),
       );
@@ -272,7 +276,7 @@ describe("the conversation's forwarded tools and resources", () => {
       expect(transport.events).toEqual(["touch spc_beta", "resources/read"]);
 
       transport.events.length = 0;
-      await tool("read_resource").execute("c2", { uri: "appfile://file_unplaced00" });
+      await tool("read_resource").execute("c2", { uri: "appfile://file_own00001" });
       expect(transport.events).toEqual(["resources/read"]);
     } finally {
       await built.close();
@@ -359,6 +363,31 @@ describe("the files a call names", () => {
         input: { a: "appfile://file_alpha001", own: "appfile://file_own00001" },
       });
       expect(transport.events.slice(0, 2)).toEqual(["touch spc_alpha", "launch"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("answers a missing file, one outside the turn and one it may not read alike, recording nothing", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const answer = async (uri: string) =>
+        text(await tool("read_file").execute("c1", { uri, space_id: "spc_alpha" }));
+      // The same file id in three places: nowhere, a space the turn does not act in, and a
+      // turn space without `files:read`.
+      const [missing, outside, unreadable] = await Promise.all(
+        ["file_nowhere1", "file_gamma003", "file_delta003"].map((id) => answer(`appfile://${id}`)),
+      );
+      const shape = (answered: string, id: string) => answered.replace(id, "<id>");
+      expect(JSON.parse(missing)).toEqual({
+        code: "not_found",
+        error: "File not found: appfile://file_nowhere1",
+      });
+      expect(shape(outside, "file_gamma003")).toBe(shape(missing, "file_nowhere1"));
+      expect(shape(unreadable, "file_delta003")).toBe(shape(missing, "file_nowhere1"));
+      expect(transport.events).toEqual([]);
+      expect(transport.toolCalls).toEqual([]);
     } finally {
       await built.close();
     }
