@@ -20,7 +20,6 @@ import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
 import { findCause } from "@appstrate/core/error-cause";
-import { classifyApiCallFailure } from "@appstrate/afps-runtime/resolvers";
 import { egressFetchImpl, isCleartextToUntrustedHost } from "../../lib/egress-host-guard.ts";
 import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -220,10 +219,9 @@ export interface McpOperation {
   /** The deadline, or the operation failing: what every request of the client is bound by. */
   signal: AbortSignal;
   /**
-   * `work`, unless an exchange fails the operation first: an answer over the exchange bound, the
-   * server refusing the connection's credential, or the egress guard refusing the server. The SDK
-   * may swallow any (an SSE stream erroring) and wait for its timeout; the operation answers at
-   * once.
+   * `work`, unless an exchange fails the operation first: an answer over the exchange bound, or
+   * the server refusing the connection's credential (proxied path). The SDK may swallow either
+   * (an SSE stream erroring) and wait for its timeout; the operation answers at once.
    */
   guard<T>(work: Promise<T>): Promise<T>;
   settle(): void;
@@ -349,46 +347,40 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
   });
 }
 
+/** The direct path's egress options, beside the guard's own per-hop host check. */
+const DIRECT_EGRESS = {
+  // Not `validateHop`: declaring one makes the guard drop the body on a same-host redirect.
+  returnRedirect: (url: URL, hop: number) => {
+    if (isCleartextToUntrustedHost(url)) {
+      throw new SsrfBlockedError(url.hostname, "blocked-scheme", hop);
+    }
+    return false;
+  },
+  sensitiveHeaders: ["mcp-session-id"],
+} as const satisfies Parameters<typeof egressFetchImpl>[0];
+
+/** @internal Test-only: the redirect rules, for a guard driven with injected DNS and transport. */
+export const _directEgressOptionsForTesting = DIRECT_EGRESS;
+
 /**
- * One MCP operation of an unauthenticated integration (AFPS §7.2), its server reached directly
- * with nothing injected, through the egress guard on every hop, the https floor
- * (`isCleartextToUntrustedHost`) included. A failed exchange fails the operation with the
- * proxy's own problem for it (`blocked_target`, `upstream_unresolvable`, `upstream_unreachable`,
- * `upstream_timeout`), journaled only when a request may have been sent. A redirect follows the
- * guard's own rules: the body kept on the same host, `Mcp-Session-Id` stripped on any change of
- * origin. `beforeExchange` is asked before each exchange, as the proxy re-selects its connection
- * on each one; a refusal there fails the operation, nothing sent. The answer is relayed as it
- * streams, under the proxied path's bound. Journaled as one row without a connection; a
- * challenge flags nothing, there is no connection to flag.
+ * An unauthenticated integration's operation (AFPS §7.2): nothing injected, the egress guard and
+ * its https floor on every hop; a 307/308 keeps the body on the same host only (JSON-RPC
+ * arguments may be user data), `Mcp-Session-Id` stays with its origin; `beforeExchange` mirrors
+ * the proxy's per-exchange activation check; a challenge flags nothing, there is no connection.
  */
 export function directMcpOperation(
   input: McpOperationInput & { beforeExchange?: () => Promise<void> },
 ): McpOperation {
-  const egressFetch = egressFetchImpl({
-    // Not `validateHop`: declaring one makes the guard drop the body on a same-host redirect.
-    returnRedirect: (url, hop) => {
-      if (isCleartextToUntrustedHost(url)) {
-        throw new SsrfBlockedError(url.hostname, "blocked-scheme", hop);
-      }
-      return false;
-    },
-    sensitiveHeaders: ["mcp-session-id"],
-  });
+  const egressFetch = egressFetchImpl(DIRECT_EGRESS);
   return mcpOperation(input, async ({ href, init, signal, reached, fail }) => {
     const target = new URL(href);
-    /** Journals (when sent) and fails the operation with the typed failure, to throw. */
+    /** The typed failure to throw, journaled when a request may have been sent. */
     const failed = (err: unknown): ProxyCallError => {
       const failure = directFailure(err, target.origin);
       if (failure.sent) reached(null, failure.code);
-      fail(failure);
       return failure;
     };
-    try {
-      await input.beforeExchange?.();
-    } catch (err) {
-      if (err instanceof Error) fail(err);
-      throw err;
-    }
+    await input.beforeExchange?.();
     if (isCleartextToUntrustedHost(target)) {
       throw failed(new SsrfBlockedError(target.hostname, "blocked-scheme", 0));
     }
@@ -425,26 +417,28 @@ export function directMcpOperation(
 function directFailure(err: unknown, origin: string): ProxyCallError {
   const server = `The MCP server at ${origin}`;
   if (err instanceof SsrfBlockedError && err.reason !== "too-many-redirects") {
-    const sent = err.hop > 0;
-    return err.reason === "resolution-failed"
-      ? new ProxyCallError(
-          "upstream_unresolvable",
-          upstreamFailureDetail(server, "upstream_unresolvable"),
-          undefined,
-          sent,
-        )
-      : new ProxyCallError(
-          "blocked_target",
-          `${server} is refused by the egress guard.`,
-          undefined,
-          sent,
-        );
+    const unresolvable = err.reason === "resolution-failed";
+    const refused = unresolvable ? "could not be resolved" : "the egress guard refuses";
+    const detail =
+      err.hop > 0
+        ? `${server} redirected to ${err.host}, which ${refused}.`
+        : unresolvable
+          ? upstreamFailureDetail(server, "upstream_unresolvable")
+          : `${server} is refused by the egress guard.`;
+    return new ProxyCallError(
+      unresolvable ? "upstream_unresolvable" : "blocked_target",
+      detail,
+      undefined,
+      err.hop > 0,
+    );
   }
-  const code =
-    classifyApiCallFailure(err).code === "upstream_timeout"
-      ? "upstream_timeout"
-      : "upstream_unreachable";
+  const code = isTimeout(err) ? "upstream_timeout" : "upstream_unreachable";
   return new ProxyCallError(code, upstreamFailureDetail(server, code), undefined, true);
+}
+
+/** A deadline reached, at any depth of the error's causes. */
+function isTimeout(err: unknown): boolean {
+  return findCause(err, (e) => e.name === "TimeoutError") !== undefined;
 }
 
 /** `work`'s outcome, or `signal`'s reason once it aborts first; `work` then settles unobserved. */
@@ -566,7 +560,7 @@ export function mcpServerFailure(
       headers: upstreamProxyStatus({ receivedStatus: status }),
     });
   }
-  if (isRequestTimeout(err) || findCause(err, (e) => e.name === "TimeoutError")) {
+  if (isRequestTimeout(err) || isTimeout(err)) {
     return proxyProblem("upstream_timeout", upstreamFailureDetail(server, "upstream_timeout"));
   }
   const rpc = jsonRpcErrorOf(err);

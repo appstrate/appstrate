@@ -14,8 +14,8 @@ import {
 
 /**
  * Journal of the credential proxy's calls outside a run and for remote runs (`X-Run-Id`): one row
- * per call or MCP operation that reached an upstream, with or without a credential, whatever its
- * outcome. Written by `recordConnectionCall`
+ * per call or MCP operation that was dispatched to an upstream (and so may have reached it), with
+ * or without a credential, whatever its outcome. Written by `recordConnectionCall`
  * (`apps/api/src/services/credential-proxy/call-journal.ts`), best-effort like `recordAudit`.
  *
  * No foreign keys, on any column, for the reason `audit_events` states: the journal outlives the
@@ -23,7 +23,7 @@ import {
  * value that may name a row that no longer exists.
  *
  * `connection_id` is NULL when the integration binds no connection (unauthenticated, AFPS §7.2),
- * and `owner_*` with it. `owner_type` / `owner_id` are the connection's owner when the call was
+ * and `owner_*` with it (`connection_calls_no_connection_no_owner`). `owner_type` / `owner_id` are the connection's owner when the call was
  * made (`user` / `end_user`), NULL when the connection was gone by then. `actor_type` /
  * `actor_id` are who acted, `api_key_id` the key they acted through, if any.
  *
@@ -59,6 +59,10 @@ export const connectionCalls = pgTable(
     index("idx_connection_calls_space_id").on(table.spaceId, table.id),
     index("idx_connection_calls_connection_id").on(table.connectionId, table.id),
     check("connection_calls_actor_type_valid", sql`actor_type IN ('user', 'end_user')`),
+    check(
+      "connection_calls_no_connection_no_owner",
+      sql`connection_id IS NOT NULL OR (owner_type IS NULL AND owner_id IS NULL)`,
+    ),
     check(
       "connection_calls_owner_type_valid",
       sql`owner_type IS NULL OR owner_type IN ('user', 'end_user')`,

@@ -99,9 +99,9 @@ const REMOTE_TOOL_USAGE =
   "call_integration_tool names the connection; without it the proxy chooses as for an " +
   "`api_call`, and `must_choose_connection` lists the candidates in " +
   "`errors[0].candidate_connections` (retry with one `id` as `connection_id`); a tool whose " +
-  "`connection_ids` is empty belongs to an integration that binds no connection, and is called " +
-  "without `connection_id`. The result is " +
-  `the server's own tool result, relayed as is up to ${MAX_RESULT_BYTES} bytes; past that the ` +
+  "`connection_ids` is empty belongs to an integration that binds no connection, and is " +
+  "called without `connection_id`. The result is the server's own tool result, relayed as " +
+  `is up to ${MAX_RESULT_BYTES} bytes; past that the ` +
   "tool has run: a text block that does not fit whole is cut, any other block that does not " +
   "fit is replaced by a note while one fits, a closing note counts what was cut or dropped, " +
   'and `_meta["dev.appstrate/truncated"]` is `true`. Such a result, the server\'s, carries ' +

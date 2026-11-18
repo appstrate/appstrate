@@ -32,7 +32,7 @@ import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import { getEnv } from "@appstrate/env";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { eq, like } from "drizzle-orm";
-import { files, integrationConnections, oauthResource, spaces } from "@appstrate/db/schema";
+import { files, integrationConnections, oauthResource, runs, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -1038,7 +1038,6 @@ describe("mcp integration tools", () => {
   describe("an unauthenticated remote integration's typed tools (AFPS §7.2)", () => {
     const OPEN_ID = "@cporg/files";
     const OPEN_TOOL = "cporg_files__read_media_file";
-    const IMAGE = PNG_IMAGE_CONTENT;
     let server: FakeMcpServer;
     let restoreEgress: () => void;
 
@@ -1046,7 +1045,11 @@ describe("mcp integration tools", () => {
       restoreEgress = allowLoopbackOAuthEgress();
       server = startFakeMcpServer({
         tools: [
-          { name: "read_media_file", description: "Reads an image.", result: { content: [IMAGE] } },
+          {
+            name: "read_media_file",
+            description: "Reads an image.",
+            result: { content: [PNG_IMAGE_CONTENT] },
+          },
         ],
       });
     });
@@ -1125,7 +1128,7 @@ describe("mcp integration tools", () => {
           _meta?: Record<string, unknown>;
         };
         expect(result.isError ?? false).toBe(false);
-        expect(result.content).toEqual([IMAGE]);
+        expect(result.content).toEqual([PNG_IMAGE_CONTENT]);
         expect(result._meta?.["dev.appstrate/relayed"]).toBe(true);
         // Nothing injected: not the caller's MCP token, no credential at all.
         expect(server.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
@@ -1135,6 +1138,8 @@ describe("mcp integration tools", () => {
           .from(integrationConnections)
           .where(eq(integrationConnections.integrationId, OPEN_ID));
         expect(connections).toEqual([]);
+        // No run either: the call is the platform's, outside any run.
+        expect(await db.select().from(runs).where(eq(runs.orgId, owner.orgId))).toEqual([]);
       });
     }
   });

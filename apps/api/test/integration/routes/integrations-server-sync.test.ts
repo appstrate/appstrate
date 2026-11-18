@@ -16,6 +16,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
+import { journaledCalls } from "../../helpers/connection-calls.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -642,10 +643,7 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
   const unauthenticated = (url: string) =>
     remoteIntegrationManifest({ name: OPEN_ID, displayName: "Open", url });
 
-  const journaled = async () => {
-    await drainAudits(5_000);
-    return db.select().from(connectionCalls).where(eq(connectionCalls.integrationId, OPEN_ID));
-  };
+  const journaled = () => journaledCalls(OPEN_ID);
 
   const syncOpen = (caller: TestContext = ctx) =>
     getTestApp().request(`/api/integrations/${OPEN_ID}/discover`, {

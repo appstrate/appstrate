@@ -9,19 +9,14 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { count, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  connectionCalls,
-  integrationConnections,
-  runs,
-  spacePackages,
-  spaces,
-} from "@appstrate/db/schema";
+import { integrationConnections, runs, spacePackages, spaces } from "@appstrate/db/schema";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
-import { drainAudits } from "../../../src/services/audit.ts";
 import { initProxyLimits } from "../../../src/services/proxy-limits.ts";
+import { _setRemoteToolTimeoutsForTesting } from "../../../src/services/credential-proxy/remote-tools.ts";
+import { withAuthEnv } from "../../helpers/auth-env.ts";
+import { journaledCalls } from "../../helpers/connection-calls.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
@@ -36,7 +31,7 @@ import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-ser
 import { bearerApiKeyAuth, seedProxyIntegration } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import {
-  PNG_IMAGE_CONTENT as IMAGE,
+  PNG_IMAGE_CONTENT,
   startFakeMcpServer,
   type FakeMcpServer,
 } from "../../helpers/fake-mcp-server.ts";
@@ -51,7 +46,11 @@ beforeAll(() => {
   restoreEgress = allowLoopbackOAuthEgress();
   server = startFakeMcpServer({
     tools: [
-      { name: "read_media_file", description: "Reads an image.", result: { content: [IMAGE] } },
+      {
+        name: "read_media_file",
+        description: "Reads an image.",
+        result: { content: [PNG_IMAGE_CONTENT] },
+      },
       "write_file",
     ],
   });
@@ -90,25 +89,25 @@ function startServer(respond: (req: Request) => Response | Promise<Response>) {
   };
 }
 
-/** Runs `use` with the operator allowlist and `CREDENTIAL_PROXY_LIMITS` set as given. */
-async function withEnv(env: Record<string, string>, use: () => Promise<void>) {
-  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
-  Object.assign(process.env, env);
-  resetEnvCache();
-  initProxyLimits();
+/** Runs `use` under `env`, the proxy limits read again from it. */
+const withEnv = (env: Record<string, string>, use: () => Promise<void>) =>
+  withAuthEnv(env, use, initProxyLimits);
+
+/** Runs `use` under shortened remote-tool deadlines, restored afterwards. */
+async function withTimeouts(next: { callMs?: number; listMs?: number }, use: () => Promise<void>) {
+  _setRemoteToolTimeoutsForTesting(next);
   try {
     await use();
   } finally {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    resetEnvCache();
-    initProxyLimits();
+    _setRemoteToolTimeoutsForTesting();
   }
 }
 
+/** What a call gets once its body was dropped on a cross-host redirect. */
+const CROSS_HOST_OUTCOME = [502, "bad_gateway"];
+
 interface Tool {
+  catalog_unreadable?: boolean;
   name: string;
   kind: string;
   remote_name?: string;
@@ -178,10 +177,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     expect(called.proxyStatus).toContain("error=destination_ip_prohibited");
   };
 
-  const journal = async () => {
-    await drainAudits(5_000);
-    return db.select().from(connectionCalls).where(eq(connectionCalls.integrationId, ID));
-  };
+  const journal = () => journaledCalls(ID);
 
   beforeEach(async () => {
     await truncateAll();
@@ -230,7 +226,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
 
     const { status, body } = await call({ name: listed.tools[0]!.remote_name, arguments: {} });
     expect(status).toBe(200);
-    expect(body.result!.content).toEqual([IMAGE]);
+    expect(body.result!.content).toEqual([PNG_IMAGE_CONTENT]);
     expect(server.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
     expect(server.requests.every((r) => r.headers.get("authorization") === null)).toBe(true);
 
@@ -295,7 +291,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     expect((await list({ integration_package_id: ID }, operator)).body.tools).toHaveLength(1);
     const { status, body } = await call({ name: "read_media_file" }, operator);
     expect(status).toBe(200);
-    expect(body.result!.content).toEqual([IMAGE]);
+    expect(body.result!.content).toEqual([PNG_IMAGE_CONTENT]);
   });
 
   describe("refusals before any exchange", () => {
@@ -375,74 +371,78 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     });
   });
 
-  describe("the egress guard on every hop", () => {
-    for (const [what, target] of [
-      ["to plain http on a host the operator does not trust", "http"],
-      ["to a loopback address the operator does not trust", "https"],
-    ] as const) {
-      it(`refuses a redirect ${what}, its target receiving nothing`, async () => {
-        const redirectTarget = startServer(() => new Response("reached"));
-        const redirecting = startServer(
-          () =>
-            new Response(null, {
-              status: 307,
-              headers: { Location: `${target}://localhost:${redirectTarget.port}/mcp` },
-            }),
+  // The https floor on a redirect hop is proven in `unit/services/credential-proxy-direct-egress`.
+  it("refuses a redirect to a loopback address the operator does not trust, its target receiving nothing", async () => {
+    const redirectTarget = startServer(() => new Response("reached"));
+    const redirecting = startServer(
+      () =>
+        new Response(null, {
+          status: 307,
+          headers: { Location: `https://localhost:${redirectTarget.port}/mcp` },
+        }),
+    );
+    try {
+      // `localhost` out of the allowlist: untrusted, and resolving to loopback.
+      await withEnv({ EGRESS_ALLOW_INTERNAL_HOSTS: "127.0.0.1" }, async () => {
+        await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
+        const called = await call({ name: "read_media_file" });
+        expect([called.status, called.body.code]).toEqual([403, "blocked_target"]);
+        expect(called.body.detail).toBe(
+          `The MCP server at ${new URL(redirecting.url).origin} redirected to localhost, which the egress guard refuses.`,
         );
-        try {
-          // `localhost` out of the allowlist: untrusted, and resolving to loopback.
-          await withEnv({ EGRESS_ALLOW_INTERNAL_HOSTS: "127.0.0.1" }, async () => {
-            await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
-            const called = await call({ name: "read_media_file" });
-            expectEgressRefusal(called, new URL(redirecting.url).origin);
-            const listed = await list({ integration_package_id: ID });
-            expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual([
-              "blocked_target",
-            ]);
-          });
-          expect(redirecting.received.length).toBeGreaterThan(0);
-          expect(redirectTarget.received).toEqual([]);
-          // The first hop was sent: journaled as the refusal of its redirect.
-          expect((await journal()).map((row) => row.outcome)).toEqual([
-            "blocked_target",
-            "blocked_target",
-          ]);
-        } finally {
-          redirecting.stop();
-          redirectTarget.stop();
-        }
+        expect(called.proxyStatus).toContain("error=destination_ip_prohibited");
+        const listed = await list({ integration_package_id: ID });
+        expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual(["blocked_target"]);
       });
+      expect(redirecting.received.length).toBeGreaterThan(0);
+      expect(redirectTarget.received).toEqual([]);
+      // The first hop was sent: journaled as the refusal of its redirect.
+      expect((await journal()).map((row) => row.outcome)).toEqual([
+        "blocked_target",
+        "blocked_target",
+      ]);
+    } finally {
+      redirecting.stop();
+      redirectTarget.stop();
     }
   });
 
-  it("refuses an answer past the proxy's `max_response_bytes`", async () => {
-    const big = startFakeMcpServer({
-      tools: [
-        {
-          name: "read_media_file",
-          result: { content: [{ type: "text", text: "x".repeat(8192) }] },
-        },
-      ],
+  for (const sse of [false, true]) {
+    it(`refuses an answer past the proxy's \`max_response_bytes\`${sse ? ", in an event stream" : ""}`, async () => {
+      const big = startFakeMcpServer({
+        tools: [
+          {
+            name: "read_media_file",
+            result: { content: [{ type: "text", text: "x".repeat(8192) }] },
+          },
+        ],
+        sse,
+      });
+      try {
+        // Under a deadline far longer than the answer: failing at the bound is what ends it.
+        await withTimeouts({ callMs: 5_000 }, () =>
+          withEnv(
+            { CREDENTIAL_PROXY_LIMITS: JSON.stringify({ max_response_bytes: 4096 }) },
+            async () => {
+              await seedProxyIntegration(ctx, unauthenticated(big.url));
+              const called = await call({ name: "read_media_file" });
+              expect([called.status, called.body.code]).toEqual([
+                502,
+                "upstream_response_too_large",
+              ]);
+              expect(called.body.detail).toContain("more than 4096 bytes");
+            },
+          ),
+        );
+      } finally {
+        big.stop();
+      }
     });
-    try {
-      await withEnv(
-        { CREDENTIAL_PROXY_LIMITS: JSON.stringify({ max_response_bytes: 4096 }) },
-        async () => {
-          await seedProxyIntegration(ctx, unauthenticated(big.url));
-          const called = await call({ name: "read_media_file" });
-          expect(called.status).toBe(502);
-          expect(called.body.code).toBe("upstream_response_too_large");
-          expect(called.body.detail).toContain("more than 4096 bytes");
-        },
-      );
-    } finally {
-      big.stop();
-    }
-  });
+  }
 
   it("resolves an event-stream answer its server keeps open", async () => {
     const sse = startFakeMcpServer({
-      tools: [{ name: "read_media_file", result: { content: [IMAGE] } }],
+      tools: [{ name: "read_media_file", result: { content: [PNG_IMAGE_CONTENT] } }],
       sse: true,
     });
     // In front of it: the same answers, each event stream left open once relayed.
@@ -467,11 +467,10 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     });
     try {
       await seedProxyIntegration(ctx, unauthenticated(held.url));
-      const started = Date.now();
+      // Buffering the stream would wait for its end, past the call's deadline: a 504.
       const called = await call({ name: "read_media_file" });
       expect(called.status).toBe(200);
-      expect(called.body.result!.content).toEqual([IMAGE]);
-      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(called.body.result!.content).toEqual([PNG_IMAGE_CONTENT]);
     } finally {
       held.stop();
       sse.stop();
@@ -498,7 +497,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
         await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
         const { status, body } = await call({ name: "read_media_file" });
         expect(status).toBe(200);
-        expect(body.result!.content).toEqual([IMAGE]);
+        expect(body.result!.content).toEqual([PNG_IMAGE_CONTENT]);
         expect(server.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
       } finally {
         redirecting.stop();
@@ -539,7 +538,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
             expect(relay.seen.some((r) => r.body.includes('"tools/call"'))).toBe(true);
           } else {
             // Another host gets neither the session nor the body: the call goes nowhere.
-            expect(called.status).not.toBe(200);
+            expect([called.status, called.body.code]).toEqual(CROSS_HOST_OUTCOME);
             expect(inSession.every((r) => r.body === "")).toBe(true);
           }
         } finally {
@@ -569,22 +568,74 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     expect(await journal()).toEqual([]);
   });
 
-  it("re-checks activation before each exchange: switched off mid-operation, no tools/call is sent", async () => {
+  for (const sse of [false, true]) {
+    it(`re-checks activation before each exchange: switched off during the handshake, no tools/call is sent${sse ? " (event streams)" : ""}`, async () => {
+      const upstream = startFakeMcpServer({ tools: ["read_media_file"], sse });
+      let initializing!: () => void;
+      const initialized = new Promise<void>((resolve) => (initializing = resolve));
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      const sent: string[] = [];
+      // `initialize` held until the test releases it; everything else relayed as is.
+      const relay = startServer(async (req) => {
+        const body = await req.text();
+        sent.push(body);
+        if (body.includes('"initialize"')) {
+          initializing();
+          await released;
+        }
+        return fetch(upstream.url, { method: req.method, headers: req.headers, body });
+      });
+      try {
+        await seedProxyIntegration(ctx, unauthenticated(relay.url));
+        const pending = call({ name: "read_media_file" });
+        await initialized;
+        await db
+          .update(spacePackages)
+          .set({ enabled: false })
+          .where(eq(spacePackages.packageId, ID));
+        release();
+        const called = await pending;
+        expect([called.status, called.body.code]).toEqual([404, "not_found"]);
+        expect(called.body.detail).toContain("not active in this space");
+        expect(sent.some((body) => body.includes('"tools/call"'))).toBe(false);
+      } finally {
+        relay.stop();
+        upstream.stop();
+      }
+    });
+  }
+
+  it("keeps the declared names when its server cannot be reached; a call is a journaled 502", async () => {
+    await seedProxyIntegration(ctx, unauthenticated("http://127.0.0.1:9/mcp"));
+    const listed = await list({ integration_package_id: ID });
+    expect(listed.body.unlisted).toEqual([]);
+    expect(listed.body.tools).toEqual([
+      expect.objectContaining({ name: TOOL, catalog_unreadable: true }),
+    ]);
+    const called = await call({ name: "read_media_file" });
+    expect([called.status, called.body.code]).toEqual([502, "upstream_unreachable"]);
+    expect(called.proxyStatus).toContain("error=destination_unavailable");
+    // Sent, as far as the platform can tell: each operation journaled.
+    expect((await journal()).map((row) => row.outcome)).toEqual([
+      "upstream_unreachable",
+      "upstream_unreachable",
+    ]);
+  });
+
+  it("answers a server that does not answer in time with 504 upstream_timeout, journaled", async () => {
     const slow = startFakeMcpServer({
-      tools: [{ name: "read_media_file", result: { content: [IMAGE] } }],
-      delayMs: 300,
-      delayedMethod: "initialize",
+      tools: ["read_media_file"],
+      delayMs: 2_000,
+      delayedMethod: "tools/call",
     });
     try {
       await seedProxyIntegration(ctx, unauthenticated(slow.url));
-      const pending = call({ name: "read_media_file" });
-      // Once `initialize` reached the server, and while it waits to answer.
-      while (!slow.requests.some((r) => r.body.includes('"initialize"'))) await Bun.sleep(5);
-      await db.update(spacePackages).set({ enabled: false }).where(eq(spacePackages.packageId, ID));
-      const called = await pending;
-      expect(called.status).toBe(404);
-      expect(called.body.detail).toContain("not active in this space");
-      expect(slow.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+      await withTimeouts({ callMs: 300 }, async () => {
+        const called = await call({ name: "read_media_file" });
+        expect([called.status, called.body.code]).toEqual([504, "upstream_timeout"]);
+      });
+      expect((await journal()).map((row) => row.outcome)).toEqual(["upstream_timeout"]);
     } finally {
       slow.stop();
     }
@@ -636,8 +687,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
       }),
     ]);
     const called = await call({ name: "read_media_file" });
-    expect(called.status).not.toBe(200);
-    expect(called.body.code).toBe("credential_not_found");
+    expect([called.status, called.body.code]).toEqual([404, "credential_not_found"]);
     expect(server.requests).toEqual([]);
   });
 });

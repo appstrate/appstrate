@@ -32,7 +32,11 @@ import { logger } from "../../lib/logger.ts";
 import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
-import { selectAccessibleConnection, type ProxyReach } from "../integration-connections.ts";
+import {
+  assertIntegrationActive,
+  selectAccessibleConnection,
+  type ProxyReach,
+} from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import { readIntegrationManifestForProxy } from "../integration-service.ts";
 import { ProxyCallError } from "./core.ts";
@@ -154,7 +158,8 @@ async function remoteConnection(
       }).catch(async (err: unknown) => {
         throw await withConnectOffers(err, input);
       });
-  if (unauthenticated && input.connectionId) throw connectionNamedWithout(input.integrationId);
+  if (unauthenticated && input.connectionId)
+    throw connectionIdRefusedWithoutAuth(input.integrationId);
   if (!unauthenticated && !connection) {
     throw proxyProblem(
       "credential_not_found",
@@ -180,7 +185,7 @@ async function remoteConnection(
 }
 
 /** A `connection_id` named for an unauthenticated integration, which binds none. */
-export function connectionNamedWithout(integrationId: string): ApiError {
+export function connectionIdRefusedWithoutAuth(integrationId: string): ApiError {
   return proxyProblem(
     "credential_not_found",
     `Integration '${integrationId}' declares no authentication and binds no connection: call it without \`connection_id\`.`,
@@ -243,8 +248,8 @@ async function withClient<T>(
     input.connectionId === null
       ? directMcpOperation({
           ...base,
-          // As the proxy re-selects a connection on each exchange: switched off since, no exchange.
-          beforeExchange: () => assertActiveOutsideRun(input.scope, input.integrationId),
+          // The activation check `proxyCall` makes on each exchange: switched off since, none sent.
+          beforeExchange: () => assertIntegrationActive(input.integrationId, input.scope.spaceId),
         })
       : proxiedMcpOperation({ ...base, connectionId: input.connectionId, reach: input.reach });
   let client: AppstrateMcpClient | undefined;

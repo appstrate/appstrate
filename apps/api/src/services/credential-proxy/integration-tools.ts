@@ -45,7 +45,7 @@ import {
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
 import {
-  connectionNamedWithout,
+  connectionIdRefusedWithoutAuth,
   listingDeadline,
   listRemoteTools,
   offeredRemoteToolNames,
@@ -430,7 +430,9 @@ async function remoteTools(
     return {
       unlisted: {
         integration_package_id: integrationId,
-        refusal: connectionNamedWithout(integrationId).toProblemDetail(caller.caller.requestId),
+        refusal: connectionIdRefusedWithoutAuth(integrationId).toProblemDetail(
+          caller.caller.requestId,
+        ),
       },
     };
   }
@@ -528,8 +530,9 @@ function offersToolsOutsideRun(manifest: IntegrationManifest): boolean {
  * tools first, with the connections they reach, the integrations without a usable connection and
  * the remote ones the proxy refused to list. The remote integrations listed are those the caller
  * reaches a connection of, and the unauthenticated Streamable HTTP ones (AFPS §7.2), which need
- * none: their tools reach no connection, and they are never `not_ready`. Read under `reach`, activation checked
- * before any connection is selected; servers are waited for until {@link listingDeadline}.
+ * none: their tools reach no connection, and they are never `not_ready`. Read under `reach`,
+ * activation checked before any connection is selected; servers are waited for until
+ * {@link listingDeadline}.
  */
 export async function listIntegrationTools(
   caller: RemoteToolsCaller,

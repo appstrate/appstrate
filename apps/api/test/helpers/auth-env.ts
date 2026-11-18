@@ -43,13 +43,22 @@ export function useAuthEnv(initial?: AuthEnv): (vars: AuthEnv) => void {
   return set;
 }
 
-/** Runs `fn` under `vars`, then puts the previous values back and rebuilds auth. */
-export async function withAuthEnv<T>(vars: AuthEnv, fn: () => Promise<T>): Promise<T> {
+/**
+ * Runs `fn` under `vars`, then puts the previous values back and rebuilds auth. `reload` runs
+ * after each change, for another registry read once from the env (`initProxyLimits`).
+ */
+export async function withAuthEnv<T>(
+  vars: AuthEnv,
+  fn: () => Promise<T>,
+  reload?: () => void,
+): Promise<T> {
   const previous = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
   try {
     applyAuthEnv(vars);
+    reload?.();
     return await fn();
   } finally {
     applyAuthEnv(previous);
+    reload?.();
   }
 }

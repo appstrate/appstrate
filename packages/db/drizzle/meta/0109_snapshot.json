@@ -7643,6 +7643,10 @@
           "name": "connection_calls_actor_type_valid",
           "value": "actor_type IN ('user', 'end_user')"
         },
+        "connection_calls_no_connection_no_owner": {
+          "name": "connection_calls_no_connection_no_owner",
+          "value": "connection_id IS NOT NULL OR (owner_type IS NULL AND owner_id IS NULL)"
+        },
         "connection_calls_owner_type_valid": {
           "name": "connection_calls_owner_type_valid",
           "value": "owner_type IS NULL OR owner_type IN ('user', 'end_user')"

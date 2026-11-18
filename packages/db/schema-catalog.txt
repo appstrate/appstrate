@@ -721,6 +721,7 @@ constraint cli_refresh_tokens cli_refresh_tokens_pkey PRIMARY KEY (id)
 constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token_hash)
 constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint connection_calls connection_calls_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text])))
+constraint connection_calls connection_calls_no_connection_no_owner CHECK (((connection_id IS NOT NULL) OR ((owner_type IS NULL) AND (owner_id IS NULL))))
 constraint connection_calls connection_calls_owner_type_valid CHECK (((owner_type IS NULL) OR (owner_type = ANY (ARRAY['user'::text, 'end_user'::text]))))
 constraint connection_calls connection_calls_pkey PRIMARY KEY (id)
 constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE

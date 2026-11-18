@@ -1442,7 +1442,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call, with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -2144,7 +2144,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made with one of the caller's connections
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listMyConnectionCalls"];
         put?: never;
@@ -17084,7 +17084,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: {
+                        data: ({
                             /** @description Monotonic row id; the pagination cursor. */
                             id: number;
                             /** Format: date-time */
@@ -17125,7 +17125,10 @@ export interface operations {
                             duration_ms: number;
                             /** @description The call's `Request-Id`. */
                             request_id: string;
-                        }[];
+                        } & {
+                            /** Format: uuid */
+                            connection_id?: string;
+                        })[];
                         hasMore: boolean;
                     };
                 };
