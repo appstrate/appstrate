@@ -44,6 +44,7 @@ import { getPublicAppOrigin } from "../lib/public-url.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
 import { attachmentDisposition } from "@appstrate/core/naming";
+import { previewKind } from "@appstrate/core/mime";
 import {
   getFileForActor,
   listFilesForActor,
@@ -58,7 +59,6 @@ import {
 import { parseListFilesQuery } from "../lib/list-query.ts";
 import {
   verifyPreviewToken,
-  previewKind,
   buildPreviewCsp,
   buildInertPreviewCsp,
   injectMetaCsp,

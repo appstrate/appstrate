@@ -145,7 +145,8 @@ function scriptedDispatch(
 
 /**
  * A scripted engine: records what the handler handed it, then streams the same
- * chunk sequence the Pi mapper emits for a plain text answer. The concurrency
+ * chunk sequence the Pi mapper emits for a plain text answer, with the route's
+ * `leadingChunks` right after `start` as `runPiChat` writes them. The concurrency
  * slot is released when the stream closes — exactly as the real engine does, so
  * one test cannot starve the next.
  */
@@ -159,6 +160,7 @@ function scriptedEngine(text = "Bonjour le monde"): {
     const id = "txt_1";
     const chunks: UIMessageChunk[] = [
       { type: "start", messageId: "asst_1" },
+      ...(input.leadingChunks ?? []),
       { type: "text-start", id },
       { type: "text-delta", id, delta: text },
       { type: "text-end", id },
@@ -464,6 +466,64 @@ describe("handleChatStream", () => {
       "mcp:read",
       "runs:read-all",
     ]);
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("tells the browser which file each sent upload became, without persisting it", async () => {
+    // The browser's copy of the user message keeps its optimistic `upload://`
+    // parts; only this chunk lets its chips open the file before a reload.
+    const sessionId = mintSessionId();
+    const { engine } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      parts: [
+        { type: "text", text: "lis ceci" },
+        { type: "file", url: "upload://upl_sent", mediaType: "text/plain", filename: "a.txt" },
+        // Already stored (picked from the gallery): nothing to tell.
+        {
+          type: "file",
+          url: "appfile://file_picked12",
+          mediaType: "text/plain",
+          filename: "b.txt",
+        },
+      ],
+      resolveChatAttachment: async (request) => ({
+        uri: request.uri === "upload://upl_sent" ? "appfile://file_sent12345" : request.uri,
+        name: "a.txt",
+        mime: "text/plain",
+        size: 3,
+        spaceId: ctx.defaultSpaceId,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const chunks = await collectUiChunks(res);
+    expect(chunks.filter((chunk) => chunk.type === "data-upload-resolutions")).toEqual([
+      {
+        type: "data-upload-resolutions",
+        data: [
+          { uri: "upload://upl_sent", file: { id: "file_sent12345", spaceId: ctx.defaultSpaceId } },
+        ],
+        transient: true,
+      },
+    ]);
+
+    await waitForAssistantPersist(sessionId);
+    const rows = await db
+      .select({ content: chatMessages.content })
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId));
+    const assistant = rows
+      .map((row) => row.content as UIMessage)
+      .find((message) => message.role === "assistant");
+    expect(assistant?.parts.map((part) => part.type)).toEqual(["text"]);
+  });
+
+  it("writes no resolutions for a turn that sent no upload", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine);
+    await collectUiChunks(res);
+    expect(calls[0]?.leadingChunks).toBeUndefined();
     await waitForAssistantPersist(sessionId);
   });
 

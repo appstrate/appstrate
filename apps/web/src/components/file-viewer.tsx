@@ -79,19 +79,30 @@ function useRemoteText(load: (signal: { cancelled: boolean }) => Promise<string 
   return state;
 }
 
+/** The text behind a preview URL: a signed server one, or the `blob:` of a file not yet sent. */
+async function fetchPreviewText(url: string): Promise<string> {
+  const response = await fetch(url, { referrerPolicy: "no-referrer" });
+  if (!response.ok) throw new Error("preview fetch failed");
+  return await response.text();
+}
+
 function MarkdownPreview({
   id,
   context,
+  localUrl,
   unavailable,
 }: {
   id: string;
   context?: FileContext;
+  /** A file not yet sent has no content route: its own copy is read. */
+  localUrl?: string;
   unavailable: string;
 }) {
   // By value: a context rebuilt each render must not re-read the file.
   const orgId = context?.orgId;
   const spaceId = context?.spaceId;
   const load = useCallback(async () => {
+    if (localUrl) return fetchPreviewText(localUrl);
     const { data } = await client.GET("/api/files/{id}/content", {
       params: {
         path: { id },
@@ -100,7 +111,7 @@ function MarkdownPreview({
       parseAs: "text",
     });
     return data;
-  }, [id, orgId, spaceId]);
+  }, [id, orgId, spaceId, localUrl]);
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
@@ -113,11 +124,7 @@ function MarkdownPreview({
 }
 
 function TextPreview({ url, unavailable }: { url: string; unavailable: string }) {
-  const load = useCallback(async () => {
-    const response = await fetch(url, { referrerPolicy: "no-referrer" });
-    if (!response.ok) throw new Error("preview fetch failed");
-    return await response.text();
-  }, [url]);
+  const load = useCallback(() => fetchPreviewText(url), [url]);
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
@@ -150,6 +157,7 @@ export function FileViewer({
   fileId,
   file,
   context,
+  local = false,
   isLoading,
   error,
   unavailableAction,
@@ -157,6 +165,8 @@ export function FileViewer({
 }: {
   fileId: string;
   file?: ViewableFile;
+  /** The browser's own copy of a file not yet sent (`preview_url` is its `blob:`). */
+  local?: boolean;
   /** The file's organization and space when not the current ones (the reader page). */
   context?: FileContext;
   isLoading: boolean;
@@ -182,6 +192,7 @@ export function FileViewer({
           key={fileId}
           id={fileId}
           context={context}
+          localUrl={local ? previewUrl : undefined}
           unavailable={t("preview.unavailable")}
         />
       );

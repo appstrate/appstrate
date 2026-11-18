@@ -28,7 +28,7 @@
  */
 
 import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
-import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import { normalizeMime } from "@appstrate/core/mime";
 
 /** Preview capability lifetime — deliberately short (a render link, not a session). */
 export const PREVIEW_TOKEN_TTL_SECONDS = 300;
@@ -101,47 +101,10 @@ export function verifyPreviewToken(
  * Is `mime` an HTML document? Tolerates a parameterized value
  * (`text/html; charset=utf-8`) — only the type/subtype matters for the preview
  * gate. Retained as a focused, tested utility; the DTO and route classify via
- * {@link previewKind} (of which HTML is one kind).
+ * `previewKind` (`@appstrate/core/mime`), of which HTML is one kind.
  */
 export function isHtmlMime(mime: string): boolean {
   return normalizeMime(mime) === "text/html";
-}
-
-/**
- * The four ways a file can be previewed in-browser (or null for "not
- * previewable"). Drives BOTH the DTO's `preview_kind`/`previewable` derivation
- * AND the preview route's serving branch — a single source of truth, so the set
- * of previewable types can never drift between "advertised as previewable" and
- * "actually served".
- */
-export type PreviewKind = "html" | "image" | "pdf" | "text";
-
-/**
- * Text-family mimes previewed as PLAINTEXT. A conservative allowlist, NOT a
- * blanket `text/*`: every entry is inert once the route relabels it
- * `text/plain` (killing any markdown→HTML sniff surface). `application/json` is
- * the common structured-text case; `application/xml` / SVG are excluded (XML can
- * host active content).
- */
-const PREVIEW_TEXT_MIMES: ReadonlySet<string> = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-]);
-
-/**
- * Classify a file's mime into its {@link PreviewKind}, or null when it is
- * not previewable. Tolerates a parameterized mime (`text/plain; charset=…`) —
- * only the type/subtype is matched.
- */
-export function previewKind(mime: string): PreviewKind | null {
-  const base = normalizeMime(mime);
-  if (base === "text/html") return "html";
-  if (base === "application/pdf") return "pdf";
-  if (isRasterImageMime(base)) return "image";
-  if (PREVIEW_TEXT_MIMES.has(base)) return "text";
-  return null;
 }
 
 /**

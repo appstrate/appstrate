@@ -91,7 +91,9 @@ test("sends image pixels to the configured provider and reloads the attached fil
       { name: "pixel.png", mimeType: "image/png", buffer: png },
       { name: "contract.pdf", mimeType: "application/pdf", buffer: pdf },
     ]);
-    await expect(page.getByRole("img", { name: "pixel.png" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Aperçu de pixel.png", exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("contract.pdf", { exact: true })).toBeVisible();
     // A Chat Completions model reads no PDF natively: the chip says so before anything is sent.
     await expect(page.getByText("Ce modèle ne lit pas les PDF.")).toBeVisible();
@@ -109,7 +111,9 @@ test("sends image pixels to the configured provider and reloads the attached fil
     expect(history).not.toContain(png.toString("base64"));
     expect(history).not.toContain(pdf.toString("base64"));
     await page.reload();
-    await expect(page.getByRole("img", { name: "pixel.png" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Aperçu de pixel.png", exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("contract.pdf", { exact: true })).toBeVisible();
     await expect(page.getByText(answer, { exact: true })).toBeVisible();
 

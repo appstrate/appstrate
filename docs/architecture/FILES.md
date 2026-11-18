@@ -195,7 +195,7 @@ Previewable files are served **only** from a hardened, cookie-less route, `GET /
 
 ### Preview kinds
 
-A file's mime is classified by `previewKind()` (one source of truth for `preview_kind`, `previewable`, and the route's serving branch):
+A file's mime is classified by `previewKind()` (`@appstrate/core/mime`: one source of truth for `preview_kind`, `previewable`, the route's serving branch, and `localPreviewKind()`, the `image`/`pdf`/`text` subset the chat composer previews from the browser's own `blob:` copy of a file not yet sent — the SPA's `frame-src` allows `blob:` for the pdf frame; `html` needs the preview origin):
 
 | `preview_kind` | Mimes                                                         | Served as                                                                                                                                                     | Frontend render                                                     |
 | -------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |

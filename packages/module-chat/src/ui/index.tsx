@@ -35,6 +35,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { useLatest } from "./use-latest.ts";
+import { recordUploadResolutions } from "./upload.ts";
 import { Thread } from "./thread.tsx";
 import { createMessageQueue } from "./message-queue.ts";
 import {
@@ -61,6 +62,7 @@ export type {
   ChatTransport,
   GetHeaders,
   OpenFile,
+  OpenFileTarget,
   RenderSpaces,
   SelectConversation,
   SpaceChoiceMenu,
@@ -731,6 +733,8 @@ function ConversationInner({
     // (`ReactChatState.replaceMessage`) — this only bounds how often the
     // thread re-renders and re-parses on top of that.
     throttle: 16,
+    // The stored file each just-sent attachment became, so its chip opens before a reload.
+    onData: recordUploadResolutions,
   });
 
   // History ↔ resume self-heal: the history GET and the resume GET are both

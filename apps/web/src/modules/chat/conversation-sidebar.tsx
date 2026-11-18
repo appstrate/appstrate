@@ -10,11 +10,11 @@ import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { FileArtifact } from "../../components/file-artifact";
-import { MimeIcon } from "../../components/file-badges";
 import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
@@ -26,13 +26,16 @@ import { useConversationTabs } from "./use-conversation-tabs";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
+import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
   ConversationSidebarState,
   ConversationSidebarTab,
+  LocalSidebarFile,
   SidebarFile,
+  StoredSidebarFile,
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
@@ -95,6 +98,25 @@ export function ShownFile({
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
+  const close = {
+    label: backToList ? t("context.backToFiles") : t("context.collapse"),
+    onClick: onClose,
+  };
+  return "local" in file ? (
+    <ShownLocalFile file={file} onClose={close} />
+  ) : (
+    <ShownStoredFile file={file} onClose={close} />
+  );
+}
+
+function ShownStoredFile({
+  file,
+  onClose,
+}: {
+  file: StoredSidebarFile;
+  onClose: { label: string; onClick: () => void };
+}) {
+  const { t } = useTranslation("chat");
   // A file of another space (a conversation's) is read, copied and downloaded there.
   const context = otherSpaceFileContext(file.spaceId, useCurrentOrgId(), useCurrentSpaceId());
   const { data, isLoading, error } = useFile(file.id, context);
@@ -107,10 +129,30 @@ export function ShownFile({
       isLoading={isLoading}
       error={error}
       fallbackName={file.name || t("context.file.untitled")}
-      onClose={{
-        label: backToList ? t("context.backToFiles") : t("context.collapse"),
-        onClick: onClose,
-      }}
+      onClose={onClose}
+      className="h-full rounded-none border-0"
+    />
+  );
+}
+
+/** A file picked in the composer: the same frame over the browser's own copy, nothing to fetch. */
+function ShownLocalFile({
+  file,
+  onClose,
+}: {
+  file: LocalSidebarFile;
+  onClose: { label: string; onClick: () => void };
+}) {
+  const { t } = useTranslation("chat");
+  const viewable = localViewableFile(file.local, file.url);
+  return (
+    <FileArtifact
+      fileId={viewable.id}
+      file={viewable}
+      isLoading={false}
+      error={null}
+      fallbackName={file.local.name || t("context.file.untitled")}
+      onClose={onClose}
       className="h-full rounded-none border-0"
     />
   );
@@ -177,7 +219,7 @@ export function ConversationFiles({
 }: {
   conversationId: string | null;
   active: boolean;
-  onSelect: (file: SidebarFile) => void;
+  onSelect: (file: StoredSidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
   // The list spans the spaces the reader reads files in: each row names its own once there are several.

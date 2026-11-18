@@ -87,12 +87,8 @@ import { toStorageName } from "../lib/storage-name.ts";
 import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
 import { recordAudit } from "./audit.ts";
-import {
-  signPreviewToken,
-  previewKind,
-  type PreviewKind,
-  PREVIEW_TOKEN_TTL_SECONDS,
-} from "./file-preview.ts";
+import { previewKind, type PreviewKind } from "@appstrate/core/mime";
+import { signPreviewToken, PREVIEW_TOKEN_TTL_SECONDS } from "./file-preview.ts";
 import {
   FILE_ID_RE,
   isFileUri,

@@ -18,8 +18,9 @@
  * (`pi-chat/attachment-inputs.ts`); the line stays so the URI is still chainable.
  */
 
-import type { FileUIPart, UIMessage } from "ai";
+import type { FileUIPart, UIMessage, UIMessageChunk } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
+import { parseFileUri, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { formatBytes } from "@appstrate/core/format";
 import { isImageMime } from "@appstrate/core/mime";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
@@ -98,7 +99,7 @@ export function messagesWithAttachmentsAsText(
               type: "text" as const,
               text: [
                 attachmentTextBlock(part, imageNote(message, part, context)),
-                message === messages.at(-1) && part.mediaType === "application/pdf"
+                message === messages[messages.length - 1] && part.mediaType === "application/pdf"
                   ? context?.pdfReceipts?.get(part.url)
                   : undefined,
               ]
@@ -150,6 +151,43 @@ export async function materializeUserAttachments(
     } satisfies FileUIPart);
   }
   return { ...message, parts: rewritten };
+}
+
+/** UI-stream data part naming the stored file each just-sent `upload://` became. */
+export const UPLOAD_RESOLUTIONS_PART = "data-upload-resolutions";
+
+/** One entry of {@link UPLOAD_RESOLUTIONS_PART}: the sent URI and the file it resolved to. */
+export interface UploadResolution {
+  uri: string;
+  file: { id: string; spaceId: string };
+}
+
+/**
+ * The chunk telling the browser how the `upload://` parts of `sent` resolved in
+ * `materialized` (its {@link materializeUserAttachments} rewrite, part for part),
+ * or `null` when the turn sent none. The browser still holds the optimistic
+ * `upload://` copy of the message; this is what makes its chips previewable
+ * before a reload. Transient: it is about the user message, never a part of the
+ * assistant's.
+ */
+export function uploadResolutionsChunk(
+  sent: UIMessage,
+  materialized: UIMessage,
+): UIMessageChunk | null {
+  const resolutions: UploadResolution[] = [];
+  sent.parts?.forEach((part, index) => {
+    const rewritten = materialized.parts[index];
+    if (!isFileUIPart(part) || !part.url.startsWith(UPLOAD_URI_PREFIX)) return;
+    if (!isFileUIPart(rewritten)) return;
+    const id = parseFileUri(rewritten.url);
+    const spaceId = (rewritten.providerMetadata?.appstrate as { spaceId?: unknown } | undefined)
+      ?.spaceId;
+    if (id && typeof spaceId === "string") {
+      resolutions.push({ uri: part.url, file: { id, spaceId } });
+    }
+  });
+  if (resolutions.length === 0) return null;
+  return { type: UPLOAD_RESOLUTIONS_PART, data: resolutions, transient: true };
 }
 
 /**

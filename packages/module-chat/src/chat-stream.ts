@@ -19,7 +19,7 @@
  */
 
 import type { Context } from "hono";
-import { safeValidateUIMessages, type UIMessage } from "ai";
+import { safeValidateUIMessages, type UIMessage, type UIMessageChunk } from "ai";
 import { z } from "zod";
 import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -34,7 +34,11 @@ import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
-import { materializeUserAttachments, withStoredHistoryFiles } from "./attachments.ts";
+import {
+  materializeUserAttachments,
+  uploadResolutionsChunk,
+  withStoredHistoryFiles,
+} from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
@@ -711,7 +715,10 @@ export async function handleChatStream(
     id: space.id,
     permissions: new Set(space.permissions),
   }));
+  // What the browser's optimistic `upload://` parts became, for the stream to tell it.
+  let uploadResolutions: UIMessageChunk | null = null;
   if (sessionId && lastMessage) {
+    const sent = lastMessage;
     try {
       lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
         return deps.resolveChatAttachment({
@@ -731,6 +738,7 @@ export async function handleChatStream(
       throw err;
     }
     messages[messages.length - 1] = lastMessage;
+    uploadResolutions = uploadResolutionsChunk(sent, lastMessage);
   }
 
   let userMessageId: string | undefined;
@@ -851,6 +859,7 @@ export async function handleChatStream(
         chatSessionId: meteringSessionId,
         requestId,
         messages,
+        ...(uploadResolutions ? { leadingChunks: [uploadResolutions] } : {}),
         readAttachment: (uri, options) =>
           deps.readChatAttachment({
             orgId,

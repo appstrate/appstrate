@@ -14,7 +14,8 @@ import { useFileImageSrc, type FileDto } from "../hooks/use-files";
 import { formatBytes } from "../lib/format-bytes";
 import { formatDateField } from "../lib/format-date";
 import { DocumentRowActions } from "./document-row-actions";
-import { ExpiryBadge, MimeIcon } from "./file-badges";
+import { MimeIcon } from "@appstrate/ui/components/mime-icon";
+import { ExpiryBadge } from "./file-badges";
 import { SkeletonLine } from "./skeleton-line";
 import { SpaceNameOf } from "./space-name";
 
