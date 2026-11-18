@@ -10,6 +10,7 @@ import { describe, expect, it } from "bun:test";
 import {
   ASSISTANT_MESSAGE_CLASS,
   COMPOSER_INPUT_CLASS,
+  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
   NOTE_TEXT_CLASS,
@@ -77,5 +78,15 @@ describe("secondary text", () => {
   it("is 14 px on a phone, never the 12 px of the dense size", () => {
     expect(phoneSizes(NOTE_TEXT_CLASS)).toEqual(["text-sm"]);
     expect(NOTE_TEXT_CLASS.split(/\s+/)).toContain("md:text-xs");
+  });
+});
+
+describe("composer tools row", () => {
+  it("takes a row of its own on a phone once a chip is in it, never at rest", () => {
+    const tokens = COMPOSER_TOOLS_CLASS.split(/\s+/);
+    const own = tokens.find((token) => token.endsWith(":basis-full"));
+    // A third child of the cluster is a chip; the rule only applies off the resting state.
+    expect(own).toContain("has-[>div>:nth-child(3)]");
+    expect(own?.startsWith("max-md:group-not-data-[rest]/composer:")).toBe(true);
   });
 });

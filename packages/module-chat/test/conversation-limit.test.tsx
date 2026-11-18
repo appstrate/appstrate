@@ -407,6 +407,8 @@ describe("the composer's limit chip", () => {
     const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true }));
     // The markup escapes the `&` and `>` of the arbitrary variant.
     expect(out).toContain("max-md:group-data-[rest]/composer:[&amp;&gt;:not(:first-child)]:hidden");
+    // Chips wrap inside the cluster rather than squeezing each other.
+    expect(out).toContain("max-md:flex-wrap");
     // Attach is the cluster's first child; settings and the chip come after it.
     const cluster = out.slice(out.indexOf("max-md:group-data-[rest]/composer"));
     expect(cluster.indexOf('aria-label="composer.attach"')).toBeLessThan(

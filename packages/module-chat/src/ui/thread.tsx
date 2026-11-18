@@ -78,6 +78,7 @@ import { takesDraft } from "./composer-draft.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
   COMPOSER_INPUT_CLASS,
+  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
@@ -608,7 +609,7 @@ function Composer({
       </div>
       <ComposerAttachmentError />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 max-md:group-data-[rest]/composer:flex-nowrap">
-        <div className="min-w-0 flex-1 max-md:group-data-[rest]/composer:flex-none">{tools}</div>
+        <div className={COMPOSER_TOOLS_CLASS}>{tools}</div>
         <ComposerPrimitive.Input
           rows={1}
           // A phone would open its keyboard on arrival and never show the resting composer.
@@ -633,7 +634,7 @@ function Composer({
             "order-first basis-full max-md:group-data-[rest]/composer:order-none max-md:group-data-[rest]/composer:min-w-0 max-md:group-data-[rest]/composer:flex-1 max-md:group-data-[rest]/composer:basis-0",
           )}
         />
-        <div className="min-w-0 max-md:group-data-[rest]/composer:hidden">{slot}</div>
+        <div className="ml-auto min-w-0 max-md:group-data-[rest]/composer:hidden">{slot}</div>
         <div className="flex shrink-0 items-center gap-2">
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild disabled={limitPending}>

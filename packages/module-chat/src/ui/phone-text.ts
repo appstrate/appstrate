@@ -21,6 +21,15 @@ export const READING_TEXT_DENSE_CLASS = "text-base md:text-xs";
 /** Secondary text (a chip, a meta line, a status): 14 px on a phone, never smaller. */
 export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
 
+/**
+ * The composer's tools (attach, settings, the chips of the settings that left their default), in
+ * the row under the field. At rest on a phone it is just the attach button. Once a chip is there
+ * (a third child of the cluster) the tools take a row of their own, so the chip keeps its label
+ * and its X instead of being squeezed between the cluster and the model picker.
+ */
+export const COMPOSER_TOOLS_CLASS =
+  "min-w-0 flex-1 max-md:group-data-[rest]/composer:flex-none max-md:group-not-data-[rest]/composer:has-[>div>:nth-child(3)]:basis-full";
+
 /** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
 export const SEARCH_INPUT_CLASS =
   "h-10 pr-9 pl-7 text-base md:h-7 md:pr-7 md:text-xs [&::-webkit-search-cancel-button]:hidden";
