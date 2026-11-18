@@ -53,8 +53,8 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useAttachAvailability } from "./conversation-scope.ts";
-import { sentenceWithName } from "./sentence-with-name.tsx";
+import { useAttachTarget, useConversationScope, useSpaceName } from "./conversation-scope.ts";
+import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
@@ -85,13 +85,16 @@ export function Thread({
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
-  const attach = useAttachAvailability();
+  // A drop cannot ask for a space: it goes to the one decided, or to the one last picked.
+  const dropSpaceId = useAttachTarget().spaceId;
+  const shownSpaceId = useChatTransport()?.spaceId ?? null;
+  const dropSpace = useSpaceName(dropSpaceId !== shownSpaceId ? dropSpaceId : null);
   return (
     // The whole thread is the drop target, welcome screen and transcript alike;
     // dropped files take the same adapter path as the picker. A reader gets no
     // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || !attach.available}
+      disabled={!can("chat:write") || dropSpaceId === null}
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -157,7 +160,11 @@ export function Thread({
       >
         <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
           <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+          <p className="text-sm font-medium">
+            {dropSpace
+              ? sentenceWithNode(t, "composer.dropzoneIn", dropSpace.node)
+              : t("composer.dropzone")}
+          </p>
         </div>
       </div>
     </ComposerPrimitive.AttachmentDropzone>
@@ -180,9 +187,10 @@ function ThreadWelcome({
   const { can, t, firstName: name, actingSpaceIds } = useChatHost();
   const canWrite = can("chat:write");
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
-  // still runs, in the caller's other spaces, and touches none of this one.
+  // still runs, in the caller's other spaces, and touches none of this one. Unsaid until known.
   const spaceId = useChatTransport()?.spaceId;
-  const outsideActingSet = canWrite && !!spaceId && !actsIn(actingSpaceIds, spaceId);
+  const outsideActingSet =
+    canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
@@ -268,6 +276,7 @@ function PendingImage({ file, name }: { file: File; name: string }) {
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const file = useAuiState((s) => s.attachment.file);
+  const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, t } = useChatHost();
   const previewFile = file && isImageMime(file.type) ? file : undefined;
@@ -286,27 +295,32 @@ function ComposerAttachmentChip() {
       </button>
     </AttachmentPrimitive.Remove>
   );
-  if (previewFile) {
-    return (
-      <AttachmentPrimitive.Root className="relative inline-flex">
-        <PendingImage file={previewFile} name={name} />
-        {remove}
-      </AttachmentPrimitive.Root>
-    );
-  }
   return (
-    <AttachmentPrimitive.Root className="inline-flex">
-      <InertAttachmentChip
-        name={name}
-        trailing={
-          <>
-            {size > 0 && (
-              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
-            )}
-            {remove}
-          </>
-        }
-      />
+    <AttachmentPrimitive.Root className="inline-flex min-w-0 flex-col items-start gap-1">
+      {previewFile ? (
+        <span className="relative inline-flex">
+          <PendingImage file={previewFile} name={name} />
+          {remove}
+        </span>
+      ) : (
+        <InertAttachmentChip
+          name={name}
+          trailing={
+            <>
+              {size > 0 && (
+                <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
+              )}
+              {remove}
+            </>
+          }
+        />
+      )}
+      {status.type === "incomplete" && status.reason === "error" && status.message && (
+        <span role="alert" className="text-destructive text-xs">
+          <span className="sr-only">{name}. </span>
+          {status.message}
+        </span>
+      )}
     </AttachmentPrimitive.Root>
   );
 }
@@ -498,6 +512,8 @@ function Composer({
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
+  const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
   const canQueue = running && !hasAttachments && composer.value.trim() !== "";
   const enqueue = () => {
@@ -521,7 +537,12 @@ function Composer({
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
-    <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+    <ComposerPrimitive.Root
+      className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      onSubmit={(e) => {
+        if (limitPending) e.preventDefault();
+      }}
+    >
       {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
       <QueuedMessages
@@ -553,7 +574,7 @@ function Composer({
         <div className="flex shrink-0 items-center gap-2">
           <div className="min-w-0">{slot}</div>
           <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send asChild>
+            <ComposerPrimitive.Send asChild disabled={limitPending}>
               <Button
                 type="button"
                 size="icon"

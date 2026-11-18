@@ -25,12 +25,16 @@ export function stagedImagePreviewUrl(uri: string): string | undefined {
 }
 
 /**
- * Stage `file` through the host uploader and return its `upload://` URI,
+ * Stage `file` into `spaceId` through the host uploader and return its `upload://` URI,
  * remembering a local preview when the file is an image. Transport failures
  * propagate from the host implementation (the composer surfaces the message).
  */
-export async function stageComposerFile(upload: UploadFile, file: File): Promise<string> {
-  const uri = await upload(file);
+export async function stageComposerFile(
+  upload: UploadFile,
+  file: File,
+  spaceId: string,
+): Promise<string> {
+  const uri = await upload(file, spaceId);
   if (file.type.startsWith("image/")) {
     stagedImagePreviews.set(uri, URL.createObjectURL(file));
   }

@@ -18,6 +18,7 @@
     "./provision-org": "./src/provision-org.ts",
     "./storage": "./src/storage.ts",
     "./notify": "./src/notify.ts",
+    "./errors": "./src/errors.ts",
     "./pg-safe": "./src/pg-safe.ts",
     "./logger": "./src/logger.ts",
     "./encrypted-columns": "./src/encrypted-columns.ts"

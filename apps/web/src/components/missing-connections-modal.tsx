@@ -67,6 +67,7 @@ export function MissingConnectionsModal({
 
   return (
     <Modal
+      inSpace
       onClose={onClose}
       title={t("missingConnections.title")}
       actions={

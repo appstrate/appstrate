@@ -11,8 +11,8 @@ import { useCurrentOrgId } from "./use-org";
 import { invalidateSchedules } from "./use-schedules";
 
 /** The caller's connections across every org/space, grouped by source package (no header context). */
-export function useMyConnections() {
-  return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
+export function useMyConnections(enabled = true) {
+  return $api.useQuery("get", "/api/me/connections", {}, { enabled, select: (e) => e.data });
 }
 
 /**

@@ -22,8 +22,14 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict, internalError, type ResolutionFieldError } from "../lib/errors.ts";
-import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
+import {
+  runReadCondition,
+  runVisibilityFilter,
+  assertRunVisible,
+  requireRunsRead,
+} from "../lib/run-visibility.ts";
 import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
+import { parseStrictQuery } from "../lib/list-query.ts";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { setCursorLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import {
@@ -184,17 +190,20 @@ function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown
 
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
 
+/** Read back a launch, replay or cancellation in the space that authorized it. */
+function readRunInRequestSpace(
+  c: Context<AppEnv>,
+  id: string,
+  visibility?: ReturnType<typeof runVisibilityFilter>,
+) {
+  return getRunFull(c.get("orgId"), [callerSpaceGrant(c)], id, getActor(c), visibility);
+}
+
 /** The stored 201 body with its run fields re-read; launch-time `warnings` are kept as stored. */
 async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
   if (response.status !== 201) return response;
   const cached = z.looseObject({ id: z.string() }).parse(await response.json());
-  const run = await getRunFull(
-    getSpaceScope(c),
-    cached.id,
-    getActor(c),
-    runVisibilityFilter(c),
-    !agentReadIsSummary(c),
-  );
+  const run = await readRunInRequestSpace(c, cached.id, runVisibilityFilter(c));
   if (!run || (c.get("package") && run.packageId !== c.get("package").id)) {
     throw notFound("Run not found");
   }
@@ -207,6 +216,52 @@ export async function respondRunList(c: Context<AppEnv>, orgId: string, grants: 
   const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
   setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
   return c.json(result);
+}
+
+/** The query of both run reads: `wait` alone, any other parameter is a 400. */
+const runReadQuerySchema = z.object({ wait: z.string().optional() }).strict();
+
+/**
+ * One run of the spaces of `grants`: `GET /api/runs/{id}` (one grant) and
+ * `GET /api/orgs/{orgId}/runs/{id}` (one grant per space). The run is read under
+ * the grant of its own space (`runReadCondition`), its `input` shown when that
+ * grant reads agent content. Optional `?wait=<seconds|true>` long-poll: holds
+ * the request until the run reaches a terminal status or the wait elapses
+ * (capped at MAX_WAIT_SECONDS, below typical proxy idle timeouts), then returns
+ * the run exactly as the plain call does; a non-terminal status means "poll
+ * again". Visibility is verified BEFORE any waiting starts.
+ */
+export async function respondRun(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  const runId = c.req.param("id")!;
+  // Validated before touching the DB, so a malformed value 400s even for a
+  // run the caller could not read.
+  const waitMs = parseWaitQuery(parseStrictQuery(c, runReadQuerySchema).wait);
+  const actor = getActor(c);
+  const visibility = runReadCondition(grants, actor);
+  const read = () => getRunFull(orgId, grants, runId, actor, visibility);
+
+  const row = await read();
+  if (!row) throw notFound("Run not found");
+  if (waitMs === 0 || TERMINAL_RUN_STATUSES.has(row.status)) return c.json(row);
+
+  const apiKeyId = c.get("apiKeyId");
+  await waitForRunTerminal({
+    runId,
+    scope: { orgId, spaceId: row.spaceId },
+    timeoutMs: waitMs,
+    // Per-identity concurrent-waiter cap (same identity keying as the
+    // rate-limit middleware). Beyond the cap the wait degrades to no-wait: the
+    // fresh read below answers immediately and the client's normal poll-again
+    // loop takes over. Documented in the OpenAPI `wait` parameter.
+    identity: apiKeyId ? `apikey:${apiKeyId}` : c.get("user").id,
+    // Client disconnect aborts the server-side wait — no leaked
+    // timers/subscriptions for a response nobody will read.
+    signal: c.req.raw.signal,
+  });
+  // The run can be deleted mid-wait (e.g. DELETE agent runs): the same 404.
+  const fresh = await read();
+  if (!fresh) throw notFound("Run not found");
+  return c.json(fresh);
 }
 
 export function createRunsRouter() {
@@ -401,13 +456,7 @@ export function createRunsRouter() {
         // plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
         // No legacy `runId` alias: the run id is `id`.
-        const row = await getRunFull(
-          getSpaceScope(c),
-          runId,
-          getActor(c),
-          undefined,
-          !agentReadIsSummary(c),
-        );
+        const row = await readRunInRequestSpace(c, runId);
         if (!row) {
           // The run row was inserted by `prepareAndExecuteRun` above and is
           // read back on the same scope, so a miss means it was deleted out
@@ -474,56 +523,10 @@ export function createRunsRouter() {
     return c.body(null, 204);
   });
 
-  // GET /api/runs/:id — get a single run
-  //
-  // Optional `?wait=<seconds|true>` long-poll: holds the
-  // request until the run reaches a terminal status or the wait elapses
-  // (capped at MAX_WAIT_SECONDS, below typical proxy idle timeouts), then
-  // returns the run object exactly as the plain call does. A non-terminal
-  // status in the response means "poll again". The wakeup is event-driven
-  // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
-  // services/run-wait.ts. Auth/scoping is identical to the plain call:
-  // ownership is verified BEFORE any waiting starts.
-  router.get("/runs/:id", requireRunsRead, async (c) => {
-    const runId = c.req.param("id")!;
-    const scope = getSpaceScope(c);
-    // Validate the wait param before touching the DB so a malformed value
-    // 400s even for runs the caller could not read.
-    const waitMs = parseWaitQuery(c.req.query("wait"));
-
-    const visibility = runVisibilityFilter(c);
-    const row = await getRunFull(scope, runId, getActor(c), visibility, !agentReadIsSummary(c));
-    if (!row) {
-      throw notFound("Run not found");
-    }
-
-    if (waitMs > 0 && !TERMINAL_RUN_STATUSES.has(row.status)) {
-      const apiKeyId = c.get("apiKeyId");
-      await waitForRunTerminal({
-        runId,
-        scope,
-        timeoutMs: waitMs,
-        // Per-identity concurrent-waiter cap (same identity keying as the
-        // rate-limit middleware). Beyond the cap the wait degrades to
-        // no-wait: the fresh read below answers immediately and the
-        // client's normal poll-again loop takes over. Documented in the
-        // OpenAPI `wait` parameter.
-        identity: apiKeyId ? `apikey:${apiKeyId}` : c.get("user").id,
-        // Client disconnect aborts the server-side wait — no leaked
-        // timers/subscriptions for a response nobody will read.
-        signal: c.req.raw.signal,
-      });
-      const fresh = await getRunFull(scope, runId, getActor(c), visibility, !agentReadIsSummary(c));
-      // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
-      // the same 404 the initial read would have.
-      if (!fresh) {
-        throw notFound("Run not found");
-      }
-      return c.json(fresh);
-    }
-
-    return c.json(row);
-  });
+  // GET /api/runs/:id — one run of the space (`respondRun`).
+  router.get("/runs/:id", requireRunsRead, (c) =>
+    respondRun(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // GET /api/runs/:id/logs — get run logs
   //
@@ -651,7 +654,7 @@ export function createRunsRouter() {
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
     // completed_at). Same DTO and serializer as GET /runs/:id.
-    const row = await getRunFull(scope, runId, getActor(c), undefined, !agentReadIsSummary(c));
+    const row = await readRunInRequestSpace(c, runId);
     if (!row) {
       // The run was readable above; a miss here means a concurrent delete
       // raced the finalize. The resource is gone — surface the same 404 a
@@ -771,13 +774,7 @@ export function createRunsRouter() {
         // to read from the `packageId` envelope field is the resource's own
         // `packageId`. The run row exists once `triggerInlineRun` resolves
         // (`prepareAndExecuteRun` inserts it before returning).
-        const row = await getRunFull(
-          getSpaceScope(c),
-          runId,
-          getActor(c),
-          undefined,
-          !agentReadIsSummary(c),
-        );
+        const row = await readRunInRequestSpace(c, runId);
         if (!row) {
           // The shadow run was inserted by `triggerInlineRun` and read back on
           // the same scope; a miss means a concurrent teardown deleted it. The

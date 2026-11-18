@@ -25,7 +25,7 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
-import { ensureSession, touchSessionSpace } from "../src/persistence.ts";
+import { ensureSession, touchSessionSpace, writingOriginSpace } from "../src/persistence.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
 import { installPermissionAuditLogger } from "../../../apps/api/src/lib/permission-audit.ts";
@@ -333,6 +333,110 @@ describe("chat sessions", () => {
     it("requires at least one field", async () => {
       const created = await createSession(ctx);
       expect((await patch(ctx, created.id, {})).status).toBe(400);
+      // An unknown field is a 400, never dropped.
+      expect((await patch(ctx, created.id, { title: "T", other: 1 })).status).toBe(400);
+    });
+
+    describe("giving a conversation without an origin its space, by limiting it there", () => {
+      const rowOf = async (id: string) =>
+        (await db.select().from(chatSessions).where(eq(chatSessions.id, id)))[0]!;
+      const fieldOf = async (res: Response) => JSON.stringify(await res.json());
+
+      it("sets the origin and the limit together, and lists it under that space alone", async () => {
+        const overview = await createSession(ctx);
+        expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([overview.id]);
+        const res = await patch(ctx, overview.id, { spaceId: spaceB, restricted: true });
+        expect(res.status).toBe(204);
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: spaceB, restricted: true });
+        expect(await listSessionIds(ctx, `?spaceId=${spaceB}`)).toEqual([overview.id]);
+        expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([]);
+        const dto = (await (await orgCallAs(ctx, overview.id)).json()) as SessionDto;
+        expect(dto).toMatchObject({ spaceId: spaceB, restricted: true, space_ids: [spaceB] });
+        // Lifting the limit keeps the origin.
+        expect((await patch(ctx, overview.id, { restricted: false })).status).toBe(204);
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: spaceB, restricted: false });
+      });
+
+      it("keeps the spaces touched before, the new origin listed once and first", async () => {
+        const overview = await createSession(ctx);
+        await touch(overview.id, ctx.defaultSpaceId);
+        await touch(overview.id, spaceB);
+        expect((await patch(ctx, overview.id, { spaceId: spaceB, restricted: true })).status).toBe(
+          204,
+        );
+        expect(await touchedBy(overview.id)).toEqual([ctx.defaultSpaceId]);
+        const dto = (await (await orgCallAs(ctx, overview.id)).json()) as SessionDto;
+        expect(dto.space_ids).toEqual([spaceB, ctx.defaultSpaceId]);
+        expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([overview.id]);
+      });
+
+      it("refuses spaceId once the origin is set, even the same one (400 naming spaceId)", async () => {
+        const created = await createSession(ctx, { spaceId: ctx.defaultSpaceId });
+        for (const spaceId of [spaceB, ctx.defaultSpaceId]) {
+          const refused = await patch(ctx, created.id, { spaceId, restricted: true });
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+        }
+        expect(await rowOf(created.id)).toMatchObject({
+          spaceId: ctx.defaultSpaceId,
+          restricted: false,
+        });
+      });
+
+      it("refuses spaceId without restricted: true (400 naming spaceId)", async () => {
+        const overview = await createSession(ctx);
+        for (const body of [
+          { spaceId: spaceB },
+          { spaceId: spaceB, restricted: false },
+          { spaceId: spaceB, title: "T" },
+        ]) {
+          const refused = await patch(ctx, overview.id, body);
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+        }
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
+      });
+
+      it("refuses a space outside the caller's acting set, the row unchanged (400 naming spaceId)", async () => {
+        const acting = (await seedSpace({ orgId: ctx.orgId, name: "Acting", visibility: "closed" }))
+          .id;
+        const readOnly = (
+          await seedSpace({ orgId: ctx.orgId, name: "Read only", visibility: "closed" })
+        ).id;
+        const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
+          .id;
+        const foreign = await createTestContext({ orgSlug: "foreignspace" });
+        const member = await memberContext(ctx, "member", "viewer");
+        await seedSpaceMember({ spaceId: acting, userId: member.user.id, presetRole: "runner" });
+        await seedSpaceMember({ spaceId: readOnly, userId: member.user.id, presetRole: "viewer" });
+        await db
+          .insert(chatSessions)
+          .values({ id: "chs_no_origin", orgId: ctx.orgId, userId: member.user.id });
+        // Read only, a closed space never joined, another organization's, an unknown id.
+        for (const spaceId of [readOnly, closed, foreign.defaultSpaceId, "spc_nonexistent"]) {
+          const refused = await patch(member, "chs_no_origin", { spaceId, restricted: true });
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+          expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: null, restricted: false });
+        }
+        expect(await touchedBy("chs_no_origin")).toEqual([]);
+        expect(
+          (await patch(member, "chs_no_origin", { spaceId: acting, restricted: true })).status,
+        ).toBe(204);
+        expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: acting, restricted: true });
+      });
+
+      it("refuses it while a turn is running (409): the turn claims on the scope it read", async () => {
+        const overview = await createSession(ctx);
+        await db
+          .update(chatSessions)
+          .set({ activeStreamId: "stream_live" })
+          .where(eq(chatSessions.id, overview.id));
+        const refused = await patch(ctx, overview.id, { spaceId: spaceB, restricted: true });
+        expect(refused.status).toBe(409);
+        expect(((await refused.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
+      });
     });
 
     it("refuses changing the limit while a turn is running (409), and still renames", async () => {
@@ -359,6 +463,9 @@ describe("chat sessions", () => {
       const refused = await patch(ctx, created.id, { restricted: false });
       expect(refused.status).toBe(409);
       expect(((await refused.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+      expect(await restrictedOf(created.id)).toBe(true);
+      // Restating the limit changes nothing, so the turn does not stand in the way.
+      expect((await patch(ctx, created.id, { restricted: true })).status).toBe(204);
       expect(await restrictedOf(created.id)).toBe(true);
     });
   });
@@ -696,6 +803,43 @@ describe("chat sessions", () => {
       expect(((await res.json()) as { detail: string }).detail).toContain("confined to spaces");
     }
     expect(await db.select({ id: chatSessions.id }).from(chatSessions)).toEqual([]);
+  });
+});
+
+describe("an origin space deleted between its check and the write", () => {
+  it("refuses the write on its foreign key, answered as the 400 naming spaceId", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "originrace" });
+    // The space the check accepted, gone by the time the row names it.
+    const write = () =>
+      db.insert(chatSessions).values({
+        id: "chs_origin_race",
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        spaceId: "spc_deleted_since",
+      });
+    const raw = await write().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(raw).toBeDefined();
+    await expect(writingOriginSpace(write)).rejects.toMatchObject({
+      status: 400,
+      param: "spaceId",
+    });
+    expect(await db.select().from(chatSessions)).toEqual([]);
+  });
+
+  it("lets every other failure through", async () => {
+    const other = new Error("boom");
+    await expect(writingOriginSpace(() => Promise.reject(other))).rejects.toBe(other);
+    const missingUser = new Error("insert failed", {
+      cause: {
+        code: "23503",
+        constraint_name: "chat_sessions_user_id_user_id_fk",
+      },
+    });
+    await expect(writingOriginSpace(() => Promise.reject(missingUser))).rejects.toBe(missingUser);
   });
 });
 

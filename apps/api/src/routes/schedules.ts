@@ -76,7 +76,7 @@ import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { parseEmptyQuery } from "../lib/list-query.ts";
+import { packageIdFilter, parseStrictQuery } from "../lib/list-query.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
@@ -448,14 +448,17 @@ function scheduleVersion(schedule: { updatedAt: string }): number {
   return Date.parse(schedule.updatedAt);
 }
 
+/** The query of `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`: strict, an unknown parameter is a 400. */
+const scheduleListQuerySchema = z.object({ packageId: packageIdFilter }).strict();
+
 /**
  * The schedule list over `grants`: `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`. The
  * caller is the VIEWER of the run counters (`unread_count` is recipient-scoped), never the
  * schedules' own execution actor.
  */
 export async function respondScheduleList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
-  parseEmptyQuery(c);
-  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c))));
+  const { packageId } = parseStrictQuery(c, scheduleListQuerySchema);
+  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c), { packageId })));
 }
 
 export function createSchedulesRouter() {

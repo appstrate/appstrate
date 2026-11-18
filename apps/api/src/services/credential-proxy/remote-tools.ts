@@ -24,7 +24,7 @@ import {
 } from "@appstrate/core/integration";
 import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
-import { findCause } from "../../lib/error-cause.ts";
+import { findCause } from "@appstrate/core/error-cause";
 import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";

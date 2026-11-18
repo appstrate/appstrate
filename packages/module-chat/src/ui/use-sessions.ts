@@ -10,8 +10,9 @@
  * dropped NOTIFY) and is paused while the tab is hidden.
  */
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { infiniteQueryOptions, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { usePendingSessionLimits } from "./conversation-limit.ts";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import { useChatTransport, type ChatTransport } from "./runtime-context.ts";
 import {
@@ -81,7 +82,13 @@ export function useSessions(transport?: ChatTransport, q = "") {
   const contextTransport = useChatTransport();
   // ChatPage owns the provider below its render, so its own observer receives
   // the host transport directly. Descendants read the same one from context.
-  return useInfiniteQuery(sessionsQuery(transport ?? contextTransport, true, q));
+  const current = transport ?? contextTransport;
+  const project = usePendingSessionLimits(current?.orgId);
+  const select = useCallback(
+    (cache: SessionsCache) => flattenSessions(cache).map(project),
+    [project],
+  );
+  return useInfiniteQuery({ ...sessionsQuery(current, true, q), select });
 }
 
 /**
@@ -89,7 +96,12 @@ export function useSessions(transport?: ChatTransport, q = "") {
  * chat page's history, so the shell's title, spaces and info read what the thread holds.
  */
 export function useSessionDetail(id: string | null) {
-  return useQuery(sessionQuery(useChatTransport(), id));
+  return useSessionDetailQuery(useChatTransport(), id);
+}
+
+function useSessionDetailQuery(transport: ChatTransport | undefined | null, id: string | null) {
+  const project = usePendingSessionLimits(transport?.orgId);
+  return useQuery({ ...sessionQuery(transport, id), select: (row) => row && project(row) });
 }
 
 /**
@@ -104,7 +116,7 @@ export function useActiveSession(
 ): SessionSummary | undefined {
   const listed = useSessions(transport).data?.find((s) => s.id === id);
   // The detail is only fetched when the list does not hold the row (filtered out, not loaded).
-  const detail = useQuery(sessionQuery(transport, persisted && !listed ? id : null));
+  const detail = useSessionDetailQuery(transport, persisted && !listed ? id : null);
   return listed ?? detail.data ?? undefined;
 }
 

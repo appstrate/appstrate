@@ -13,11 +13,13 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
+import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
+import { createRun } from "../../../src/services/state/runs.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedRunLog } from "../../helpers/seed.ts";
-import { assertDbMissing } from "../../helpers/assertions.ts";
+import { seedAgent, seedRun, seedRunLog, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
 import { packages, runs, runLogs, llmUsage } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -99,28 +101,122 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(usage[0]!.runId).toBe(run.id);
   });
 
-  it("returns 409 agent_in_use when a pending or running run still owns the package", async () => {
-    await seedAgent({
-      id: "@delorg/busy",
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-    });
+  it.each(["the request space", "another space"])(
+    "allows publishing and restoring, but refuses deletion, while a run is active in %s",
+    async (location) => {
+      await seedAgent({
+        id: "@delorg/elsewhere",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        homeSpaceId: ctx.defaultSpaceId,
+        draftManifest: {
+          name: "@delorg/elsewhere",
+          schema_version: "0.2",
+          version: "0.2.0",
+          type: "agent",
+          display_name: "Elsewhere",
+          description: "Agent with an active run",
+        },
+      });
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
+      await seedSpacePackage(other.id, "@delorg/elsewhere");
+      await seedRun({
+        packageId: "@delorg/elsewhere",
+        orgId: ctx.orgId,
+        spaceId: location === "the request space" ? ctx.defaultSpaceId : other.id,
+        status: "running",
+      });
 
-    await seedRun({
-      packageId: "@delorg/busy",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      status: "running",
-    });
+      const removed = await app.request("/api/packages/agents/@delorg/elsewhere", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(removed.status).toBe(409);
+      const body = (await removed.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_in_use");
+      expect(body.detail).toContain("another space of the organization");
+      await assertDbHas(packages, eq(packages.id, "@delorg/elsewhere"));
 
-    const res = await app.request("/api/packages/agents/@delorg/busy", {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
+      const published = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      expect(published.status, await published.clone().text()).toBe(201);
+      const versionUrl = "/api/packages/agents/@delorg/elsewhere/versions/0.2.0";
+      const restored = await app.request(`${versionUrl}/restore`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      expect(restored.status).toBe(200);
+      const removedVersion = await app.request(versionUrl, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(removedVersion.status).toBe(409);
+      expect(await removedVersion.json()).toHaveProperty("code", "agent_in_use");
+    },
+  );
 
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("agent_in_use");
+  it.skipIf(isEmbeddedDb)(
+    "waits for a concurrent run admission before deciding whether the agent may be deleted",
+    async () => {
+      const packageId = "@delorg/admitting";
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
+      await seedSpacePackage(other.id, packageId);
+      const connection = (await reservePgConnection())!;
+      let removing: Promise<Response> | undefined;
+      try {
+        await connection.sql`BEGIN`;
+        // An admitted run still uncommitted: its FK holds KEY SHARE on the package.
+        await connection.sql`INSERT INTO runs (id, package_id, org_id, space_id)
+        VALUES ('run_admitting', ${packageId}, ${ctx.orgId}, ${other.id})`;
+        removing = Promise.resolve(
+          app.request(`/api/packages/agents/${packageId}`, {
+            method: "DELETE",
+            headers: authHeaders(ctx),
+          }),
+        );
+        const deadline = Date.now() + 3000;
+        while (true) {
+          const rows = await connection.sql`SELECT 1 FROM pg_locks
+          WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))`;
+          if (rows.length > 0) break;
+          if (Date.now() >= deadline)
+            throw new Error("Package deletion did not wait for admission");
+          await Bun.sleep(10);
+        }
+        await connection.sql`COMMIT`;
+        const response = await removing;
+        expect(response.status).toBe(409);
+        expect(await response.json()).toHaveProperty("code", "agent_in_use");
+        await assertDbHas(packages, eq(packages.id, packageId));
+      } finally {
+        await connection.sql`ROLLBACK`;
+        connection.release();
+        await removing;
+      }
+    },
+  );
+
+  it("refuses admission when the agent or its pinned version disappeared after preflight", async () => {
+    const packageId = "@delorg/gone";
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const id = "run_package_disappeared";
+    const launch = () =>
+      createRun(scope, {
+        id,
+        packageId,
+        versionRef: "1.0.0",
+        actor: null,
+        input: null,
+        modelId: null,
+        inferenceRoute: null,
+      });
+    await expect(launch()).rejects.toMatchObject({ status: 404 });
+    await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+    await expect(launch()).rejects.toMatchObject({ status: 404 });
+    await assertDbMissing(runs, eq(runs.id, id));
   });
 
   it("orphaned runs surface in GET /api/runs with the denormalized name", async () => {

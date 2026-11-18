@@ -29,6 +29,16 @@ export interface SpaceScope extends OrgScope {
   readonly spaceId: string;
 }
 
+/** The spaces of one organization a read spans: one space, or every one the caller reaches. */
+export interface SpacesScope extends OrgScope {
+  readonly spaceIds: readonly string[];
+}
+
+/** The {@link SpacesScope} of one space. */
+export function spacesOf(scope: SpaceScope): SpacesScope {
+  return { orgId: scope.orgId, spaceIds: [scope.spaceId] };
+}
+
 /**
  * Read `orgId` from the Hono context. The request has already passed the
  * org-context middleware so `orgId` is guaranteed to be present; throwing

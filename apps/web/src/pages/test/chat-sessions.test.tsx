@@ -85,7 +85,6 @@ function hostWith(granted: string[]): ChatHost {
     can: (permission) => granted.includes(permission),
     canIn: (_spaceId, permission) => granted.includes(permission),
     actingSpaceIds: ["spc_a"],
-    workingSpaceId: "spc_a",
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
@@ -93,6 +92,7 @@ function hostWith(granted: string[]): ChatHost {
     renderSpaces: () => null,
     linkInSpace: (path) => path,
     useSpaceLabelOf: () => () => undefined,
+    SpaceChoiceMenu: () => null,
   };
 }
 

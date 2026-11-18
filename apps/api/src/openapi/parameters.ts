@@ -2,6 +2,7 @@
 
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { runStatusValues } from "@appstrate/core/run-status";
+import { scopedNameRegex } from "@appstrate/core/validation";
 
 /**
  * Reusable OpenAPI parameter definitions.
@@ -9,6 +10,16 @@ import { runStatusValues } from "@appstrate/core/run-status";
 /** The closing sentences of every list spanning the spaces of an organization (`/api/orgs/{orgId}/…`). */
 export const ORG_READ_REACH =
   "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.";
+
+/** The `packageId` filter of a list (runs, schedules): `rows` names what it returns, `empty` its empty answer. */
+export function packageIdFilterParameter(rows: string, empty: "page" | "list") {
+  return {
+    name: "packageId",
+    in: "query" as const,
+    schema: { type: "string", pattern: scopedNameRegex.source },
+    description: `Return only the ${rows} of this agent (\`@scope/name\`). A package the caller cannot read yields an empty ${empty}, not a refusal. A value that is not a package id is rejected with \`400\`; an empty value reads as absent.`,
+  };
+}
 
 export const parameters = {
   Offset: {

@@ -39,6 +39,7 @@ export function ConnectionShareEditor({
   shareAllSpaces,
   onShareAllSpacesChange,
   onUnshare,
+  spaceNameOf,
 }: {
   connectionId: string;
   scope: ConnectionScope;
@@ -62,8 +63,14 @@ export function ConnectionShareEditor({
   shareAllSpaces: boolean;
   onShareAllSpacesChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
+  /** In « Tous les espaces », where « cet espace » is no space on screen: the spaces are named. */
+  spaceNameOf?: (spaceId: string | null) => string | undefined;
 }) {
   const { t } = useTranslation("settings");
+  const named = (plain: string, naming: string, spaceId: string | null) => {
+    const space = spaceNameOf?.(spaceId);
+    return space ? t(naming, { space }) : t(plain);
+  };
   const [open, setOpen] = useState(false);
 
   if (canShare && scope === "space") {
@@ -76,7 +83,11 @@ export function ConnectionShareEditor({
     return (
       <label
         className="flex items-center gap-1.5 text-xs"
-        title={t("integration.connection.share.thisSpaceHelp")}
+        title={named(
+          "integration.connection.share.thisSpaceHelp",
+          "integration.connection.share.thisSpaceHelpIn",
+          rowSpaceId,
+        )}
       >
         <Checkbox
           checked={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
@@ -88,7 +99,11 @@ export function ConnectionShareEditor({
           }}
           data-testid={`share-toggle-${connectionId}`}
         />
-        {t("integration.connection.share.thisSpace")}
+        {named(
+          "integration.connection.share.thisSpace",
+          "integration.connection.share.thisSpaceIn",
+          rowSpaceId,
+        )}
       </label>
     );
   }
@@ -178,11 +193,23 @@ export function ConnectionShareEditor({
           size="sm"
           className="h-7 text-xs"
           disabled={pending || !!lockHint}
-          title={lockHint ? undefined : t("integration.connection.share.removeHereHelp")}
+          title={
+            lockHint
+              ? undefined
+              : named(
+                  "integration.connection.share.removeHereHelp",
+                  "integration.connection.share.removeHereHelpIn",
+                  hereSpaceId,
+                )
+          }
           onClick={() => onUnshare(hereSpaceId)}
           data-testid={`share-remove-here-${connectionId}`}
         >
-          {t("integration.connection.share.removeHere")}
+          {named(
+            "integration.connection.share.removeHere",
+            "integration.connection.share.removeHereIn",
+            hereSpaceId,
+          )}
         </Button>
       </DisabledReasonTooltip>
     );
@@ -190,7 +217,13 @@ export function ConnectionShareEditor({
 
   return (
     <span className="text-muted-foreground text-xs">
-      {sharedHere ? t("integration.connection.share.sharedHere") : "—"}
+      {sharedHere
+        ? named(
+            "integration.connection.share.sharedHere",
+            "integration.connection.share.sharedHereIn",
+            hereSpaceId,
+          )
+        : "—"}
     </span>
   );
 }

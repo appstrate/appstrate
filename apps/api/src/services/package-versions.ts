@@ -44,6 +44,7 @@ import type { DbOrTx } from "../lib/db-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { lockPackageVersions, withPackageDraftLock } from "./package-locks.ts";
+import { lockIdleAgent } from "./state/runs.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
 // ─────────────────────────────────────────────
@@ -573,9 +574,14 @@ export async function getVersionCount(packageId: string): Promise<number> {
 // ─────────────────────────────────────────────
 
 /** Permanently delete a version. Reassigns dist-tags, then removes the DB row and storage artifact. */
-export async function deletePackageVersion(packageId: string, version: string): Promise<boolean> {
+export async function deletePackageVersion(
+  pkg: { id: string; orgId: string; type: PackageType },
+  version: string,
+): Promise<boolean> {
+  const packageId = pkg.id;
   const deleted = await db.transaction(async (tx) => {
     await lockPackageVersions(tx, packageId);
+    if (pkg.type === "agent") await lockIdleAgent(tx, { orgId: pkg.orgId }, packageId);
 
     // Find the version row
     const [row] = await tx

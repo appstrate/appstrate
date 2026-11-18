@@ -10,11 +10,13 @@ import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { SpaceChoiceDropdown } from "./space-choice-menu";
+import { deedOfAction, spaceDeedLabels } from "./space-deed";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
 import { packageDetailQueryOptions, usePackageDetail } from "../hooks/use-packages";
-import { useSpaceAction } from "../hooks/use-space-action";
+import { useAgentSpaceAction } from "../hooks/use-agent-run-space";
+import { useSpacesFor } from "../hooks/use-space-action";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { spaceStore } from "../stores/space-store";
@@ -27,10 +29,17 @@ const NO_SPACES: readonly string[] = [];
 interface RunAgentButtonProps {
   packageId: string;
   /**
-   * The spaces of the index row offering the run: a click enters the granting space before
-   * running; several granting it, the button opens their menu. The working space when absent.
+   * The spaces the agent runs in, from its index row or its detail: a click enters the granting
+   * space before running; several granting it, the button opens their menu. Read in « Tous les
+   * espaces » only.
    */
   spaceIds?: readonly string[];
+  /**
+   * Whether the working space runs it without asking when it is among `spaceIds` (a row of it);
+   * `false` on the agent's page, which names no working space: the reader chooses. Defaults to
+   * `true`.
+   */
+  preferWorkingSpace?: boolean;
   /** When provided, skips the lazy fetch (detail page case). */
   detail?: AgentDetail;
   version?: string;
@@ -53,6 +62,7 @@ interface RunAgentButtonProps {
 export function RunAgentButton({
   packageId,
   spaceIds = NO_SPACES,
+  preferWorkingSpace = true,
   detail: providedDetail,
   version,
   disabled,
@@ -67,12 +77,11 @@ export function RunAgentButton({
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const workingSpaceId = useCurrentSpaceId();
-  // Among the row's spaces, or the working space's alone.
-  const runAction = useSpaceAction(
-    { permission: "agents:run" },
-    spaceIds.length > 0 ? spaceIds : workingSpaceId ? [workingSpaceId] : NO_SPACES,
-  );
+  const runAction = useAgentSpaceAction(packageId, "agents:run", spaceIds, { preferWorkingSpace });
   const canRun = runAction.offered;
+  // A reader who runs agents somewhere sees a blocked button with its reason, even where this
+  // agent runs in none of the spaces offered.
+  const runsAgents = useSpacesFor({ permission: "agents:run" }).offered;
   // A row not of the working space: the detail query below reads the working space, so nothing
   // it holds is this row's until a click enters the row's space.
   const elsewhere = spaceIds.length > 0 && !spaceIds.includes(workingSpaceId ?? "");
@@ -121,22 +130,26 @@ export function RunAgentButton({
 
   const start = () => {
     const target = spaceStore.getState().id;
-    // Detail already available (provided, or cached from a previous click) when it is the
-    // target's: the one held is the working space's at the click.
-    if (detail && target === workingSpaceId) {
-      startRun(detail);
+    const inTarget = packageDetailQueryOptions("agent", { orgId, spaceId: target }, packageId);
+    // The target's own: the one held when it is the working space, else the one read on entering it.
+    const known =
+      target === workingSpaceId ? detail : qc.getQueryData<AgentDetail>(inTarget.queryKey);
+    if (known) {
+      startRun(known);
       return;
     }
     // Deferred fetch, on the key the detail query reads in the target space — `isFetching`
     // drives the pending spinner meanwhile.
-    qc.fetchQuery(packageDetailQueryOptions("agent", { orgId, spaceId: target }, packageId)).then(
-      startRun,
-      () => toast.error(t("error.generic", { ns: "common" })),
-    );
+    qc.fetchQuery(inTarget).then(startRun, () => toast.error(t("error.generic", { ns: "common" })));
   };
 
-  // Between several of the row's spaces, the button is the menu of them.
-  const runIn = runAction.choose(t("common:spaceChoice.run"), start);
+  // In the mode the label names the space the click runs in, or asks it (the menu of them).
+  const runDeed = deedOfAction(
+    runAction,
+    spaceDeedLabels(t, "spaceChoice.run", "spaceChoice.runIn"),
+    start,
+  );
+  const runLabel = runDeed.label ?? t("detail.run");
 
   const neverPublished = isNeverPublishedForReader(detail);
   const inputShown = runInputOpens({
@@ -145,7 +158,7 @@ export function RunAgentButton({
     canRun,
     detail,
   });
-  const isPending = isFetching || launcher.isPending;
+  const isPending = isFetching || runAction.entering || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
   const blockedTitle =
     disabled && disabledTitle
@@ -154,7 +167,7 @@ export function RunAgentButton({
         ? t("detail.titleNeverPublished")
         : undefined;
 
-  if (!canRun) return null;
+  if (!canRun && !(runsAgents && disabled && blockedTitle)) return null;
 
   // Non-blocking warning dot — surfaced when integration connections aren't
   // ready, but the button stays clickable (recovery via MissingConnectionsModal).
@@ -171,7 +184,7 @@ export function RunAgentButton({
   return (
     <>
       <DisabledReasonTooltip reason={blockedTitle}>
-        <SpaceChoiceDropdown choice={isDisabled ? undefined : runIn}>
+        <SpaceChoiceDropdown choice={isDisabled ? undefined : runDeed.inSpaces}>
           <PendingButton
             variant={variant}
             size={size}
@@ -179,13 +192,13 @@ export function RunAgentButton({
             onClick={handleClick}
             pending={isPending}
             disabled={isDisabled}
-            title={blockedTitle ? undefined : t("detail.run")}
-            aria-label={showLabel ? undefined : t("detail.run")}
+            title={blockedTitle ? undefined : runLabel}
+            aria-label={showLabel ? undefined : runLabel}
           >
             {!isPending && (
               <Play className={cn(showLabel && variant === "outline" && "text-primary")} />
             )}
-            {showLabel && t("detail.run")}
+            {showLabel && runLabel}
             {warningDot}
           </PendingButton>
         </SpaceChoiceDropdown>

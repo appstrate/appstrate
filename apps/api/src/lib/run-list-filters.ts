@@ -8,7 +8,8 @@ import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { parseListLimit } from "@appstrate/core/list-query";
 import type { AppEnv } from "../types/index.ts";
 import { GLOBAL_RUN_KINDS, type GlobalRunListFilters } from "../services/state/runs.ts";
-import { invalidRequest, zodIssuesToFieldErrors } from "./errors.ts";
+import { invalidRequest } from "./errors.ts";
+import { closedSet, packageIdFilter, parseStrictQuery } from "./list-query.ts";
 import { likeContains } from "./like-pattern.ts";
 
 /** `runs.run_number` is an int4: a larger number names no run, and binding it overflows. */
@@ -62,14 +63,6 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
   return conditions;
 }
 
-/**
- * A closed-set filter. An unrecognised value is a 400: dropping it would widen
- * a list the caller reads as narrowed. An empty value (`?kind=`) reads as
- * absent — how a form or a URL builder emitting every key spells "no filter".
- */
-const closedSet = <const T extends readonly [string, ...string[]]>(values: T) =>
-  z.preprocess((value) => (value === "" ? undefined : value), z.enum(values).optional());
-
 // Built on first use: `services/state/runs.ts` imports this module, so `GLOBAL_RUN_KINDS` is not
 // initialised yet while it loads.
 const runListQuerySchema = () =>
@@ -84,6 +77,7 @@ const runListQuerySchema = () =>
       start_date: z.string().optional(),
       end_date: z.string().optional(),
       chat_session_id: z.string().optional(),
+      packageId: packageIdFilter,
       // Checked by `parseListLimit` (anything but 1..100 is a 400).
       limit: z.string().optional(),
       startingAfter: z.string().optional(),
@@ -107,13 +101,7 @@ function parseDate(raw: string | undefined, name: string): Date | undefined {
 export function parseGlobalRunListQuery(
   c: Context<AppEnv>,
 ): GlobalRunListFilters & { limit: number } {
-  const parsed = runListQuerySchema().safeParse(c.req.query());
-  if (!parsed.success) {
-    // One `invalid_request` naming the parameter (`param`), as the run lists answer.
-    const [issue] = zodIssuesToFieldErrors(parsed.error.issues);
-    throw invalidRequest(issue!.message, issue!.field);
-  }
-  const query = parsed.data;
+  const query = parseStrictQuery(c, runListQuerySchema());
   const { status, search } = parseRunListFilters({ status: query.status, q: query.q });
   return {
     limit: parseListLimit(c, { defaultLimit: 20 }),
@@ -129,5 +117,6 @@ export function parseGlobalRunListQuery(
     startDate: parseDate(query.start_date, "start_date"),
     endDate: parseDate(query.end_date, "end_date"),
     chatSessionId: query.chat_session_id || undefined,
+    packageId: query.packageId,
   };
 }

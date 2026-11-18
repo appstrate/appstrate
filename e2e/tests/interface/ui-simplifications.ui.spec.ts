@@ -95,6 +95,7 @@ test("a role missing from the assignable catalog stays visible and disabled afte
   await expect(role).toHaveCount(0);
   release.resolve();
   await expect(role).toHaveText("Opérateur");
+  await page.unrouteAll({ behavior: "wait" });
   await role.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("option", { name: "Opérateur", exact: true })).toBeDisabled();

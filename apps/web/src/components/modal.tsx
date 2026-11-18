@@ -21,11 +21,10 @@ interface ModalProps {
   /** What the dialog does, read by assistive technology after the title. */
   description?: string;
   /**
-   * The dialog acts in the working space (a creation, an import, a launch): in « Tous les
-   * espaces » a line under its description names that space, the one the action that opened it
-   * chose.
+   * In « Tous les espaces », name the space of the act: its explicit target, or the working
+   * space when the action entered it before opening the dialog.
    */
-  inSpace?: boolean;
+  inSpace?: boolean | string;
   children: ReactNode;
   actions?: ReactNode;
   className?: string;
@@ -54,7 +53,13 @@ export function Modal({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
-          {inSpace && <WorkingSpaceName size="sm" className="text-muted-foreground" />}
+          {inSpace && (
+            <WorkingSpaceName
+              spaceId={typeof inSpace === "string" ? inSpace : undefined}
+              size="sm"
+              className="text-muted-foreground"
+            />
+          )}
         </DialogHeader>
         {children}
         {actions && <DialogFooter>{actions}</DialogFooter>}

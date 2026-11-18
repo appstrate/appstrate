@@ -4,7 +4,7 @@ import { and, eq, inArray, ne, type AnyColumn, type SQL } from "drizzle-orm";
 import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spacePackages, spaces } from "@appstrate/db/schema";
-import { findCause } from "./error-cause.ts";
+import { findCause } from "@appstrate/core/error-cause";
 import { notFound } from "./errors.ts";
 import { logger } from "./logger.ts";
 
@@ -158,16 +158,6 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
         typeof e.message === "string" && e.message.includes("invalid input syntax for type uuid"),
     )
   );
-}
-
-/**
- * True when a DB error is a referential-integrity violation on write:
- * PostgreSQL raises `23503` (foreign_key_violation), while PGlite (tier 0)
- * surfaces an `ON DELETE RESTRICT` as `23001` (restrict_violation). Both mean
- * "rows still reference this one".
- */
-export function isForeignKeyViolation(err: unknown): boolean {
-  return hasSqlState(err, "23503", "23001");
 }
 
 /** True when a DB error is Postgres `23505` (unique_violation). */

@@ -10,7 +10,7 @@ import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import type { SpaceChoiceMenu } from "../lib/menu-action";
-import { grantsInRowSpace, spaceChoice, spacesWhere, type SpaceGate } from "../lib/space-lists";
+import { spaceChoice, spacesWhere, type SpaceGate } from "../lib/space-lists";
 import { useAppConfig } from "./use-app-config";
 import { useCanReach } from "./use-can-reach";
 import { useCurrentSpaceId, useSpaceSwitcher } from "./use-current-space";
@@ -24,23 +24,9 @@ import { useSpaces } from "./use-spaces";
 /** What an action needs of a space: a permission, or a route that opens there. */
 type SpaceNeed = { permission: string } | { route: RoutePath };
 
-/** Whether `permission` holds in a row's space (`spaceId`; the working space's when absent). */
-export function useRowSpaceGrants(): (spaceId: string | undefined, permission: string) => boolean {
-  const { can } = usePermissions();
-  const workingSpaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
-  return useCallback(
-    (spaceId, permission) =>
-      grantsInRowSpace(spaceId, workingSpaceId, can, spaces, orgPermissions, permission),
-    [can, workingSpaceId, spaces, orgPermissions],
-  );
-}
-
 /**
- * Performs `act` in `spaceId`: at once in the working space, else after entering it as the
- * working space (behind the unsaved-drafts question a scope change asks), so every request
- * `act` sends, and every screen it opens, is that space's. Exported for its test.
+ * Performs `act` in `spaceId`: at once in the working space, else after entering it (behind the
+ * unsaved-drafts question). Exported for its test.
  */
 export function actInSpace(
   spaceId: string,
@@ -60,9 +46,9 @@ function useActInSpace(): (spaceId: string, act: () => void) => void {
 }
 
 /**
- * Where an action naming no space may act. Out of the mode: `offered` is the working space's
- * verdict and `eligible` is empty. In it: the spaces that grant `need`, only those of `among`
- * when given, and `offered` when there is one.
+ * Where an action naming no space may act: `targets`, the spaces granting `need` (among `among`
+ * when given) in the mode, else the working space when it grants it; `offered` when there is one;
+ * `anyOf`, the one to read from when any of them answers the same (the working space first).
  */
 export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { on } = useOverviewMode();
@@ -71,6 +57,7 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { features } = useAppConfig();
   const orgPermissions = useOrg().currentOrg?.permissions;
   const { data: spaces } = useSpaces();
+  const workingSpaceId = useCurrentSpaceId();
 
   const admits = (gate: SpaceGate, space: { id: string; personal: boolean }) =>
     (!among || among.includes(space.id)) &&
@@ -83,23 +70,49 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
     : "permission" in need
       ? can(need.permission)
       : canReach(need.route);
-  return { on, eligible, offered };
+  const anyOf = (eligible.find((space) => space.id === workingSpaceId) ?? eligible[0])?.id;
+  const working = spaces?.find((space) => space.id === workingSpaceId);
+  const targets = on ? eligible : offered && working ? [working] : [];
+  return { on, offered, anyOf, targets };
+}
+
+/** How {@link useSpaceAction} picks and enters a space. */
+interface SpaceActionOptions {
+  /** Whether the working space is taken without asking when it is among `among`. Defaults to whether `among` is given. */
+  preferWorkingSpace?: boolean;
+  /**
+   * Before entering another space, reads what the redrawn screen needs and resolves to the `act`
+   * to run once entered; a failed read (it reports itself) runs nothing.
+   */
+  prepare?: (spaceId: string, act: () => void) => Promise<() => void>;
 }
 
 /**
- * An action naming no space. `offered`: whether to show it at all. `run(act)`: performs `act` in
- * the space that grants `need`, among `among` when given (out of the mode, the working space);
- * between several it does nothing, the reader choosing in `choose(label, act)`, the menu its
- * trigger becomes — `undefined` when there is nothing to choose. `link(to)`: a link going to `to`
- * the same way.
+ * An action naming no space. `offered`: whether to show it. `run(act)`: performs `act` in the one
+ * space granting `need` (out of the mode, the working space); between several it does nothing and
+ * `choose(label, act)` is the menu of them (`undefined` otherwise). `target`: in the mode, the
+ * space `run` acts in. `link(to)`: a link going to `to` the same way.
  */
-export function useSpaceAction(need: SpaceNeed, among?: readonly string[]) {
-  const { on, eligible, offered } = useSpacesFor(need, among);
-  const actIn = useActInSpace();
+export function useSpaceAction(
+  need: SpaceNeed,
+  among?: readonly string[],
+  { preferWorkingSpace = among !== undefined, prepare }: SpaceActionOptions = {},
+) {
+  const { on, targets, offered } = useSpacesFor(need, among);
+  const actInSpace = useActInSpace();
   const navigate = useNavigate();
   const workingSpaceId = useCurrentSpaceId();
-  // A row's action continues in the working space when it is among the row's.
-  const choice = on ? spaceChoice(eligible, among ? workingSpaceId : null) : null;
+  const choice = on ? spaceChoice(targets, preferWorkingSpace ? workingSpaceId : null) : null;
+  const target =
+    choice?.kind === "one" ? targets.find((space) => space.id === choice.spaceId) : undefined;
+
+  const actIn = (spaceId: string, act: () => void) => {
+    if (!prepare || spaceId === spaceStore.getState().id) return actInSpace(spaceId, act);
+    prepare(spaceId, act).then(
+      (prepared) => actInSpace(spaceId, prepared),
+      () => undefined,
+    );
+  };
 
   const run = (act: () => void) => {
     if (!choice) return act();
@@ -107,12 +120,14 @@ export function useSpaceAction(need: SpaceNeed, among?: readonly string[]) {
   };
 
   return {
+    on,
     offered,
+    target,
     run,
     /** The menu of the spaces to act in, labelled `label` (« Créer dans… »); `undefined` unless the reader must choose. */
     choose: (label: string, act: () => void): SpaceChoiceMenu | undefined =>
       choice?.kind === "ask"
-        ? { label, spaces: eligible, onPick: (spaceId) => actIn(spaceId, act) }
+        ? { label, spaces: targets, onPick: (spaceId) => actIn(spaceId, act) }
         : undefined,
     /** A link to `to`: plain out of the mode; in it, `onSelect` replaces the navigation with `run`. */
     link: (to: string): { to: string; onSelect?: () => void } => ({

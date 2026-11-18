@@ -25,6 +25,19 @@ interface CountableGroup {
   connections: readonly CountableConnection[];
 }
 
+/** The caller's own connections usable in at least one of these spaces. */
+export function connectionsInSpaces<T extends CountableConnection>(
+  connections: readonly T[],
+  orgId: string | null,
+  spaceIds: readonly string[],
+): T[] {
+  return connections.filter(
+    (connection) =>
+      connection.org.id === orgId &&
+      (connection.space === null || spaceIds.includes(connection.space.id)),
+  );
+}
+
 /** Connections of one integration package id in `spaceIds` of `orgId`; 0 before the org is known. */
 export function connectionCounter(
   groups: readonly CountableGroup[],
@@ -32,11 +45,5 @@ export function connectionCounter(
 ): (sourceId: string, spaceIds: readonly string[]) => number {
   const bySource = new Map(groups.map((group) => [group.source_id, group.connections]));
   return (sourceId, spaceIds) =>
-    orgId === null
-      ? 0
-      : (bySource.get(sourceId) ?? []).filter(
-          (connection) =>
-            connection.org.id === orgId &&
-            (connection.space === null || spaceIds.includes(connection.space.id)),
-        ).length;
+    connectionsInSpaces(bySource.get(sourceId) ?? [], orgId, spaceIds).length;
 }
