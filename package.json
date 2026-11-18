@@ -152,8 +152,8 @@
   "overrides": {
     "zod": "4.6.7",
     "jose": "6.2.17",
-    "ai": "^7.0.172",
-    "@ai-sdk/react": "^4.0.176",
+    "ai": "^7.0.173",
+    "@ai-sdk/react": "^4.0.177",
     "@ai-sdk/provider-utils": "^5.0.81",
     "@earendil-works/pi-agent-core": "1.5.2",
     "@earendil-works/pi-ai": "1.5.2",

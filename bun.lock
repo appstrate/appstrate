@@ -509,7 +509,7 @@
   },
   "overrides": {
     "@ai-sdk/provider-utils": "^5.0.81",
-    "@ai-sdk/react": "^4.0.176",
+    "@ai-sdk/react": "^4.0.177",
     "@earendil-works/pi-agent-core": "1.5.2",
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-codemode": "1.5.2",
@@ -517,7 +517,7 @@
     "@earendil-works/pi-schema": "1.5.2",
     "@earendil-works/pi-telemetry": "1.5.2",
     "@earendil-works/pi-tui": "1.5.2",
-    "ai": "^7.0.172",
+    "ai": "^7.0.173",
     "dompurify": "3.4.17",
     "jose": "6.2.17",
     "zod": "4.6.7",
