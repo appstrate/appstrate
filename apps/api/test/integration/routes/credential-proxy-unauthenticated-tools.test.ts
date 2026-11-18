@@ -19,23 +19,30 @@ import {
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import { drainAudits } from "../../../src/services/audit.ts";
+import { initProxyLimits } from "../../../src/services/proxy-limits.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  authHeaders,
+  createTestContext,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
 import { bearerApiKeyAuth, seedProxyIntegration } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+import {
+  PNG_IMAGE_CONTENT as IMAGE,
+  startFakeMcpServer,
+  type FakeMcpServer,
+} from "../../helpers/fake-mcp-server.ts";
 
 const ID = "@acme/files";
 const TOOL = "acme_files__read_media_file";
-/** A 1×1 transparent PNG. */
-const PNG =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-const IMAGE = { type: "image" as const, data: PNG, mimeType: "image/png" };
 
 let server: FakeMcpServer;
 let restoreEgress: () => void;
@@ -57,15 +64,49 @@ afterAll(() => {
 
 /** No `auths`: the integration binds no connection. `write_file` is outside its policy. */
 const unauthenticated = (url = server.url): IntegrationManifest =>
-  ({
-    type: "integration",
-    schema_version: "0.3",
+  remoteIntegrationManifest({
     name: ID,
-    version: "1.0.0",
-    display_name: "Files",
-    source: { kind: "remote", remote: { url, transport: "streamable-http" } },
+    displayName: "Files",
+    url,
     tools_policy: { read_media_file: {} },
-  }) as unknown as IntegrationManifest;
+  });
+
+/** A loopback server answering every request with `respond`, counting what it received. */
+function startServer(respond: (req: Request) => Response | Promise<Response>) {
+  const received: string[] = [];
+  const http = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) => {
+      received.push(req.url);
+      return respond(req);
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${http.port}/mcp`,
+    port: http.port,
+    received,
+    stop: () => http.stop(true),
+  };
+}
+
+/** Runs `use` with the operator allowlist and `CREDENTIAL_PROXY_LIMITS` set as given. */
+async function withEnv(env: Record<string, string>, use: () => Promise<void>) {
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  resetEnvCache();
+  initProxyLimits();
+  try {
+    await use();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetEnvCache();
+    initProxyLimits();
+  }
+}
 
 interface Tool {
   name: string;
@@ -86,16 +127,16 @@ interface Listing {
 describe("the typed tools of an unauthenticated remote integration", () => {
   let ctx: TestContext;
   let apiKey: string;
+  let apiKeyId: string;
 
-  const keyOf = async (holder: TestContext, scopes = ["credential-proxy:call-own"]) =>
-    (
-      await seedApiKey({
-        orgId: holder.orgId,
-        spaceId: holder.defaultSpaceId,
-        createdBy: holder.user.id,
-        scopes,
-      })
-    ).rawKey;
+  const seedKey = (holder: TestContext, scopes = ["credential-proxy:call-own"]) =>
+    seedApiKey({
+      orgId: holder.orgId,
+      spaceId: holder.defaultSpaceId,
+      createdBy: holder.user.id,
+      scopes,
+    });
+  const keyOf = async (holder: TestContext) => (await seedKey(holder)).rawKey;
 
   const headers = (key: string) => ({
     Authorization: `Bearer ${key}`,
@@ -139,7 +180,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     clearAllCachesLocally();
     forgetProtocolEras();
     ctx = await createTestContext({ orgSlug: "acme" });
-    apiKey = await keyOf(ctx);
+    ({ rawKey: apiKey, id: apiKeyId } = await seedKey(ctx));
     server.requests.length = 0;
   });
 
@@ -209,11 +250,24 @@ describe("the typed tools of an unauthenticated remote integration", () => {
         actorId: ctx.user.id,
         spaceId: ctx.defaultSpaceId,
         runId: null,
+        apiKeyId,
+        authMethod: "api_key",
+        method: "POST",
         outcome: "200",
         host: "127.0.0.1",
       });
-      expect(row.apiKeyId).not.toBeNull();
     }
+
+    // The space's governor reads them at its door, without a connection.
+    const res = await getTestApp().request("/api/integrations/calls", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { connection_id: string | null; integration_package_id?: string; outcome: string }[];
+    };
+    expect(data).toHaveLength(2);
+    expect(data.every((row) => row.connection_id === null && row.outcome === "200")).toBe(true);
   });
 
   it("shares the catalog across the organization's callers", async () => {
@@ -254,8 +308,10 @@ describe("the typed tools of an unauthenticated remote integration", () => {
       await seedProxyIntegration(ctx, unauthenticated());
       const runner = await keyOf(await memberContext(ctx, "member", "runner"));
 
-      expect((await list({ integration_package_id: ID }, runner)).status).toBe(403);
-      expect((await call({ name: "read_media_file" }, runner)).status).toBe(403);
+      const listed = await list({ integration_package_id: ID }, runner);
+      expect([listed.status, listed.body.code]).toEqual([403, "forbidden"]);
+      const called = await call({ name: "read_media_file" }, runner);
+      expect([called.status, called.body.code]).toEqual([403, "forbidden"]);
       expect(server.requests).toEqual([]);
     });
 
@@ -309,6 +365,112 @@ describe("the typed tools of an unauthenticated remote integration", () => {
       expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual(["bad_gateway"]);
       expect(await journal()).toEqual([]);
     });
+  });
+
+  describe("the egress guard on every hop", () => {
+    for (const [what, target] of [
+      ["to plain http on a host the operator does not trust", "http"],
+      ["to a loopback address the operator does not trust", "https"],
+    ] as const) {
+      it(`refuses a redirect ${what}, its target receiving nothing`, async () => {
+        const redirectTarget = startServer(() => new Response("reached"));
+        const redirecting = startServer(
+          () =>
+            new Response(null, {
+              status: 307,
+              headers: { Location: `${target}://localhost:${redirectTarget.port}/mcp` },
+            }),
+        );
+        try {
+          // `localhost` out of the allowlist: untrusted, and resolving to loopback.
+          await withEnv({ EGRESS_ALLOW_INTERNAL_HOSTS: "127.0.0.1" }, async () => {
+            await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
+            const called = await call({ name: "read_media_file" });
+            expect(called.status).toBe(502);
+            expect(called.body.detail).toBe(
+              `The MCP server at ${new URL(redirecting.url).origin} is refused by the egress guard.`,
+            );
+            const listed = await list({ integration_package_id: ID });
+            expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual([
+              "bad_gateway",
+            ]);
+          });
+          expect(redirecting.received.length).toBeGreaterThan(0);
+          expect(redirectTarget.received).toEqual([]);
+          // The first hop was sent: journaled as the refusal of its redirect.
+          expect((await journal()).map((row) => row.outcome)).toEqual([
+            "blocked_target",
+            "blocked_target",
+          ]);
+        } finally {
+          redirecting.stop();
+          redirectTarget.stop();
+        }
+      });
+    }
+  });
+
+  it("refuses an answer past the proxy's `max_response_bytes`", async () => {
+    const big = startFakeMcpServer({
+      tools: [
+        {
+          name: "read_media_file",
+          result: { content: [{ type: "text", text: "x".repeat(8192) }] },
+        },
+      ],
+    });
+    try {
+      await withEnv(
+        { CREDENTIAL_PROXY_LIMITS: JSON.stringify({ max_response_bytes: 4096 }) },
+        async () => {
+          await seedProxyIntegration(ctx, unauthenticated(big.url));
+          const called = await call({ name: "read_media_file" });
+          expect(called.status).toBe(502);
+          expect(called.body.code).toBe("upstream_response_too_large");
+          expect(called.body.detail).toContain("more than 4096 bytes");
+        },
+      );
+    } finally {
+      big.stop();
+    }
+  });
+
+  it("resolves an event-stream answer its server keeps open", async () => {
+    const sse = startFakeMcpServer({
+      tools: [{ name: "read_media_file", result: { content: [IMAGE] } }],
+      sse: true,
+    });
+    // In front of it: the same answers, each event stream left open once relayed.
+    const held = startServer(async (req) => {
+      const res = await fetch(sse.url, {
+        method: req.method,
+        headers: req.headers,
+        body: await req.text(),
+      });
+      if (!res.headers.get("content-type")?.includes("text/event-stream")) return res;
+      const reader = res.body!.getReader();
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            const { done, value } = await reader.read();
+            if (done) return new Promise<void>(() => {});
+            controller.enqueue(value);
+          },
+        }),
+        { status: res.status, headers: res.headers },
+      );
+    });
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(held.url));
+      const started = Date.now();
+      const called = await call({ name: "read_media_file" });
+      expect(called.status).toBe(200);
+      expect(called.body.result!.content).toEqual([IMAGE]);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      held.stop();
+      sse.stop();
+    }
   });
 
   it("answers a server's challenge as the integration unavailable, flagging nothing", async () => {

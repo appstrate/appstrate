@@ -154,13 +154,7 @@ async function remoteConnection(
       }).catch(async (err: unknown) => {
         throw await withConnectOffers(err, input);
       });
-  if (unauthenticated && input.connectionId) {
-    throw proxyProblem(
-      "credential_not_found",
-      `Integration '${input.integrationId}' declares no authentication and binds no connection: call it without \`connection_id\`.`,
-      "connection_id",
-    );
-  }
+  if (unauthenticated && input.connectionId) throw connectionNamedWithout(input.integrationId);
   if (!unauthenticated && !connection) {
     throw proxyProblem(
       "credential_not_found",
@@ -183,6 +177,15 @@ async function remoteConnection(
     });
   }
   return { connectionId: connection?.id ?? null, url: remote.url };
+}
+
+/** A `connection_id` named for an unauthenticated integration, which binds none. */
+export function connectionNamedWithout(integrationId: string): ApiError {
+  return proxyProblem(
+    "credential_not_found",
+    `Integration '${integrationId}' declares no authentication and binds no connection: call it without \`connection_id\`.`,
+    "connection_id",
+  );
 }
 
 async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {

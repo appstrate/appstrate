@@ -33,6 +33,13 @@ export type FakeMcpTool =
       result?: CallToolResult;
     };
 
+/** A 1×1 transparent PNG as an MCP `image` content block. */
+export const PNG_IMAGE_CONTENT = {
+  type: "image" as const,
+  data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  mimeType: "image/png",
+};
+
 export interface FakeMcpServerOptions {
   tools?: FakeMcpTool[];
   /** Tools per `tools/list` page; omitted = one page. */

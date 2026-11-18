@@ -54,6 +54,7 @@ import {
   remoteIntegrationManifest,
 } from "../../../../../test/helpers/integration-manifests.ts";
 import {
+  PNG_IMAGE_CONTENT,
   startFakeMcpServer,
   type FakeMcpServer,
 } from "../../../../../test/helpers/fake-mcp-server.ts";
@@ -1037,12 +1038,7 @@ describe("mcp integration tools", () => {
   describe("an unauthenticated remote integration's typed tools (AFPS §7.2)", () => {
     const OPEN_ID = "@cporg/files";
     const OPEN_TOOL = "cporg_files__read_media_file";
-    /** A 1×1 transparent PNG. */
-    const IMAGE = {
-      type: "image" as const,
-      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-      mimeType: "image/png",
-    };
+    const IMAGE = PNG_IMAGE_CONTENT;
     let server: FakeMcpServer;
     let restoreEgress: () => void;
 
@@ -1064,15 +1060,39 @@ describe("mcp integration tools", () => {
       forgetProtocolEras();
       server.requests.length = 0;
       // No `auths`: nothing to connect, nothing to inject.
-      await seedProxyIntegration(owner, {
-        type: "integration",
-        schema_version: "0.3",
-        name: OPEN_ID,
-        version: "1.0.0",
-        display_name: "Files",
-        source: { kind: "remote", remote: { url: server.url, transport: "streamable-http" } },
-        tools_policy: { read_media_file: {} },
-      } as unknown as IntegrationManifest);
+      await seedProxyIntegration(
+        owner,
+        remoteIntegrationManifest({
+          name: OPEN_ID,
+          displayName: "Files",
+          url: server.url,
+          tools_policy: { read_media_file: {} },
+        }),
+      );
+    });
+
+    it("refuses a call naming a connection before any exchange, its catalog cold", async () => {
+      const envelope = await mcp(await instanceCaller(owner), "tools/call", {
+        name: "call_integration_tool",
+        arguments: { tool: OPEN_TOOL, arguments: {}, connection_id: crypto.randomUUID() },
+      });
+      const result = envelope.result as { isError?: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+        code: "credential_not_found",
+        param: "connection_id",
+        detail: `Integration '${OPEN_ID}' declares no authentication and binds no connection: call it without \`connection_id\`.`,
+      });
+      expect(server.requests).toEqual([]);
+    });
+
+    it("offers neither tool to a runner", async () => {
+      const names = await toolNames(
+        await instanceCaller(await memberContext(owner, "member", "runner")),
+      );
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
+      expect(server.requests).toEqual([]);
     });
 
     for (const preset of ["admin", "operator"] as const) {

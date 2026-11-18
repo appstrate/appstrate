@@ -640,14 +640,12 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
   });
 
   const unauthenticated = (url: string) =>
-    ({
-      type: "integration",
-      schema_version: "0.3",
-      name: OPEN_ID,
-      version: "1.0.0",
-      display_name: "Open",
-      source: { kind: "remote", remote: { url, transport: "streamable-http" } },
-    }) as unknown as IntegrationManifest;
+    remoteIntegrationManifest({ name: OPEN_ID, displayName: "Open", url });
+
+  const journaled = async () => {
+    await drainAudits(5_000);
+    return db.select().from(connectionCalls).where(eq(connectionCalls.integrationId, OPEN_ID));
+  };
 
   const syncOpen = (caller: TestContext = ctx) =>
     getTestApp().request(`/api/integrations/${OPEN_ID}/discover`, {
@@ -674,11 +672,7 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
     expect(open.authorizations.length).toBeGreaterThan(0);
     expect(open.authorizations.every((a) => a === null)).toBe(true);
     // Journaled like any operation outside a run: one row, without a connection.
-    await drainAudits(5_000);
-    const rows = await db
-      .select()
-      .from(connectionCalls)
-      .where(eq(connectionCalls.integrationId, OPEN_ID));
+    const rows = await journaled();
     expect(rows.map((row) => [row.connectionId, row.actorId, row.outcome])).toEqual([
       [null, ctx.user.id, "200"],
     ]);
@@ -691,6 +685,19 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
     expect(((await res.json()) as { detail: string }).detail).toContain(
       "refused by the egress guard",
     );
+    expect(await journaled()).toEqual([]);
+  });
+
+  it("synchronizes in a space that closes the credential proxy: the sync asks no proxy right", async () => {
+    await seedProxyIntegration(ctx, unauthenticated(open.url));
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+    const res = await syncOpen();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tools: { name: string }[] };
+    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
   });
 
   it("answers 502 when the server asks for a credential: never authorized ad hoc", async () => {

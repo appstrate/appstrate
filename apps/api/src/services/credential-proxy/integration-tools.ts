@@ -17,6 +17,7 @@
 import {
   allowsUndeclaredTools,
   getApiCallConfigs,
+  getRemoteSource,
   isUnauthenticatedIntegration,
   missingScopesForConnection,
   resolveIntegrationToolCatalog,
@@ -44,6 +45,7 @@ import {
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
 import {
+  connectionNamedWithout,
   listingDeadline,
   listRemoteTools,
   offeredRemoteToolNames,
@@ -418,6 +420,20 @@ async function remoteTools(
   query: Pick<IntegrationToolQuery, "name" | "connectionId">,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest, connections } = entry;
+  if (
+    query.name !== undefined &&
+    query.connectionId !== undefined &&
+    isUnauthenticatedIntegration(manifest)
+  ) {
+    // A call naming a connection of an integration that binds none: refused before any exchange.
+    if (!mayNameRemoteTool(entry, query.name)) return { tools: [], truncatedAt: null };
+    return {
+      unlisted: {
+        integration_package_id: integrationId,
+        refusal: connectionNamedWithout(integrationId).toProblemDetail(caller.caller.requestId),
+      },
+    };
+  }
   let catalog: RemoteToolCatalog;
   try {
     catalog = await readRemoteCatalog(caller, entry, query.connectionId);
@@ -511,8 +527,8 @@ function offersToolsOutsideRun(manifest: IntegrationManifest): boolean {
  * Every tool the caller may call outside a run in the space, sorted by integration, `api_call`
  * tools first, with the connections they reach, the integrations without a usable connection and
  * the remote ones the proxy refused to list. The remote integrations listed are those the caller
- * reaches a connection of, and the unauthenticated ones (AFPS §7.2), which need none: their tools
- * reach no connection, and they are never `not_ready`. Read under `reach`, activation checked
+ * reaches a connection of, and the unauthenticated Streamable HTTP ones (AFPS §7.2), which need
+ * none: their tools reach no connection, and they are never `not_ready`. Read under `reach`, activation checked
  * before any connection is selected; servers are waited for until {@link listingDeadline}.
  */
 export async function listIntegrationTools(
@@ -533,7 +549,10 @@ export async function listIntegrationTools(
 
   const byIntegration = new Map<string, ConnectionOutsideRun[]>();
   for (const [id, manifest] of manifests) {
-    if (manifest.source?.kind === "remote" && isUnauthenticatedIntegration(manifest)) {
+    if (
+      getRemoteSource(manifest)?.transport === "streamable-http" &&
+      isUnauthenticatedIntegration(manifest)
+    ) {
       byIntegration.set(id, []);
     }
   }

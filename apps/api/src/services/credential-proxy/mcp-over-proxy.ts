@@ -20,8 +20,8 @@ import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
 import { findCause } from "@appstrate/core/error-cause";
-import { readBodyUnder } from "../../lib/capped-body.ts";
-import { checkEgressUrl, egressFetchImpl } from "../../lib/egress-host-guard.ts";
+import { classifyApiCallFailure } from "@appstrate/afps-runtime/resolvers";
+import { egressFetchImpl, isCleartextToUntrustedHost } from "../../lib/egress-host-guard.ts";
 import { ApiError, badGateway } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import {
@@ -57,12 +57,17 @@ interface ProxiedMcpOperationInput extends McpOperationInput {
 
 /**
  * Per MCP exchange (a `tools/list` page or a tool result), bounded like an `api_call` body; the
- * proxy's `max_response_bytes` wins when lower.
+ * proxy's `max_response_bytes` wins when lower ({@link exchangeBound}).
  */
-export const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
+const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
+
+/** The bound an MCP answer is read under, on either path. */
+function exchangeBound(): number {
+  return Math.min(MAX_EXCHANGE_BYTES, getCredentialProxyLimits().max_response_bytes);
+}
 
 /** An MCP exchange whose answer exceeded the bound it is read under: the server did answer. */
-export class McpExchangeTooLargeError extends Error {
+class McpExchangeTooLargeError extends Error {
   constructor(readonly limit: number) {
     super(`an MCP answer exceeds ${limit} bytes`);
     this.name = "McpExchangeTooLargeError";
@@ -299,10 +304,7 @@ function mcpOperation(
  */
 export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperation {
   return mcpOperation(input, async ({ method, href, init, signal, reached, fail }) => {
-    const maxResponseBytes = Math.min(
-      MAX_EXCHANGE_BYTES,
-      getCredentialProxyLimits().max_response_bytes,
-    );
+    const maxResponseBytes = exchangeBound();
     let result;
     try {
       result = await proxyCall({
@@ -349,55 +351,54 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
 
 /**
  * One MCP operation of an unauthenticated integration (AFPS §7.2), its server reached directly
- * with nothing injected: a URL the egress guard refuses (plain `http` included, for a host the
- * operator does not trust) fails the operation before any exchange, and every redirect hop is
- * guarded again. Journaled as one row without a connection; a challenge flags nothing, there is no
- * connection to flag.
+ * with nothing injected, through the egress guard on every hop, the https floor
+ * (`isCleartextToUntrustedHost`) included: a hop it refuses fails the operation as a refusal,
+ * journaled only when an earlier hop was sent. The answer is relayed as it streams, under the
+ * proxied path's bound. Journaled as one row without a connection; a challenge flags nothing,
+ * there is no connection to flag.
  */
 export function directMcpOperation(input: McpOperationInput): McpOperation {
-  const egressFetch = egressFetchImpl();
-  const verdicts = new Map<string, Promise<boolean>>();
-  const allowed = (href: string) => {
-    let verdict = verdicts.get(href);
-    if (!verdict) {
-      verdict = checkEgressUrl(href, { requireHttpsForUntrustedHost: true }).then((c) => c.ok);
-      verdicts.set(href, verdict);
-    }
-    return verdict;
-  };
+  const egressFetch = egressFetchImpl({
+    validateHop: (url, hop) => {
+      if (isCleartextToUntrustedHost(url))
+        throw new SsrfBlockedError(url.hostname, "blocked-scheme", hop);
+    },
+  });
   return mcpOperation(input, async ({ href, init, signal, reached, fail }) => {
-    if (!(await allowed(href))) {
-      const err = badGateway(
-        `The MCP server at ${URL.parse(href)?.origin} is refused by the egress guard.`,
-      );
-      fail(err);
-      throw err;
-    }
+    const bound = exchangeBound();
     let res;
     try {
       res = await egressFetch(href, { ...init, signal });
     } catch (err) {
-      // A refused initial URL sent nothing; anything else may have reached the server.
-      if (!(err instanceof SsrfBlockedError && err.hop === 0)) reached(null, directFailure(err));
+      if (err instanceof SsrfBlockedError) {
+        // A refused first hop sent nothing; a refused redirect followed a request that was sent.
+        if (err.hop > 0) reached(null, "blocked_target");
+        const refusal = badGateway(
+          `The MCP server at ${new URL(href).origin} is refused by the egress guard.`,
+        );
+        fail(refusal);
+        throw refusal;
+      }
+      reached(null, classifyApiCallFailure(err).code);
       throw err;
     }
     reached(null, String(res.status));
-    const body = await readBodyUnder(res, MAX_EXCHANGE_BYTES);
-    if (body === null) {
-      const err = new McpExchangeTooLargeError(MAX_EXCHANGE_BYTES);
-      fail(err);
-      throw err;
-    }
-    return new Response(body, { status: res.status, headers: res.headers });
+    // An answer past the bound fails the operation, rather than handing the client half a message.
+    let read = 0;
+    const relayed =
+      res.body?.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            read += chunk.byteLength;
+            if (read <= bound) return controller.enqueue(chunk);
+            const err = new McpExchangeTooLargeError(bound);
+            fail(err);
+            controller.error(err);
+          },
+        }),
+      ) ?? null;
+    return new Response(relayed, { status: res.status, headers: res.headers });
   });
-}
-
-/** A failed direct exchange's journal outcome, in the proxy's codes. */
-function directFailure(err: unknown): string {
-  if (err instanceof SsrfBlockedError) return "blocked_target";
-  return findCause(err, (e) => e.name === "TimeoutError")
-    ? "upstream_timeout"
-    : "upstream_unreachable";
 }
 
 /** `work`'s outcome, or `signal`'s reason once it aborts first; `work` then settles unobserved. */
