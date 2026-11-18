@@ -563,10 +563,14 @@ export async function extractDocumentText(input: {
   const format = documentFormatOf(input.mime, input.name);
   if (!format) return { status: "unsupported", reason: "format" };
   if (input.size > DOCUMENT_SOURCE_MAX_BYTES) return { status: "unsupported", reason: "too_large" };
-  return documentTextCache.get(`${input.sha256}:${format}`, async () => {
+  // A body that cannot be read (the storage object is momentarily gone) answers `undefined` from
+  // the loader, which the cache answers but never stores: a transient miss must not read as
+  // "corrupt" to every reader of the same content for the next ten minutes.
+  const extracted = await documentTextCache.get(`${input.sha256}:${format}`, async () => {
     const bytes = await input.read();
-    return bytes ? extract(bytes, format, DOCUMENT_TEXT_MAX_CHARS) : { status: "failed", format };
+    return bytes ? extract(bytes, format, DOCUMENT_TEXT_MAX_CHARS) : undefined;
   });
+  return extracted ?? { status: "failed", format };
 }
 
 /** Extraction with an explicit cap, uncached: the seam the unit tests drive. */

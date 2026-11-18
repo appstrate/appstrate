@@ -171,6 +171,22 @@ describe("extractDocumentText (cached by sha256)", () => {
     expect(reads).toBe(1);
   });
 
+  it("does not cache a read that found no bytes: the next read gets the text", async () => {
+    const input = {
+      sha256: `hash-${crypto.randomUUID()}`,
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      name: "a.docx",
+      size: docx.byteLength,
+    };
+    expect(await extractDocumentText({ ...input, read: async () => null })).toEqual({
+      status: "failed",
+      format: "docx",
+    });
+    expect(await extractDocumentText({ ...input, read: async () => docx })).toMatchObject({
+      status: "text",
+    });
+  });
+
   it("does not open a file over the source cap, nor a format it does not read", async () => {
     const read = async () => {
       throw new Error("must not be read");
