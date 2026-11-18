@@ -241,7 +241,11 @@ async function withClient<T>(
   };
   const operation =
     input.connectionId === null
-      ? directMcpOperation(base)
+      ? directMcpOperation({
+          ...base,
+          // As the proxy re-selects a connection on each exchange: switched off since, no exchange.
+          beforeExchange: () => assertActiveOutsideRun(input.scope, input.integrationId),
+        })
       : proxiedMcpOperation({ ...base, connectionId: input.connectionId, reach: input.reach });
   let client: AppstrateMcpClient | undefined;
   try {

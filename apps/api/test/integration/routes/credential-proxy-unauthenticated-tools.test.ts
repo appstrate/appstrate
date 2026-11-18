@@ -160,6 +160,7 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     });
     return {
       status: res.status,
+      proxyStatus: res.headers.get("proxy-status"),
       body: (await res.json()) as {
         result?: { content: unknown[] };
         code?: string;
@@ -167,6 +168,14 @@ describe("the typed tools of an unauthenticated remote integration", () => {
         param?: string;
       },
     };
+  };
+
+  /** The proxy's own refusal of a target, as the proxied path answers it. */
+  const expectEgressRefusal = (called: Awaited<ReturnType<typeof call>>, origin: string) => {
+    expect(called.status).toBe(403);
+    expect(called.body.code).toBe("blocked_target");
+    expect(called.body.detail).toBe(`The MCP server at ${origin} is refused by the egress guard.`);
+    expect(called.proxyStatus).toContain("error=destination_ip_prohibited");
   };
 
   const journal = async () => {
@@ -358,11 +367,10 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     it("for a server the egress guard refuses (plain http to a host the operator does not trust)", async () => {
       await seedProxyIntegration(ctx, unauthenticated("http://mcp.untrusted.test/mcp"));
       const called = await call({ name: "read_media_file" });
-      expect(called.status).toBe(502);
-      expect(called.body.detail).toContain("refused by the egress guard");
+      expectEgressRefusal(called, "http://mcp.untrusted.test");
       const listed = await list({ integration_package_id: ID });
       expect(listed.body.tools).toEqual([]);
-      expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual(["bad_gateway"]);
+      expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual(["blocked_target"]);
       expect(await journal()).toEqual([]);
     });
   });
@@ -386,13 +394,10 @@ describe("the typed tools of an unauthenticated remote integration", () => {
           await withEnv({ EGRESS_ALLOW_INTERNAL_HOSTS: "127.0.0.1" }, async () => {
             await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
             const called = await call({ name: "read_media_file" });
-            expect(called.status).toBe(502);
-            expect(called.body.detail).toBe(
-              `The MCP server at ${new URL(redirecting.url).origin} is refused by the egress guard.`,
-            );
+            expectEgressRefusal(called, new URL(redirecting.url).origin);
             const listed = await list({ integration_package_id: ID });
             expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual([
-              "bad_gateway",
+              "blocked_target",
             ]);
           });
           expect(redirecting.received.length).toBeGreaterThan(0);
@@ -470,6 +475,98 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     } finally {
       held.stop();
       sse.stop();
+    }
+  });
+
+  describe("a redirect", () => {
+    /** A relay to the shared server, recording each request's headers and body. */
+    const startRecordingRelay = () => {
+      const seen: { headers: Headers; body: string }[] = [];
+      const relay = startServer(async (req) => {
+        const body = await req.text();
+        seen.push({ headers: req.headers, body });
+        return fetch(server.url, { method: req.method, headers: req.headers, body });
+      });
+      return { ...relay, seen };
+    };
+
+    it("to the same host on another port keeps the body: the call succeeds", async () => {
+      const redirecting = startServer(
+        () => new Response(null, { status: 307, headers: { Location: server.url } }),
+      );
+      try {
+        await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
+        const { status, body } = await call({ name: "read_media_file" });
+        expect(status).toBe(200);
+        expect(body.result!.content).toEqual([IMAGE]);
+        expect(server.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
+      } finally {
+        redirecting.stop();
+      }
+    });
+
+    for (const [host, kept] of [
+      ["127.0.0.1", true],
+      ["localhost", false],
+    ] as const) {
+      it(`to ${host} ${kept ? "keeps" : "strips"} the session id the server set`, async () => {
+        const relay = startRecordingRelay();
+        const session = startFakeMcpServer({ tools: ["read_media_file"], sessionId: "sess-1" });
+        // `initialize` answered with a session id; every later request redirected to the relay.
+        const redirecting = startServer(async (req) => {
+          const body = await req.text();
+          if (body.includes('"initialize"')) {
+            return fetch(session.url, { method: "POST", headers: req.headers, body });
+          }
+          return new Response(null, {
+            status: 307,
+            headers: { Location: `http://${host}:${relay.port}/mcp` },
+          });
+        });
+        try {
+          await seedProxyIntegration(ctx, unauthenticated(redirecting.url));
+          const called = await call({ name: "read_media_file" });
+          // The era probe precedes the session; every request after `initialize` is redirected.
+          const inSession = relay.seen.filter((r) => !r.body.includes('"server/discover"'));
+          expect(inSession.length).toBeGreaterThan(0);
+          for (const request of inSession) {
+            expect(request.headers.get("mcp-session-id")).toBe(kept ? "sess-1" : null);
+          }
+          if (kept) {
+            expect(called.status).toBe(200);
+            expect(relay.seen.some((r) => r.body.includes('"tools/call"'))).toBe(true);
+          } else {
+            // Another host gets neither the session nor the body: the call goes nowhere.
+            expect(called.status).not.toBe(200);
+            expect(inSession.every((r) => r.body === "")).toBe(true);
+          }
+        } finally {
+          redirecting.stop();
+          session.stop();
+          relay.stop();
+        }
+      });
+    }
+  });
+
+  it("re-checks activation before each exchange: switched off mid-operation, no tools/call is sent", async () => {
+    const slow = startFakeMcpServer({
+      tools: [{ name: "read_media_file", result: { content: [IMAGE] } }],
+      delayMs: 300,
+      delayedMethod: "initialize",
+    });
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(slow.url));
+      const pending = call({ name: "read_media_file" });
+      // Once `initialize` reached the server, and while it waits to answer.
+      while (!slow.requests.some((r) => r.body.includes('"initialize"'))) await Bun.sleep(5);
+      await db.update(spacePackages).set({ enabled: false }).where(eq(spacePackages.packageId, ID));
+      const called = await pending;
+      expect(called.status).toBe(404);
+      expect(called.body.detail).toContain("not active in this space");
+      expect(slow.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+    } finally {
+      slow.stop();
     }
   });
 

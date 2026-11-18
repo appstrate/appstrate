@@ -681,11 +681,30 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
   it("refuses a server the egress guard refuses, before any exchange", async () => {
     await seedProxyIntegration(ctx, unauthenticated("http://mcp.untrusted.test/mcp"));
     const res = await syncOpen();
-    expect(res.status).toBe(502);
-    expect(((await res.json()) as { detail: string }).detail).toContain(
-      "refused by the egress guard",
-    );
+    expect(res.status).toBe(403);
+    expect(res.headers.get("proxy-status")).toContain("error=destination_ip_prohibited");
+    expect((await res.json()) as { code: string; detail: string }).toMatchObject({
+      code: "blocked_target",
+      detail: "The MCP server at http://mcp.untrusted.test is refused by the egress guard.",
+    });
     expect(await journaled()).toEqual([]);
+  });
+
+  it("follows a redirect to the same host on another port with its body", async () => {
+    const redirecting = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(null, { status: 307, headers: { Location: open.url } }),
+    });
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(`http://127.0.0.1:${redirecting.port}/mcp`));
+      const res = await syncOpen();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { tools: { name: string }[] };
+      expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    } finally {
+      redirecting.stop(true);
+    }
   });
 
   it("synchronizes in a space that closes the credential proxy: the sync asks no proxy right", async () => {

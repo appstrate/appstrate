@@ -815,7 +815,8 @@ export const credentialProxyPaths = {
         "connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations " +
         "whose server the proxy refused to list (connection selection, permission, " +
         "`authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's " +
-        "credential (`upstream_credential_rejected`), each with that refusal; resolving a `name` " +
+        "credential (`upstream_credential_rejected`) or, declaring no auths, asked for one " +
+        "(`bad_gateway`), each with that refusal; resolving a `name` " +
         "only the unread catalog could map (under `allow_undeclared_tools`, neither a declared " +
         "tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits " +
         "never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could " +
@@ -968,8 +969,9 @@ export const credentialProxyPaths = {
         "refusals and the result carry none. The arguments go to the server as given: it " +
         "validates them. An integration declaring no `auths` (AFPS §7.2) is called without any " +
         "connection: its server is reached directly (egress-guarded on the URL and every " +
-        "redirect hop, https required for an untrusted host, the same exchange bound, nothing " +
-        "injected), the call is journaled with no connection, a `connection_id` is refused " +
+        "redirect hop, https required for an untrusted host, a refusal answered as the proxy's " +
+        "`403 blocked_target`; the same exchange bound; nothing injected; activation re-checked " +
+        "before each exchange), the call is journaled with no connection, a `connection_id` is refused " +
         "(`credential_not_found`) before any exchange, and the server's 401 or 403 is a " +
         "`502 bad_gateway` (it declares no authentication) that flags nothing. " +
         "Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
@@ -1058,7 +1060,9 @@ export const credentialProxyPaths = {
             "`credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's " +
             "refusals of the server URL, before anything is sent: `unauthorized_target` " +
             "(`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), " +
-            "`credential_exfiltration_refused` (`http_request_denied`).",
+            "`credential_exfiltration_refused` (`http_request_denied`). For an integration " +
+            "declaring no auths, `blocked_target` also answers the egress guard refusing a " +
+            "redirect hop, after the first hop was sent.",
           headers: PROXY_STATUS_HEADER,
           content: problemContent,
         },

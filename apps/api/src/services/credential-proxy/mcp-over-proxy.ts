@@ -22,7 +22,7 @@ import { credentialMember, type CredentialStatus } from "../../lib/credential-st
 import { findCause } from "@appstrate/core/error-cause";
 import { classifyApiCallFailure } from "@appstrate/afps-runtime/resolvers";
 import { egressFetchImpl, isCleartextToUntrustedHost } from "../../lib/egress-host-guard.ts";
-import { ApiError, badGateway } from "../../lib/errors.ts";
+import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import {
   proxyProblem,
@@ -352,19 +352,34 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
 /**
  * One MCP operation of an unauthenticated integration (AFPS §7.2), its server reached directly
  * with nothing injected, through the egress guard on every hop, the https floor
- * (`isCleartextToUntrustedHost`) included: a hop it refuses fails the operation as a refusal,
- * journaled only when an earlier hop was sent. The answer is relayed as it streams, under the
- * proxied path's bound. Journaled as one row without a connection; a challenge flags nothing,
- * there is no connection to flag.
+ * (`isCleartextToUntrustedHost`) included: a hop it refuses fails the operation with the proxy's
+ * `blocked_target` refusal, journaled only when an earlier hop was sent. A redirect keeps the
+ * body and the session on the target's own host (a scheme or port upgrade) and strips them on
+ * any other. `beforeExchange` is asked before each exchange, as the proxy re-selects its
+ * connection on each one; a refusal there fails the operation, nothing sent. The answer is
+ * relayed as it streams, under the proxied path's bound. Journaled as one row without a
+ * connection; a challenge flags nothing, there is no connection to flag.
  */
-export function directMcpOperation(input: McpOperationInput): McpOperation {
-  const egressFetch = egressFetchImpl({
-    validateHop: (url, hop) => {
-      if (isCleartextToUntrustedHost(url))
-        throw new SsrfBlockedError(url.hostname, "blocked-scheme", hop);
-    },
-  });
+export function directMcpOperation(
+  input: McpOperationInput & { beforeExchange?: () => Promise<void> },
+): McpOperation {
   return mcpOperation(input, async ({ href, init, signal, reached, fail }) => {
+    const target = new URL(href);
+    try {
+      await input.beforeExchange?.();
+    } catch (err) {
+      if (err instanceof Error) fail(err);
+      throw err;
+    }
+    const egressFetch = egressFetchImpl({
+      validateHop: (url, hop) => {
+        if (isCleartextToUntrustedHost(url)) {
+          throw new SsrfBlockedError(url.hostname, "blocked-scheme", hop);
+        }
+      },
+      forwardCredentials: (next) => next.hostname === target.hostname,
+      sensitiveHeaders: ["mcp-session-id"],
+    });
     const bound = exchangeBound();
     let res;
     try {
@@ -373,8 +388,9 @@ export function directMcpOperation(input: McpOperationInput): McpOperation {
       if (err instanceof SsrfBlockedError) {
         // A refused first hop sent nothing; a refused redirect followed a request that was sent.
         if (err.hop > 0) reached(null, "blocked_target");
-        const refusal = badGateway(
-          `The MCP server at ${new URL(href).origin} is refused by the egress guard.`,
+        const refusal = proxyProblem(
+          "blocked_target",
+          `The MCP server at ${target.origin} is refused by the egress guard.`,
         );
         fail(refusal);
         throw refusal;
