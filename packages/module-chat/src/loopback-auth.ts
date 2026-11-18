@@ -99,6 +99,8 @@ interface LoopbackClaims extends LoopbackIdentity {
   chatSessionId?: string | null;
   /** The skills the turn's prompt injected, as served; MCP bearer only (→ `skill://` reads). */
   injectedSkills?: InjectedSkills;
+  /** The turn this bearer was minted for; MCP bearer only (→ what the turn may import). */
+  turnId?: string;
   /**
    * The turn's spaces, as a credential allowlist (`AuthResolution.spaceIds`): the only spaces
    * the bearer reaches; MCP bearer only. Absent means unbound — the inference bearer.
@@ -184,6 +186,8 @@ export function mintMcpLoopbackToken(
     injectedSkills?: InjectedSkills;
     /** The conversation, for what a call stores in it (`save_as_file`). Absent on an ephemeral turn. */
     chatSessionId?: string | null;
+    /** The turn, so what it imports is bounded as a whole (`save_as_file`). */
+    turnId?: string;
     /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
     spaceIds?: readonly string[];
   },
@@ -260,6 +264,7 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // llm-proxy; `viewAs` is re-published before any permission is resolved.
       ...(claims.chatSessionId !== undefined ||
       claims.viewAs !== undefined ||
+      typeof claims.turnId === "string" ||
       injectedSkills !== undefined
         ? {
             extra: {
@@ -267,6 +272,7 @@ export const chatLoopbackStrategy: AuthStrategy = {
                 ? { chatSessionId: claims.chatSessionId }
                 : {}),
               ...(claims.viewAs !== undefined ? { viewAs: claims.viewAs } : {}),
+              ...(typeof claims.turnId === "string" ? { chatTurnId: claims.turnId } : {}),
               ...(injectedSkills !== undefined
                 ? { [INJECTED_SKILLS_AUTH_EXTRA]: injectedSkills }
                 : {}),

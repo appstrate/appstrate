@@ -357,6 +357,12 @@ function chatSessionIdOf(c: Context<AppEnv>): string | null {
   return typeof id === "string" && id !== "" ? id : null;
 }
 
+/** The chat turn the bearer was minted for (`authExtra`), or null. */
+function chatTurnIdOf(c: Context<AppEnv>): string | null {
+  const id = c.get("authExtra")?.chatTurnId;
+  return typeof id === "string" && id !== "" ? id : null;
+}
+
 function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
   return isBearerOnlyCaller(bearerCaller(c), "credential-proxy");
 }
@@ -693,6 +699,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       orgSpaces,
       // Signed into the chat's own bearer; `authExtra` is the strategy's, never a header.
       chatSessionId: chatSessionIdOf(c),
+      chatTurnId: chatTurnIdOf(c),
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)

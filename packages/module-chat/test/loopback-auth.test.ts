@@ -103,6 +103,32 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
     expect(plain!.extra).toBeUndefined();
   });
 
+  it("carries the conversation and the turn of the MCP bearer, signed, for what a call imports", async () => {
+    const token = mintMcpLoopbackToken({
+      ...claims,
+      permissions: callerPermissions,
+      chatSessionId: "chs_1",
+      turnId: "turn_1",
+    });
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    expect(res!.extra).toMatchObject({ chatSessionId: "chs_1", chatTurnId: "turn_1" });
+    // A forged payload does not verify: neither claim can be set by a caller.
+    const [payload, signature] = token.slice("chatloop_".length).split(".");
+    const forged = Buffer.from(
+      JSON.stringify({ ...JSON.parse(Buffer.from(payload!, "base64url").toString()), turnId: "x" }),
+    ).toString("base64url");
+    expect(
+      await chatLoopbackStrategy.authenticate({
+        headers: authHeaders(`chatloop_${forged}.${signature}`),
+      } as never),
+    ).toBeNull();
+    // No turn, no key: the inference bearer carries none.
+    const plain = await chatLoopbackStrategy.authenticate({
+      headers: authHeaders(mintMcpLoopbackToken({ ...claims, permissions: callerPermissions })),
+    } as never);
+    expect(plain!.extra).toBeUndefined();
+  });
+
   it("carries the injected skills into `extra[INJECTED_SKILLS_AUTH_EXTRA]`, only on the MCP bearer", async () => {
     const injectedSkills = {
       skills: {

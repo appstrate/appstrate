@@ -92,6 +92,7 @@ import {
   type DocumentFormat,
 } from "../../services/document-text.ts";
 import { formatBytes } from "@appstrate/core/format";
+import { chargeTurnImport } from "../../services/chat-import-budget.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
@@ -222,6 +223,8 @@ export interface McpToolContext {
    * of that conversation (`save_as_file`); `null`/absent for every other client.
    */
   chatSessionId?: string | null;
+  /** The chat turn the bearer was minted for: what the turn imports is bounded as a whole. */
+  chatTurnId?: string | null;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -2013,12 +2016,20 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
           ...(ctx.chatSessionId
             ? {
                 saveFile: async ({ name, mime, bytes }) => {
+                  // Bounded per turn as well as per call: a turn reads third-party content.
+                  const refund = chargeTurnImport(
+                    ctx.chatTurnId ?? ctx.chatSessionId!,
+                    bytes.byteLength,
+                  );
                   const row = await createChatFileFromBytes(
                     ctx.scope,
                     ctx.actor,
                     ctx.chatSessionId!,
                     { name, mime, bytes },
-                  );
+                  ).catch((error: unknown) => {
+                    refund();
+                    throw error;
+                  });
                   return {
                     uri: fileUri(row.id),
                     name: row.name,

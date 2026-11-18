@@ -821,6 +821,8 @@ export async function handleChatStream(
       // The conversation, so a file the turn imports (`save_as_file`) is anchored to it. Null on an
       // ephemeral turn: with no conversation there is nothing to hold the file.
       chatSessionId: meteringSessionId,
+      // The turn, so what it imports from connectors is bounded as a whole.
+      turnId: streamId,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
