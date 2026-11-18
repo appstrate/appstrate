@@ -32,6 +32,7 @@ import { getPlatformServices } from "../platform.ts";
 import { logger } from "../logger.ts";
 import { billableSeconds, periodStartOf } from "./period.ts";
 import { emitComputeSignals, type ComputeIncrement } from "./alerts.ts";
+import { purgeOrphanedOrgs } from "./orphans.ts";
 
 /** How far below the watermark a pass re-reads, to catch a run that committed late. */
 export const REPLAY_WINDOW_MS = 10 * 60 * 1000;
@@ -206,7 +207,7 @@ let replayRequested = false;
  * Run a settlement pass, single-flight per process. Only the timer's pass (`replay`) re-reads
  * the window below the watermark: it is what recovers a run that committed late, once a
  * minute, instead of every terminal event re-reading and re-claiming the whole window. A pass
- * triggered by an event starts at the watermark. A call made during a pass asks for one more
+ * triggered by an event starts at the watermark. A call made during a pass a call during a pass asks for one more
  * pass when it ends instead of stacking a second concurrent one, and shares the promise of the
  * one in flight. Never rejects: a failing pass is logged, and the next trigger or the timer
  * repairs it.
@@ -259,13 +260,28 @@ const DRAIN_TIMEOUT_MS = 60_000;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let stopped = true;
 
+/** Ticks between two purges of deleted organizations' rows: hourly at a 60 s cadence. */
+const PURGE_EVERY_TICKS = 60;
+let ticks = 0;
+
+async function maybePurgeOrphans(): Promise<void> {
+  if (++ticks % PURGE_EVERY_TICKS !== 0) return;
+  try {
+    await purgeOrphanedOrgs();
+  } catch (err) {
+    logger.error("compute orphan purge failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 function scheduleNext(): void {
   if (stopped) return;
   const jitter = 0.9 + Math.random() * 0.2;
   timer = setTimeout(() => {
     // Shares the event-poked passes' single flight, so a tick and an event never both read
     // and claim the same window.
-    void settleSingleFlight(true).finally(scheduleNext);
+    void settleSingleFlight(true).then(maybePurgeOrphans).finally(scheduleNext);
   }, SWEEP_INTERVAL_MS * jitter);
   // A trailing tick must not keep the process alive.
   timer.unref?.();
