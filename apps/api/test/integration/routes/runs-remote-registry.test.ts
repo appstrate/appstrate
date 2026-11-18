@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { countTestSelects } from "../../helpers/db.ts";
+
 /**
  * Integration tests for `POST /api/runs/remote` — `kind: "registry"` path.
  *
@@ -29,15 +31,16 @@ import {
   loseVersionArchive,
   seedPackage,
   seedPackageVersion,
+  seedPublishedVersion,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
+import { resolveRegistryAgent } from "../../../src/services/registry-run-resolver.ts";
 import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import {
   runs,
   packages,
   packageVersions,
-  packageDistTags,
   integrationConnections,
   integrationPins,
 } from "@appstrate/db/schema";
@@ -46,6 +49,7 @@ import {
   seedConnectionTestIntegration,
   seedIntegrationConnection,
 } from "../../helpers/run-connection-fixtures.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { validateManifest } from "@appstrate/core/validation";
 import { and } from "drizzle-orm";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -89,17 +93,7 @@ async function seedRegistryAgent(
     draftManifest: manifest,
     draftContent: PROMPT,
   });
-  const versionRow = await seedPackageVersion({
-    packageId: "@acme/briefing",
-    version,
-    integrity: "sha256-test",
-    artifactSize: 1024,
-    manifest,
-  });
-  await db
-    .insert(packageDistTags)
-    .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-  await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
+  await seedPublishedVersion("@acme/briefing", version, { manifest, content: PROMPT });
   await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 }
 
@@ -197,6 +191,26 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(ephemerals).toHaveLength(0);
   });
 
+  it.skipIf(process.env.TEST_TIER !== "0")(
+    "resolves each published selector with one catalogue lookup",
+    async () => {
+      await seedPublishedAgent(ctx);
+      for (const spec of ["1.2.3", "^1.0.0", undefined]) {
+        const selects = await countTestSelects(async () => {
+          const selected = await resolveRegistryAgent({
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            packageId: "@acme/briefing",
+            stage: "published",
+            spec,
+          });
+          expect(selected.agent.prompt).toBe(PROMPT);
+        }, /^select .* from "package_(?:versions|dist_tags)"/i);
+        expect(selects).toBeLessThanOrEqual(3);
+      }
+    },
+  );
+
   it("resolves `latest` when no spec is supplied", async () => {
     await seedPublishedAgent(ctx, "1.0.0");
 
@@ -237,17 +251,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       draftManifest: manifest,
       draftContent: PROMPT,
     });
-    const versionRow = await seedPackageVersion({
-      packageId: "@acme/briefing",
-      version,
-      integrity: "sha256-test",
-      artifactSize: 1024,
-      manifest,
-    });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-    await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
+    await seedPublishedVersion("@acme/briefing", version, { manifest, content: PROMPT });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
@@ -282,17 +286,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       draftManifest: publishedManifest(version) as unknown as Record<string, unknown>,
       draftContent: PROMPT,
     });
-    const versionRow = await seedPackageVersion({
-      packageId: "@acme/briefing",
-      version,
-      integrity: "sha256-test",
-      artifactSize: 1024,
-      manifest,
-    });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-    await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
+    await seedPublishedVersion("@acme/briefing", version, { manifest, content: PROMPT });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
@@ -363,44 +357,10 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
     // Publish one too, so the control below runs the SAME agent from the SAME
     // caller and the only thing that changes is the stage.
-    const versionRow = await seedPackageVersion({
-      packageId: "@acme/draft-only",
-      version: "0.0.1",
-      integrity: "sha256-test",
-      artifactSize: 1024,
-      manifest: {
-        name: "@acme/draft-only",
-        display_name: "Draft-only Agent",
-        version: "0.0.1",
-        type: "agent",
-        description: "Test agent",
-        schema_version: "0.1",
-        author: "tester",
-        timeout: 300,
-        dependencies: { skills: {}, integrations: {} },
-      },
+    await seedPublishedVersion("@acme/draft-only", "0.0.1", {
+      manifest: { ...publishedManifest("0.0.1"), name: "@acme/draft-only" },
+      content: PROMPT,
     });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: "@acme/draft-only", tag: "latest", versionId: versionRow.id });
-    await uploadPackageZip(
-      "@acme/draft-only",
-      "0.0.1",
-      buildMinimalZip(
-        {
-          name: "@acme/draft-only",
-          display_name: "Draft-only Agent",
-          version: "0.0.1",
-          type: "agent",
-          description: "Test agent",
-          schema_version: "0.1",
-          author: "tester",
-          timeout: 300,
-          dependencies: { skills: {}, integrations: {} },
-        },
-        PROMPT,
-      ),
-    );
 
     const operator = await createTestUser();
     await addOrgMember(ctx.orgId, operator.id, "member");
@@ -591,9 +551,27 @@ describe("POST /api/runs/remote — kind: registry", () => {
       );
     });
 
+    it("refuses an archive whose bytes differ from the resolved catalogue row", async () => {
+      await seedPublishedAgent(ctx);
+      await uploadPackageZip(
+        "@acme/briefing",
+        "1.2.3",
+        buildMinimalZip(publishedManifest(), "A different prompt"),
+      );
+      await expectProblem(await launch(), 500, { code: "bundle_integrity_mismatch" });
+      expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
+        0,
+      );
+    });
+
     it("keeps the signature gate's coded 422 when a required policy parses a corrupt archive", async () => {
       await seedPublishedAgent(ctx, "1.2.3");
-      await uploadPackageZip("@acme/briefing", "1.2.3", new TextEncoder().encode("not a zip"));
+      const corrupt = new TextEncoder().encode("not a zip");
+      await uploadPackageZip("@acme/briefing", "1.2.3", corrupt);
+      await db
+        .update(packageVersions)
+        .set({ integrity: computeIntegrity(corrupt) })
+        .where(eq(packageVersions.packageId, "@acme/briefing"));
       // A run is an EXECUTION read, so `required` parses the bytes before the
       // unzip: the failure is a bundle-layer throw, coded — never an uncoded 500.
       const saved = process.env.AFPS_SIGNATURE_POLICY;
@@ -1000,17 +978,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       draftManifest: manifest,
       draftContent: PROMPT,
     });
-    const versionRow = await seedPackageVersion({
-      packageId: "@acme/briefing",
-      version: "2.0.0",
-      integrity: "sha256-test",
-      artifactSize: 1024,
-      manifest,
-    });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-    await uploadPackageZip("@acme/briefing", "2.0.0", buildMinimalZip(manifest, PROMPT));
+    await seedPublishedVersion("@acme/briefing", "2.0.0", { manifest, content: PROMPT });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({

@@ -253,18 +253,17 @@ describe("run read isolation between members", () => {
       scheduleId,
       startedAt: T2,
     });
-    const [first, second] = [runAScheduled, tied.id].sort().reverse();
     for (const path of [`/api/agents/${AGENT_PATH}/runs`, `/api/schedules/${scheduleId}/runs`]) {
-      for (const [cursor, expected] of [
-        ["", first],
-        [`&startingAfter=${first}`, second],
-      ]) {
+      const ids: string[] = [];
+      for (let page = 0; page < 2; page++) {
+        const cursor = page ? `&startingAfter=${ids[0]}` : "";
         const response = await app.request(`${path}?limit=1${cursor}`, {
           headers: authHeaders(operatorA),
         });
         expect(response.status).toBe(200);
-        expect(((await response.json()) as RunList).data.map((run) => run.id)).toEqual([expected]);
+        ids.push(...((await response.json()) as RunList).data.map((run) => run.id));
       }
+      expect(ids).toEqual([runAScheduled, tied.id].sort().reverse());
     }
   });
 

@@ -150,7 +150,7 @@ export async function resolveRegistryAgent(
   // nothing resolves — let it bubble.
   const detail = await resolveExportVersion(packageId, spec ?? null);
   const { version } = detail;
-  const content = await readVersionArchive(packageId, version, { forExecution: true });
+  const content = await readVersionArchive(packageId, version, { integrity: detail.integrity });
   if (detail.yanked) {
     throw new ApiError({
       status: 410,
