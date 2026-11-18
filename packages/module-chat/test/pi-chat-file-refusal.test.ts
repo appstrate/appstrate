@@ -3,130 +3,33 @@
 import { describe, expect, it } from "bun:test";
 import { payloadTooLarge } from "@appstrate/core/api-errors";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
-import {
-  createFileRefusal,
-  fileKindsIn,
-  mayBeFileRefusal,
-  withholdFiles,
-} from "../src/pi-chat/file-refusal.ts";
+import { createFileRefusal } from "../src/pi-chat/file-refusal.ts";
 
+const POINTER = "[file withheld: the model refused it]";
 const text = { type: "text", text: "hi" };
 const image = { type: "image", source: { type: "base64", data: "AAAA" } };
+const pdf = { type: "document", source: { type: "base64", data: "BBBB" } };
 const withImage = { messages: [{ role: "user", content: [text, image] }] };
+const withBoth = {
+  messages: [
+    { role: "user", content: [text, image] },
+    { role: "user", content: [text, pdf] },
+  ],
+};
 
-describe("fileKindsIn", () => {
-  it("finds image and PDF parts in messages, tool results and Responses items", () => {
-    expect(fileKindsIn({ messages: [{ role: "user", content: [text] }] }).size).toBe(0);
-    expect(fileKindsIn({ messages: [{ role: "user", content: "plain" }] }).size).toBe(0);
-    for (const [type, kind] of [
-      ["image", "image"],
-      ["image_url", "image"],
-      ["document", "pdf"],
-      ["file", "pdf"],
-    ]) {
-      expect([...fileKindsIn({ messages: [{ role: "user", content: [text, { type }] }] })]).toEqual(
-        [kind],
-      );
-    }
-    expect([
-      ...fileKindsIn({
-        messages: [
-          { role: "user", content: [{ type: "tool_result", content: [{ type: "image" }] }] },
-        ],
-      }),
-    ]).toEqual(["image"]);
-    expect([
-      ...fileKindsIn({
-        input: [
-          { role: "user", content: [{ type: "input_image" }] },
-          { type: "function_call_output", output: [{ type: "input_file" }] },
-        ],
-      }),
-    ]).toEqual(["image", "pdf"]);
-  });
-
-  it("ignores tool schemas and a tool call's own arguments", () => {
-    const payload = {
-      tools: [{ type: "file" }],
-      messages: [{ role: "assistant", content: [{ type: "tool_use", input: { type: "image" } }] }],
-    };
-    expect(fileKindsIn(payload).size).toBe(0);
-  });
-});
-
-describe("withholdFiles", () => {
-  it("replaces only the withheld kinds with a pointer, in the API's text type", () => {
-    const pdf = { type: "document", source: { data: "BBBB" } };
-    const payload = {
-      model: "m",
-      messages: [
-        { role: "user", content: [text, { ...image, cache_control: { type: "ephemeral" } }] },
-        { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [pdf] }] },
-      ],
-    };
-    expect(withholdFiles(payload, new Set(["image"]), "anthropic-messages")).toEqual({
-      model: "m",
-      messages: [
-        {
-          role: "user",
-          content: [
-            text,
-            {
-              type: "text",
-              text: "[file withheld: the model refused it]",
-              cache_control: { type: "ephemeral" },
-            },
-          ],
-        },
-        payload.messages[1],
-      ],
-    });
-    const responses = {
-      input: [{ type: "function_call_output", output: [{ type: "input_file" }] }],
-    };
-    expect(withholdFiles(responses, new Set(["pdf"]), "openai-responses")).toEqual({
-      input: [
-        {
-          type: "function_call_output",
-          output: [{ type: "input_text", text: "[file withheld: the model refused it]" }],
-        },
-      ],
-    });
-  });
-});
-
-describe("mayBeFileRefusal", () => {
-  it("holds for an invalid request", () => {
-    expect(mayBeFileRefusal("400 Invalid image data")).toBe(true);
-    // A non-file 4xx is a suspect too: the replay decides.
-    expect(mayBeFileRefusal("400 Unsupported parameter: 'temperature'")).toBe(true);
-  });
-
-  it("does not hold for the llm-proxy's body limit, which pi-ai reads as an overflow", () => {
-    // What the OpenAI SDK makes of the problem+json `bodyLimit` answers (`apps/api`).
-    const problem = payloadTooLarge("Request body exceeds the 10485760-byte limit").toProblemDetail(
-      "req_1",
-    );
-    expect(mayBeFileRefusal(`413 ${JSON.stringify(problem)}`)).toBe(false);
-  });
-
-  it("does not hold for a context overflow, auth or throttling", () => {
-    expect(mayBeFileRefusal("400 prompt is too long: 250000 tokens > 200000 maximum")).toBe(false);
-    expect(mayBeFileRefusal("401 invalid x-api-key")).toBe(false);
-    expect(mayBeFileRefusal("429 Too many requests")).toBe(false);
-  });
-});
-
-/** A fake `pi` that records the handlers, and the events of one step. */
-function harness() {
-  const refusal = createFileRefusal("anthropic-messages");
+/** A fake `pi` that records the handlers, and drives the events of one step. */
+function harness(api = "anthropic-messages") {
+  let replays = 0;
+  const refusal = createFileRefusal(api, () => replays++);
   const handlers = new Map<string, (event: unknown) => unknown>();
   refusal.extension({
     on(event: string, handler: (event: unknown) => unknown) {
       handlers.set(event, handler);
     },
   } as unknown as ExtensionAPI);
-  const send = (payload: unknown) => handlers.get("before_provider_request")!({ payload });
+  /** The payload as it reaches the wire. */
+  const send = (payload: unknown) =>
+    handlers.get("before_provider_request")!({ payload }) ?? payload;
   const end = (stopReason: string, errorMessage?: string) =>
     handlers.get("turn_end")!({ message: { role: "assistant", stopReason, errorMessage } });
   const settle = (outcome = "error") =>
@@ -145,7 +48,13 @@ function harness() {
         ],
       },
     });
-  return { refusal, send, end, settle };
+  /** One failed request with `payload`, settled: whether a replay was asked for. */
+  const fail = (payload: unknown, error: string) => {
+    send(payload);
+    end("error", error);
+    return settle() !== undefined;
+  };
+  return { refusal, send, end, settle, fail, replays: () => replays };
 }
 
 const REPLAY = {
@@ -153,46 +62,149 @@ const REPLAY = {
   continue: true,
 };
 
-describe("createFileRefusal", () => {
-  it("replays a refused request once without its files, and records the kind on success", () => {
-    const { refusal, send, end, settle } = harness();
-    expect(send(withImage)).toBeUndefined();
+describe("which failures are replayed", () => {
+  it("replays an invalid request that carried a file, a non-file 4xx included", () => {
+    expect(harness().fail(withImage, "400 Invalid image data")).toBe(true);
+    expect(harness().fail(withImage, "400 Unsupported parameter: 'temperature'")).toBe(true);
+  });
+
+  it("finds files in tool results and Responses items, never in schemas or tool arguments", () => {
+    const toolResult = {
+      messages: [{ role: "user", content: [{ type: "tool_result", content: [image] }] }],
+    };
+    expect(harness().fail(toolResult, "400 bad")).toBe(true);
+    const responses = {
+      input: [{ type: "function_call_output", output: [{ type: "input_file" }] }],
+    };
+    expect(harness("openai-responses").fail(responses, "400 bad")).toBe(true);
+    const noFile = {
+      tools: [{ type: "file" }],
+      messages: [{ role: "assistant", content: [{ type: "tool_use", input: { type: "image" } }] }],
+    };
+    expect(harness().fail(noFile, "400 bad")).toBe(false);
+  });
+
+  it("does not replay the llm-proxy's body limit, an overflow, auth, throttling or a 5xx", () => {
+    // What the OpenAI SDK makes of the problem+json `bodyLimit` answers (`apps/api`).
+    const problem = payloadTooLarge("Request body exceeds the 10485760-byte limit").toProblemDetail(
+      "req_1",
+    );
+    for (const error of [
+      `413 ${JSON.stringify(problem)}`,
+      "400 prompt is too long: 250000 tokens > 200000 maximum",
+      "401 invalid x-api-key",
+      "429 Too many requests",
+      "503 Service unavailable",
+    ]) {
+      expect(harness().fail(withImage, error)).toBe(false);
+    }
+  });
+
+  it("does not replay a stopped turn", () => {
+    const { send, end, settle } = harness();
+    send(withImage);
     end("error", "400 Could not process image");
-    expect(settle()).toEqual(REPLAY);
+    expect(settle("aborted")).toBeUndefined();
+  });
+});
+
+describe("the replay", () => {
+  it("withholds the refused kind for the rest of the turn and records it on success", () => {
+    const { refusal, send, end, fail, replays } = harness();
+    expect(fail(withImage, "400 Could not process image")).toBe(true);
+    expect(replays()).toBe(1);
     const replayed = send(withImage);
-    expect(fileKindsIn(replayed).size).toBe(0);
-    expect(JSON.stringify(replayed)).toContain("[file withheld: the model refused it]");
+    expect(replayed).toEqual({
+      messages: [{ role: "user", content: [text, { type: "text", text: POINTER }] }],
+    });
     end("stop");
     expect(refusal.refusedKinds()).toEqual(["image"]);
     expect(refusal.originalError()).toBeUndefined();
-    // The rest of the turn goes without it too.
-    expect(fileKindsIn(send(withImage)).size).toBe(0);
+    expect(JSON.stringify(send(withImage))).not.toContain("AAAA");
   });
 
-  it("keeps the first error and records nothing when the replay fails too", () => {
-    const { refusal, send, end, settle } = harness();
+  it("writes the pointer in the Responses text type and keeps the cache mark", () => {
+    const { send, fail } = harness("openai-responses");
+    const marked = { type: "input_image", image_url: "x", cache_control: { type: "ephemeral" } };
+    fail({ input: [{ role: "user", content: [marked] }] }, "400 bad image");
+    expect(send({ input: [{ role: "user", content: [marked] }] })).toEqual({
+      input: [
+        {
+          role: "user",
+          content: [{ type: "input_text", text: POINTER, cache_control: { type: "ephemeral" } }],
+        },
+      ],
+    });
+  });
+
+  it("records the kinds when Pi's own retry of a transiently failed replay succeeds", () => {
+    const { refusal, send, end, settle, fail } = harness();
+    fail(withImage, "400 Could not process image");
     send(withImage);
-    end("error", "400 Unsupported parameter: 'temperature'");
-    expect(settle()).toEqual(REPLAY);
+    end("error", "503 Service unavailable");
+    // Pi retries the 503 itself before settling; that retry succeeds.
+    send(withImage);
+    end("stop");
+    expect(settle("completed")).toBeUndefined();
+    expect(refusal.refusedKinds()).toEqual(["image"]);
+  });
+
+  it("reports the replay's own error when it fails otherwise, and records nothing", () => {
+    const { refusal, send, end, settle, fail } = harness();
+    fail(withImage, "400 Could not process image");
+    send(withImage);
+    end("error", "503 Service unavailable");
+    expect(settle()).toBeUndefined();
+    expect(refusal.originalError()).toBeUndefined();
+    expect(refusal.refusedKinds()).toEqual([]);
+  });
+
+  it("keeps the first error when the replay is refused the same way, and records nothing", () => {
+    const { refusal, send, end, settle, fail } = harness();
+    fail(withImage, "400 Unsupported parameter: 'temperature'");
     send(withImage);
     end("error", "400 Unsupported parameter: 'temperature' (again)");
     expect(settle()).toBeUndefined();
     expect(refusal.refusedKinds()).toEqual([]);
     expect(refusal.originalError()).toBe("400 Unsupported parameter: 'temperature'");
   });
+});
 
-  it("replays nothing without a file, for an overflow, for a stop or for a 5xx", () => {
-    for (const [payload, error, outcome] of [
-      [{ messages: [{ role: "user", content: [text] }] }, "400 Invalid request", "error"],
-      [withImage, "413 status code (no body)", "error"],
-      [withImage, "503 Service unavailable", "error"],
-      [withImage, "400 Could not process image", "aborted"],
-    ] as const) {
-      const { refusal, send, end, settle } = harness();
-      send(payload);
-      end("error", error);
-      expect(settle(outcome)).toBeUndefined();
-      expect(refusal.refusedKinds()).toEqual([]);
-    }
+describe("a request carrying an image and a PDF", () => {
+  it("withholds the PDF alone first, and records only it when that replay succeeds", () => {
+    const { refusal, send, end, fail } = harness();
+    expect(fail(withBoth, "400 Could not process the document")).toBe(true);
+    const replayed = JSON.stringify(send(withBoth));
+    expect(replayed).toContain("AAAA");
+    expect(replayed).not.toContain("BBBB");
+    end("stop");
+    expect(refusal.refusedKinds()).toEqual(["pdf"]);
+  });
+
+  it("then withholds both when the PDF-less replay is refused too, at most twice", () => {
+    const { refusal, send, end, settle, fail, replays } = harness();
+    fail(withBoth, "400 Could not process image");
+    send(withBoth);
+    end("error", "400 Could not process image");
+    expect(settle()).toEqual(REPLAY);
+    const replayed = JSON.stringify(send(withBoth));
+    expect(replayed).not.toContain("AAAA");
+    expect(replayed).not.toContain("BBBB");
+    end("stop");
+    expect(refusal.refusedKinds().sort()).toEqual(["image", "pdf"]);
+    expect(replays()).toBe(2);
+  });
+
+  it("stops after the second replay and keeps the first error", () => {
+    const { refusal, send, end, settle, fail } = harness();
+    fail(withBoth, "400 first");
+    send(withBoth);
+    end("error", "400 second");
+    settle();
+    send(withBoth);
+    end("error", "400 third");
+    expect(settle()).toBeUndefined();
+    expect(refusal.refusedKinds()).toEqual([]);
+    expect(refusal.originalError()).toBe("400 first");
   });
 });

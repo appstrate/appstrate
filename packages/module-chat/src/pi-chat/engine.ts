@@ -244,7 +244,7 @@ export function runPiChat(input: PiChatInput): Response {
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
   // Replays a request refused with a file once without it, and records the verdict.
-  const fileRefusal = createFileRefusal(model.api);
+  const fileRefusal = createFileRefusal(model.api, () => mapper.clearFailure());
 
   const stream = createUIMessageStream({
     onError,

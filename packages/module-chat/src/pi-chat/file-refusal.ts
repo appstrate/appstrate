@@ -4,9 +4,11 @@
  * Whether a model refused a file, decided by a replay rather than by the provider's wording.
  *
  * A provider request carrying a file that fails as an invalid request (not for its length) is
- * replayed once, in the same step, with those file parts replaced by a text pointer. Only when
- * that replay succeeds was the file the cause: the turn carries on without it and the kinds are
- * recorded on the turn. When the replay fails too, the turn reports the first error.
+ * replayed in the same step with those file parts replaced by a text pointer: the PDFs alone
+ * first when images rode too, then both if that replay is refused the same way. Only a replay
+ * that succeeds names the cause, and exactly the kinds it withheld are recorded on the turn.
+ * When every replay is refused the same way, the turn reports the first error; when one fails
+ * otherwise, its own error.
  */
 
 import type { FileInputKind } from "@appstrate/core/chat-turn-metadata";
@@ -39,7 +41,7 @@ function collectKinds(value: unknown, kinds: Set<FileInputKind>): void {
 }
 
 /** The file kinds a provider payload's conversation (not its tool schemas) carries. */
-export function fileKindsIn(payload: unknown): Set<FileInputKind> {
+function fileKindsIn(payload: unknown): Set<FileInputKind> {
   const kinds = new Set<FileInputKind>();
   if (payload && typeof payload === "object") {
     const { messages, input } = payload as Record<string, unknown>;
@@ -67,7 +69,7 @@ function withhold(value: unknown, kinds: ReadonlySet<FileInputKind>, textType: s
 }
 
 /** The payload with every file part of these kinds replaced by a text pointer. */
-export function withholdFiles(
+function withholdFiles(
   payload: unknown,
   kinds: ReadonlySet<FileInputKind>,
   api: string | null | undefined,
@@ -89,7 +91,7 @@ const OVERFLOW_PATTERNS = getOverflowPatterns();
  * What a refused file fails as: an invalid request (any 4xx but auth, quota and throttling) that
  * pi-ai's overflow patterns do not read as too long — the llm-proxy's 413 body limit among them.
  */
-export function mayBeFileRefusal(errorText: string): boolean {
+function mayBeFileRefusal(errorText: string): boolean {
   const text = errorText.trim();
   return (
     classifyClientTurnError(text).category === "invalid_request" &&
@@ -100,15 +102,21 @@ export function mayBeFileRefusal(errorText: string): boolean {
 interface FileRefusal {
   /** Must be the last `before_provider_request` handler: it reads and edits the payload as sent. */
   extension: ExtensionFactory;
-  /** The kinds whose replay without them succeeded this turn. */
+  /** The kinds withheld by the replay that succeeded this turn. */
   refusedKinds(): FileInputKind[];
-  /** The first failure's text when its replay failed too: the error the turn reports. */
+  /** The first failure's text when every replay was refused the same way: the turn's error. */
   originalError(): string | undefined;
 }
 
-interface Suspect {
+interface Replay {
+  /** Every kind withheld so far by this replay chain. */
   kinds: FileInputKind[];
+  /** Kinds that rode the failed request and are still sent, for the one escalation. */
+  remaining: FileInputKind[];
+  /** The failed request's error, before any replay. */
   error: string;
+  /** The latest replay's own error, retries included. */
+  lastError?: string;
 }
 
 interface AssistantView {
@@ -117,12 +125,16 @@ interface AssistantView {
   errorMessage?: unknown;
 }
 
-export function createFileRefusal(api: string | null | undefined): FileRefusal {
+/** `onReplay` runs when a replay is requested: the failed attempt is no longer the turn's error. */
+export function createFileRefusal(
+  api: string | null | undefined,
+  onReplay: () => void = () => {},
+): FileRefusal {
   const withheld = new Set<FileInputKind>();
   const refused = new Set<FileInputKind>();
   let sent: FileInputKind[] = [];
-  let suspect: Suspect | undefined;
-  let replay: Suspect | undefined;
+  let suspect: { kinds: FileInputKind[]; error: string } | undefined;
+  let replay: Replay | undefined;
   let original: string | undefined;
 
   return {
@@ -134,38 +146,51 @@ export function createFileRefusal(api: string | null | undefined): FileRefusal {
         sent = [...fileKindsIn(sending)];
         return withheld.size ? sending : undefined;
       });
+      // Errors are judged where Pi settles a run, after its own retries.
       pi.on("turn_end", ({ message }) => {
         const m = message as AssistantView;
         if (m.role !== "assistant") return;
+        const error = typeof m.errorMessage === "string" ? m.errorMessage : "";
         if (m.stopReason === "aborted") {
           suspect = replay = undefined;
-          return;
-        }
-        if (m.stopReason !== "error") {
+        } else if (m.stopReason !== "error") {
           for (const kind of replay?.kinds ?? []) refused.add(kind);
           suspect = replay = original = undefined;
-          return;
+        } else if (replay) {
+          replay.lastError = error;
+        } else {
+          suspect = sent.length && mayBeFileRefusal(error) ? { kinds: sent, error } : undefined;
         }
-        if (replay) {
-          original = replay.error;
-          suspect = replay = undefined;
-          return;
-        }
-        const error = typeof m.errorMessage === "string" ? m.errorMessage : "";
-        suspect = sent.length && mayBeFileRefusal(error) ? { kinds: sent, error } : undefined;
       });
-      // A failed step ends the run, so the replay is requested where Pi settles it.
       pi.on("agent_before_settle", ({ outcome, context }) => {
-        if (!suspect || outcome !== "error") return;
+        if (outcome !== "error" || (!suspect && !replay)) return;
         const failed = context.contextEntries.findLast(
           ({ sourceEntry }) =>
             sourceEntry.type === "message" && sourceEntry.message.role === "assistant",
         )?.sourceEntry;
         if (failed?.type !== "message" || failed.message.role !== "assistant") return;
         if (failed.message.stopReason !== "error") return;
-        replay = suspect;
-        suspect = undefined;
+        const refusedAgain = replay !== undefined && mayBeFileRefusal(replay.lastError ?? "");
+        if (replay && !(refusedAgain && replay.remaining.length)) {
+          original = refusedAgain ? replay.error : undefined;
+          replay = undefined;
+          return;
+        }
+        if (replay) {
+          replay = { ...replay, kinds: [...replay.kinds, ...replay.remaining], remaining: [] };
+        } else {
+          // A new PDF beside an image already accepted earlier must not cut the image.
+          const both = suspect!.kinds.includes("pdf") && suspect!.kinds.length > 1;
+          const kinds: FileInputKind[] = both ? ["pdf"] : suspect!.kinds;
+          replay = {
+            kinds,
+            remaining: suspect!.kinds.filter((kind) => !kinds.includes(kind)),
+            error: suspect!.error,
+          };
+          suspect = undefined;
+        }
         for (const kind of replay.kinds) withheld.add(kind);
+        onReplay();
         // Omitted like Pi's own retries omit a failed attempt; it ran no tool.
         return {
           entries: [{ type: "context_edit", targetId: failed.id, replacement: null }],

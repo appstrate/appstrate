@@ -87,6 +87,8 @@ interface StubSurface {
 const EMPTY_SURFACE: StubSurface = { tools: [] };
 let mcpSurface: StubSurface = EMPTY_SURFACE;
 let mcpInitializes = 0;
+/** `tools/call` requests the stub answered. Reset in `afterEach`. */
+let mcpToolCalls = 0;
 
 async function mcpResponse(req: Request): Promise<Response> {
   if (req.method === "GET") return new Response(null, { status: 405 });
@@ -113,6 +115,7 @@ async function mcpResponse(req: Request): Promise<Response> {
   }
   if (msg.method === "tools/list") return json({ tools: mcpSurface.tools });
   if (msg.method === "tools/call" && mcpSurface.call) {
+    mcpToolCalls++;
     return json(
       capture.bodies.length === mcpSurface.call.steps
         ? mcpSurface.call.result
@@ -348,6 +351,7 @@ afterEach(() => {
   providerRefusalError = AUTH_REFUSAL;
   providerRefuses = () => true;
   providerRefusals = 0;
+  mcpToolCalls = 0;
   mcpSurface = EMPTY_SURFACE;
 });
 
@@ -742,6 +746,84 @@ describe("runPiChat against a stub provider", () => {
       expect(body.includes("refused a file of this kind earlier in this conversation")).toBe(!sent);
       expect(next.chunks.some((chunk) => chunk.type === "error")).toBe(false);
     }
+  }, 30_000);
+
+  it("replays a step refused for a tool's image without running the tool again", async () => {
+    capture.bodies.length = 0;
+    const name = "call_integration_tool";
+    mcpSurface = {
+      tools: [
+        {
+          name,
+          inputSchema: {
+            type: "object",
+            properties: { tool: { type: "string" }, arguments: { type: "object" } },
+          },
+        },
+      ],
+      call: {
+        name,
+        arguments: { tool: "crm__api_call", arguments: { read_as_file: true } },
+        steps: 1,
+        result: {
+          content: [
+            {
+              type: "resource",
+              resource: {
+                uri: "urn:uuid:photo",
+                mimeType: "image/png",
+                blob: PIXEL.toString("base64"),
+              },
+            },
+          ],
+        },
+      },
+    };
+    providerRefusal = 400;
+    providerRefusalError = { message: "Could not process image", type: "invalid_request_error" };
+    providerRefuses = (body) => body.includes("data:image/png;base64,");
+    const { chunks } = await runTurn(() => "tool-image", undefined, undefined, {
+      model: { ...orgModel(), input: ["text", "image"] },
+    });
+    // Step 1 calls the tool, step 2 carries its image and is refused, its replay answers.
+    expect(mcpToolCalls).toBe(1);
+    expect(capture.bodies).toHaveLength(3);
+    expect(capture.bodies[1]).toContain("data:image/png;base64,");
+    expect(capture.bodies[2]).not.toContain("data:image/png;base64,");
+    expect(capture.bodies[2]).toContain("[file withheld: the model refused it]");
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    expect(chunks.filter((chunk) => chunk.type === "tool-input-available")).toHaveLength(1);
+    expect(finishMetadata(chunks)).toMatchObject({
+      appstrate: { turn: { finishReason: "stop", refusedFileKinds: ["image"] } },
+    });
+  }, 30_000);
+
+  it("ends a turn stopped during the replay as a stop, not as the refused attempt's error", async () => {
+    capture.bodies.length = 0;
+    providerRefusal = 400;
+    providerRefusalError = { message: "Could not process image", type: "invalid_request_error" };
+    providerRefuses = (body) => body.includes("data:image/png;base64,");
+    let arrived!: () => void;
+    const replayArrived = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    providerPark = { arrived, settle: () => {} };
+    const stopped = new AbortController();
+    const logs = await recordingWarnAndError(async () => {
+      const turn = runTurn(() => "stop-during-replay", stopped.signal, undefined, {
+        model: { ...orgModel(), input: ["text", "image"] },
+        messages: imageTurn(),
+        readAttachment: mock(async () => ({ mime: "image/png", bytes: PIXEL })),
+      });
+      await replayArrived;
+      stopped.abort(new Error("stopped by user"));
+      return turn;
+    });
+    expect(capture.bodies).toHaveLength(2);
+    expect(logs.warn.filter(([msg]) => msg === MODEL_ERROR_LOG)).toEqual([]);
+    const { chunks } = logs.result;
+    expect(chunks.map((c) => c.type)).not.toContain("error");
+    expect(JSON.stringify(finishMetadata(chunks))).not.toContain("errorCategory");
   }, 30_000);
 
   it("keeps the first error and records no refusal when the request fails without its image too", async () => {
