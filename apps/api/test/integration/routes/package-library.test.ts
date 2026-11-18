@@ -15,7 +15,7 @@
  * placed anywhere.
  */
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { organizationMembers, packages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -36,8 +36,15 @@ import {
   seedSpaceMember,
   seedSpacePackage,
 } from "../../helpers/seed.ts";
+import {
+  __resetSystemIntegrationsForTest,
+  initSystemIntegrations,
+} from "../../../src/services/integration-client-registry.ts";
+import { isIntegrationActive } from "../../../src/services/integration-connections.ts";
 
 const app = getTestApp();
+
+afterEach(() => __resetSystemIntegrationsForTest());
 
 const AGENT = "@lib/worker";
 /** A package of the organization that belongs to no team: homed in the DEFAULT space. */
@@ -425,14 +432,12 @@ describe("integrations take their state from the activation resolver", () => {
     expect(await stateIn(alphaId)).toBe("inactive");
   });
 
-  it("never PROPOSES a deployment integration in a personal space — but never hides a real row either", async () => {
-    // Two halves of one rule, and the bug was that the first swallowed the
-    // second. The deployment's own integrations are not proposed in somebody's
-    // private workspace: they would run on that person's credentials, and
-    // nobody puts an integration there on their behalf. But once the space
-    // HOLDS a `space_packages` row, that row is a decision its owner made, and
-    // a map that omits it is a map lying about a state the platform persisted —
-    // with no way back to the switch that set it.
+  it("projects the activation rule in a personal space, system integrations included", async () => {
+    // A personal space RUNS what the activation rule says it runs: a
+    // default-on system integration is active there with no row, exactly as
+    // the run gate reads it. The map used to drop that placement, so the SPA
+    // listed an integration the run would use as missing, and the owner had
+    // no switch to turn off one running on their own connections.
     const SYSTEM_INTEGRATION = "@appstrate/system-gmail";
     await seedPackage({
       id: SYSTEM_INTEGRATION,
@@ -442,6 +447,7 @@ describe("integrations take their state from the activation resolver", () => {
       homeSpaceId: null,
       draftManifest: { name: SYSTEM_INTEGRATION, version: "1.0.0", type: "integration" },
     });
+    initSystemIntegrations([{ id: SYSTEM_INTEGRATION }]);
 
     const listed = await app.request("/api/spaces", { headers: owner(alphaId) });
     const mine = ((await listed.json()) as { data: { id: string; personal: boolean }[] }).data;
@@ -453,16 +459,39 @@ describe("integrations take their state from the activation resolver", () => {
         personalId,
       );
 
-    // No row: not proposed, so not on the map at all.
-    expect(await placementIn()).toBeUndefined();
+    // No row: the deployment's default, active — the run gate's own answer.
+    expect(await placementIn()).toMatchObject({ via: "system", state: "active" });
+    expect(await isIntegrationActive(SYSTEM_INTEGRATION, personalId)).toBe(true);
 
-    // A row — here the sticky opt-out its owner set — IS on the map.
+    // The owner's sticky opt-out is on the map too, and both readers agree.
     await seedSpacePackage(personalId, SYSTEM_INTEGRATION, { enabled: false });
     expect(await placementIn()).toMatchObject({ via: "system", state: "inactive" });
+    expect(await isIntegrationActive(SYSTEM_INTEGRATION, personalId)).toBe(false);
+  });
 
-    // …and so is the other decision, for the same reason.
-    await seedSpacePackage(personalId, SYSTEM_INTEGRATION, { enabled: true });
-    expect(await placementIn()).toMatchObject({ via: "system", state: "active" });
+  it("lists a system integration the deployment does not offer as `none` in a personal space", async () => {
+    // Placed everywhere, switched on nowhere without a row: the same answer a
+    // team space gets, so a personal space is no exception to the rule.
+    const CATALOG_INTEGRATION = "@appstrate/system-catalog-only";
+    await seedPackage({
+      id: CATALOG_INTEGRATION,
+      orgId: null,
+      source: "system",
+      type: "integration",
+      homeSpaceId: null,
+      draftManifest: { name: CATALOG_INTEGRATION, version: "1.0.0", type: "integration" },
+    });
+
+    const listed = await app.request("/api/spaces", { headers: owner(alphaId) });
+    const mine = ((await listed.json()) as { data: { id: string; personal: boolean }[] }).data;
+    const personalId = mine.find((space) => space.personal)!.id;
+
+    const placement = placementOf(
+      rowOf(await spaceLibrary(owner(personalId), personalId), "integration", CATALOG_INTEGRATION),
+      personalId,
+    );
+    expect(placement).toMatchObject({ via: "system", state: "none" });
+    expect(await isIntegrationActive(CATALOG_INTEGRATION, personalId)).toBe(false);
   });
 });
 
