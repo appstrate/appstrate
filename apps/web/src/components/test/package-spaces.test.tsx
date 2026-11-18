@@ -2,7 +2,8 @@
 
 /**
  * The spaces of a package in a list or a detail header: its home first with the others counted,
- * a muted label when no home is visible, the first active space leading when the home is off.
+ * a muted label when the home is withheld, the first active space leading when the home is off
+ * or the package is a system one.
  * The header's meta line names the home only where no tile does.
  */
 
@@ -53,15 +54,23 @@ describe("PackageSpaces", () => {
     expect(html).not.toContain("Espace non visible");
   });
 
-  it("labels a system package « Plateforme » and counts every space", () => {
+  it("leads a system package with its first active space and counts the others", () => {
     const html = renderInSpaces(
       <PackageSpaces
         item={{ homeSpaceId: null, spaceIds: ["spc_a", "spc_b"], source: "system" }}
       />,
     );
-    expect(html).toContain(">Plateforme<");
-    expect(html).toContain('aria-label="Disponible dans Atelier, Studio"');
-    expect(html).toMatch(/>\+2<\/span>/);
+    expect(html).toContain(">Atelier<");
+    expect(html).toContain('aria-label="Disponible dans Studio"');
+    expect(html).toMatch(/>\+1<\/span>/);
+    expect(html).not.toContain("Plateforme");
+  });
+
+  it("draws nothing for a system package active in no space", () => {
+    const html = renderInSpaces(
+      <PackageSpaces item={{ homeSpaceId: null, spaceIds: [], source: "system" }} />,
+    );
+    expect(html).toBe("");
   });
 
   it("labels a withheld home « Espace non visible » and counts every space", () => {

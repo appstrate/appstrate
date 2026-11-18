@@ -41,9 +41,9 @@ const STACKED_TILES = 2;
 /**
  * The spaces a package is active in (`spaceIds`), in a list spanning spaces or a detail header:
  * its home's tile with the others' stacked behind, its home's name, then the others as a count.
- * Switched off at home, its first active space leads instead. With no visible home (a system
- * package, or a home withheld from the reader) a muted label stands for it and the count covers
- * every space.
+ * Switched off at home, its first active space leads instead. A system package has no home: its
+ * first active space leads the same way, and nothing is drawn when it is active nowhere. A home
+ * withheld from the reader is named by a muted label, and the count covers every space.
  */
 export function PackageSpaces({ item }: { item: PackageSpacesOf }) {
   const { t } = useTranslation("common");
@@ -53,7 +53,7 @@ export function PackageSpaces({ item }: { item: PackageSpacesOf }) {
   const { data: spaces } = useSpaces();
   const home = system ? null : (item.homeSpaceId ?? null);
   const homeActive = !!home && spaceIds.includes(home);
-  const lead = homeActive ? home : home ? (spaceIds[0] ?? null) : null;
+  const lead = homeActive ? home : home || system ? (spaceIds[0] ?? null) : null;
   const others = spaceIds.filter((id) => id !== lead);
   const names = others.flatMap((id) => labelOf(id) ?? []);
   const leadSpace = spaces?.find((space) => space.id === lead);
@@ -63,14 +63,13 @@ export function PackageSpaces({ item }: { item: PackageSpacesOf }) {
   const text = t(homeActive ? "packageSpaces.sharedWith" : "packageSpaces.availableIn", {
     names: names.join(", "),
   });
+  if (system && spaceIds.length === 0) return null;
   return (
     <span className="text-muted-foreground flex min-w-0 items-center gap-2">
       {leadSpace ? (
         <SpaceName space={leadSpace} stacked={stacked} />
-      ) : home ? null : (
-        <span className="truncate">
-          {t(system ? "packageSpaces.platform" : "packageSpaces.hiddenHome")}
-        </span>
+      ) : home || system ? null : (
+        <span className="truncate">{t("packageSpaces.hiddenHome")}</span>
       )}
       <SpacesBadge names={names} text={text} />
     </span>

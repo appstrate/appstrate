@@ -374,7 +374,6 @@
   "status.cancelled": "annulé",
   "packageSpaces.sharedWith": "Partagé avec {{names}}",
   "packageSpaces.availableIn": "Disponible dans {{names}}",
-  "packageSpaces.platform": "Plateforme",
   "packageSpaces.hiddenHome": "Espace non visible",
   "packageSpaces.sharedFrom": "Partagé depuis {{space}}",
   "packageSpaces.sharedFromHidden": "Partagé depuis un autre espace",
