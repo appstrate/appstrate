@@ -565,6 +565,7 @@ describe("temporary connector files", () => {
         isError: false,
       });
       expect(JSON.stringify(chunks)).not.toContain(btoa("%PDF-example"));
+      expect(JSON.stringify(chunks)).not.toContain("[pdf:");
       expect(JSON.stringify(chunks)).toContain("application/pdf");
 
       const external = await call.execute("untrusted-id", { ...args, tool: "typed" });

@@ -12,10 +12,16 @@ interface PdfFile {
   data: string;
 }
 
+interface PdfReceipt {
+  note: string;
+  /** A one-turn reference placed only in the in-memory Pi message and removed on serialization. */
+  reference?: string;
+}
+
 export interface TurnPdfInput {
   supported: boolean;
   /** Without a tool call id, the PDF belongs to the current user message. */
-  add(file: PdfFile, toolCallId?: string): string;
+  add(file: PdfFile, toolCallId?: string): PdfReceipt;
   extension: ExtensionFactory;
 }
 
@@ -26,15 +32,20 @@ export interface TurnPdfInput {
  */
 export function createTurnPdfInput(api: Api): TurnPdfInput {
   const supported = api === "openai-responses";
-  const files: { source?: string; receipt: string; name: string; data: string }[] = [];
+  const files: {
+    source?: string;
+    receipt: PdfReceipt & { reference: string };
+    name: string;
+    data: string;
+  }[] = [];
   let remainingBytes = RESOURCE_BLOB_MAX_BYTES;
 
   return {
     supported,
     add({ name, data }, toolCallId) {
-      if (!supported) return PDF_INPUT_UNSUPPORTED;
+      if (!supported) return { note: PDF_INPUT_UNSUPPORTED };
       const size = Buffer.byteLength(data, "base64");
-      if (!size) return "No PDF content was available.";
+      if (!size) return { note: "No PDF content was available." };
       const filename = sanitizeFilename(name);
       // Pi pairs Responses calls as "call_id|item_id"; only call_id goes on the wire.
       const source = toolCallId?.split("|", 1)[0];
@@ -43,10 +54,15 @@ export function createTurnPdfInput(api: Api): TurnPdfInput {
       );
       if (duplicate) return duplicate.receipt;
       if (size > remainingBytes) {
-        return "PDF omitted: the turn's inline file size limit was reached. Use an inline run to inspect it.";
+        return {
+          note: "PDF omitted: the turn's inline file size limit was reached. Use an inline run to inspect it.",
+        };
       }
       remainingBytes -= size;
-      const receipt = `PDF supplied to the model for this turn: ${filename}`;
+      const receipt = {
+        note: `PDF supplied to the model for this turn: ${filename}`,
+        reference: `[pdf:${crypto.randomUUID()}]`,
+      };
       files.push({ source, receipt, name: filename, data });
       return receipt;
     },
@@ -60,35 +76,32 @@ export function createTurnPdfInput(api: Api): TurnPdfInput {
           !Array.isArray(payload.input)
         )
           return;
-        const currentUser = payload.input.findLastIndex((item) => item?.role === "user");
-        if (currentUser < 0) return;
-        const input = payload.input.map((item, index) => {
-          // A provider can reuse a call id that already appears in replayed history.
-          if (index < currentUser) return item;
-          const user = index === currentUser;
+        const input = payload.input.map((item) => {
+          const user = item?.role === "user";
           if (!user && item?.type !== "function_call_output") return item;
           const content = user ? item.content : item.output;
           const parts =
             typeof content === "string" ? [{ type: "input_text", text: content }] : content;
           if (!Array.isArray(parts)) return item;
-          const attached = files.filter((file) =>
-            user
-              ? file.source === undefined &&
-                parts.some(
-                  (p) =>
-                    p?.type === "input_text" &&
-                    typeof p.text === "string" &&
-                    p.text.includes(file.receipt),
-                )
-              : file.source !== undefined && file.source === item.call_id,
-          );
-          if (!attached.length) return item;
-          const native = attached.map((file) => ({
+          const source = user ? undefined : item.call_id;
+          const attached = new Set<(typeof files)[number]>();
+          const cleaned = parts.flatMap((part) => {
+            if (part?.type !== "input_text" || typeof part.text !== "string") return [part];
+            let text: string = part.text;
+            for (const file of files) {
+              if (file.source !== source || !text.includes(file.receipt.reference)) continue;
+              attached.add(file);
+              text = text.replaceAll(file.receipt.reference, "");
+            }
+            return text.trim() ? [{ ...part, text }] : [];
+          });
+          if (!attached.size) return item;
+          const native = Array.from(attached, (file) => ({
             type: "input_file",
             filename: file.name,
             file_data: `data:application/pdf;base64,${file.data}`,
           }));
-          return { ...item, [user ? "content" : "output"]: [...parts, ...native] };
+          return { ...item, [user ? "content" : "output"]: [...cleaned, ...native] };
         });
         return { ...payload, input };
       });

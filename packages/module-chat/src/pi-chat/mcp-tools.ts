@@ -651,7 +651,9 @@ async function liveResources(
     } else if (text !== undefined) {
       content.push({ type: "text", text });
     } else if (mimeType === "application/pdf" && opts.pdfInput) {
-      note = opts.pdfInput.add({ name: "document.pdf", data: blob }, toolCallId);
+      const pdf = opts.pdfInput.add({ name: "document.pdf", data: blob }, toolCallId);
+      note = pdf.note;
+      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
     } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
       content.push({ type: "image", mimeType, data: blob });
     } else {

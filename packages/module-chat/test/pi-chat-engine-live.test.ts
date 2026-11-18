@@ -25,6 +25,10 @@
 
 import { describe, it, expect, afterAll, afterEach, mock, spyOn } from "bun:test";
 import type { UIMessage } from "ai";
+import {
+  CHAT_FINAL_STEP_SYSTEM_PROMPT,
+  CHAT_TOOL_STEP_BUDGET,
+} from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
 import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
@@ -78,7 +82,7 @@ interface StubSurface {
   instructions?: string;
   tools: unknown[];
   /** Drive one actual provider tool call on the Responses wire and answer it via MCP. */
-  call?: { name: string; arguments: Record<string, unknown>; result: unknown };
+  call?: { name: string; arguments: Record<string, unknown>; steps: number; result: unknown };
 }
 const EMPTY_SURFACE: StubSurface = { tools: [] };
 let mcpSurface: StubSurface = EMPTY_SURFACE;
@@ -108,7 +112,13 @@ async function mcpResponse(req: Request): Promise<Response> {
     );
   }
   if (msg.method === "tools/list") return json({ tools: mcpSurface.tools });
-  if (msg.method === "tools/call" && mcpSurface.call) return json(mcpSurface.call.result);
+  if (msg.method === "tools/call" && mcpSurface.call) {
+    return json(
+      capture.bodies.length === mcpSurface.call.steps
+        ? mcpSurface.call.result
+        : { content: [{ type: "text", text: "Document not ready yet." }] },
+    );
+  }
   return json({});
 }
 
@@ -160,11 +170,12 @@ const server = Bun.serve({
     if (path.endsWith("/responses")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      const call = capture.bodies.length === 1 ? mcpSurface.call : undefined;
+      const step = capture.bodies.length;
+      const call = mcpSurface.call && step <= mcpSurface.call.steps ? mcpSurface.call : undefined;
       const item = call && {
         type: "function_call",
-        id: "fc_connector",
-        call_id: "call_connector",
+        id: `fc_connector_${step}`,
+        call_id: `call_connector_${step}`,
         name: call.name,
         arguments: JSON.stringify(call.arguments),
       };
@@ -408,61 +419,72 @@ describe("runPiChat against a stub provider", () => {
     expect(usage).toEqual([]);
   }, 30_000);
 
-  it("sends a temporary connector PDF in the tool output of the next provider request and only its receipt on SSE", async () => {
-    capture.bodies.length = 0;
-    const name = "call_integration_tool";
-    const data = btoa("%PDF-1.7 connector-only file");
-    const args = {
-      tool: "crm__api_call",
-      arguments: {
-        read_as_file: true,
-        requests: [{ method: "GET", target: "https://example.test/contract" }],
-      },
-    };
-    mcpSurface = {
-      tools: [
-        {
+  it.each([1, CHAT_TOOL_STEP_BUDGET])(
+    "sends a connector PDF received on tool step %i in the next provider request, with only its receipt on SSE",
+    async (steps) => {
+      capture.bodies.length = 0;
+      const name = "call_integration_tool";
+      const data = btoa("%PDF-1.7 connector-only file");
+      const args = {
+        tool: "crm__api_call",
+        arguments: {
+          read_as_file: true,
+          requests: [{ method: "GET", target: "https://example.test/contract" }],
+        },
+      };
+      mcpSurface = {
+        tools: [
+          {
+            name,
+            inputSchema: {
+              type: "object",
+              properties: { tool: { type: "string" }, arguments: { type: "object" } },
+            },
+          },
+        ],
+        call: {
           name,
-          inputSchema: {
-            type: "object",
-            properties: { tool: { type: "string" }, arguments: { type: "object" } },
+          arguments: args,
+          steps,
+          result: {
+            content: [
+              { type: "text", text: '{"results":[{"status":200}]}' },
+              {
+                type: "resource",
+                resource: { uri: "urn:uuid:document", mimeType: "application/pdf", blob: data },
+              },
+            ],
           },
         },
-      ],
-      call: {
-        name,
-        arguments: args,
-        result: {
-          content: [
-            { type: "text", text: '{"results":[{"status":200}]}' },
-            {
-              type: "resource",
-              resource: { uri: "urn:uuid:document", mimeType: "application/pdf", blob: data },
-            },
-          ],
-        },
-      },
-    };
-    const { chunks } = await runTurn(() => "tool-read", undefined, undefined, {
-      model: { ...orgModel(), apiShape: "openai-responses" },
-    });
-    expect(capture.bodies).toHaveLength(2);
-    expect(capture.bodies[0]).not.toContain(data);
-    const second = JSON.parse(capture.bodies[1]!);
-    const output = second.input.find(
-      (item: { type?: string }) => item.type === "function_call_output",
-    );
-    expect(output.call_id).toBe("call_connector");
-    expect(output.output).toContainEqual({
-      type: "input_file",
-      filename: "document.pdf",
-      file_data: `data:application/pdf;base64,${data}`,
-    });
-    expect(chunks.find((chunk) => chunk.type === "tool-input-available")?.input).toEqual(args);
-    const receipt = chunks.find((chunk) => chunk.type === "tool-output-available");
-    expect(JSON.stringify(receipt?.output)).toContain("application/pdf");
-    expect(JSON.stringify(chunks)).not.toContain(data);
-  }, 30_000);
+      };
+      const { chunks } = await runTurn(() => "tool-read", undefined, undefined, {
+        model: { ...orgModel(), apiShape: "openai-responses" },
+      });
+      expect(capture.bodies).toHaveLength(steps + 1);
+      expect(capture.bodies.slice(0, steps).some((body) => body.includes(data))).toBe(false);
+      const last = JSON.parse(capture.bodies.at(-1)!);
+      if (steps === CHAT_TOOL_STEP_BUDGET) {
+        expect(last.input.at(-1)).toMatchObject({
+          role: "user",
+          content: [{ type: "input_text", text: CHAT_FINAL_STEP_SYSTEM_PROMPT }],
+        });
+      }
+      const output = last.input.find(
+        (item: { type?: string; call_id?: string }) =>
+          item.type === "function_call_output" && item.call_id === `call_connector_${steps}`,
+      );
+      expect(output.output).toContainEqual({
+        type: "input_file",
+        filename: "document.pdf",
+        file_data: `data:application/pdf;base64,${data}`,
+      });
+      expect(chunks.find((chunk) => chunk.type === "tool-input-available")?.input).toEqual(args);
+      const receipt = chunks.findLast((chunk) => chunk.type === "tool-output-available");
+      expect(JSON.stringify(receipt?.output)).toContain("application/pdf");
+      expect(JSON.stringify(chunks)).not.toContain(data);
+    },
+    30_000,
+  );
 
   it("sends real image pixels to a vision model and only the pointer to a text model", async () => {
     const messages = userTurn("Read this image");

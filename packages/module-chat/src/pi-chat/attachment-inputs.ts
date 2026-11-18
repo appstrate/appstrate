@@ -96,11 +96,13 @@ export async function readPromptPdfs(
           maxBytes: RESOURCE_BLOB_MAX_BYTES,
           signal,
         });
-        if (file)
-          note = pdfInput.add({
+        if (file) {
+          const pdf = pdfInput.add({
             name: part.filename ?? "attachment.pdf",
             data: Buffer.from(file.bytes).toString("base64"),
           });
+          note = pdf.reference ?? pdf.note;
+        }
       } catch (error) {
         signal.throwIfAborted();
         logger.warn("chat PDF attachment skipped", {
