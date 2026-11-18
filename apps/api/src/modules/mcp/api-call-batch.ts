@@ -110,7 +110,7 @@ export const MAX_RESULT_BYTES = 256 * 1024;
  * refused rather than stored (a truncated PDF opens as nothing). The per-file cap and the org's
  * quota apply on top, as for an upload.
  */
-export const SAVE_AS_FILE_MAX_BYTES = 20 * 1024 * 1024;
+const SAVE_AS_FILE_MAX_BYTES = 20 * 1024 * 1024;
 /** Requests of one call that may save a file: each is held whole in memory until stored. */
 const MAX_SAVED_PER_CALL = 5;
 /** Characters kept of one projected response header. */

@@ -67,7 +67,7 @@ const EXTENSION_FORMAT: Record<string, DocumentFormat> = {
  */
 export const DOCUMENT_SOURCE_MAX_BYTES = 25 * 1024 * 1024;
 /** Characters of extracted text one read returns (about 30k tokens); the rest is cut with a note. */
-export const DOCUMENT_TEXT_MAX_CHARS = 120_000;
+const DOCUMENT_TEXT_MAX_CHARS = 120_000;
 /** Pages of a PDF read at most, whatever the text cap, so a thousand-page scan costs bounded CPU. */
 const PDF_MAX_PAGES = 300;
 /** Decompressed bytes an Office/ODF archive may inflate to, in total and per member. */

@@ -26,6 +26,7 @@ import { ApiError } from "@appstrate/core/api-errors";
 import {
   _setBatchDeadlineForTesting,
   executeApiCall,
+  savedFileName,
 } from "../../../../src/modules/mcp/api-call-batch.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
@@ -1718,5 +1719,40 @@ describe("call_integration_tool — save_as_file", () => {
     );
     expect(many.outcome).toMatchObject({ code: "invalid_argument" });
     expect(many.calls).toHaveLength(0);
+  });
+});
+
+describe("savedFileName", () => {
+  const url = "https://api.example.com/drive/v3/files/abc123?alt=media";
+
+  it("prefers the caller's name, then the upstream's, then the URL's last segment", () => {
+    expect(savedFileName("mine.png", 'attachment; filename="up.png"', url, "image/png")).toBe(
+      "mine.png",
+    );
+    expect(
+      savedFileName(undefined, 'attachment; filename="up stream.pdf"', url, "application/pdf"),
+    ).toBe("up stream.pdf");
+    expect(
+      savedFileName(
+        undefined,
+        "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf",
+        url,
+        "application/pdf",
+      ),
+    ).toBe("résumé.pdf");
+    expect(savedFileName(undefined, null, url, "image/png")).toBe("abc123.png");
+  });
+
+  it("gives a nameless file a generic name with its type's extension", () => {
+    expect(savedFileName(undefined, null, "https://api.example.com/", "application/pdf")).toBe(
+      "imported-file.pdf",
+    );
+  });
+
+  it("neutralizes path separators, control characters and leading dots", () => {
+    const name = savedFileName("../../etc/pass\u0000wd", null, url, "text/plain");
+    expect(name).not.toContain("/");
+    expect(name).not.toContain("\u0000");
+    expect(savedFileName("..hidden.txt", null, url, "text/plain")).toBe("hidden.txt");
   });
 });
