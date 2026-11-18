@@ -101,82 +101,61 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(usage[0]!.runId).toBe(run.id);
   });
 
-  it("returns 409 agent_in_use when a pending or running run still owns the package", async () => {
-    await seedAgent({
-      id: "@delorg/busy",
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-    });
+  it.each(["the request space", "another space"])(
+    "allows publishing and restoring, but refuses deletion, while a run is active in %s",
+    async (location) => {
+      await seedAgent({
+        id: "@delorg/elsewhere",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        homeSpaceId: ctx.defaultSpaceId,
+        draftManifest: {
+          name: "@delorg/elsewhere",
+          schema_version: "0.2",
+          version: "0.2.0",
+          type: "agent",
+          display_name: "Elsewhere",
+          description: "Agent with an active run",
+        },
+      });
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
+      await seedSpacePackage(other.id, "@delorg/elsewhere");
+      await seedRun({
+        packageId: "@delorg/elsewhere",
+        orgId: ctx.orgId,
+        spaceId: location === "the request space" ? ctx.defaultSpaceId : other.id,
+        status: "running",
+      });
 
-    await seedRun({
-      packageId: "@delorg/busy",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      status: "running",
-    });
+      const removed = await app.request("/api/packages/agents/@delorg/elsewhere", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(removed.status).toBe(409);
+      const body = (await removed.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_in_use");
+      expect(body.detail).toContain("another space of the organization");
+      await assertDbHas(packages, eq(packages.id, "@delorg/elsewhere"));
 
-    const res = await app.request("/api/packages/agents/@delorg/busy", {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("agent_in_use");
-  });
-
-  it("refuses deleting an agent while a run of it runs in another space, but lets its author publish and restore", async () => {
-    await seedAgent({
-      id: "@delorg/elsewhere",
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-      homeSpaceId: ctx.defaultSpaceId,
-      draftManifest: {
-        name: "@delorg/elsewhere",
-        schema_version: "0.2",
-        version: "0.2.0",
-        type: "agent",
-        display_name: "Elsewhere",
-        description: "Agent with a run in another space",
-      },
-    });
-    const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
-    await seedSpacePackage(other.id, "@delorg/elsewhere");
-    await seedRun({
-      packageId: "@delorg/elsewhere",
-      orgId: ctx.orgId,
-      spaceId: other.id,
-      status: "running",
-    });
-
-    const removed = await app.request("/api/packages/agents/@delorg/elsewhere", {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
-    expect(removed.status).toBe(409);
-    const body = (await removed.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("agent_in_use");
-    expect(body.detail).toContain("another space of the organization");
-    await assertDbHas(packages, eq(packages.id, "@delorg/elsewhere"));
-
-    // A published run froze its version, and a draft run already reads every draft save:
-    // publishing and restoring wait for no run, in any space.
-    const published = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
-      method: "POST",
-      headers: authHeaders(ctx),
-    });
-    expect(published.status, await published.clone().text()).toBe(201);
-    const versionUrl = "/api/packages/agents/@delorg/elsewhere/versions/0.2.0";
-    const restore = () =>
-      app.request(`${versionUrl}/restore`, { method: "POST", headers: authHeaders(ctx) });
-    expect((await restore()).status).toBe(200);
-    const removedVersion = await app.request(versionUrl, {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
-    expect(removedVersion.status).toBe(409);
-    expect(await removedVersion.json()).toHaveProperty("code", "agent_in_use");
-  });
+      const published = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      expect(published.status, await published.clone().text()).toBe(201);
+      const versionUrl = "/api/packages/agents/@delorg/elsewhere/versions/0.2.0";
+      const restored = await app.request(`${versionUrl}/restore`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      expect(restored.status).toBe(200);
+      const removedVersion = await app.request(versionUrl, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(removedVersion.status).toBe(409);
+      expect(await removedVersion.json()).toHaveProperty("code", "agent_in_use");
+    },
+  );
 
   it.skipIf(isEmbeddedDb)(
     "waits for a concurrent run admission before deciding whether the agent may be deleted",
