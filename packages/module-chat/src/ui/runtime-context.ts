@@ -200,6 +200,11 @@ export interface ChatHost {
    */
   actingSpaceIds: readonly string[] | null;
   /**
+   * The caller's personal space (« Mon espace »), where every file attached from their computer
+   * is staged, `null` until the host's listing has answered: attaching waits for it.
+   */
+  personalSpaceId: string | null;
+  /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
    * credential would fix names no link to add one. `undefined` until the

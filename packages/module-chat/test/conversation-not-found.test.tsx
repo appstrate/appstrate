@@ -33,8 +33,8 @@ afterAll(() => {
 const ACTING = ["spc_a"];
 
 /** The host's space services, as the shell passes them. */
-const { canIn, renderSpaces, linkInSpace, useSpaceLabelOf } = testHost();
-const SPACE_PROPS = { canIn, renderSpaces, linkInSpace, useSpaceLabelOf };
+const { canIn, personalSpaceId, renderSpaces, linkInSpace, useSpaceLabelOf } = testHost();
+const SPACE_PROPS = { canIn, personalSpaceId, renderSpaces, linkInSpace, useSpaceLabelOf };
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 

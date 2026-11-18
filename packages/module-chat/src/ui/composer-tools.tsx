@@ -24,15 +24,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
-  useAttachTarget,
   useConversationScope,
   useSpaceName,
-  type AttachUnavailableReason,
   type LimitUnavailableReason,
 } from "./conversation-scope.ts";
 import {
@@ -40,7 +37,7 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
-import { useChatHost, useChatTransport, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
@@ -52,12 +49,6 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
   "no-acting-space": "composer.limit.noActingSpace",
   outside: "composer.limit.outside",
-};
-
-const ATTACH_REASON_KEY: Record<AttachUnavailableReason, string> = {
-  outside: "composer.attachUnavailable",
-  "origin-outside": "composer.limit.outside",
-  "no-acting-space": "composer.limit.noActingSpace",
 };
 
 export interface ComposerToolsProps {
@@ -277,63 +268,21 @@ function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
   );
 }
 
-/** The attach button opens the native picker directly, or after choosing its destination. */
+/** The attach button opens the native picker: files always go to the caller's personal space. */
 function AttachButton() {
-  const { t, SpaceChoiceMenu } = useChatHost();
-  const shownSpaceId = useChatTransport()?.spaceId ?? null;
-  const { availability, pick } = useAttachTarget();
-  const filePicker = useRef<HTMLButtonElement>(null);
-  const space = useSpaceName(availability.kind === "attach" ? availability.spaceId : null);
-  const label =
-    space && availability.kind === "attach" && availability.spaceId !== shownSpaceId
-      ? t("composer.attachIn", { name: space.label })
-      : t("composer.attach");
-  const unavailable = availability.kind === "unavailable";
-  const button = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      disabled={unavailable}
-      className={ICON_BUTTON}
-      aria-label={label}
-    >
-      <PaperclipIcon />
-    </Button>
-  );
-  if (availability.kind === "attach") {
-    return <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>;
-  }
-  if (availability.kind === "choose") {
-    return (
-      <>
-        <SpaceChoiceMenu
-          variant="dropdown"
-          label={t("composer.attach.choose")}
-          spaceIds={availability.spaceIds}
-          onPick={(spaceId) => {
-            pick(spaceId);
-            filePicker.current?.click();
-          }}
-          trigger={button}
-        />
-        <ComposerPrimitive.AddAttachment hidden ref={filePicker} />
-      </>
-    );
-  }
-  if (!availability.reason) return button;
-  const reason = t(ATTACH_REASON_KEY[availability.reason]);
+  const { t, personalSpaceId } = useChatHost();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex shrink-0">
-          {button}
-          <span className="sr-only">{reason}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-64 text-xs">
-        {reason}
-      </TooltipContent>
-    </Tooltip>
+    <ComposerPrimitive.AddAttachment asChild>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        disabled={personalSpaceId === null}
+        className={ICON_BUTTON}
+        aria-label={t("composer.attach")}
+      >
+        <PaperclipIcon />
+      </Button>
+    </ComposerPrimitive.AddAttachment>
   );
 }

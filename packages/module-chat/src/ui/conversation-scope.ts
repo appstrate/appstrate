@@ -5,7 +5,7 @@
  * published by `Conversation` to the composer, the skills picker and the tool cards.
  */
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { actsIn, useChatHost } from "./runtime-context.ts";
 
 export interface ConversationScope {
@@ -77,118 +77,6 @@ export function limitAvailability(
   if (actingSpaceIds.length === 0) return { kind: "unavailable", reason: "no-acting-space" };
   if (actingSpaceIds.length === 1) return { kind: "toggle", spaceId: actingSpaceIds[0]! };
   return { kind: "choose", spaceIds: actingSpaceIds };
-}
-
-/**
- * Why no file can be attached: the selected space is not one the chat acts in, the limited
- * conversation's origin no longer is, or the chat acts nowhere.
- */
-export type AttachUnavailableReason = "outside" | "origin-outside" | "no-acting-space";
-
-/**
- * Where a file goes. `attach`: uploaded into `spaceId` at once; `choose`: the user picks it among
- * `spaceIds`, the spaces the chat acts in; `unavailable`, with the reason, `null` while the acting
- * set is not known.
- */
-export type AttachAvailability =
-  | { kind: "attach"; spaceId: string }
-  | { kind: "choose"; spaceIds: readonly string[] }
-  | { kind: "unavailable"; reason: AttachUnavailableReason | null };
-
-/**
- * The one decision on the space a file is uploaded into. Never the host's working space unseen:
- * in « Tous les espaces » (`selectedSpaceId` `null`) without an origin, the user picks.
- */
-export function attachAvailability(
-  scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
-  actingSpaceIds: readonly string[] | null,
-  selectedSpaceId: string | null,
-): AttachAvailability {
-  if (actingSpaceIds === null) return { kind: "unavailable", reason: null };
-  const origin = scope.originSpaceId;
-  if (origin && actsIn(actingSpaceIds, origin)) return { kind: "attach", spaceId: origin };
-  if (origin && scope.restricted) return { kind: "unavailable", reason: "origin-outside" };
-  if (selectedSpaceId !== null) {
-    return actsIn(actingSpaceIds, selectedSpaceId)
-      ? { kind: "attach", spaceId: selectedSpaceId }
-      : { kind: "unavailable", reason: "outside" };
-  }
-  if (actingSpaceIds.length === 0) return { kind: "unavailable", reason: "no-acting-space" };
-  if (actingSpaceIds.length === 1) return { kind: "attach", spaceId: actingSpaceIds[0]! };
-  return { kind: "choose", spaceIds: actingSpaceIds };
-}
-
-/** The open conversation's {@link attachAvailability} and the space a file goes to now. */
-interface AttachTarget {
-  availability: AttachAvailability;
-  /** The decided space, else the one picked while it is one of the choices; `null` for none. */
-  spaceId: string | null;
-  /** Picks the space the next files go to. */
-  pick: (spaceId: string) => void;
-  /** Drops the pick: the turn it was made for is sent. */
-  forget: () => void;
-}
-
-/** Where a file goes now: the decided space, else the one picked while it is a choice. */
-export function attachSpaceOf(
-  availability: AttachAvailability,
-  picked: string | null,
-): string | null {
-  if (availability.kind === "attach") return availability.spaceId;
-  return availability.kind === "choose" && picked && availability.spaceIds.includes(picked)
-    ? picked
-    : null;
-}
-
-const NO_ATTACH_TARGET: AttachTarget = {
-  availability: { kind: "unavailable", reason: null },
-  spaceId: null,
-  pick: () => {},
-  forget: () => {},
-};
-
-const AttachTargetContext = createContext<AttachTarget>(NO_ATTACH_TARGET);
-
-export const AttachTargetProvider = AttachTargetContext.Provider;
-
-export function useAttachTarget(): AttachTarget {
-  return useContext(AttachTargetContext);
-}
-
-/**
- * The open conversation's {@link AttachTarget} under the space the host shows (`selectedSpaceId`,
- * `null` in « Tous les espaces »). A pick answers the choice offered when it was made: a target
- * that is no longer that choice drops it, and so does sending the turn (`forget`).
- */
-export function useConversationAttachTarget(
-  scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
-  selectedSpaceId: string | null,
-): AttachTarget {
-  const { actingSpaceIds } = useChatHost();
-  const [picked, pick] = useState<string | null>(null);
-  const { originSpaceId, restricted } = scope;
-  const availability = useMemo(
-    () => attachAvailability({ originSpaceId, restricted }, actingSpaceIds, selectedSpaceId),
-    [originSpaceId, restricted, actingSpaceIds, selectedSpaceId],
-  );
-  const spaceId = attachSpaceOf(availability, picked);
-  if (picked && (availability.kind !== "choose" || spaceId === null)) pick(null);
-  const forget = useCallback(() => pick(null), []);
-  return useMemo(() => ({ availability, spaceId, pick, forget }), [availability, spaceId, forget]);
-}
-
-/**
- * The spaces a turn sent now reads, where its attachments must be: a limited conversation's
- * origin alone (while the chat acts there), else the acting set. `null` while that is not known.
- */
-export function turnSpacesOf(
-  scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
-  actingSpaceIds: readonly string[] | null,
-): readonly string[] | null {
-  if (actingSpaceIds === null) return null;
-  const limited = limitedSpaceOf(scope);
-  if (limited === undefined) return actingSpaceIds;
-  return actsIn(actingSpaceIds, limited) ? [limited] : [];
 }
 
 /**

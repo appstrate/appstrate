@@ -15,6 +15,7 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     can: () => true,
     canIn: () => true,
     actingSpaceIds: [],
+    personalSpaceId: null,
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,

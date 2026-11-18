@@ -62,8 +62,8 @@ import {
   subscribeResolvedUploads,
 } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useAttachTarget, useConversationScope, useSpaceName } from "./conversation-scope.ts";
-import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
+import { useConversationScope } from "./conversation-scope.ts";
+import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
@@ -98,90 +98,88 @@ export function Thread({
   useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
-  const { can, t } = useChatHost();
-  // A drop cannot ask for a space: it goes to the one decided, or to the one last picked.
-  const dropSpaceId = useAttachTarget().spaceId;
-  const shownSpaceId = useChatTransport()?.spaceId ?? null;
-  const dropSpace = useSpaceName(dropSpaceId !== shownSpaceId ? dropSpaceId : null);
+  const { can, t, personalSpaceId } = useChatHost();
+  // The whole thread is the drop target, welcome screen and transcript alike, on the picker's
+  // adapter path; a reader or an unknown personal space gets none (no overlay either). The
+  // wrapper cancels a file drag the dropzone leaves alone so the browser never opens the file;
+  // text drags keep their default.
+  const cancelFileDrag = (event: React.DragEvent) => {
+    if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+  };
   return (
-    // The whole thread is the drop target, welcome screen and transcript alike;
-    // dropped files take the same adapter path as the picker. A reader gets no
-    // drop target (and no overlay: `data-dragging` is only set when enabled).
-    <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || dropSpaceId === null}
-      className="group/drop relative h-full min-h-0"
-    >
-      <ThreadPrimitive.Root
-        // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
-        // this shell are grey with white cards on top (the composer, the tool
-        // cards). `background` is shadcn's component surface, which would make
-        // the chat the one flat white screen in the product.
-        className="bg-canvas flex h-full flex-col"
-        style={{ ["--thread-max-width" as string]: "42rem" }}
+    <div className="h-full min-h-0" onDragOver={cancelFileDrag} onDrop={cancelFileDrag}>
+      <ComposerPrimitive.AttachmentDropzone
+        disabled={!can("chat:write") || personalSpaceId === null}
+        className="group/drop relative h-full min-h-0"
       >
-        {/* Register the rich tool cards (these render nothing themselves). */}
-        <InvokeOperationToolUI />
-        <RunAndWaitToolUI />
-        <SearchOperationsToolUI />
-        <DescribeOperationToolUI />
-        <ImportPackageFileToolUI />
+        <ThreadPrimitive.Root
+          // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+          // this shell are grey with white cards on top (the composer, the tool
+          // cards). `background` is shadcn's component surface, which would make
+          // the chat the one flat white screen in the product.
+          className="bg-canvas flex h-full flex-col"
+          style={{ ["--thread-max-width" as string]: "42rem" }}
+        >
+          {/* Register the rich tool cards (these render nothing themselves). */}
+          <InvokeOperationToolUI />
+          <RunAndWaitToolUI />
+          <SearchOperationsToolUI />
+          <DescribeOperationToolUI />
+          <ImportPackageFileToolUI />
 
-        {/* Empty: composer centered mid-screen for a strong first impression.
+          {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
-        <AuiIf condition={(s) => s.thread.isEmpty}>
-          <ThreadWelcome
-            composerTools={composerTools}
-            composerSlot={composerSlot}
-            initialComposerDraft={initialComposerDraft}
-            draftSeededRef={draftSeededRef}
-            queue={messageQueue}
-          />
-        </AuiIf>
+          <AuiIf condition={(s) => s.thread.isEmpty}>
+            <ThreadWelcome
+              composerTools={composerTools}
+              composerSlot={composerSlot}
+              initialComposerDraft={initialComposerDraft}
+              draftSeededRef={draftSeededRef}
+              queue={messageQueue}
+            />
+          </AuiIf>
 
-        <AuiIf condition={(s) => !s.thread.isEmpty}>
-          {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+          <AuiIf condition={(s) => !s.thread.isEmpty}>
+            {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
             and amplifies any residual layout shift. `relative` makes the
             viewport the containing block of its absolutely positioned
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-          <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
-            <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+            <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+              <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
-            <div className="min-h-6 flex-grow" />
+              <div className="min-h-6 flex-grow" />
 
-            <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
-              <ScrollToBottom />
-              <Composer
-                tools={composerTools}
-                slot={composerSlot}
-                initialDraft={initialComposerDraft}
-                draftSeededRef={draftSeededRef}
-                queue={messageQueue}
-              />
-              <Disclaimer />
-            </ThreadPrimitive.ViewportFooter>
-          </ThreadPrimitive.Viewport>
-        </AuiIf>
-      </ThreadPrimitive.Root>
-      {/* The app's dropzone in its drag-over state (the form file field, the
+              <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+                <ScrollToBottom />
+                <Composer
+                  tools={composerTools}
+                  slot={composerSlot}
+                  initialDraft={initialComposerDraft}
+                  draftSeededRef={draftSeededRef}
+                  queue={messageQueue}
+                />
+                <Disclaimer />
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </AuiIf>
+        </ThreadPrimitive.Root>
+        {/* The app's dropzone in its drag-over state (the form file field, the
           import dialog): dashed border, primary tint. Over the thread it needs
           a veil so the transcript does not show through. */}
-      <div
-        aria-hidden="true"
-        className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
-      >
-        <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
-          <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">
-            {dropSpace
-              ? sentenceWithNode(t, "composer.dropzoneIn", dropSpace.node)
-              : t("composer.dropzone")}
-          </p>
+        <div
+          aria-hidden="true"
+          className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
+        >
+          <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
+            <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
+            <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+          </div>
         </div>
-      </div>
-    </ComposerPrimitive.AttachmentDropzone>
+      </ComposerPrimitive.AttachmentDropzone>
+    </div>
   );
 }
 

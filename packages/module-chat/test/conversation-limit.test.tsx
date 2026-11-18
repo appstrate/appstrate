@@ -20,14 +20,9 @@ import {
 
 import { creationFields, useConversationLimit } from "../src/ui/conversation-limit.ts";
 import {
-  AttachTargetProvider,
   ConversationScopeProvider,
-  attachAvailability,
-  attachSpaceOf,
   limitAvailability,
-  useConversationAttachTarget,
   limitedSpaceOf,
-  type AttachAvailability,
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
 import { ComposerTools, LimitMenuEntry } from "../src/ui/composer-tools.tsx";
@@ -46,6 +41,12 @@ import {
 import { useSessions, useSessionDetail } from "../src/ui/use-sessions.ts";
 import { transportOf, transportOver } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
+
+/** The assistant-ui runtime the attach button reads. */
+function Runtime({ children }: { children: ReactNode }) {
+  const runtime = useLocalRuntime({ run: async () => ({ content: [] }) });
+  return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
+}
 
 describe("what the first message carries", () => {
   it("is the origin space, and the limit only when it is on", () => {
@@ -378,15 +379,17 @@ describe("the composer's limit chip", () => {
       <QueryClientProvider client={new QueryClient()}>
         <ChatHostProvider value={host}>
           <ConversationScopeProvider value={scope}>
-            <TooltipProvider>
-              <ComposerTools
-                transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
-                selection={{ skillMode: "auto", pinnedSkills: [] }}
-                onSelectionChange={() => {}}
-                showPicker={false}
-                authorsPackages={false}
-              />
-            </TooltipProvider>
+            <Runtime>
+              <TooltipProvider>
+                <ComposerTools
+                  transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
+                  selection={{ skillMode: "auto", pinnedSkills: [] }}
+                  onSelectionChange={() => {}}
+                  showPicker={false}
+                  authorsPackages={false}
+                />
+              </TooltipProvider>
+            </Runtime>
           </ConversationScopeProvider>
         </ChatHostProvider>
       </QueryClientProvider>,
@@ -480,191 +483,38 @@ describe("the composer's limit entry", () => {
   });
 });
 
-describe("the space a file is attached in", () => {
-  const unlimited = (originSpaceId: string | null) => ({ originSpaceId, restricted: false });
-  const limited = (originSpaceId: string) => ({ originSpaceId, restricted: true });
-  const acting = ["spc_a", "spc_b"];
-
-  it("is the origin while the chat acts there, limited or not, whatever space is shown", () => {
-    for (const shown of ["spc_a", "spc_b", null]) {
-      for (const scope of [limited("spc_a"), unlimited("spc_a")]) {
-        expect(attachAvailability(scope, acting, shown)).toEqual({
-          kind: "attach",
-          spaceId: "spc_a",
-        });
-      }
-    }
-  });
-
-  it("decides the other cases from the space shown and the acting set", () => {
-    const cases: [Parameters<typeof attachAvailability>, AttachAvailability][] = [
-      // A limited conversation whose origin left the acting set takes no file.
-      [[limited("spc_x"), acting, "spc_a"], { kind: "unavailable", reason: "origin-outside" }],
-      // Without an origin, or off one left behind: the space shown, when the chat acts there.
-      [[unlimited(null), acting, "spc_b"], { kind: "attach", spaceId: "spc_b" }],
-      [[unlimited("spc_x"), acting, "spc_b"], { kind: "attach", spaceId: "spc_b" }],
-      [[unlimited(null), acting, "spc_z"], { kind: "unavailable", reason: "outside" }],
-      [[unlimited("spc_x"), acting, "spc_z"], { kind: "unavailable", reason: "outside" }],
-      // « Tous les espaces »: the one acting space, else a choice, never the hidden one.
-      [[unlimited(null), ["spc_a"], null], { kind: "attach", spaceId: "spc_a" }],
-      [[unlimited(null), acting, null], { kind: "choose", spaceIds: acting }],
-      [[unlimited(null), [], null], { kind: "unavailable", reason: "no-acting-space" }],
-      // No reason while the acting set is not known.
-      [[unlimited(null), null, null], { kind: "unavailable", reason: null }],
-      [[limited("spc_a"), null, "spc_a"], { kind: "unavailable", reason: null }],
-    ];
-    for (const [args, expected] of cases) expect(attachAvailability(...args)).toEqual(expected);
-  });
-
-  it("goes where it is decided, else where last picked while that is a choice", () => {
-    const choose: AttachAvailability = { kind: "choose", spaceIds: acting };
-    expect(attachSpaceOf({ kind: "attach", spaceId: "spc_a" }, "spc_b")).toBe("spc_a");
-    expect(attachSpaceOf(choose, "spc_b")).toBe("spc_b");
-    expect(attachSpaceOf(choose, null)).toBeNull();
-    expect(attachSpaceOf(choose, "spc_z")).toBeNull();
-    expect(attachSpaceOf({ kind: "unavailable", reason: "outside" }, "spc_a")).toBeNull();
-  });
-
-  /** The target's space after each render's step; `scope` and the space shown are its state. */
-  function targetAcross(
-    steps: Array<
-      (
-        target: ReturnType<typeof useConversationAttachTarget>,
-        set: {
-          shown: (spaceId: string | null) => void;
-          scope: (scope: ReturnType<typeof unlimited>) => void;
-        },
-      ) => void
-    >,
-  ): string | null {
-    let destination: string | null = null;
-    const queue = [...steps];
-    function Composer() {
-      const [shown, setShown] = useState<string | null>(null);
-      const [scope, setScope] = useState(unlimited(null));
-      const target = useConversationAttachTarget(scope, shown);
-      destination = target.spaceId;
-      queue.shift()?.(target, { shown: setShown, scope: setScope });
-      return null;
-    }
-    renderToStaticMarkup(
-      <ChatHostProvider value={testHost({ actingSpaceIds: acting })}>
-        <Composer />
-      </ChatHostProvider>,
-    );
-    return destination;
-  }
-
-  it("forgets a pick once the choice it answered is gone", () => {
-    // Leaving the overview and coming back.
-    expect(
-      targetAcross([
-        (t) => t.pick("spc_b"),
-        (_, set) => set.shown("spc_a"),
-        (_, set) => set.shown(null),
-      ]),
-    ).toBeNull();
-    // Limited to another space (the origin then decides), then the limit lifted with no origin.
-    expect(
-      targetAcross([
-        (t) => t.pick("spc_b"),
-        (_, set) => set.scope({ originSpaceId: "spc_a", restricted: true }),
-        (_, set) => set.scope(unlimited(null)),
-      ]),
-    ).toBeNull();
-  });
-
-  it("forgets a pick once the turn it was made for is sent", () => {
-    expect(targetAcross([(t) => t.pick("spc_b"), (t) => t.forget()])).toBeNull();
-  });
-
-  it("is the space picked, then the origin once the conversation is limited there", () => {
-    expect(targetAcross([(t) => t.pick("spc_b")])).toBe("spc_b");
-    expect(
-      targetAcross([
-        (t) => t.pick("spc_b"),
-        (_, set) => set.scope({ originSpaceId: "spc_a", restricted: true }),
-      ]),
-    ).toBe("spc_a");
-  });
-});
-
 describe("the composer's attach button", () => {
-  const names: Record<string, string> = { spc_a: "Studio", spc_b: "Atelier" };
-  const HostMenu: SpaceChoiceMenu = ({ variant, label, spaceIds, trigger }) => (
-    <div data-variant={variant} data-label={label} data-choice={spaceIds.join(",")}>
-      {trigger}
-    </div>
-  );
-
-  function Runtime({ children }: { children: ReactNode }) {
-    const runtime = useLocalRuntime({ run: async () => ({ content: [] }) });
-    return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
-  }
-
-  function render(availability: AttachAvailability, shownSpaceId: string | null) {
-    const host = testHost({
-      t: (key, options) => (options ? `${key}|${String(options.name)}` : key),
-      useSpaceLabelOf: () => (id) => (id ? names[id] : undefined),
-      SpaceChoiceMenu: HostMenu,
-    });
-    const transport = transportOf(() => ({}), shownSpaceId);
-    const spaceId = availability.kind === "attach" ? availability.spaceId : null;
+  /** In « Tous les espaces » with several acting spaces: the destination is never asked. */
+  function render(personalSpaceId: string | null) {
+    const host = testHost({ actingSpaceIds: ["spc_a", "spc_b"], personalSpaceId });
+    const transport = transportOf(() => ({}), null);
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
         <ChatTransportProvider value={transport}>
-          <AttachTargetProvider value={{ availability, spaceId, pick: () => {}, forget: () => {} }}>
-            <Runtime>
-              <TooltipProvider>
-                <ComposerTools
-                  transport={transport}
-                  selection={{ skillMode: "auto", pinnedSkills: [] }}
-                  onSelectionChange={() => {}}
-                  showPicker={false}
-                  authorsPackages={false}
-                />
-              </TooltipProvider>
-            </Runtime>
-          </AttachTargetProvider>
+          <Runtime>
+            <TooltipProvider>
+              <ComposerTools
+                transport={transport}
+                selection={{ skillMode: "auto", pinnedSkills: [] }}
+                onSelectionChange={() => {}}
+                showPicker={false}
+                authorsPackages={false}
+              />
+            </TooltipProvider>
+          </Runtime>
         </ChatTransportProvider>
       </ChatHostProvider>,
     );
   }
 
-  it("attach: directly, naming the destination only when it is not the space shown", () => {
-    const here = render({ kind: "attach", spaceId: "spc_a" }, "spc_a");
-    expect(here).toContain('aria-label="composer.attach"');
-    expect(here).toContain('aria-label="composer.settings"');
-    expect(here).not.toContain("data-choice");
-    for (const shown of ["spc_b", null]) {
-      expect(render({ kind: "attach", spaceId: "spc_a" }, shown)).toContain(
-        'aria-label="composer.attachIn|Studio"',
-      );
-    }
-    // A space the host cannot name is not named.
-    expect(render({ kind: "attach", spaceId: "spc_unseen" }, null)).toContain(
-      'aria-label="composer.attach"',
-    );
+  it("opens the picker directly in a multi-space view, with no space question", () => {
+    const out = render("spc_me");
+    expect(out).toMatch(/<button[^>]*aria-label="composer.attach"/);
+    expect(out).not.toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
+    expect(out).not.toContain("composer.attach.choose");
   });
 
-  it("choose: opens the acting spaces from the attach button itself", () => {
-    const out = render({ kind: "choose", spaceIds: ["spc_a", "spc_b"] }, null);
-    expect(out).toContain('data-variant="dropdown"');
-    expect(out).toContain('data-label="composer.attach.choose"');
-    expect(out).toContain('data-choice="spc_a,spc_b"');
-    expect(out).toContain('aria-label="composer.attach"');
-  });
-
-  it("unavailable: disabled with the reason, and without one while the acting set loads", () => {
-    const cases: [AttachAvailability, string | null][] = [
-      [{ kind: "unavailable", reason: "origin-outside" }, "composer.limit.outside"],
-      [{ kind: "unavailable", reason: null }, null],
-    ];
-    for (const [availability, reason] of cases) {
-      const out = render(availability, "spc_a");
-      expect(out).toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
-      if (reason) expect(out).toContain(reason);
-      else expect(out).not.toContain('class="sr-only"');
-    }
+  it("is disabled until the personal space is known", () => {
+    expect(render(null)).toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
   });
 });

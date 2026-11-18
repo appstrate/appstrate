@@ -49,7 +49,7 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
+import { useSpaceLabelOf, useSpaces, useSpacesOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -109,6 +109,9 @@ export function ChatModulePage() {
   // A call's grant is judged in the space the call acted in.
   const canIn = useRowSpaceGrants();
   const actingSpaceIds = useChatActingSpaceIds();
+  // Every file attached from the computer goes to the caller's own personal space (the listing
+  // names only theirs: an orphaned one is the admin projection of someone who left).
+  const personalSpaceId = useSpaces().data?.find((s) => s.personal && !s.orphaned_at)?.id ?? null;
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -203,6 +206,7 @@ export function ChatModulePage() {
               can={can}
               canIn={canIn}
               actingSpaceIds={actingSpaceIds}
+              personalSpaceId={personalSpaceId}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
