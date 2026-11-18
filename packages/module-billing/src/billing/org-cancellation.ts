@@ -9,7 +9,12 @@
 
 import { eq, isNotNull } from "drizzle-orm";
 import { getBillingDb } from "../db.ts";
-import { billingAccounts, orgUsageRecords } from "../../drizzle/schema.ts";
+import {
+  billingAccounts,
+  computeUsage,
+  orgUsageRecords,
+  settledRuns,
+} from "../../drizzle/schema.ts";
 import { cancelSubscription } from "../stripe/cancel.ts";
 import { logger } from "../logger.ts";
 import { deleteBillingManagers } from "./managers.ts";
@@ -19,6 +24,8 @@ async function deleteOrgBillingRows(orgId: string): Promise<void> {
   const db = getBillingDb();
   await deleteBillingManagers(orgId);
   await db.delete(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
+  await db.delete(computeUsage).where(eq(computeUsage.orgId, orgId));
+  await db.delete(settledRuns).where(eq(settledRuns.orgId, orgId));
   await db.delete(billingAccounts).where(eq(billingAccounts.orgId, orgId));
 }
 

@@ -32,6 +32,8 @@ import {
 } from "../billing/contact.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
 import { getPlatformServices } from "../platform.ts";
+import { SECONDS_PER_MINUTE, periodEndOf, periodStartOf } from "../compute/period.ts";
+import { readComputeSecondsUsed } from "../compute/usage.ts";
 import {
   problemJson,
   noBillingAccount,
@@ -107,6 +109,8 @@ interface PlanDetail {
   price: number;
   credit_quota: number;
   file_storage_bytes: number;
+  included_compute_minutes: number | null;
+  max_concurrent_runs: number | null;
 }
 
 type CheckoutPlanId = (typeof CHECKOUT_PLAN_IDS)[number];
@@ -123,6 +127,8 @@ function planDetail(p: PlanDefinition): PlanDetail {
     price: p.monthlyPrice,
     credit_quota: p.creditQuota,
     file_storage_bytes: p.fileStorageBytes,
+    included_compute_minutes: p.includedComputeMinutes,
+    max_concurrent_runs: p.maxConcurrentRuns,
   };
 }
 
@@ -174,6 +180,30 @@ function managerList(managers: BillingManager[]) {
 }
 
 /**
+ * The org's compute month as the dashboard reads it. The gauge is the SAME arithmetic as the
+ * admission gate (`used >= included`), so a bar reading 100 % is exactly a refused launch.
+ */
+async function computeSnapshot(
+  orgId: string,
+  plan: PlanDefinition | undefined,
+  now: Date = new Date(),
+) {
+  const usedSeconds = await readComputeSecondsUsed(orgId, now);
+  const periodStart = periodStartOf(now);
+  const included = plan?.includedComputeMinutes ?? null;
+  const quotaSeconds = included === null ? 0 : included * SECONDS_PER_MINUTE;
+  return {
+    used_seconds: usedSeconds,
+    included_minutes: included,
+    usage_percent:
+      quotaSeconds > 0 ? Math.min(100, Math.floor((usedSeconds / quotaSeconds) * 100)) : 0,
+    period_start: `${periodStart}T00:00:00.000Z`,
+    period_end: periodEndOf(periodStart).toISOString(),
+    max_concurrent_runs: plan?.maxConcurrentRuns ?? null,
+  };
+}
+
+/**
  * The wire projection of one org's billing account — plan, usage, status and upgrades —
  * shared by `GET /api/billing` and the answer to a plan change; `null` when the org has
  * no billing account. `plan_action` is the same `planAction` predicate
@@ -204,6 +234,7 @@ async function billingSnapshot(orgId: string) {
   const plans = getPlans();
   const allPlans = [plans.free, plans.starter, plans.pro];
   const currentPlan = allPlans.find((p) => p.id === account.planId);
+  const compute = await computeSnapshot(orgId, currentPlan);
 
   return {
     plan: {
@@ -211,6 +242,7 @@ async function billingSnapshot(orgId: string) {
       name: currentPlan?.name ?? account.planId,
     },
     plans: allPlans.map(planDetail),
+    compute,
     usage_percent: usagePercent,
     credits_used: account.creditsUsed,
     credit_quota: account.creditQuota,
