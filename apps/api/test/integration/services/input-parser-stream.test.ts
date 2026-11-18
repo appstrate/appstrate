@@ -14,10 +14,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { Context } from "hono";
 import { db } from "@appstrate/db/client";
-import { uploads, runs } from "@appstrate/db/schema";
+import { uploads, runs, spaceRoles } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, addOrgMember } from "../../helpers/auth.ts";
+import { seedSpace, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
 import { createFileFromUpload, createFileFromStream } from "../../../src/services/files.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -74,6 +75,8 @@ function fakeCtx(ctx: {
   user?: { id: string };
   /** The caller's resolved grants — `runs:read-all` is what widens a run container. */
   permissions?: ReadonlySet<string>;
+  /** The caller's org role: with one, the caller reaches its other spaces (`callerReachableSpaces`). */
+  orgRole?: string;
 }): Context {
   const user = ctx.endUser ? undefined : (ctx.user ?? { id: "usr_input_parser_test" });
   return {
@@ -87,8 +90,12 @@ function fakeCtx(ctx: {
             : key === "user"
               ? user
               : key === "permissions"
-                ? ctx.permissions
-                : undefined,
+                ? // Run inputs read file content, which asks `files:read` in the file's space.
+                  new Set(["files:read", ...(ctx.permissions ?? [])])
+                : key === "orgRole"
+                  ? ctx.orgRole
+                  : undefined,
+    set: () => {},
   } as unknown as Context;
 }
 
@@ -624,6 +631,55 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // persists as SQL NULL, matching a fresh input-less trigger.
     expect(result.input).toBeUndefined();
     expect(result.uploadedFiles).toBeUndefined();
+  });
+
+  it("replays an appfile:// input of another space under the caller's grant there", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-cross" });
+    const member = await createTestUser({ email: "m@rerun-cross.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const spaceA = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const spaceB = { orgId: ctx.orgId, spaceId: (await seedSpace({ orgId: ctx.orgId })).id };
+    // The member's own output in A, given to a run in B that is then replayed.
+    const producer = `run_${crypto.randomUUID()}`;
+    await seedRun(spaceA, { id: producer, input: null, userId: member.id });
+    const { row } = await createFileFromStream(
+      spaceA,
+      producer,
+      { userId: member.id, endUserId: null },
+      null,
+      { name: "out.pdf", mime: "application/pdf", body: new Blob([PDF_BYTES]).stream() },
+    );
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    await seedRun(spaceB, {
+      id: priorRunId,
+      input: { doc: `appfile://${row.id}` },
+      userId: member.id,
+    });
+    const rerun = () =>
+      parseRequestInput(
+        fakeCtx({ ...spaceB, user: { id: member.id }, orgRole: "member" }),
+        { rerun_from: priorRunId },
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      );
+
+    // In A the member reads runs, not files: the replay is refused like a missing file.
+    const role = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["runs:read"] });
+    await seedSpaceMember({
+      spaceId: ctx.defaultSpaceId,
+      userId: member.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    await expect(rerun()).rejects.toMatchObject({ status: 404 });
+
+    await db
+      .update(spaceRoles)
+      .set({ permissions: ["runs:read", "files:read"] })
+      .where(eq(spaceRoles.id, role.id));
+    const result = await rerun();
+    expect(result.uploadedFiles).toHaveLength(1);
+    expect(result.consumedFileIds).toEqual([row.id]);
   });
 });
 

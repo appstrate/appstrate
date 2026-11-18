@@ -35,6 +35,7 @@ import { materializeUserAttachments, messagesWithAttachmentsAsText } from "../sr
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { persistUserMessage } from "../src/persistence.ts";
+import { ensurePersonalSpaceFor } from "../../../apps/api/src/services/spaces.ts";
 
 // Boot the platform app once (registers routes, storage, DB) — this test drives
 // the services directly, so the handle itself is not referenced.
@@ -95,6 +96,7 @@ function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, 
       // These cases materialize the session owner's own uploads; the container
       // ACL never widens, so the narrowest set is the honest one to hand it.
       spaces: [{ id: scope.spaceId, permissions: new Set() }],
+      reach: [],
       beforeResolve: async () => {},
     });
 }
@@ -107,7 +109,9 @@ describe("chat attachments", () => {
     await truncateAll();
     _resetCacheForTesting();
     ctx = await createTestContext({ orgSlug: "chatattach" });
-    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    // The composer stages every attachment in the caller's personal space.
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    scope = { orgId: ctx.orgId, spaceId: personal.id };
   });
 
   it("materializes an upload:// part into a session-scoped file and rewrites it to appfile://", async () => {
@@ -129,7 +133,7 @@ describe("chat attachments", () => {
     expect(filePart.url.startsWith("appfile://")).toBe(true);
     expect(filePart.providerMetadata?.appstrate?.size).toBe(bytes.byteLength);
     // The space it lives in travels with it: a download after the working space changes reads there.
-    expect(filePart.providerMetadata?.appstrate?.spaceId).toBe(ctx.defaultSpaceId);
+    expect(filePart.providerMetadata?.appstrate?.spaceId).toBe(scope.spaceId);
 
     // A durable file row exists, anchored to the chat session, attributed
     // to its owner, purpose user_upload.
@@ -289,9 +293,9 @@ describe("chat attachments", () => {
       orgId: ctx.orgId,
       userId: over.userId ?? ctx.user.id,
       uri,
-      spaces: [
-        { id: ctx.defaultSpaceId, permissions: new Set(over.permissions ?? ["files:read"]) },
-      ],
+      chatSessionId: null,
+      spaces: [{ id: scope.spaceId, permissions: new Set(over.permissions ?? ["files:read"]) }],
+      reach: [],
       kind: "image" as const,
       beforeResolve: async () => {},
       maxBytes: over.maxBytes ?? 4096,
@@ -350,7 +354,7 @@ describe("chat attachments", () => {
       await expect(readChatAttachment({ ...request(uri), beforeResolve: refuse })).rejects.toThrow(
         "Space refused",
       );
-      expect(spaces).toEqual([ctx.defaultSpaceId]);
+      expect(spaces).toEqual([scope.spaceId]);
     });
 
     it("is null once `files:read` is withdrawn, re-asked at every read (between two turns)", async () => {

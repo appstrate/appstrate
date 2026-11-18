@@ -155,14 +155,22 @@ export async function createSession(input: {
   return input.spaceId === null ? insert() : writingOriginSpace(insert);
 }
 
-/** The space a file belongs to, or undefined when `orgId` holds no such file. */
-export async function fileSpaceId(orgId: string, fileId: string): Promise<string | undefined> {
+/**
+ * The space a read of a file touches: the space it belongs to, or undefined when `orgId` holds
+ * no such file or when the conversation `chatSessionId` holds it — such a file (a chat upload, in
+ * the personal space) is reached through its container, not through a space of the turn.
+ */
+export async function fileSpaceId(
+  orgId: string,
+  fileId: string,
+  chatSessionId: string | undefined,
+): Promise<string | undefined> {
   const [row] = await db
-    .select({ spaceId: files.spaceId })
+    .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })
     .from(files)
     .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
     .limit(1);
-  return row?.spaceId;
+  return row && (!chatSessionId || row.chatSessionId !== chatSessionId) ? row.spaceId : undefined;
 }
 
 /** What a turn takes from the conversation row: its skill selection, origin space and limit. */

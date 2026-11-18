@@ -9,12 +9,12 @@ import type { TestContext } from "./auth.ts";
 /**
  * `member`'s loopback headers in `orgId`, capped at `permissions`. `spaceIds` is the space
  * allowlist the bearer carries (`AuthResolution.spaceIds`, `credentialSpaceIds`); absent, it is
- * unbound.
+ * unbound. `chatSessionId` is the conversation the turn's bearer names as issuing it.
  */
 export function loopbackHeaders(
   member: Pick<TestContext, "user">,
   orgId: string,
-  options: { orgRole: OrgRole; permissions: string[]; spaceIds?: string[] },
+  options: { orgRole: OrgRole; permissions: string[]; spaceIds?: string[]; chatSessionId?: string },
 ): Record<string, string> {
   const token = mintMcpLoopbackToken({
     userId: member.user.id,
@@ -24,6 +24,7 @@ export function loopbackHeaders(
     orgRole: options.orgRole,
     permissions: options.permissions,
     spaceIds: options.spaceIds,
+    chatSessionId: options.chatSessionId,
   });
   return { Authorization: `Bearer ${token}`, "X-Org-Id": orgId };
 }

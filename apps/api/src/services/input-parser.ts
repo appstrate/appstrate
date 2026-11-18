@@ -53,14 +53,14 @@ import {
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
 import {
-  getFileForActor,
+  resolveFileAcrossSpaces,
   streamFileContent,
   assertWithinFileLimits,
   type PendingUploadMaterialization,
 } from "./files.ts";
 import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getActor } from "../lib/actor.ts";
-import { callerPermissions } from "../lib/permissions.ts";
+import { requestFileAccess } from "../lib/file-access.ts";
 import { assertRunVisible } from "../lib/run-visibility.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
@@ -677,19 +677,17 @@ export async function parseRequestInput(
         // (any org member could consume another member's staged bytes).
         const actor = getActor(c);
 
-        // Resolve every `appfile://` reference through the container ACL (D2):
-        // the run-triggering actor must be able to read the file, else it is
-        // indistinguishable from missing (404 — covers cross-org and cross-space).
+        // Resolve every `appfile://` reference in the FILE's own space, under the
+        // caller's grant there as its credential reaches it (`files:read` required,
+        // here as on every door reading file content), then the container ACL (D2)
+        // — `requestFileAccess`, which also admits the issuing chat conversation's
+        // own files. Anything refused is indistinguishable from missing (404).
+        const fileAccess = requestFileAccess(c, spaceId);
         const resolvedDocs =
           fileRefs.length > 0
             ? await Promise.all(
                 fileRefs.map(async ({ ref, id }) => {
-                  const doc = await getFileForActor(
-                    { orgId, spaceId },
-                    actor,
-                    id,
-                    callerPermissions(c),
-                  );
+                  const doc = await resolveFileAcrossSpaces(orgId, actor, id, fileAccess);
                   // Cross-actor ACL (S2): the container ACL is the outer gate
                   // and narrows a run-contained output to the runs the caller
                   // may read (`runs:read-all`, else its own); the `download`
@@ -698,9 +696,7 @@ export async function parseRequestInput(
                   // another member's private upload into their own run.
                   // `download` is always true for an `agent_output` — chainable
                   // within the container the outer gate already granted (D6) —
-                  // and true for an upload only for its creator. A rejected ref
-                  // is indistinguishable from missing (404), matching the
-                  // not-found shape above.
+                  // and true for an upload only for its creator.
                   if (!doc || !doc.capabilities.download) throw notFound(`File '${id}' not found`);
                   return { ref, doc: doc.row };
                 }),

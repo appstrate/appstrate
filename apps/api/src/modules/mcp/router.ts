@@ -119,6 +119,7 @@ import {
   type OrgWideSpaces,
 } from "./spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import { requestFileAccess } from "../../lib/file-access.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** The per-org POST endpoint, parameterised on the org id. */
@@ -684,6 +685,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       observe,
       actor,
       scope,
+      fileAccess: requestFileAccess(c, scope.spaceId),
       orgSpaces,
     };
     const surface = orgSpaces

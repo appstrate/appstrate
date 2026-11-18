@@ -1329,6 +1329,7 @@ describe("files service + routes", () => {
         uri: `appfile://${fileId}`,
         // `files:read` is what lets a caller attach a stored file at all; the set under test widens it.
         spaces: [{ id: ctx.defaultSpaceId, permissions: new Set([...permissions, "files:read"]) }],
+        reach: [],
         beforeResolve: async () => {},
       });
 
@@ -1350,6 +1351,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri: `appfile://${ownOutput.id}`,
         spaces: [{ id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN }],
+        reach: [],
         beforeResolve: async () => {},
       }),
     ).rejects.toMatchObject({ status: 404 });
@@ -1427,6 +1429,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri,
         spaces,
+        reach: spaces,
         beforeResolve: async () => {},
       });
     const here = { id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN };
@@ -1442,71 +1445,138 @@ describe("files service + routes", () => {
     ).rejects.toMatchObject({ status: 404 });
     // A space the caller may not attach in is as absent as a missing file.
     await expect(attach(`appfile://${output.id}`, [here])).rejects.toMatchObject({ status: 404 });
-
-    // An upload is materialized in the space it was staged in, which the result names.
-    const upload = await stageUpload(
-      otherScope,
-      ctx.user.id,
-      "depuis-l-autre.txt",
-      new TextEncoder().encode("contenu"),
-    );
-    await expect(attach(`upload://${upload}`, [here])).rejects.toMatchObject({ status: 404 });
-    const materialized = await attach(`upload://${upload}`, [
-      here,
-      { id: other.id, permissions: NO_GRANTS },
-    ]);
-    expect(materialized.spaceId).toBe(other.id);
-    const [row] = await db
-      .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })
-      .from(files)
-      .where(eq(files.id, materialized.uri.replace("appfile://", "")));
-    expect(row).toEqual({ spaceId: other.id, chatSessionId });
   });
 
-  it("a chat attachment announces its space before anything is materialized there", async () => {
-    const chatSessionId = `chs_${crypto.randomUUID()}`;
-    await db.insert(chatSessions).values({
-      id: chatSessionId,
+  it("a chat upload materializes in the caller's personal space and touches no space", async () => {
+    const personal = await seedSpace({
       orgId: ctx.orgId,
-      userId: ctx.user.id,
+      name: "Mon espace",
+      ownerUserId: ctx.user.id,
+      visibility: "private",
     });
-    const upload = await stageUpload(
+    const personalScope = { orgId: ctx.orgId, spaceId: personal.id };
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db
+      .insert(chatSessions)
+      .values({ id: chatSessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const filesOfSession = () =>
+      db
+        .select({ spaceId: files.spaceId })
+        .from(files)
+        .where(eq(files.chatSessionId, chatSessionId));
+    const announced: string[] = [];
+    // A limited conversation: the turn acts in the team space alone, the personal space is
+    // neither one of its spaces nor touched.
+    const attach = (uri: string) =>
+      resolveChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        chatSessionId,
+        uri,
+        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) }],
+        reach: [{ id: personal.id, permissions: new Set(["files:read"]) }],
+        beforeResolve: async (spaceId) => {
+          announced.push(spaceId);
+        },
+      });
+
+    // Staged in a team space, even one the turn acts in: refused, and nothing materialized.
+    const inTeam = await stageUpload(
       scope,
       ctx.user.id,
-      "refusee.txt",
-      new TextEncoder().encode("contenu"),
+      "equipe.txt",
+      new TextEncoder().encode("x"),
     );
-    const request = (beforeResolve: (spaceId: string) => Promise<void>) => ({
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      chatSessionId,
-      uri: `upload://${upload}`,
-      spaces: [{ id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN }],
-      beforeResolve,
-    });
-    const filesOfSession = () =>
-      db.select({ id: files.id }).from(files).where(eq(files.chatSessionId, chatSessionId));
-
-    // A refusal leaves no file behind: the upload stays staged.
-    await expect(
-      resolveChatAttachment(
-        request(async () => {
-          throw new Error("refused");
-        }),
-      ),
-    ).rejects.toThrow("refused");
+    await expect(attach(`upload://${inTeam}`)).rejects.toMatchObject({ status: 404 });
     expect(await filesOfSession()).toEqual([]);
 
-    // Told the space it resolves in, the same upload then materializes.
-    const announced: string[] = [];
-    const resolved = await resolveChatAttachment(
-      request(async (spaceId) => {
-        announced.push(spaceId);
-      }),
+    // Staged in the personal space: materialized there, held by the conversation.
+    const upload = await stageUpload(
+      personalScope,
+      ctx.user.id,
+      "perso.txt",
+      new TextEncoder().encode("contenu"),
     );
-    expect(announced).toEqual([ctx.defaultSpaceId]);
-    expect(await filesOfSession()).toHaveLength(1);
-    expect(resolved.spaceId).toBe(ctx.defaultSpaceId);
+    const materialized = await attach(`upload://${upload}`);
+    expect(materialized.spaceId).toBe(personal.id);
+    expect(await filesOfSession()).toEqual([{ spaceId: personal.id }]);
+    expect(announced).toEqual([]);
+
+    // Re-attaching the conversation's own file resolves through the conversation, outside the
+    // turn's spaces, and still touches none.
+    expect(await attach(materialized.uri)).toMatchObject({ spaceId: personal.id });
+    expect(announced).toEqual([]);
+
+    // Another member's personal space is not the caller's: their upload is a 404 here.
+    const colleague = await createTestUser({ email: "colleague@personal-upload.test" });
+    await addOrgMember(ctx.orgId, colleague.id, "member");
+    const theirs = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Leur espace",
+      ownerUserId: colleague.id,
+      visibility: "private",
+    });
+    const foreign = await stageUpload(
+      { orgId: ctx.orgId, spaceId: theirs.id },
+      ctx.user.id,
+      "ailleurs.txt",
+      new TextEncoder().encode("x"),
+    );
+    await expect(attach(`upload://${foreign}`)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("a conversation reads its own attachment outside the turn's spaces; nobody else does", async () => {
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Mon espace",
+      ownerUserId: ctx.user.id,
+      visibility: "private",
+    });
+    const personalScope = { orgId: ctx.orgId, spaceId: personal.id };
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    const otherSessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values([
+      { id: chatSessionId, orgId: ctx.orgId, userId: ctx.user.id },
+      { id: otherSessionId, orgId: ctx.orgId, userId: ctx.user.id },
+    ]);
+    const png = Uint8Array.from(
+      atob(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      ),
+      (char) => char.charCodeAt(0),
+    );
+    const upload = await stageUpload(personalScope, ctx.user.id, "photo.png", png, "image/png");
+    const file = await createFileFromUpload(personalScope, userActor, upload, { chatSessionId });
+
+    const personalGrant = { id: personal.id, permissions: new Set(["files:read"]) };
+    const read = (userId: string, sessionId: string | null, reach = [personalGrant]) =>
+      readChatAttachment({
+        orgId: ctx.orgId,
+        userId,
+        chatSessionId: sessionId,
+        uri: `appfile://${file.id}`,
+        // A later turn of a limited conversation: the team space alone.
+        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) }],
+        reach,
+        beforeResolve: async () => {
+          throw new Error("a conversation's own file touches no space");
+        },
+        kind: "image",
+        maxBytes: 1024,
+      });
+
+    expect((await read(ctx.user.id, chatSessionId))?.bytes).toEqual(png);
+    // Under the caller's set in the file's space: without `files:read` there, nothing.
+    expect(
+      await read(ctx.user.id, chatSessionId, [{ id: personal.id, permissions: new Set() }]),
+    ).toBeNull();
+    // Another conversation of the same user does not hold it, and its spaces do not include it.
+    expect(await read(ctx.user.id, otherSessionId)).toBeNull();
+    expect(await read(ctx.user.id, null)).toBeNull();
+    // Another member naming the conversation is refused by the container ACL.
+    const stranger = await createTestUser({ email: "stranger@personal-read.test" });
+    await addOrgMember(ctx.orgId, stranger.id, "member");
+    expect(await read(stranger.id, chatSessionId)).toBeNull();
   });
 
   it("a chat attachment the caller cannot read announces no space", async () => {
@@ -1528,6 +1598,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri: `appfile://${theirOutput.id}`,
         spaces: [{ id: ctx.defaultSpaceId, permissions }],
+        reach: [],
         beforeResolve: async (spaceId) => {
           announced.push(spaceId);
         },
@@ -1591,12 +1662,15 @@ describe("files service + routes", () => {
       spaces: [
         { id: ctx.defaultSpaceId, permissions: new Set(["files:read", ...READS_EVERY_RUN]) },
       ],
+      reach: [],
       beforeResolve: async () => {},
     };
     expect(
       await resolveChatAttachment({ ...request, chatSessionId: "unused-existing-reference" }),
     ).toMatchObject({ name: dto.name, mime: dto.mime });
-    expect(await readChatAttachment({ ...request, kind: "image", maxBytes: 1024 })).toBeNull();
+    expect(
+      await readChatAttachment({ ...request, chatSessionId: null, kind: "image", maxBytes: 1024 }),
+    ).toBeNull();
 
     // /content is refused outright.
     const content = await app.request(`/api/files/${upload.id}/content`, {

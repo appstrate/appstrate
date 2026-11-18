@@ -39,7 +39,11 @@ function fakeCtx(scope: Scope, userId: string): Context {
           ? scope.spaceId
           : key === "user"
             ? { id: userId }
-            : undefined,
+            : key === "permissions"
+              ? // Run inputs read file content, which asks `files:read` in the file's space.
+                new Set(["files:read"])
+              : undefined,
+    set: () => {},
   } as unknown as Context;
 }
 

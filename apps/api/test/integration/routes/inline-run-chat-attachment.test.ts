@@ -47,6 +47,7 @@ import { uploadStream } from "@appstrate/db/storage";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { resolveChatAttachment } from "../../../src/services/files.ts";
 import { CONTEXT_FILES_FIELD } from "../../../src/services/inline-run.ts";
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import { launchRunAndWait } from "@appstrate/core/run-and-wait-client";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import {
@@ -86,12 +87,13 @@ describe("inline run launched from the chat with an attached file", () => {
     restoreSystemPackages();
   });
 
-  /** The composer's 2-step upload, as `ui/upload.ts` performs it. */
+  /** The composer's 2-step upload, as `ui/upload.ts` performs it: into the personal space. */
   async function stageUpload(name: string, content: string): Promise<string> {
     const bytes = new TextEncoder().encode(content);
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
     const up = await createUpload({
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
+      spaceId: personal.id,
       createdBy: ctx.user.id,
       name,
       size: bytes.byteLength,
@@ -121,6 +123,7 @@ describe("inline run launched from the chat with an attached file", () => {
       chatSessionId: sessionId,
       uri: `upload://${uploadId}`,
       spaces: [{ id: ctx.defaultSpaceId, permissions: new Set() }],
+      reach: [],
       beforeResolve: async () => {},
     });
     return { uri: resolved.uri, fileId: parseFileUri(resolved.uri)! };

@@ -78,7 +78,8 @@ import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
-  getFileForActor,
+  resolveFileAcrossSpaces,
+  type FileAccess,
   mayReadFileContent,
   readStoredFileBytes,
   projectFileMetadata,
@@ -190,6 +191,8 @@ export interface McpToolContext {
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
+  /** How a file read by id reaches the file's own space (`requestFileAccess`). */
+  fileAccess: FileAccess;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
@@ -1601,7 +1604,7 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /**
  * The file read shared by `read_file` and `resources/read`, through the files
- * service's container ACL (`getFileForActor`, as the REST route) and straight
+ * service's container ACL in the file's own space (`resolveFileAcrossSpaces`) and straight
  * from storage (`readStoredFileBytes`, so no presigned redirect to follow). A bad
  * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
  *
@@ -1657,7 +1660,14 @@ function buildFileResourceReader(ctx: McpToolContext): {
 
       // The in-process read skips the REST middleware; apply its file-family grant before the container ACL.
       if (!mayReadFileContent(ctx.permissions)) throw fileContentNotGranted();
-      const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
+      // In the file's own space: a file of another reached space, or one the issuing
+      // conversation holds (a chat upload, in the personal space), reads as its REST twin would.
+      const resolved = await resolveFileAcrossSpaces(
+        ctx.scope.orgId,
+        ctx.actor,
+        docId,
+        ctx.fileAccess,
+      );
       if (!resolved) {
         throw new ToolRefusal({
           code: "not_found",

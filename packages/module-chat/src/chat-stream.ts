@@ -465,7 +465,7 @@ export async function handleChatStream(
       },
       spaceOfUri: async (uri) => {
         const fileId = parseFileUri(uri);
-        return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
+        return fileId ? fileSpaceId(orgId, fileId, sessionId) : parseSkillUri(uri)?.spaceId;
       },
     };
     return {
@@ -715,6 +715,12 @@ export async function handleChatStream(
     id: space.id,
     permissions: new Set(space.permissions),
   }));
+  // The caller's whole reach: a file the conversation holds (an upload, in the personal space)
+  // reads under the caller's set in its own space, even outside the turn's spaces.
+  const attachmentReach = reachable.map((space) => ({
+    id: space.id,
+    permissions: new Set(space.permissions),
+  }));
   // What the browser's optimistic `upload://` parts became, for the stream to tell it.
   let uploadResolutions: UIMessageChunk | null = null;
   if (sessionId && lastMessage) {
@@ -727,8 +733,9 @@ export async function handleChatStream(
           chatSessionId: sessionId,
           uri,
           spaces: attachmentSpaces,
-          // The space the file belongs to is touched by the session that comes to hold it,
-          // before anything is materialized there.
+          reach: attachmentReach,
+          // A gallery file's space is touched by the session that comes to hold it, before
+          // it is attached; an upload lands in the personal space and touches none.
           beforeResolve: organization.touch,
         });
       });
@@ -836,6 +843,8 @@ export async function handleChatStream(
       injectedSkills,
       // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
+      // The conversation issuing its requests: a run it launches may take its own files.
+      chatSessionId: meteringSessionId,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -866,6 +875,8 @@ export async function handleChatStream(
             userId: user.id,
             uri,
             spaces: attachmentSpaces,
+            reach: attachmentReach,
+            chatSessionId: sessionId ?? null,
             beforeResolve: organization.touch,
             ...options,
           }),

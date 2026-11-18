@@ -47,6 +47,7 @@ function makeTools(permissions: string[], status = 200) {
     observe: (e) => events.push(e),
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    fileAccess: { grantIn: () => undefined },
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
     requestId: "req_test",

@@ -41,7 +41,15 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { files, fileLinks, organizations, chatSessions, runs, uploads } from "@appstrate/db/schema";
+import {
+  files,
+  fileLinks,
+  organizations,
+  chatSessions,
+  runs,
+  spaces,
+  uploads,
+} from "@appstrate/db/schema";
 import type { FilePurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -1305,19 +1313,18 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
  * metadata (the seam behind `PlatformServices.resolveChatAttachment`, wired for
  * the chat module which has no DB access):
  *
- *  - `upload://upl_x` → materialize it into a chat-session-scoped file
- *    (purpose `user_upload`, attributed to the session owner) and return the new
- *    `appfile://` URI. Quota/cap rejections propagate as RFC 9457 errors.
+ *  - `upload://upl_x` → staged in the caller's personal space (any other space is a 404),
+ *    materialized there into a chat-session-scoped file (purpose `user_upload`,
+ *    attributed to the session owner), returning the new `appfile://` URI.
+ *    Quota/cap rejections propagate as RFC 9457 errors.
  *  - `appfile://file_x` → validate the session owner can read it (container ACL)
  *    and echo it back; a foreign/missing file is a 404.
  *
  * Chat sessions are per dashboard user, so the actor is always a `user`.
- * The attachment resolves in the space its file or upload belongs to (one of
- * `request.spaces`), under the caller's permission set there, so the ACL here
- * answers the same set the file gallery does: with `runs:read-all` a
- * colleague's run output attaches, without it only the session owner's own
- * runs. The picker and the attach must agree, or a file the user just chose
- * from the gallery 404s.
+ * A stored file resolves in its own space: one of `request.spaces` under the
+ * caller's set there, so the ACL answers what the file gallery does (with
+ * `runs:read-all` a colleague's run output attaches), or a file this
+ * conversation already holds, under the caller's set in its space.
  */
 export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
@@ -1328,23 +1335,29 @@ export async function resolveChatAttachment(
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
     const attached = await resolveStoredChatFile(request, fileId);
     if (!attached) throw notFound(`File '${fileId}' not found`);
-    await request.beforeResolve(attached.row.spaceId);
+    await touchIfTurnSpace(request, attached.row.spaceId);
     row = { ...attached.row, ...projectFileMetadata(attached.row, attached.capabilities) };
   } else {
     const uploadId = parseUploadUri(request.uri);
     if (!uploadId)
       throw invalidRequest("Attachment URI must be an 'upload://' or 'appfile://' URI");
-    const [owner] = await db
+    // A chat upload lives in the caller's personal space, reached through the conversation
+    // that holds it: it touches no space, so a limited conversation stays limited.
+    const [staged] = await db
       .select({ spaceId: uploads.spaceId })
       .from(uploads)
-      .where(and(eq(uploads.id, uploadId), eq(uploads.orgId, request.orgId)))
+      .innerJoin(spaces, eq(spaces.id, uploads.spaceId))
+      .where(
+        and(
+          eq(uploads.id, uploadId),
+          eq(uploads.orgId, request.orgId),
+          eq(spaces.ownerUserId, request.userId),
+        ),
+      )
       .limit(1);
-    const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
-    if (!space) throw notFound(`Upload '${uploadId}' not found`);
-    // Touch before materialization so a refused space creates no durable file.
-    await request.beforeResolve(space.id);
+    if (!staged) throw notFound(`Upload '${uploadId}' not found`);
     row = await createFileFromUpload(
-      { orgId: request.orgId, spaceId: space.id },
+      { orgId: request.orgId, spaceId: staged.spaceId },
       { type: "user", id: request.userId },
       uploadId,
       { chatSessionId: request.chatSessionId },
@@ -1371,35 +1384,76 @@ export function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
   return permissions.has(FILE_CONTENT_GRANT);
 }
 
-/** Attaching and reading a stored file use the same space grant and container ACL as the file gallery. */
+/** A caller's effective set in a space, or undefined where it holds none. */
+type GrantIn = (
+  spaceId: string,
+) => ReadonlySet<string> | undefined | Promise<ReadonlySet<string> | undefined>;
+
+/**
+ * How a caller reaches files across spaces: its grant in each space its credential reaches and,
+ * when a chat conversation issued the request, the grant the conversation's own files are read
+ * under wherever they live (they are reachable through their container, not through a space).
+ */
+export interface FileAccess {
+  grantIn: GrantIn;
+  conversation?: { id: string; grantIn: GrantIn };
+}
+
+/**
+ * Resolve a file in its OWN space: the caller's grant there (or, for a file the issuing
+ * conversation holds, the conversation's), which must read file content, then the container
+ * ACL of {@link getFileForActor}. Anything refused is indistinguishable from missing (null).
+ * Every door taking a file by id across spaces calls this: run inputs and chat attachments.
+ */
+export async function resolveFileAcrossSpaces(
+  orgId: string,
+  actor: Actor,
+  fileId: string,
+  access: FileAccess,
+): Promise<ResolvedFile | null> {
+  if (!FILE_ID_RE.test(fileId)) return null;
+  const [location] = await db
+    .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })
+    .from(files)
+    .where(and(eq(files.orgId, orgId), eq(files.id, fileId)))
+    .limit(1);
+  if (!location) return null;
+  const permissions =
+    (await access.grantIn(location.spaceId)) ??
+    (access.conversation && location.chatSessionId === access.conversation.id
+      ? await access.conversation.grantIn(location.spaceId)
+      : undefined);
+  if (!permissions || !mayReadFileContent(permissions)) return null;
+  return getFileForActor({ orgId, spaceId: location.spaceId }, actor, fileId, permissions);
+}
+
+/**
+ * The chat's reach for a stored file: the turn's spaces, plus — for a file this conversation
+ * holds — the caller's grant in the file's own space (its personal space for an upload).
+ */
 async function resolveStoredChatFile(
-  request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces">,
+  request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces" | "reach"> & {
+    chatSessionId: string | null;
+  },
   fileId: string,
 ): Promise<ResolvedFile | null> {
-  const spaces = request.spaces.filter((space) => mayReadFileContent(space.permissions));
-  if (!spaces.length) return null;
-  const [owner] = await db
-    .select({ spaceId: files.spaceId })
-    .from(files)
-    .where(
-      and(
-        eq(files.orgId, request.orgId),
-        eq(files.id, fileId),
-        inArray(
-          files.spaceId,
-          spaces.map((s) => s.id),
-        ),
-      ),
-    )
-    .limit(1);
-  const space = spaces.find((s) => s.id === owner?.spaceId);
-  if (!space) return null;
-  return getFileForActor(
-    { orgId: request.orgId, spaceId: space.id },
-    { type: "user", id: request.userId },
-    fileId,
-    space.permissions,
-  );
+  const grantOf =
+    (grants: readonly { id: string; permissions: ReadonlySet<string> }[]) => (spaceId: string) =>
+      grants.find((grant) => grant.id === spaceId)?.permissions;
+  return resolveFileAcrossSpaces(request.orgId, { type: "user", id: request.userId }, fileId, {
+    grantIn: grantOf(request.spaces),
+    ...(request.chatSessionId
+      ? { conversation: { id: request.chatSessionId, grantIn: grantOf(request.reach) } }
+      : {}),
+  });
+}
+
+/** Touch the file's space only when it is one of the turn's: a conversation's own file outside them touches none. */
+async function touchIfTurnSpace(
+  request: Pick<ChatAttachmentRequest, "spaces" | "beforeResolve">,
+  spaceId: string,
+): Promise<void> {
+  if (request.spaces.some((space) => space.id === spaceId)) await request.beforeResolve(spaceId);
 }
 
 export async function readChatAttachment(
@@ -1412,7 +1466,7 @@ export async function readChatAttachment(
   if (!resolved?.capabilities.download) return null;
   const file = resolved.row;
   if (previewKind(file.mime) !== request.kind || file.size > request.maxBytes) return null;
-  await request.beforeResolve(file.spaceId);
+  await touchIfTurnSpace(request, file.spaceId);
   const bytes = await readStoredFileBytes(file, request.signal);
   return bytes ? { bytes, mime: normalizeMime(file.mime) } : null;
 }

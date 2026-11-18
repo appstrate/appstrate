@@ -60,6 +60,7 @@ import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../l
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
+import { recordAudit } from "../audit.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
@@ -600,7 +601,7 @@ interface CreateRunParams {
   input: Record<string, unknown> | null;
   /**
    * Existing durable files referenced by the run input. These rows are
-   * locked, revalidated in the space scope, and linked to the new run inside the
+   * locked, revalidated in the org (each lives in its own space), and linked to the new run inside the
    * same transaction as the run INSERT. This closes the resolve/create race:
    * either every input file is protected by a link, or no run is created.
    */
@@ -693,6 +694,7 @@ interface CreateRunParams {
 
 export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
   const { id, packageId, actor, input } = params;
+  let consumed: { id: string; spaceId: string }[] = [];
 
   await db.transaction(async (tx) => {
     // FIRST statement, before any row lock: the per-org admission key is the
@@ -740,17 +742,14 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
 
     const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
     if (consumedFileIds.length > 0) {
+      // Org-scoped, not space-scoped: an input resolves in its file's own space
+      // (`resolveFileAcrossSpaces`), which may be another than the run's.
       const available = await tx
-        .select({ id: files.id })
+        .select({ id: files.id, spaceId: files.spaceId })
         .from(files)
-        .where(
-          and(
-            inArray(files.id, consumedFileIds),
-            eq(files.orgId, scope.orgId),
-            eq(files.spaceId, scope.spaceId),
-          ),
-        )
+        .where(and(inArray(files.id, consumedFileIds), eq(files.orgId, scope.orgId)))
         .for("update");
+      consumed = available;
       if (available.length !== consumedFileIds.length) {
         throw conflict(
           "file_unavailable",
@@ -850,6 +849,20 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
         .onConflictDoNothing();
     }
   });
+
+  // Best-effort, once the run and its links exist: who gave which file to which run.
+  for (const file of consumed) {
+    await recordAudit({
+      orgId: scope.orgId,
+      spaceId: scope.spaceId,
+      actorType: actor ? actor.type : "system",
+      actorId: actor?.id ?? null,
+      action: "file.consumed",
+      resourceType: "file",
+      resourceId: file.id,
+      after: { runId: id, fileSpaceId: file.spaceId },
+    });
+  }
 }
 
 /**

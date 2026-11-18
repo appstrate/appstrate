@@ -320,7 +320,10 @@ const canonicalRunsPaths = {
                   description:
                     "Run input values, validated against the agent's input schema. File fields " +
                     "take `upload://upl_xxx` references (from `createUpload`), " +
-                    "`appfile://file_xxx` references (an existing file the caller can read), " +
+                    "`appfile://file_xxx` references (an existing file of any space the caller's " +
+                    "credential reaches with `files:read` there, under the file's container ACL; " +
+                    "a chat turn also reaches its own conversation's attachments; anything else " +
+                    "is a 404), " +
                     "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },
                 rerun_from: {

@@ -11,7 +11,12 @@ import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { getFileForActor, mayReadFileContent, streamFileContent } from "../../services/files.ts";
+import {
+  mayReadFileContent,
+  resolveFileAcrossSpaces,
+  streamFileContent,
+  type FileAccess,
+} from "../../services/files.ts";
 import {
   bundleImportAuditRecords,
   handleImportBundle,
@@ -30,6 +35,8 @@ interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
   actor: Actor;
   scope: SpaceScope;
+  /** How the archive's file id reaches the file's own space (`requestFileAccess`). */
+  fileAccess: FileAccess;
   /**
    * Package-level authorisation for the bundle about to be read. Required:
    * the preflight and the import both hand it every package they found,
@@ -101,7 +108,12 @@ async function readPackageFileBytes(
   }
   // Validating or importing an archive reads its bytes.
   if (!mayReadFileContent(ctx.permissions)) throw fileContentNotGranted();
-  const resolved = await getFileForActor(ctx.scope, ctx.actor, fileId, ctx.permissions);
+  const resolved = await resolveFileAcrossSpaces(
+    ctx.scope.orgId,
+    ctx.actor,
+    fileId,
+    ctx.fileAccess,
+  );
   if (!resolved) {
     throw new ToolRefusal({
       code: "not_found",

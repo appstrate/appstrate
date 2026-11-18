@@ -15,6 +15,15 @@ export function getActor(c: Context): Actor {
 }
 
 /**
+ * The chat conversation that issued this request, read from the VALIDATED credential's claims
+ * (`authExtra`, never a caller-supplied header): only the chat's loopback bearers carry one.
+ */
+export function issuingChatSessionId(c: Context): string | null {
+  const extra = c.get("authExtra") as Record<string, unknown> | undefined;
+  return typeof extra?.chatSessionId === "string" ? extra.chatSessionId : null;
+}
+
+/**
  * Produces the `{userId, endUserId}` column pair for an INSERT. Both `runs`
  * and `integration_connections` use those exact column names, so callers can
  * spread the result into the values object directly without further mapping.
