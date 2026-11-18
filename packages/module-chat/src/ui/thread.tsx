@@ -74,7 +74,7 @@ import {
 } from "./file-attachment.tsx";
 import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
-import { COMPOSER_INPUT_CLASS } from "./phone-text.ts";
+import { ASSISTANT_MESSAGE_CLASS, COMPOSER_INPUT_CLASS, USER_MESSAGE_CLASS } from "./phone-text.ts";
 import {
   flushDecision,
   joinQueued,
@@ -699,7 +699,7 @@ function UserMessage() {
         {/* A white card on the canvas, like every other surface in the thread
             (the composer, the tool cards). `bg-muted` was a hollow on white and
             reads as a smudge on grey — 3 points of luminance from the page. */}
-        <div className="bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-sm whitespace-pre-wrap shadow-sm">
+        <div className={USER_MESSAGE_CLASS}>
           <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
         </div>
       </MessagePrimitive.If>
@@ -821,7 +821,7 @@ function AssistantMessage() {
   const { t } = useChatHost();
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
-      <div className="text-foreground text-sm leading-relaxed">
+      <div className={ASSISTANT_MESSAGE_CLASS}>
         <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         <TurnLimitNotice />
         <MessageError />

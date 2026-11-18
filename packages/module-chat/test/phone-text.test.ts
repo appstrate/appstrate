@@ -7,7 +7,13 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { COMPOSER_INPUT_CLASS, SEARCH_INPUT_CLASS } from "../src/ui/phone-text.ts";
+import {
+  ASSISTANT_MESSAGE_CLASS,
+  COMPOSER_INPUT_CLASS,
+  MARKDOWN_PROSE_CLASS,
+  SEARCH_INPUT_CLASS,
+  USER_MESSAGE_CLASS,
+} from "../src/ui/phone-text.ts";
 
 const DENSE = /^(text-(xs|sm)|text-\[[^\]]+\])$/;
 
@@ -19,6 +25,8 @@ function phoneSizes(classes: string): string[] {
 describe.each([
   ["composer input", COMPOSER_INPUT_CLASS],
   ["conversation search", SEARCH_INPUT_CLASS],
+  ["user message", USER_MESSAGE_CLASS],
+  ["assistant message", ASSISTANT_MESSAGE_CLASS],
 ])("%s", (_name, classes) => {
   it("is 16 px on a phone", () => {
     const sizes = phoneSizes(classes);
@@ -29,5 +37,19 @@ describe.each([
   it("only goes denser from the md breakpoint", () => {
     const dense = classes.split(/\s+/).filter((token) => /(^|:)text-(xs|sm)$/.test(token));
     for (const token of dense) expect(token.startsWith("md:")).toBe(true);
+  });
+});
+
+describe("markdown prose", () => {
+  it("is the base prose size on a phone and the small one from md", () => {
+    const tokens = MARKDOWN_PROSE_CLASS.split(/\s+/);
+    expect(tokens).toContain("prose-base");
+    expect(tokens).toContain("md:prose-sm");
+    expect(tokens).not.toContain("prose-sm");
+  });
+
+  it("keeps code blocks at 14 px on a phone and 12 px from md", () => {
+    expect(MARKDOWN_PROSE_CLASS).toContain("[&_pre]:text-sm");
+    expect(MARKDOWN_PROSE_CLASS).toContain("md:[&_pre]:text-xs");
   });
 });

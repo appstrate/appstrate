@@ -5,6 +5,7 @@
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { cn } from "@appstrate/ui/cn";
 import remarkGfm from "remark-gfm";
+import { MARKDOWN_PROSE_CLASS } from "./phone-text.ts";
 
 /**
  * Open links in a new tab so a click never navigates the chat SPA away — the
@@ -78,10 +79,7 @@ function Markdown({ className }: { className?: string }) {
       // commit, so a commit floor below the frame rate turns the reveal into
       // steps.
       smooth={{ drainMs: 150, maxCharIntervalMs: 10 }}
-      className={cn(
-        "prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs",
-        className,
-      )}
+      className={cn(MARKDOWN_PROSE_CLASS, className)}
       components={MARKDOWN_COMPONENTS}
     />
   );
