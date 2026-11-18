@@ -474,7 +474,7 @@ async function admitCall(
   const uris = fileUrisIn(call.args);
   if (!uris) {
     return {
-      code: "invalid_argument",
+      code: "invalid_request",
       error: `Arguments nest deeper than ${MAX_ARGUMENT_DEPTH} levels.`,
     };
   }

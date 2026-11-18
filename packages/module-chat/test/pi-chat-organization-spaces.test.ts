@@ -373,7 +373,7 @@ describe("the files a call names", () => {
       const refused = JSON.parse(
         text(await tool("read_file").execute("c1", { uri: nested, space_id: "spc_alpha" })),
       );
-      expect(refused).toMatchObject({ code: "invalid_argument" });
+      expect(refused).toMatchObject({ code: "invalid_request" });
       expect(transport.events).toEqual([]);
     } finally {
       await built.close();
