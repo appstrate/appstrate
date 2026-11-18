@@ -13,12 +13,14 @@
  *   never killed for lack of minutes, it finishes and is settled afterwards.
  * - **BYOK runs are gated too.** The model credential decides who pays the LLM, not who
  *   occupies the sandbox: an org on its own API key still consumes minutes.
- * - **A soft cap, by design.** Nothing is reserved at admission; the counter moves when a
- *   run finishes. The overshoot is bounded by the concurrency cap times the longest a run may
- *   last. The concurrency check shares that softness: `runningCount` is read before the run
- *   row is inserted, so launches landing in the same instant can exceed it by the number of
- *   racing requests. The platform's own cap, enforced atomically under the org admission
- *   lock, stays the hard ceiling.
+ * - **Minutes are a soft cap, by design.** Nothing is reserved at admission; the counter
+ *   moves when a run finishes. The overshoot is bounded by the concurrency cap times the
+ *   longest a run may last.
+ * - **Concurrency is enforced exactly elsewhere.** The check below is only the EARLY refusal
+ *   (it spares a launch the pipeline work, and says which plan's cap it hit): `runningCount`
+ *   is read before the run row exists, so racing launches all pass it. The authoritative cap
+ *   is `maxConcurrentRunsOf`, answered through the `runLimits` hook and enforced by the
+ *   platform in the transaction that inserts the run, under the org admission lock.
  * - **An org with no billing account is not gated**, like the credit check: it predates the
  *   module and has no plan to read a limit from.
  */
@@ -32,6 +34,19 @@ import { periodEndOf, periodStartOf, quotaStanding } from "./period.ts";
 import { readComputeSecondsUsed } from "./usage.ts";
 
 type RunParams = Extract<BeforeUsageParams, { context: "run" }>;
+
+/**
+ * The plan's cap on runs in flight for `orgId`, as the `runLimits` hook answers it, or `null`
+ * for an org with no account or a plan that sets none (the deployment-wide cap alone).
+ */
+export async function maxConcurrentRunsOf(orgId: string): Promise<number | null> {
+  const [account] = await getEeDb()
+    .select({ planId: billingAccounts.planId })
+    .from(billingAccounts)
+    .where(eq(billingAccounts.orgId, orgId));
+  if (!account || !isPlanId(account.planId)) return null;
+  return getPlans()[account.planId].maxConcurrentRuns;
+}
 
 /** Does this admission attempt own the run's platform compute? */
 export function ownsPlatformCompute(params: BeforeUsageParams): params is RunParams {

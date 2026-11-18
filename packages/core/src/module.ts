@@ -481,6 +481,26 @@ export interface FirstMatchHooks {
    * database.
    */
   beforeUsage: (params: BeforeUsageParams) => Promise<UsageRejection | null>;
+  /**
+   * The limits an organization's runs are held to beyond the deployment-wide ones, asked once
+   * per platform run launch. First-match-wins for the same reason as `beforeUsage`: the answer
+   * is one set of numbers. Unlike `beforeUsage` (a read-only admission check that cannot
+   * reserve anything), the value returned here is ENFORCED by the platform inside the same
+   * transaction, under the same per-org admission lock, that inserts the run row, so a limit
+   * it carries holds exactly under racing launches.
+   */
+  runLimits: (orgId: string) => Promise<RunLimits>;
+}
+
+/** What {@link FirstMatchHooks.runLimits} answers. */
+export interface RunLimits {
+  /**
+   * Runs the organization may have in flight at once (`pending` or `running`), or `null` to
+   * leave only the deployment-wide `max_concurrent_per_org`. The lower of the two applies.
+   * Applies to runs that execute on platform compute; a remote run is not counted against it
+   * at launch.
+   */
+  maxConcurrentRuns: number | null;
 }
 
 /**
