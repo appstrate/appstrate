@@ -10,7 +10,7 @@
  */
 
 /** Pixels above which an image is not decoded (about a 7000 x 5600 photo is 40 Mpx). */
-export const IMAGE_MAX_PIXELS = 40_000_000;
+const IMAGE_MAX_PIXELS = 40_000_000;
 
 const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
 const u16le = (b: Uint8Array, at: number) => b[at]! | (b[at + 1]! << 8);

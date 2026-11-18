@@ -33,9 +33,9 @@ export const ATTACHMENT_IMAGES_PER_MESSAGE = 4;
 /** Stored size above which a file is not read (the resize would be the cost, not the model). */
 export const ATTACHMENT_IMAGE_SOURCE_MAX_BYTES = 10 * 1024 * 1024;
 /** Longest edge, in pixels, an image is downscaled to: past it a provider downsizes it anyway. */
-export const ATTACHMENT_IMAGE_MAX_EDGE = 1568;
+const ATTACHMENT_IMAGE_MAX_EDGE = 1568;
 /** Base64 bytes one image may weigh once downscaled. */
-export const ATTACHMENT_IMAGE_ENCODED_MAX_BYTES = 1.5 * 1024 * 1024;
+const ATTACHMENT_IMAGE_ENCODED_MAX_BYTES = 1.5 * 1024 * 1024;
 /** Base64 bytes of every image one request carries, replayed turns included. */
 export const ATTACHMENT_IMAGES_REQUEST_MAX_BYTES = 6 * 1024 * 1024;
 
