@@ -28,9 +28,12 @@ const SPACE_ID = "spc_a";
 
 const DETAIL = {
   active: true,
-  auths: [],
+  auths: [{ auth_key: "api", type: "api_key", connections: [] }],
   tool_catalog: [{ name: "send" }, { name: "read" }],
 } as unknown as IntegrationDetailWire;
+
+/** An unauthenticated integration (AFPS §7.2): it declares no auths, so binds no connection. */
+const UNAUTHENTICATED = { ...DETAIL, auths: [] } as unknown as IntegrationDetailWire;
 
 const connection = (
   spaceId: string | null,
@@ -63,7 +66,11 @@ const MY_CONNECTIONS = {
 
 function renderOverview(
   dependentIds: string[],
-  { overview = false, spaceIds }: { overview?: boolean; spaceIds?: string[] } = {},
+  {
+    overview = false,
+    spaceIds,
+    detail = DETAIL,
+  }: { overview?: boolean; spaceIds?: string[]; detail?: IntegrationDetailWire } = {},
 ): string {
   const queryClient = memberSpaceClient([
     testSpace("spc_a", ["integrations:read"], "Studio"),
@@ -77,7 +84,7 @@ function renderOverview(
   return renderInSpace(
     <IntegrationOverview
       packageId="@acme/gmail"
-      detail={DETAIL}
+      detail={detail}
       spaceIds={spaceIds}
       dependentIds={dependentIds}
       onOpenConnections={() => {}}
@@ -132,5 +139,19 @@ describe("the integration overview", () => {
     const label = t("integration.summary.connections");
     expect(statValue(html, label)).toBeUndefined();
     expect(html).toMatch(new RegExp(`>${label}</dt><dd[^>]*><span class="relative block`));
+  });
+
+  it("says there is nothing to connect for an integration declaring no auths", () => {
+    const t = i18nModule.default.getFixedT("fr", "settings");
+    for (const overview of [false, true]) {
+      const html = renderOverview([], {
+        overview,
+        spaceIds: ["spc_a", "spc_b"],
+        detail: UNAUTHENTICATED,
+      });
+      expect(html).toContain(t("integration.auth.none"));
+      expect(html).not.toContain(t("integration.summary.connections"));
+      expect(html).not.toContain(t("integration.summary.reauthorize"));
+    }
   });
 });
