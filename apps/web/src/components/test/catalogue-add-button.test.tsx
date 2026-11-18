@@ -2,11 +2,11 @@
 
 /**
  * The Découvrir card's slot: with a working space it adds there in one click or says « Ajouté »;
- * in « Tous les espaces » it names the space, opens the menu of spaces, and counts where the
- * package already runs.
+ * in « Tous les espaces » it names the space, opens the menu of spaces (still reachable once it
+ * runs everywhere, so a tick can be undone), and counts where the package already runs.
  *
  * Static markup: a click cannot be dispatched and a closed Radix menu renders no entries, so what
- * a click adds, and which spaces the menu offers or ticks, is driven in the browser
+ * a click adds or removes, and which spaces the menu offers or ticks, is driven in the browser
  * (`e2e/tests/spaces/catalogue-add.ui.spec.ts`). Here: which control the slot draws.
  */
 
@@ -25,13 +25,14 @@ const commonFr = (await import("../../locales/fr/common.json")).default;
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
-const space = (id: string, name: string, active: boolean): AddableSpace => ({
+const space = (id: string, name: string, active: boolean, removable = active): AddableSpace => ({
   id,
   name,
   personal: false,
   icon: null,
   color: null,
   active,
+  removable,
 });
 
 const slot = (spaces: AddableSpace[], workingSpaceId: string | null, busy = false) =>
@@ -41,6 +42,7 @@ const slot = (spaces: AddableSpace[], workingSpaceId: string | null, busy = fals
       workingSpaceId={workingSpaceId}
       busy={busy}
       onAdd={() => {}}
+      onRemove={() => {}}
     />,
   );
 
@@ -112,11 +114,25 @@ describe("in « Tous les espaces »", () => {
     expect(html).not.toContain("title=");
   });
 
-  it("says in how many spaces it is added when nothing is left to add", () => {
+  it("still opens the menu when it runs everywhere, so a tick can be undone", () => {
     const html = slot([space("spc_a", "Alpha", true), space("spc_b", "Beta", true)], null);
+    expect([...html.matchAll(/<button/g)]).toHaveLength(1);
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain(addedCount(2));
+    expect(html).not.toContain(settingsFr["catalogue.addToMenu"]);
+    // One space it runs in and may leave: the same menu, not a bare state.
+    const single = slot([space("spc_a", "Alpha", true)], null);
+    expect(single).toContain('aria-haspopup="menu"');
+    expect(single).toContain(addedCount(1));
+  });
+
+  it("says in how many spaces it is added when nothing is left to add or take out", () => {
+    const html = slot(
+      [space("spc_a", "Alpha", true, false), space("spc_b", "Beta", true, false)],
+      null,
+    );
     expect(html).toContain(addedCount(2));
     expect(html).not.toContain("<button");
-    expect(slot([space("spc_a", "Alpha", true)], null)).toContain(addedCount(1));
   });
 
   it("draws nothing where it runs nowhere and cannot be added", () => {

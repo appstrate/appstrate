@@ -351,9 +351,16 @@ export function OrgCatalogueModal({
       // Drawn with its tile: the listing's row, which every space the library names is in.
       .flatMap((space) => {
         const listed = grantById.get(space.id);
-        return listed
-          ? [{ ...listed, active: placement?.activeIn.includes(space.id) ?? false }]
-          : [];
+        if (!listed) return [];
+        const running = placement?.activeIn.includes(space.id) ?? false;
+        return [
+          {
+            ...listed,
+            active: running,
+            // The « Par espace » switch's own verdict: the menu offers what the matrix offers.
+            removable: running && activationGate(item, space.id, false).allowed,
+          },
+        ];
       })
       .filter((space) => space.active || mayActivateIn(item, space.id));
     // Only the placement in the space on screen: another space's share says nothing here.
@@ -368,6 +375,7 @@ export function OrgCatalogueModal({
           workingSpaceId={spaceId}
           busy={activate.isPending}
           onAdd={(targetSpaceId) => void onSetActive(row, targetSpaceId, true)}
+          onRemove={(targetSpaceId) => void onSetActive(row, targetSpaceId, false)}
         />
       ),
       meta: (
@@ -657,7 +665,8 @@ export function OrgCatalogueModal({
           cardRun={false}
           cardPlaceholder={<PackageCardSkeleton meta="line" keywords={false} />}
           columns={[
-            selectColumn,
+            // No row to tick (« Tous les espaces », or all already on here): no « tout cocher » either.
+            ...(activatable.length > 0 ? [selectColumn] : []),
             ...nameColumns,
             originColumn,
             ...(active === "integration" ? [sourceColumn] : []),
