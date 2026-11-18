@@ -39,7 +39,6 @@ import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { UnreadableDetail } from "../components/unreadable-detail";
-import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { isQueryInFlight } from "../lib/query-state";
 import { SettingsSkeleton } from "../components/loading-skeletons";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
@@ -65,16 +64,19 @@ import { spaceLabel } from "../lib/space-label";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
+import {
+  INTEGRATION_DEFINITION_SECTIONS,
+  resolveIntegrationSettingsSection,
+} from "../lib/integration-settings-sections";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
-import { usePackageActivation } from "../hooks/use-library";
 import { useIntegrationSpaceAction } from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
 import type { SpaceEntry } from "../hooks/use-space-entry";
-import { useOverviewMode, useWorkingSpaceWording } from "../hooks/use-overview-mode";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
@@ -97,7 +99,6 @@ const DEFINITION_RAIL: readonly DefinitionRailEntry[] = [
   ["auth-methods", "auths"],
   ["tools", "tools"],
 ];
-const DEFINITION_SECTIONS: readonly string[] = DEFINITION_RAIL.map(([id]) => id);
 
 function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
   return <IntegrationFunctioning detail={detail} />;
@@ -133,7 +134,9 @@ export function IntegrationSettings({
   const { t } = useTranslation(["settings", "agents"]);
   const { can } = usePermissions();
   const { on: overview } = useOverviewMode();
-  const workingSpace = useSpaceLabelOf()(useCurrentSpaceId());
+  const workingSpaceId = useCurrentSpaceId();
+  const workingSpace = useSpaceLabelOf()(workingSpaceId);
+  const fromWorkingSpace = shownFromWorkingSpace(overview, workingSpaceId, spaceIds);
   const canConfigure = configureIn.offered;
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
@@ -148,16 +151,11 @@ export function IntegrationSettings({
       (can("credential-proxy:call-own") &&
         detail.auths.some((auth) => auth.connections.length > 0)));
   const resolve = (requested: string | null): IntegrationSettingsSection =>
-    requested === "tools" ||
-    requested === "functioning" ||
-    (requested === "versions" && isOwned) ||
-    (definition && requested && DEFINITION_SECTIONS.includes(requested))
-      ? (requested as IntegrationSettingsSection)
-      : requested === "files" || !canConfigure
-        ? "files"
-        : requested === "access"
-          ? "access"
-          : "authentication";
+    resolveIntegrationSettingsSection(requested, {
+      canConfigure,
+      isOwned,
+      hasDefinition: !!definition,
+    });
   const steps = detail.manifest.setup_guide?.steps ?? [];
   // Same order as an agent's: Explorer (see it: files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
@@ -214,7 +212,7 @@ export function IntegrationSettings({
       label={t("integration.tabs.settings")}
       groups={groups}
       resolve={resolve}
-      definitionSections={DEFINITION_SECTIONS}
+      definitionSections={INTEGRATION_DEFINITION_SECTIONS}
     >
       {({ active, file, href }) => {
         const definitionSection = definition
@@ -266,8 +264,9 @@ export function IntegrationSettings({
                 enter={configureIn}
               />
             )}
-            {!detail.active ? (
-              <ActivationHint packageId={packageId} />
+            {/* In the mode, the section is the working space's only when the line names it. */}
+            {!fromWorkingSpace ? null : !detail.active ? (
+              <ActivationHint />
             ) : overview && !can("integrations:configure") ? (
               workingSpace && (
                 <RoleLimitNotice>
@@ -351,35 +350,29 @@ export function IntegrationSettings({
 // ─────────────────────────────────────────────
 
 /**
- * Inline prompt shown inside the Connexions tab when the integration is not
- * yet active — connecting and governance are meaningless until the
- * integration is activated for this space.
+ * In « Tous les espaces », whether a per-space section is the working space's: the space line
+ * names it only when the integration is active there (`spaceIds`). With a space selected, always.
  */
-function ActivationHint({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["settings", "common"]);
-  const { mayActivate, activate, pending } = usePackageActivation(packageId);
-  // In « Tous les espaces » the working space is on no screen: the hint names it.
-  const spaceWording = useWorkingSpaceWording("settings");
+function shownFromWorkingSpace(
+  overview: boolean,
+  workingSpaceId: string | null,
+  spaceIds: readonly string[],
+): boolean {
+  return !overview || (!!workingSpaceId && spaceIds.includes(workingSpaceId));
+}
+
+/**
+ * Shown in place of connections and governance while the integration is not active: it points at
+ * the header's « Activer », the page's one place for it, and names no space.
+ */
+function ActivationHint() {
+  const { t } = useTranslation("settings");
   return (
     <div
       className="border-border bg-muted/40 rounded-lg border p-6 text-center"
       data-testid="activation-hint"
     >
-      <p className="text-muted-foreground mb-3 text-sm">
-        {spaceWording("integrations.activate.hint", "integrations.activate.hintIn")}
-      </p>
-      <DisabledReasonTooltip
-        reason={mayActivate ? null : t("library.cannotActivate", { ns: "common" })}
-      >
-        <Button
-          size="sm"
-          onClick={() => activate()}
-          disabled={pending || !mayActivate}
-          data-testid="detail-activate-btn"
-        >
-          {t("integrations.btn.activate")}
-        </Button>
-      </DisabledReasonTooltip>
+      <p className="text-muted-foreground text-sm">{t("integrations.activate.hint")}</p>
     </div>
   );
 }
@@ -408,6 +401,8 @@ export function IntegrationDetailPage() {
   const canConfigure = can("integrations:configure");
   const configureIn = useIntegrationSpaceAction(packageId, "integrations:configure", spaceIds);
   const connectionsIn = useIntegrationSpaceAction(packageId, "integrations:read", spaceIds);
+  const workingSpaceId = useCurrentSpaceId();
+  const connectionsFromWorkingSpace = shownFromWorkingSpace(overview, workingSpaceId, spaceIds);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -547,7 +542,7 @@ export function IntegrationDetailPage() {
       <DetailTabPanel value="connections">
         {/* Connections are a space's: in « Tous les espaces » the tab names the one it lists, and
             changes it. */}
-        {overview && !pkgLoading && (
+        {overview && !pkgLoading && (connectionsIn.offered || connectionsFromWorkingSpace) && (
           <ConfigurationSpace
             label={t("integration.connections.spaceLabel")}
             choiceLabel={t("integration.connections.spaceChoice")}
@@ -558,8 +553,12 @@ export function IntegrationDetailPage() {
             enter={connectionsIn}
           />
         )}
-        {!active ? (
-          <ActivationHint packageId={packageId} />
+        {/* In the mode, the table is the working space's only when the line names it; active
+            nowhere the reader reaches, the hint. */}
+        {!connectionsFromWorkingSpace ? (
+          !pkgLoading && spaceIds.length === 0 && <ActivationHint />
+        ) : !active ? (
+          <ActivationHint />
         ) : detail.auths.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
         ) : (

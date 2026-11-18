@@ -30,6 +30,7 @@ import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { useUrlModal } from "../../hooks/use-url-modal";
 import { splitPackageRef } from "../../lib/package-paths";
 import { catalogueHref } from "../../lib/catalogue-link";
+import { removalLeavesPage } from "../../lib/catalogue-gates";
 import { agentCreationWithIntegrationPath } from "../../lib/creation-handoff";
 import { PACKAGE_TYPE_ICON } from "../../lib/package-type-icon";
 import { ConfirmModal } from "../confirm-modal";
@@ -277,11 +278,12 @@ export function usePackageActions({
       ...deedEntry(agent?.clearMemories),
     },
     // Placement: moving the home is the edit authority, sharing a verb of its own (RBAC §6.10).
+    // With a space selected a placement deed acts there under its plain label (`usePlacementDeeds`).
     {
       id: "activate",
       group: "administration",
       icon: PackagePlus,
-      label: t("packages.activate", { ns: "settings" }),
+      label: t("detail.activate"),
       // An integration's is its header button (`IntegrationActivateButton`).
       ...deedEntry(type === "integration" ? undefined : placement.activate),
     },
@@ -289,14 +291,14 @@ export function usePackageActions({
       id: "deactivate",
       group: "administration",
       icon: PackageMinus,
-      label: t("packages.deactivate", { ns: "settings" }),
+      label: t("detail.deactivate"),
       ...deedEntry(placement.deactivate),
     },
     {
       id: "remove-here",
       group: "administration",
       icon: PackageX,
-      label: t("catalogue.removeHere", { ns: "settings" }),
+      label: t("btn.remove", { ns: "common" }),
       destructive: true,
       ...deedEntry(placement.remove),
     },
@@ -377,10 +379,10 @@ export function usePackageActions({
             : null
         }
         onClose={() => setRemoving(null)}
-        // Taken out of the space the page is read from: leave for the catalogue. In « Tous les
-        // espaces » the page names the spaces left, and stays.
         onRemoved={
-          !overview && removing === spaceId ? () => navigate(catalogueHref(type)) : undefined
+          removalLeavesPage(overview, removing, spaceId)
+            ? () => navigate(catalogueHref(type))
+            : undefined
         }
       />
 

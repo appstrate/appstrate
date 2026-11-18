@@ -72,6 +72,21 @@ export function linkedSpaceStep(
 }
 
 /**
+ * Where the page reopens: `target` in the first enterable space of `spaceIds` after the one that
+ * refused, so repeated refusals cannot loop; `null` when none is left.
+ */
+export function detailElsewhere(
+  spaceIds: readonly string[],
+  target: string,
+  currentSpaceId: string | null,
+  enterable: (spaceId: string) => boolean,
+): string | null {
+  if (!currentSpaceId) return null;
+  const next = spaceIds.slice(spaceIds.indexOf(currentSpaceId) + 1).find(enterable);
+  return next ? linkedSpacePath(target, next, currentSpaceId) : null;
+}
+
+/**
  * The SSE stream is scoped to the current space: a run, schedule, file or agent list spanning
  * spaces polls while mounted, or it would never see a new row (or an agent's run counts) of another
  * space. React Query pauses it in a hidden tab.

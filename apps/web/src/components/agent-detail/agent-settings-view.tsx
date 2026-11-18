@@ -31,7 +31,14 @@ import {
   type AgentSettingsSection,
   type ConfigurationSection,
 } from "../../lib/settings-section-href";
-import { isSpaceSetting, SECTION_PERMISSION } from "../../lib/agent-settings-sections";
+import {
+  AGENT_SETTINGS_GROUPS,
+  agentSectionVisible,
+  agentSettingsApplies,
+  isSpaceSetting,
+  resolveAgentSettingsSection,
+  SECTION_PERMISSION,
+} from "../../lib/agent-settings-sections";
 import { SettingsRailView } from "../settings/settings-rail-view";
 import { AgentConfigurationSpace, AgentConfigurationView } from "./agent-configuration-view";
 import { EditorPanelSkeleton } from "../loading-skeletons";
@@ -50,49 +57,24 @@ const AgentDefinitionEditor = lazy(() =>
 /**
  * Explorer: the package's raw files and its versions. Then what is set HERE
  * (Configuration), then what the package IS for every space (Définition),
- * where it is changed.
+ * where it is changed. The groups are `AGENT_SETTINGS_GROUPS`; here, their icons.
  */
-const SETTINGS_GROUPS = [
-  {
-    labelKey: "detail.settings.exploreGroup",
-    items: [
-      { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
-      { id: "versions", icon: History, labelKey: "detail.settings.versions" },
-    ],
-  },
-  {
-    labelKey: "detail.settings.configurationGroup",
-    items: [
-      { id: "model", icon: BrainCircuit, labelKey: "detail.configuration.model" },
-      { id: "proxy", icon: Globe, labelKey: "detail.configSectionProxy" },
-      { id: "inputs", icon: SlidersHorizontal, labelKey: "detail.configuration.inputsShort" },
-      { id: "connections", icon: Plug, labelKey: "detail.configuration.connections" },
-      { id: "schedules", icon: CalendarClock, labelKey: "detail.configuration.schedulesShort" },
-    ],
-  },
-  {
-    labelKey: "detail.settings.definitionGroup",
-    items: [
-      { id: "general", icon: IdCard, labelKey: "editor.tabGeneral" },
-      { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
-      { id: "skills", icon: Sparkles, labelKey: "common:nav.skills" },
-      { id: "integrations", icon: Boxes, labelKey: "common:nav.integrations" },
-    ],
-  },
-] satisfies Array<{
-  labelKey: string;
-  items: Array<{ id: AgentSettingsSection; icon: typeof BrainCircuit; labelKey: string }>;
-}>;
-
-const SETTINGS_SECTION_IDS: readonly string[] = SETTINGS_GROUPS.flatMap((group) =>
-  group.items.map((item) => item.id),
-);
+const SECTION_ICONS: Record<AgentSettingsSection, typeof BrainCircuit> = {
+  files: FolderTree,
+  versions: History,
+  model: BrainCircuit,
+  proxy: Globe,
+  inputs: SlidersHorizontal,
+  connections: Plug,
+  schedules: CalendarClock,
+  general: IdCard,
+  schema: Braces,
+  skills: Sparkles,
+  integrations: Boxes,
+};
 
 const isDefinitionSection = (section: string) =>
   (AGENT_DEFINITION_SECTIONS as readonly string[]).includes(section);
-
-/** A system agent has no history of its own to browse. */
-const applies = (section: string, isSystem: boolean) => section !== "versions" || !isSystem;
 
 export function AgentSettingsView({
   packageId,
@@ -138,38 +120,26 @@ export function AgentSettingsView({
   // is marked with a lock and its panel says why (`RoleLimitNotice`). Only a
   // section that does not apply to this agent at all leaves the rail.
   const isSystem = detail.source === "system";
-  const visible = (section: AgentSettingsSection) => {
-    const permission = SECTION_PERMISSION[section];
-    // A system agent has no history of its own to browse.
-    if (section === "versions" && detail.source === "system") return false;
-    if (permission) return !!grants[permission];
-    if (section === "schedules") return readsSchedules;
-    // The definition is edited where it is read, by whoever may write it, on
-    // an org-owned draft. Everyone else keeps Fichiers to read it.
-    if (isDefinitionSection(section)) return canEditDefinition;
-    return true;
+  const sectionGrants = {
+    grants: (permission: string) => !!grants[permission],
+    readsSchedules,
+    canEditDefinition,
+    isSystem,
   };
-  const groups = SETTINGS_GROUPS.map((group) => ({
+  const visible = (section: AgentSettingsSection) => agentSectionVisible(section, sectionGrants);
+  const groups = AGENT_SETTINGS_GROUPS.map((group) => ({
     title: t(group.labelKey),
     items: group.items
-      .filter((item) => applies(item.id, isSystem))
+      .filter((item) => agentSettingsApplies(item.id, isSystem))
       .map((item) => ({
         id: item.id,
-        icon: item.icon,
+        icon: SECTION_ICONS[item.id],
         label: t(item.labelKey),
         locked: !visible(item.id),
       })),
   })).filter((group) => group.items.length > 0);
-  const applicable = SETTINGS_SECTION_IDS.filter((id) =>
-    applies(id, isSystem),
-  ) as AgentSettingsSection[];
-  const firstOpen = applicable.find(visible) ?? applicable[0] ?? "connections";
-  const defaultSection: AgentSettingsSection = visible("model") ? "model" : firstOpen;
-  // A section asked for by name opens even when locked: its panel explains.
   const resolve = (requested: string | null): AgentSettingsSection =>
-    requested && SETTINGS_SECTION_IDS.includes(requested) && applies(requested, isSystem)
-      ? (requested as AgentSettingsSection)
-      : defaultSection;
+    resolveAgentSettingsSection(requested, sectionGrants);
 
   return (
     <SettingsRailView

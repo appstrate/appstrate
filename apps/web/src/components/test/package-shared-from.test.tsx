@@ -4,9 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ReactElement } from "react";
-import { QueryClient } from "@tanstack/react-query";
-import { $api, type components } from "../../api/client.ts";
-import { renderInSpace } from "../../test/space-context.ts";
+import { memberSpaceClient, renderInSpace, testSpace } from "../../test/space-context.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { PackageSharedFrom } from "../package-shared-from.tsx";
@@ -16,41 +14,17 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-const space = (id: string, name: string): components["schemas"]["SpaceObject"] => ({
-  object: "space",
-  id,
-  orgId: "org_1",
-  name,
-  icon: null,
-  color: null,
-  isDefault: false,
-  settings: {},
-  visibility: "open",
-  default_role: "viewer",
-  credential_proxy_open: true,
-  personal: false,
-  access: "member",
-  role: null,
-  permissions: ["runs:read"],
-  created_by: null,
-  createdAt: "2026-09-05T00:00:00Z",
-  updatedAt: "2026-09-05T00:00:00Z",
-});
-
 /**
  * `node` rendered with the reader standing in `spc_a`, who reaches Atelier, Studio and Coffre;
  * `overview`: with « Tous les espaces » chosen (offered: the spaces read runs).
  */
 function renderInSpaces(node: ReactElement, overview = false): string {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
-  queryClient.setQueryData(
-    $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } })
-      .queryKey,
-    {
-      object: "list",
-      data: [space("spc_a", "Atelier"), space("spc_b", "Studio"), space("spc_c", "Coffre")],
-      hasMore: false,
-    },
+  const queryClient = memberSpaceClient(
+    [
+      ["spc_a", "Atelier"],
+      ["spc_b", "Studio"],
+      ["spc_c", "Coffre"],
+    ].map(([id, name]) => testSpace(id!, ["runs:read"], name)),
   );
   return renderInSpace(node, { overview, queryClient });
 }

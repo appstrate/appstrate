@@ -71,8 +71,8 @@ test("in « Tous les espaces », « Lancer » asks the space and launches there,
     await expect(page.getByText(alpha.name, { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("img", { name: `Partagé avec ${beta.name}` })).toBeVisible();
 
-    // « Lancer » is the menu of the two spaces it runs in.
-    await page.getByRole("button", { name: "Lancer", exact: true }).click();
+    // « Lancer dans… » is the menu of the two spaces it runs in.
+    await page.getByRole("button", { name: "Lancer dans…", exact: true }).click();
     const menu = page.getByRole("menu");
     await expect(menu).toBeVisible();
     await expect(menu.getByText("Lancer dans…", { exact: true })).toBeVisible();

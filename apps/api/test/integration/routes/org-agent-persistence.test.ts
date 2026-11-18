@@ -206,7 +206,7 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
       });
       expect(removed.status, query).toBe(400);
     }
-    expect((await read({ Cookie: member.cookie })).memories.length).toBeGreaterThan(0);
+    expect((await read({ Cookie: member.cookie })).memories).not.toEqual([]);
   });
 
   it("narrows to one run's rows with runId", async () => {

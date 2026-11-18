@@ -75,9 +75,9 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
   try {
     await page.goto("/catalogue/agent");
     const card = catalogueCard(page, displayName);
-    // It runs in Alpha and Beta: the trigger says so.
-    const trigger = card.getByRole("button", { name: /^Ajouter/ });
-    await expect(trigger).toHaveAttribute("title", /\b2 espaces$/);
+    // It runs in Alpha and Beta: the trigger asks the space and counts those.
+    const trigger = card.getByRole("button", { name: /^Ajouter à…/ });
+    await expect(trigger).toHaveAccessibleName(/\b2 espaces$/);
     await trigger.click();
     const menu = page.getByRole("menu").filter({ hasText: "Ajouter à…" });
     await expect(menu).toBeVisible();

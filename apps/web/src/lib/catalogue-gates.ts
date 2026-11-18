@@ -58,6 +58,19 @@ export function mayRemoveFromSpace(
   );
 }
 
+/**
+ * Whether a package page leaves for the catalogue once the package is taken out of `removedFrom`:
+ * out of the space the page is read from. In « Tous les espaces » the page names the spaces
+ * left, and stays.
+ */
+export function removalLeavesPage(
+  overview: boolean,
+  removedFrom: string | null,
+  workingSpaceId: string | null,
+): boolean {
+  return !overview && !!removedFrom && removedFrom === workingSpaceId;
+}
+
 export interface CatalogueDeeds {
   /** `home_writable`: moving is the same authority as editing. */
   moveHome: boolean;

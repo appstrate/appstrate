@@ -10,7 +10,7 @@ import { $api, client } from "../api/client";
 import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useListScope, useOrgScope } from "./use-org-scope";
-import { spaceHeader } from "../lib/scoping-headers";
+import { markAllReadIn } from "../lib/mark-all-read";
 
 /**
  * The notification feed — the dashboard bell: a failed run, a share. A run's
@@ -20,8 +20,7 @@ import { spaceHeader } from "../lib/scoping-headers";
  * stream (`use-global-run-sync`, on every terminal frame and every reconnect);
  * nothing announces a share, so the poll is what brings one in. `spanning`
  * (« Tous les espaces ») reads every space the caller holds a role in from the
- * org routes; the stream carries the working space only, so it polls at the
- * pace of the other lists spanning spaces.
+ * org routes, at the same pace: a notification comes of a run or a share only.
  */
 const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 
@@ -35,7 +34,7 @@ function useFeedScope(spanning: boolean) {
     acrossOrgId: scope.acrossOrgId,
     orgId: scope.orgId ?? "",
     enabled: scope.enabled,
-    refetchInterval: scope.refetchInterval ?? NOTIFICATION_POLL_INTERVAL_MS,
+    refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
   };
 }
 
@@ -134,30 +133,12 @@ export function useMarkRead() {
   });
 }
 
-/**
- * « Tout marquer comme lu »: the working space's feed (`null`), or each listed space's — the
- * route reads one space, so one request per space, each naming it. Every request settles before
- * the outcome: one refusal fails the mutation once, with the first refusal, after the others
- * have landed; the feed is refreshed either way.
- */
+/** « Tout marquer comme lu »: the working space's feed (`null`), or each listed space's (`markAllReadIn`); the feed is refreshed either way. */
 export function useMarkAllRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (spaceIds: readonly string[] | null) => markAllReadIn(spaceIds, markReadInSpace),
+    mutationFn: (spaceIds: readonly string[] | null) =>
+      markAllReadIn(spaceIds, (init) => client.PUT("/api/notifications/read-all", init)),
     onSettled: () => invalidateNotificationQueries(qc),
   });
-}
-
-function markReadInSpace(spaceId: string | null): Promise<unknown> {
-  return client.PUT("/api/notifications/read-all", spaceHeader(spaceId));
-}
-
-/** {@link useMarkAllRead}'s requests, `put` sending one. Exported for its test. */
-export async function markAllReadIn(
-  spaceIds: readonly string[] | null,
-  put: (spaceId: string | null) => Promise<unknown>,
-): Promise<void> {
-  const outcomes = await Promise.allSettled((spaceIds ?? [null]).map(put));
-  const refused = outcomes.find((outcome) => outcome.status === "rejected");
-  if (refused) throw refused.reason;
 }

@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { packagePermission } from "@appstrate/core/permissions";
 import { $api, ApiError } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useOrgScope } from "../hooks/use-org-scope";
@@ -22,29 +23,13 @@ import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaces } from "../hooks/use-spaces";
 import { useRowSpaceGrants } from "../hooks/use-permissions";
 import { ACROSS_SPACES, scheduleKeys } from "../lib/query-keys";
-import { linkedSpacePath } from "../lib/across-spaces";
+import { detailElsewhere } from "../lib/across-spaces";
 import { isSpaceEnterable } from "../lib/space-lists";
 import { ResourceErrorState } from "./page-states";
 
 /** Whether a detail read failed for want of the resource here (403, 404, or a 404 read as `null`). */
 function isUnreadableHere(error: unknown): boolean {
   return !error || (error instanceof ApiError && (error.status === 403 || error.status === 404));
-}
-
-/**
- * Where the page reopens: `target` in the first enterable space of `spaceIds` after the one that
- * refused, so repeated refusals cannot loop; `null` when none is left. Exported for its test.
- */
-// eslint-disable-next-line react-refresh/only-export-components
-export function detailElsewhere(
-  spaceIds: readonly string[],
-  target: string,
-  currentSpaceId: string | null,
-  enterable: (spaceId: string) => boolean,
-): string | null {
-  if (!currentSpaceId) return null;
-  const next = spaceIds.slice(spaceIds.indexOf(currentSpaceId) + 1).find(enterable);
-  return next ? linkedSpacePath(target, next, currentSpaceId) : null;
 }
 
 type DetailKind = "agent" | "skill" | "integration" | "schedule" | "run" | "notification";
@@ -90,7 +75,9 @@ function PackageElsewhere(props: UnreadableDetailProps) {
   );
   const spaceIds =
     !isError && data?.type === props.kind
-      ? data.read_space_ids.filter((id) => !props.version || grants(id, `${data.type}s:read`))
+      ? data.read_space_ids.filter(
+          (id) => !props.version || grants(id, packagePermission(data.type, "read")),
+        )
       : [];
   return <Elsewhere {...props} loading={isLoading} spaceIds={spaceIds} />;
 }

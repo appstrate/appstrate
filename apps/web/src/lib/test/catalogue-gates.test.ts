@@ -13,6 +13,7 @@ import {
   catalogueOpenPage,
   mayRemoveFromSpace,
   pageSpace,
+  removalLeavesPage,
 } from "../catalogue-gates.ts";
 import type { LibraryPackageItem, LibraryPlacement } from "../../hooks/use-library.ts";
 
@@ -244,5 +245,17 @@ describe("mayRemoveFromSpace", () => {
     expect(mayRemoveFromSpace(row, "spc_sys")).toBe(false);
     expect(mayRemoveFromSpace(row, "spc_none")).toBe(false);
     expect(mayRemoveFromSpace(row, null)).toBe(false);
+  });
+});
+
+describe("removalLeavesPage", () => {
+  it("leaves for the catalogue once taken out of the space the page is read from", () => {
+    expect(removalLeavesPage(false, "spc_a", "spc_a")).toBe(true);
+    expect(removalLeavesPage(false, "spc_b", "spc_a")).toBe(false);
+    expect(removalLeavesPage(false, null, "spc_a")).toBe(false);
+  });
+
+  it("stays in « Tous les espaces », where the page names the spaces left", () => {
+    expect(removalLeavesPage(true, "spc_a", "spc_a")).toBe(false);
   });
 });

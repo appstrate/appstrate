@@ -8,7 +8,8 @@ import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { PackageOriginMeta } from "../package-origin-meta";
-import { homeNameBesideTiles, PackageSpaces } from "../package-spaces";
+import { PackageSpaces } from "../package-spaces";
+import { homeNameBesideTiles } from "../../lib/package-home";
 import { SkeletonLine } from "../skeleton-line";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 

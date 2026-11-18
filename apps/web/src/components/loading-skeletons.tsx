@@ -45,9 +45,18 @@ import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useListView } from "../stores/list-view-store";
-import { useOverviewMode } from "../hooks/use-overview-mode";
-import { isSpaceSetting, SECTION_PERMISSION } from "../lib/agent-settings-sections";
-import type { AgentSettingsSection } from "../lib/settings-section-href";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
+import {
+  agentSectionVisible,
+  isSpaceSetting,
+  resolveAgentSettingsSection,
+  SECTION_PERMISSION,
+} from "../lib/agent-settings-sections";
+import {
+  isIntegrationSpaceSection,
+  resolveIntegrationSettingsSection,
+} from "../lib/integration-settings-sections";
+import { useSpacesFor } from "../hooks/use-space-action";
 import { CardGridSkeleton } from "./card-grid";
 import { FileTileSkeleton } from "./file-tile";
 import { ShellHeaderActions } from "./shell-header-slots";
@@ -201,26 +210,52 @@ function ListTabBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
 
 /**
  * Whether a package's open tab starts with the space it is read in, in « Tous les espaces »
- * (`ConfigurationSpace`): an agent's settings section asking a permission of its space, always for
- * one set there (the rail opens on the model when none is named), else when the working space
- * refuses it; an integration's Connexions, and its Authentification or Accès (the default section).
+ * (`ConfigurationSpace`): the section the page opens (its own resolver, from the reader's grants
+ * in any space, before the detail says which spaces are the package's), when it asks a permission
+ * of its space: always for an agent's setting set there, else when the working space refuses it;
+ * an integration's Connexions, and its Authentification or Accès.
  */
 function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
   const { on } = useOverviewMode();
   const { can } = usePermissions();
   const search = new URLSearchParams(useLocation().search);
+  const configures = useSpacesFor({ permission: "agents:configure" }).offered;
+  const readsIntegrations = useSpacesFor({ permission: "integrations:read" }).offered;
+  const readsAgent = useSpacesFor({ permission: "agents:read" }).offered;
+  const readsSchedules = useAdmittingSpaces("schedules").length > 0;
+  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
   if (!on) return false;
   if (type === "agent" && tab === "settings") {
-    const section = search.get("agentSettings") ?? "model";
-    const permission = SECTION_PERMISSION[section as AgentSettingsSection];
-    return !!permission && (isSpaceSetting(section) || !can(permission));
+    const grants: Record<string, boolean> = {
+      "agents:configure": configures,
+      "integrations:read": readsIntegrations,
+      "agents:read": readsAgent,
+    };
+    // An organization agent, its definition read only: what most readers open.
+    const sectionGrants = {
+      grants: (permission: string) => !!grants[permission],
+      readsSchedules,
+      canEditDefinition: false,
+      isSystem: false,
+    };
+    const section = resolveAgentSettingsSection(search.get("agentSettings"), sectionGrants);
+    const permission = SECTION_PERMISSION[section];
+    return (
+      !!permission &&
+      agentSectionVisible(section, sectionGrants) &&
+      (isSpaceSetting(section) || !can(permission))
+    );
   }
   if (type !== "integration") return false;
   if (tab === "connections") return true;
-  const section = search.get("integrationSettings");
-  return (
-    tab === "settings" && (section === null || section === "authentication" || section === "access")
-  );
+  if (tab !== "settings") return false;
+  // A section named in the address exists: the rail offers it.
+  const section = resolveIntegrationSettingsSection(search.get("integrationSettings"), {
+    canConfigure: configuresIntegration,
+    isOwned: true,
+    hasDefinition: true,
+  });
+  return isIntegrationSpaceSection(section);
 }
 
 /**

@@ -20,6 +20,7 @@ const {
   spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
+  spacesHeld,
   spacesWhere,
 } = await import("../space-lists.ts");
 
@@ -373,5 +374,17 @@ describe("connectionRowConfigures (Préférences › Connexions)", () => {
     expect(
       connectionRowConfigures(connectionRow("org_2", null), "org_1", CONNECTION_SPACES, []),
     ).toBe(false);
+  });
+});
+
+describe("spacesHeld", () => {
+  it("is every space held with a role, whatever it grants: what the bell lists and marks read", () => {
+    const spaces = [
+      space("spc_a", ["runs:read"]),
+      space("spc_blind", []),
+      space("spc_closed", ["runs:read"], "none"),
+    ];
+    expect(spacesHeld(spaces).map((s) => s.id)).toEqual(["spc_a", "spc_blind"]);
+    expect(spacesHeld(undefined)).toEqual([]);
   });
 });

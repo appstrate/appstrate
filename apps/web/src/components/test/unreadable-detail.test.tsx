@@ -5,7 +5,7 @@
  * is no refusal, it says so; in the mode it waits for the look-up across spaces, reopens where the
  * resource is (rendering nothing on its way: `Navigate` acts in an effect), and says it is
  * unavailable in none of the reader's spaces only when no reached space holds it. Where it reopens
- * is `detailElsewhere`.
+ * is `detailElsewhere`'s (`lib/across-spaces.ts`).
  */
 
 import { describe, expect, it } from "bun:test";
@@ -18,23 +18,16 @@ installFakeStorage({
 });
 
 const { $api, ApiError } = await import("../../api/client.ts");
-const { detailElsewhere, UnreadableDetail } = await import("../unreadable-detail.tsx");
-const { renderInSpace } = await import("../../test/space-context.ts");
+const { UnreadableDetail } = await import("../unreadable-detail.tsx");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const i18nModule = await import("../../i18n.ts");
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 const i18n = i18nModule.default;
 
-const ORG_ID = "org_detail";
-const space = (id: string) => ({
-  id,
-  access: "member",
-  permissions: ["runs:read", "agents:read"],
-  personal: false,
-  isDefault: id === "spc_hidden",
-  name: id,
-});
-const SPACES = [space("spc_hidden"), space("spc_other")];
+const ORG_ID = "org_1";
+const GRANTS = ["runs:read", "agents:read"];
+const SPACES = [testSpace("spc_hidden", GRANTS), testSpace("spc_other", GRANTS)];
 const RUN_PATH = "/api/orgs/{orgId}/runs/{id}" as const;
 const runKey = $api.queryOptions("get", RUN_PATH, {
   params: { path: { orgId: ORG_ID, id: "run_1" } },
@@ -49,16 +42,9 @@ function detail(options: {
   error?: unknown;
   seed?: (qc: QueryClient) => void;
 }): string {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
-  queryClient.setQueryData(
-    ["orgs"],
-    [{ id: ORG_ID, name: "Org", slug: "org", role: "owner", permissions: [] }],
-  );
-  queryClient.setQueryData(
-    $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
-      .queryKey,
-    { object: "list", hasMore: false, data: SPACES },
-  );
+  const queryClient = memberSpaceClient(SPACES);
+  // A look-up seeded as failed stays failed: no retry on mount.
+  queryClient.setDefaultOptions({ queries: { retryOnMount: false } });
   options.seed?.(queryClient);
   return renderInSpace(
     <UnreadableDetail
@@ -70,9 +56,7 @@ function detail(options: {
     />,
     {
       overview: options.overview,
-      orgId: ORG_ID,
       spaceId: "spc_hidden",
-      userId: "u_detail",
       queryClient,
       initialEntries: ["/agents/@acme/a/runs/run_1?journalFilter=tools"],
     },
@@ -170,25 +154,5 @@ describe("UnreadableDetail", () => {
       seed: (qc) => qc.setQueryData(runKey, { id: "run_1", spaceId: "spc_hidden" }),
     });
     expect(html).toContain(HINT_ACROSS());
-  });
-});
-
-describe("detailElsewhere", () => {
-  const target = "/agents/@acme/a?agentSettings=connections#settings";
-  const placements = ["spc_b", "spc_c"];
-  const open = () => true;
-
-  it("keeps the page, query and hash, entering the next enterable placement after the refusal", () => {
-    expect(detailElsewhere(placements, target, "spc_a", open)).toBe(
-      "/agents/@acme/a?agentSettings=connections&enterSpace=spc_b#settings",
-    );
-    const inC = "/agents/@acme/a?agentSettings=connections&enterSpace=spc_c#settings";
-    expect(detailElsewhere(placements, target, "spc_b", open)).toBe(inC);
-    expect(detailElsewhere(placements, target, "spc_a", (id) => id !== "spc_b")).toBe(inC);
-  });
-
-  it("stops after the last refusal, or before the working space resolves", () => {
-    expect(detailElsewhere(placements, target, "spc_c", open)).toBeNull();
-    expect(detailElsewhere(placements, target, null, open)).toBeNull();
   });
 });

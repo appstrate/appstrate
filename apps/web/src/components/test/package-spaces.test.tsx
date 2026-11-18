@@ -11,7 +11,7 @@ import type { ReactElement } from "react";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { memberSpaceClient, renderInSpace, testSpace } from "../../test/space-context.ts";
-import { homeNameBesideTiles, PackageSpaces } from "../package-spaces.tsx";
+import { PackageSpaces } from "../package-spaces.tsx";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
@@ -82,19 +82,5 @@ describe("PackageSpaces", () => {
       // Named as a space, never as « Espace d'origine ».
       expect(html).not.toContain("origine");
     }
-  });
-});
-
-describe("homeNameBesideTiles", () => {
-  const home = { homeSpaceId: "spc_b", homeSpaceName: "Studio" };
-
-  it("says the home only where no tile names it", () => {
-    expect(homeNameBesideTiles({ ...home, spaceIds: ["spc_b", "spc_a"] })).toBeNull();
-    expect(homeNameBesideTiles({ ...home, spaceIds: ["spc_a"] })).toBe("Studio");
-    expect(homeNameBesideTiles({ ...home, spaceIds: [] })).toBe("Studio");
-  });
-
-  it("says nothing while the tiles are read, so the line does not jump", () => {
-    expect(homeNameBesideTiles({ ...home, spaceIds: undefined })).toBeNull();
   });
 });

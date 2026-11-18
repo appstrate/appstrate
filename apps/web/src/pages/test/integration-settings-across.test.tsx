@@ -44,12 +44,12 @@ const DETAIL = {
 } as unknown as IntegrationDetailWire;
 
 /** The page's wiring: the configuration space is the page's, handed down. */
-function Settings({ spaceIds }: { spaceIds: string[] }) {
+function Settings({ spaceIds, active }: { spaceIds: string[]; active: boolean }) {
   const configureIn = useIntegrationSpaceAction("@acme/crm", "integrations:configure", spaceIds);
   return (
     <IntegrationSettings
       packageId="@acme/crm"
-      detail={DETAIL}
+      detail={{ ...DETAIL, active }}
       blockUserConnections={false}
       spaceIds={spaceIds}
       configureIn={configureIn}
@@ -59,12 +59,17 @@ function Settings({ spaceIds }: { spaceIds: string[] }) {
   );
 }
 
-function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a", "spc_b"]) {
+function settings(
+  overview: boolean,
+  workingGrants: string[],
+  spaceIds = ["spc_a", "spc_b"],
+  active = true,
+) {
   const queryClient = memberSpaceClient([
     testSpace("spc_a", ["integrations:read", ...workingGrants], "Studio"),
     testSpace("spc_b", ["integrations:read", "integrations:configure"], "Coffre"),
   ]);
-  return renderInSpace(<Settings spaceIds={spaceIds} />, {
+  return renderInSpace(<Settings spaceIds={spaceIds} active={active} />, {
     overview,
     queryClient,
     initialEntries: ["/integrations/@acme/crm?integrationSettings=authentication#settings"],
@@ -73,6 +78,8 @@ function settings(overview: boolean, workingGrants: string[], spaceIds = ["spc_a
 
 const GROUP = `>${agentsT("detail.settings.configurationGroup")}<`;
 const SPACE_LINE = agentsT("detail.configuration.spaceLabel");
+const HINT = 'data-testid="activation-hint"';
+const ACTIVATE = 'data-testid="detail-activate-btn"';
 
 describe("an integration's configuration in « Tous les espaces »", () => {
   it("opens where another of its spaces grants it, naming the working space the role refuses", () => {
@@ -91,6 +98,15 @@ describe("an integration's configuration in « Tous les espaces »", () => {
     expect(html).toContain(settingsT("integration.auth.none").replace(/'/g, "&#x27;"));
   });
 
+  it("draws nothing of the working space it is off in: the line enters the space it is on in", () => {
+    // Active in Coffre only, off in the working space Studio: no hint, no « Activer » acting there.
+    const html = settings(true, ["integrations:configure"], ["spc_b"], false);
+    expect(html).toContain(agentsT("detail.configuration.spaceChoiceIn", { space: "Coffre" }));
+    expect(html).not.toContain(HINT);
+    expect(html).not.toContain(ACTIVATE);
+    expect(html).not.toContain("Studio");
+  });
+
   it("stays closed when none of its spaces grants it", () => {
     // CONTROL: the integration is active in the working space only, which refuses.
     expect(settings(true, [], ["spc_a"])).not.toContain(GROUP);
@@ -103,5 +119,12 @@ describe("an integration's configuration with a space selected", () => {
     const html = settings(false, ["integrations:configure"]);
     expect(html).toContain(GROUP);
     expect(html).not.toContain(SPACE_LINE);
+  });
+
+  it("points at the header's « Activer » while it is off, without a second button", () => {
+    const html = settings(false, ["integrations:configure"], ["spc_b"], false);
+    expect(html).toContain(HINT);
+    expect(html).toContain(settingsT("integrations.activate.hint").replace(/'/g, "&#x27;"));
+    expect(html).not.toContain(ACTIVATE);
   });
 });

@@ -35,6 +35,7 @@ const { packageDetailQueryOptions } = await import("../../hooks/use-packages.ts"
 const { ACROSS_SPACES, paginatedRunsKeys, persistenceKeys } =
   await import("../../lib/query-keys.ts");
 const { usePackageActions } = await import("../package-detail/use-package-actions.tsx");
+const { usePlacementDeeds } = await import("../space-deed.ts");
 const { useAgentActions } = await import("../package-detail/use-agent-actions.tsx");
 const { AgentRunButton } = await import("../package-detail/agent-run-button.tsx");
 
@@ -183,6 +184,51 @@ describe("the Actions menu in the mode", () => {
     expect(entry(html, "deactivate")).toBeNull();
     // Atelier does not grant `agents:write`: no fork.
     expect(entry(renderIn(false, <MenuProbe source="system" />), "fork")).toBeNull();
+  });
+});
+
+describe("the placement deeds with a space selected", () => {
+  /** The working space's library: the agent shared to Atelier, `state` there. */
+  const seedSpaceLibrary = (state: "active" | "inactive") => (qc: QueryClient) =>
+    qc.setQueryData(
+      [
+        "get",
+        "/api/spaces/{id}/library",
+        { params: { path: { id: "spc_a" }, header: { "X-Org-Id": "org_1" } } },
+      ],
+      {
+        ...LIBRARY,
+        packages: {
+          ...LIBRARY.packages,
+          agent: [
+            {
+              id: PACKAGE_ID,
+              placements: [{ space_id: "spc_a", via: "shared", state, shared_by: null }],
+              activation: [{ spaceId: "spc_a", activate: "allowed", deactivate: "allowed" }],
+            },
+          ],
+        },
+      },
+    );
+
+  it("read their plain label in the menu, naming no space", () => {
+    const off = renderIn(false, <MenuProbe isActiveHere={false} />, seedSpaceLibrary("inactive"));
+    expect(entry(off, "activate")).toBe("Activer|");
+    const on = renderIn(false, <MenuProbe isActiveHere />, seedSpaceLibrary("active"));
+    expect(entry(on, "deactivate")).toBe("Désactiver|");
+    expect(entry(on, "remove-here")).toBe("Retirer|");
+  });
+
+  it("hand the working space to the removal's confirmation", () => {
+    const removed: string[] = [];
+    function RemoveProbe() {
+      const { remove } = usePlacementDeeds(PACKAGE_ID, { onRemove: (id) => removed.push(id) });
+      remove.onSelect?.();
+      return <p>{`${remove.offered}|${remove.label ?? ""}`}</p>;
+    }
+    const html = renderIn(false, <RemoveProbe />, seedSpaceLibrary("active"));
+    expect(html).toContain("<p>true|</p>");
+    expect(removed).toEqual(["spc_a"]);
   });
 });
 

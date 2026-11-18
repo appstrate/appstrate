@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client } from "../api/client";
-import { markAllRunsReadRequests } from "../lib/mark-all-runs-read";
+import { markAllReadIn } from "../lib/mark-all-read";
 import { useFirstRunsPage } from "./use-paginated-runs";
 import { agentsKeys, paginatedRunsKeys, runKeys, scheduleKeys } from "../lib/query-keys";
 import { invalidateNotificationQueries } from "./use-notifications";
@@ -51,17 +51,13 @@ export function useMarkRunRead() {
 
 /**
  * « Tout marquer comme lu »: the working space's runs (`null`), or every listed space's
- * (`markAllRunsReadRequests`). The read state is refreshed even when one space refused.
+ * (`markAllReadIn`). The read state is refreshed even when one space refused.
  */
 export function useMarkAllRunsRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (spaceIds: readonly string[] | null) =>
-      Promise.all(
-        markAllRunsReadRequests(spaceIds).map((inSpace) =>
-          client.PUT("/api/runs/read-all", inSpace),
-        ),
-      ),
+      markAllReadIn(spaceIds, (init) => client.PUT("/api/runs/read-all", init)),
     onSettled: () => invalidateRunReadState(qc),
   });
 }

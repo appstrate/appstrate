@@ -69,23 +69,24 @@ describe("polling a list spanning spaces", () => {
     expect(intervalOf(() => useFiles(), "get", "/api/files")).toBeUndefined();
   });
 
-  it("polls the notification feed and its count across spaces at the lists' pace", () => {
+  it("polls the notification feed and its count at one pace, across spaces or in one", () => {
+    // A notification comes of a run or a share: the 5-minute backstop, in the mode too.
     expect(
       intervalOf(
         () => useNotifications({ spanning: true }),
         "get",
         "/api/orgs/{orgId}/notifications",
       ),
-    ).toBe(ACROSS_SPACES_POLL_MS);
+    ).toBe(300_000);
     expect(
       intervalOf(
         () => useUnreadCount({ spanning: true }),
         "get",
         "/api/orgs/{orgId}/notifications/unread-count",
       ),
-    ).toBe(ACROSS_SPACES_POLL_MS);
-    // One space's feed and its count: the stream keeps them live, the poll is the 5-minute
-    // backstop — both, or a missed share leaves the badge and the bell disagreeing.
+    ).toBe(300_000);
+    // One space's feed and its count: the stream keeps them live, the poll is the backstop —
+    // both, or a missed share leaves the badge and the bell disagreeing.
     expect(intervalOf(() => useNotifications(), "get", "/api/notifications")).toBe(300_000);
     expect(intervalOf(() => useUnreadCount(), "get", "/api/notifications/unread-count")).toBe(
       300_000,

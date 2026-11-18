@@ -75,6 +75,14 @@ export function spacesWhere<S extends ListedSpace>(
   );
 }
 
+/**
+ * The spaces held with a role: what a list asking no role grant spans (the notification feed's
+ * org route), and so what its « Tout marquer comme lu » marks.
+ */
+export function spacesHeld<S extends ListedSpace>(spaces: readonly S[] | undefined): S[] {
+  return spacesWhere(spaces, undefined, () => true);
+}
+
 /** Whether `permission` holds in a row's space: the working space's gate, or the row's own. */
 export function grantsInRowSpace(
   rowSpaceId: string | undefined,
