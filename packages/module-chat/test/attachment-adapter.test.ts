@@ -67,6 +67,13 @@ describe("chat attachment adapter — the space of an upload", () => {
     expect(sent.content).toMatchObject([{ type: "file", data: "upload://upl_1" }]);
   });
 
+  it("keeps the attachment destination when a locale change recreates the adapter", async () => {
+    const { upload, uploads } = recordingUpload();
+    const pending = await adapterOver(upload, () => "spc_b").add({ file: NOTE() });
+    await adapterOver(upload, () => "spc_a").send(pending);
+    expect(uploads).toEqual(["spc_b"]);
+  });
+
   it("uploads two files picked in two spaces each into its own", async () => {
     const { upload, uploads } = recordingUpload();
     let space = "spc_a";

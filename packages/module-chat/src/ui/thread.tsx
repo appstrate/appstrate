@@ -276,6 +276,7 @@ function PendingImage({ file, name }: { file: File; name: string }) {
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const file = useAuiState((s) => s.attachment.file);
+  const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, t } = useChatHost();
   const previewFile = file && isImageMime(file.type) ? file : undefined;
@@ -294,27 +295,32 @@ function ComposerAttachmentChip() {
       </button>
     </AttachmentPrimitive.Remove>
   );
-  if (previewFile) {
-    return (
-      <AttachmentPrimitive.Root className="relative inline-flex">
-        <PendingImage file={previewFile} name={name} />
-        {remove}
-      </AttachmentPrimitive.Root>
-    );
-  }
   return (
-    <AttachmentPrimitive.Root className="inline-flex">
-      <InertAttachmentChip
-        name={name}
-        trailing={
-          <>
-            {size > 0 && (
-              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
-            )}
-            {remove}
-          </>
-        }
-      />
+    <AttachmentPrimitive.Root className="inline-flex min-w-0 flex-col items-start gap-1">
+      {previewFile ? (
+        <span className="relative inline-flex">
+          <PendingImage file={previewFile} name={name} />
+          {remove}
+        </span>
+      ) : (
+        <InertAttachmentChip
+          name={name}
+          trailing={
+            <>
+              {size > 0 && (
+                <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
+              )}
+              {remove}
+            </>
+          }
+        />
+      )}
+      {status.type === "incomplete" && status.reason === "error" && status.message && (
+        <span role="alert" className="text-destructive text-xs">
+          <span className="sr-only">{name}. </span>
+          {status.message}
+        </span>
+      )}
     </AttachmentPrimitive.Root>
   );
 }
