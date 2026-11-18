@@ -14,6 +14,7 @@
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
+import { FILE_URI_PREFIX } from "@appstrate/core/file-uri";
 import type { Api, Message } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
@@ -230,18 +231,26 @@ function assistantMessages(
       if (!isToolUIPart(part)) continue;
 
       const toolName = getToolName(part);
+      const args = record(part.input);
       content.push({
         type: "toolCall",
         id: part.toolCallId,
         name: toolName,
-        arguments: record(part.input),
+        arguments: args,
       });
       toolCallCount += 1;
 
       let result: unknown;
       let isError: boolean;
       if (part.state === "output-available") {
-        result = part.output;
+        // The browser submits its branch, which can still contain a file read before an upgrade.
+        const { uri } = args;
+        result =
+          (toolName === "read_file" || toolName === "read_resource") &&
+          typeof uri === "string" &&
+          uri.startsWith(FILE_URI_PREFIX)
+            ? `[File content omitted on replay: ${uri}]`
+            : part.output;
         isError = false;
       } else if (part.state === "output-error") {
         result = part.errorText;

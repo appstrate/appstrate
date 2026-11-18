@@ -290,7 +290,7 @@ export async function handleChatStream(
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = await readJsonBody(c, chatStreamSchema);
-  // Only the new message is validated: earlier turns are the server's own rows.
+  // The client sends its selected history branch along with the new message.
   const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
   if (!validated.success) {
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");

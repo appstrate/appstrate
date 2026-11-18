@@ -10,19 +10,19 @@
  * A `read_file` / `read_resource` call on an `appfile://` URI used to persist what the model read:
  * the file's text verbatim, or its bytes as a base64 `blob` inside a JSON resource. Every later
  * turn re-sent that history to the model. The chat now persists a receipt instead (one JSON text
- * block: `{ uri, mimeType, size, note }`, no content), and its replay reads only that form. This
- * script gives the rows written before the same form, so no older shape is read anywhere.
+ * block: `{ uri, mimeType, size, note }`, no content). This script removes the old contents from
+ * stored history. Model replay independently projects a previous file read from its URI alone.
  *
  * A block is kept when it already is a receipt or platform metadata: a JSON object carrying a
  * `note` and neither `text` nor `blob`. Any other content of such a call is replaced by one receipt
  * naming the URI (and the MIME type and size when the old resource said them). A `skill://` read is
  * not touched: its instructions are meant to stay in the history.
  *
- * Run in the release window, before the app serves traffic: until it has run, replaying an old
- * thread re-sends what that call read. Dry run by default: counts the messages and calls it would
- * rewrite, writes nothing. With `--apply`, rewrites them in one transaction and exits 1 unless none
- * is left after. Idempotent: a second run finds nothing. Counts UNMEASURED: rehearse on a restored dump and record them in the
- * README's Log. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither
+ * Run in the release window with the app stopped: until it has run, loading an old thread can
+ * return the original file contents to the browser. A dry run counts affected messages and calls.
+ * With `--apply`, rewrites them in one transaction and exits 1 unless none is left after.
+ * Idempotent: a second run finds nothing. Counts UNMEASURED: rehearse on a restored dump and
+ * record them in the README's Log. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither
  * (`lib/database-target.ts`).
  */
 

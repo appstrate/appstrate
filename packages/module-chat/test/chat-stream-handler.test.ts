@@ -30,8 +30,8 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSpaces, files } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
-import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
-import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import { seedRun, seedSpace } from "../../../apps/api/test/helpers/seed.ts";
+import { createUIMessageStreamResponse, type UIMessage, type UIMessageChunk } from "ai";
 import {
   CHAT_MESSAGE_MAX_BYTES,
   handleChatStream,
@@ -59,7 +59,9 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
-import { ensureSession } from "../src/persistence.ts";
+import { ensureSession, persistAssistantMessage, persistUserMessage } from "../src/persistence.ts";
+import { createFileFromStream, readChatAttachment } from "../../../apps/api/src/services/files.ts";
+import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { reachableSpace } from "./reachable-space.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
@@ -614,6 +616,105 @@ describe("handleChatStream", () => {
     expect(calls[0]!.messages.map((m) => m.id)).toEqual(["a0", "u1"]);
     await waitForAssistantPersist(sessionId);
   });
+
+  it.each(["read_file", "read_resource"])(
+    "keeps an old tab's %s result out of the next model request after the grant is revoked",
+    async (toolName) => {
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const run = await seedRun({ ...scope, userId: ctx.user.id });
+      const pdf = new Blob(["%PDF-1.4\nSynthetic contract version 3\n%%EOF"]);
+      const { row } = await createFileFromStream(
+        scope,
+        run.id,
+        { userId: ctx.user.id, endUserId: null },
+        null,
+        {
+          name: "contract.pdf",
+          mime: "application/pdf",
+          body: pdf.stream(),
+        },
+      );
+      const uri = `appfile://${row.id}`;
+      const read = {
+        kind: "pdf",
+        maxBytes: pdf.size,
+        signal: new AbortController().signal,
+      } as const;
+      const previousRead = await readChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        spaces: [{ id: scope.spaceId, permissions: new Set(["files:read"]) }],
+        beforeResolve: async () => {},
+        uri,
+        ...read,
+      });
+      expect(previousRead?.bytes).toEqual(new Uint8Array(await pdf.arrayBuffer()));
+      const blob = Buffer.from(previousRead!.bytes).toString("base64");
+      const question: UIMessage = {
+        id: "u0",
+        role: "user",
+        parts: [{ type: "text", text: "Lis le contrat." }],
+      };
+      const answer = (result: string): UIMessage => ({
+        id: "a0",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolCallId: "read_0",
+            toolName,
+            state: "output-available",
+            input: { uri },
+            output: { content: [{ type: "text", text: result }] },
+          },
+        ],
+      });
+      // The stored row was migrated while the tab retained the result of its authorized read.
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+      await persistUserMessage(sessionId, question);
+      await persistAssistantMessage(
+        sessionId,
+        answer(
+          JSON.stringify({
+            uri,
+            mimeType: row.mime,
+            size: row.size,
+            note: "File content omitted: read in an earlier version of the chat.",
+          }),
+        ),
+        question.id,
+      );
+
+      const { engine, calls } = scriptedEngine();
+      const resource = { uri, mimeType: row.mime, blob };
+      const oldResult = toolName === "read_file" ? { type: "resource", resource } : resource;
+      const res = await postChat(sessionId, undefined, engine, {
+        permissions: new Set(),
+        history: [question, answer(JSON.stringify(oldResult))],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      expect(await input.readAttachment!(uri, read)).toBeNull();
+      const { api, provider, id } = input.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0 },
+      );
+      const result = turn.history.find((message) => message.role === "toolResult");
+      expect(JSON.stringify(result?.content)).toContain(uri);
+      expect(JSON.stringify(turn.history)).not.toContain(blob);
+      await waitForAssistantPersist(sessionId);
+      const rows = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId));
+      expect(rows).toHaveLength(4);
+      expect(JSON.stringify(rows)).not.toContain(blob);
+    },
+  );
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {
     const sessionId = mintSessionId();
