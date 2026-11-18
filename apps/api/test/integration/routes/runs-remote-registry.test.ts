@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { countTestSelects } from "../../helpers/db.ts";
-
 /**
  * Integration tests for `POST /api/runs/remote` — `kind: "registry"` path.
  *
@@ -16,9 +14,9 @@ import { countTestSelects } from "../../helpers/db.ts";
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { countTestSelects, truncateAll, db } from "../../helpers/db.ts";
 import {
   addOrgMember,
   authHeaders,
@@ -51,7 +49,6 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { validateManifest } from "@appstrate/core/validation";
-import { and } from "drizzle-orm";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
@@ -492,17 +489,19 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(res.status).toBe(404);
   });
 
-  it("rejects a yanked version with 410", async () => {
+  it("returns 410 for a yanked version even when its archive has changed", async () => {
     await seedPublishedAgent(ctx, "1.0.0");
-    // No exported yankVersion helper today — flip the column directly. The
-    // service contract under test is the resolver's behaviour on yanked
-    // rows, not the yank workflow itself (which lives in the publish flow).
     await db
       .update(packageVersions)
       .set({ yanked: true, yankedReason: "compromised" })
       .where(
         and(eq(packageVersions.packageId, "@acme/briefing"), eq(packageVersions.version, "1.0.0")),
       );
+    await uploadPackageZip(
+      "@acme/briefing",
+      "1.0.0",
+      buildMinimalZip(publishedManifest("1.0.0"), "Changed after withdrawal"),
+    );
 
     const res = await post({
       source: {

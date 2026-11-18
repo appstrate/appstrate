@@ -150,7 +150,6 @@ export async function resolveRegistryAgent(
   // nothing resolves — let it bubble.
   const detail = await resolveExportVersion(packageId, spec ?? null);
   const { version } = detail;
-  const content = await readVersionArchive(packageId, version, { integrity: detail.integrity });
   if (detail.yanked) {
     throw new ApiError({
       status: 410,
@@ -200,7 +199,7 @@ export async function resolveRegistryAgent(
     // different artifact digest. Most likely cause: the dist-tag the
     // runner pointed at (often `latest`) moved between bundle download
     // and `runs/remote` POST. We accept the run regardless (the bundle
-    // still lives on the runner, server-side bytes aren't loaded), but
+    // still runs on the caller's host), but
     // emit a structured warn so ops can correlate.
     logger.warn("registry run integrity hint diverges from resolved artifact", {
       packageId,
@@ -210,6 +209,7 @@ export async function resolveRegistryAgent(
     });
   }
 
+  const content = await readVersionArchive(packageId, version, { integrity: detail.integrity });
   const prompt = requirePublishedPrompt(packageId, { version, content });
 
   // Build the LoadedPackage from the published version's manifest + prompt
