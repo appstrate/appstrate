@@ -511,12 +511,17 @@ role. Runs keep their connections there:
   refused with `503 tool_catalog_unavailable`: the catalog could not be read
   (`listing_failure`, when known: the proxy's problem code or `timeout`),
   nothing is sent, and a retry may succeed once a listing reads it. Listing a
-  server sends the connection's credential: the listing is journaled as a call
+  server through a connection sends its credential: the listing is journaled as a call
   of the connection, a 401 goes through the forced refresh, which can rotate
   the stored OAuth tokens, and a server refusing the credential can flag the
   connection `needs_reconnection`, as a call does, so a search is annotated
-  neither read-only nor idempotent (and not destructive). A call is one `tools/call`
-  through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
+  neither read-only nor idempotent (and not destructive); an integration declaring
+  no `auths` is listed with no connection, its server reached directly with nothing
+  injected, the listing journaled with no connection. A call is one `tools/call`
+  through the credential proxy (`POST /api/credential-proxy/tools/call`; for an
+  integration declaring no `auths`: sent directly to its server with no connection,
+  and a `connection_id` is refused with `credential_not_found` before anything is
+  sent), on the
   connection named by the `connection_id` argument of `call_integration_tool`
   (one of the tool's `connection_ids`) or, without it, the one the proxy selects
   as for an `api_call`, judged for that tool: a connection lacking the scopes
