@@ -15,9 +15,9 @@
 
 import type { UIMessage } from "ai";
 import type { ChatImageContent } from "@appstrate/core/chat-contract";
+import { readImageSize } from "@appstrate/core/image-size";
 import { loadPiCodingAgentSdk, type Message } from "@appstrate/runner-pi";
 import { logger } from "../logger.ts";
-import { isDecodable } from "./image-dimensions.ts";
 
 type UserContent = Extract<Message, { role: "user" }>["content"];
 /** A Pi image block, as a user turn carries it. */
@@ -30,8 +30,6 @@ export type AttachmentImages = ReadonlyMap<string, ReadonlyMap<string, PiImageCo
 export const ATTACHMENT_IMAGE_TURNS = 3;
 /** Images sent per user message; the rest keep the pointer line. */
 export const ATTACHMENT_IMAGES_PER_MESSAGE = 4;
-/** Stored size above which a file is not read (the resize would be the cost, not the model). */
-export const ATTACHMENT_IMAGE_SOURCE_MAX_BYTES = 10 * 1024 * 1024;
 /** Longest edge, in pixels, an image is downscaled to: past it a provider downsizes it anyway. */
 const ATTACHMENT_IMAGE_MAX_EDGE = 1568;
 /** Base64 bytes one image may weigh once downscaled. */
@@ -44,6 +42,25 @@ export type ImageResizer = (
   bytes: Uint8Array,
   mime: string,
 ) => Promise<{ data: string; mimeType: string } | null>;
+
+/**
+ * Pixels above which an image is not decoded (about a 7000 x 5600 photo is 40 Mpx). The stored size
+ * says nothing about the decoded one: a 30 000 x 30 000 PNG of one flat colour weighs a few hundred
+ * kilobytes and decodes to 3.6 GB of RGBA, so the header is read first and such a file is refused
+ * before Pi's decoder (Photon, WebAssembly) allocates for it.
+ */
+const IMAGE_MAX_PIXELS = 40_000_000;
+
+/** Whether the image declares a size that is safe to decode. An unreadable header is not safe. */
+export function isDecodable(bytes: Uint8Array): boolean {
+  const size = readImageSize(bytes);
+  return (
+    size !== null &&
+    size.width > 0 &&
+    size.height > 0 &&
+    size.width * size.height <= IMAGE_MAX_PIXELS
+  );
+}
 
 /**
  * The one resizer every image bound for a provider goes through, an attachment or a tool result:
@@ -68,26 +85,18 @@ export interface AttachmentImageDeps {
   resize: ImageResizer;
 }
 
-/** Base64 bytes of the images the tools of ONE turn may put in front of the model, in all. */
-export const TOOL_IMAGES_TURN_MAX_BYTES = 4 * 1024 * 1024;
-
-/** What is left of a turn's tool-image budget; shared by every tool of the turn. */
-export interface ToolImageBudget {
-  remaining: number;
-}
-
 type ToolContentBlock =
   { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 /**
  * Bring the image blocks of a tool result under the provider's limits: each is downscaled like an
- * attachment, and charged to the turn's budget ({@link TOOL_IMAGES_TURN_MAX_BYTES}), so a model
- * that chains `read_file` calls cannot grow the request without bound. An image that cannot be
- * downscaled, or that no longer fits the budget, becomes a text pointer saying so.
+ * attachment, after the decode guard, which runs here because the chat decodes in the API process.
+ * An image that cannot be downscaled becomes a text pointer saying so. What the images of one
+ * request weigh in all is bounded where the agent runner bounds it, by `inlineImageBudgetExtension`
+ * (`@appstrate/runner-pi`), which the chat's session loads too (`createIsolatedResourceLoader`).
  */
 export async function fitToolImages(
   content: readonly ToolContentBlock[],
-  budget: ToolImageBudget,
   resize: ImageResizer,
 ): Promise<ToolContentBlock[]> {
   const fitted: ToolContentBlock[] = [];
@@ -104,13 +113,12 @@ export async function fitToolImages(
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    if (resized && resized.data.length <= budget.remaining) {
-      budget.remaining -= resized.data.length;
+    if (resized) {
       fitted.push({ type: "image", data: resized.data, mimeType: resized.mimeType });
     } else {
       fitted.push({
         type: "text",
-        text: `[image ${block.mimeType} — not shown: it could not be downscaled to the provider's limits, or this turn's image budget is spent]`,
+        text: `[image ${block.mimeType} — not shown: it could not be downscaled to the provider's limits]`,
       });
     }
   }

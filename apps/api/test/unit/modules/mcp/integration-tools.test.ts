@@ -1753,10 +1753,19 @@ describe("savedFileName", () => {
     );
   });
 
-  it("neutralizes path separators, control characters and leading dots", () => {
+  it("names the file by the platform's filename rule", () => {
     const name = savedFileName("../../etc/pass\u0000wd", null, url, "text/plain");
     expect(name).not.toContain("/");
     expect(name).not.toContain("\u0000");
-    expect(savedFileName("..hidden.txt", null, url, "text/plain")).toBe("hidden.txt");
+    expect(name).toBe("._._etc_pass_wd.txt");
+    expect(savedFileName("..hidden.txt", null, url, "text/plain")).toBe(".hidden.txt");
+    expect(savedFileName("a".repeat(300) + ".txt", null, url, "text/plain")).toHaveLength(255);
+  });
+
+  it("appends the type's extension from the shared table", () => {
+    const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    expect(savedFileName("report", null, url, docx)).toBe("report.docx");
+    expect(savedFileName("report", null, url, "application/zip")).toBe("report.zip");
+    expect(savedFileName("report", null, url, "application/octet-stream")).toBe("report");
   });
 });

@@ -12,6 +12,7 @@
  *    an MCP error — all through the same container ACL the REST route enforces.
  */
 
+import { RESOURCE_IMAGE_MAX_BYTES } from "@appstrate/mcp-transport";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -562,9 +563,9 @@ describe("mcp resources/read (appfile://)", () => {
     expect(metadataOf(contents).note).toMatch(/could not be read/);
   });
 
-  it("returns metadata only for an image over the 5 MiB inline limit", async () => {
+  it("returns metadata only for an image over the inline image limit", async () => {
     const runId = await seedRun(scope);
-    const big = new Uint8Array(5 * 1024 * 1024 + 16); // an image over the inline ceiling
+    const big = new Uint8Array(RESOURCE_IMAGE_MAX_BYTES + 16); // an image over the inline ceiling
     const docId = await publishDoc(scope, runId, "big.png", "image/png", big);
 
     const { envelope } = await rpc(

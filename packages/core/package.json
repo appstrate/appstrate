@@ -62,6 +62,7 @@
     "./naming": "./src/naming.ts",
     "./skill-uri": "./src/skill-uri.ts",
     "./image-ref": "./src/image-ref.ts",
+    "./image-size": "./src/image-size.ts",
     "./mime": "./src/mime.ts",
     "./dependencies": "./src/dependencies.ts",
     "./integrity": "./src/integrity.ts",

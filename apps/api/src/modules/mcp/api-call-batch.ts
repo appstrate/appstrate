@@ -13,6 +13,7 @@ import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-hea
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { ApiError } from "@appstrate/core/api-errors";
+import { extensionForMime, sanitizeFilename } from "@appstrate/core/naming";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
@@ -439,22 +440,6 @@ async function dispatchCall(
   };
 }
 
-/** Extensions for the types a connector commonly serves, for a name the upstream did not give. */
-const EXTENSION_BY_MIME: Record<string, string> = {
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/gif": ".gif",
-  "image/webp": ".webp",
-  "application/pdf": ".pdf",
-  "application/json": ".json",
-  "text/plain": ".txt",
-  "text/csv": ".csv",
-  "application/zip": ".zip",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-};
-
 /**
  * The name of a saved file: the caller's, else the upstream's `Content-Disposition`, else the last
  * path segment of the target, else a generic one; given the type's extension when it has none.
@@ -486,14 +471,12 @@ export function savedFileName(
       name = undefined;
     }
   }
-  // A path separator or control character has no place in a file name.
-  name = [...(name ?? "")]
-    .map((char) => (char === "/" || char === "\\" || char.charCodeAt(0) < 0x20 ? "_" : char))
-    .join("")
-    .replace(/^\.+/, "")
-    .slice(0, 200);
-  if (name === "") name = "imported-file";
-  return /\.[A-Za-z0-9]{1,8}$/.test(name) ? name : `${name}${EXTENSION_BY_MIME[mime] ?? ""}`;
+  if (!name?.trim()) name = "imported-file";
+  name = sanitizeFilename(name);
+  if (/\.[A-Za-z0-9]{1,8}$/.test(name)) return name;
+  const extension = extensionForMime(mime);
+  // Through the rule again: the stored-name bound holds for the name as stored, extension included.
+  return extension ? sanitizeFilename(`${name}.${extension}`) : name;
 }
 
 /** Stores a `save_as_file` outcome's body, leaving the outcome the entry reports. */

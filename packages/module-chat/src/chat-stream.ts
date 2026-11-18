@@ -35,7 +35,7 @@ import { selfOrigin } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
-import { ATTACHMENT_IMAGE_SOURCE_MAX_BYTES } from "./pi-chat/attachment-images.ts";
+import { RESOURCE_IMAGE_MAX_BYTES } from "@appstrate/mcp-transport";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
@@ -854,7 +854,8 @@ export async function handleChatStream(
             userId: user.id,
             uri,
             spaces: attachmentSpaces,
-            maxBytes: ATTACHMENT_IMAGE_SOURCE_MAX_BYTES,
+            // The cap `read_file` applies to the same file: one rule, whether attached or read.
+            maxBytes: RESOURCE_IMAGE_MAX_BYTES,
           }),
         system,
         generation: generationSettings,

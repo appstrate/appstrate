@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pixel size of an image, read from its header alone.
+ * The type and pixel size of an image, read from its header alone.
  *
- * Pi decodes an image (Photon, WebAssembly) before it can shrink it, and the stored size says
- * nothing about the decoded one: a 30 000 x 30 000 PNG of one flat colour weighs a few hundred
- * kilobytes and decodes to 3.6 GB of RGBA. The header is read first so such a file is refused
- * before anything allocates for it.
+ * One reader for every consumer that must know what an image declares before anything decodes it
+ * (an uploaded icon's bounds, a chat attachment's decompression-bomb guard). Only the header is
+ * walked, never the pixels; any header that is truncated or malformed answers `null`.
  */
 
-/** Pixels above which an image is not decoded (about a 7000 x 5600 photo is 40 Mpx). */
-const IMAGE_MAX_PIXELS = 40_000_000;
+export type ImageSizeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+export interface ImageSize {
+  type: ImageSizeType;
+  width: number;
+  height: number;
+}
+
+type Size = { width: number; height: number };
 
 const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
 const u16le = (b: Uint8Array, at: number) => b[at]! | (b[at + 1]! << 8);
@@ -22,10 +28,16 @@ const u32le = (b: Uint8Array, at: number) =>
 const ascii = (b: Uint8Array, at: number, length: number) =>
   String.fromCharCode(...b.subarray(at, at + length));
 
-type Size = { width: number; height: number };
+/** The 8-byte signature every PNG file starts with. */
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
+/**
+ * A PNG declares its size in the `IHDR` chunk, which the format requires first: after the
+ * signature, its length (13), `IHDR`, then width and height as big-endian 32-bit integers.
+ */
 function png(b: Uint8Array): Size | null {
-  if (b.length < 24 || ascii(b, 1, 3) !== "PNG" || ascii(b, 12, 4) !== "IHDR") return null;
+  if (b.length < 24 || !PNG_SIGNATURE.every((byte, i) => b[i] === byte)) return null;
+  if (u32be(b, 8) !== 13 || ascii(b, 12, 4) !== "IHDR") return null;
   return { width: u32be(b, 16), height: u32be(b, 20) };
 }
 
@@ -74,6 +86,7 @@ function gif(b: Uint8Array): Size | null {
 const isStartOfFrame = (marker: number) =>
   marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
 
+/** A JPEG declares its size in the first start-of-frame segment, found by skipping the segments before it. */
 function jpeg(b: Uint8Array): Size | null {
   if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return null;
   let at = 2;
@@ -99,38 +112,42 @@ function jpeg(b: Uint8Array): Size | null {
   return null;
 }
 
+/** The canvas of a WebP, read from the first chunk (`VP8X`, `VP8L` or `VP8 `) of the RIFF container. */
 function webp(b: Uint8Array): Size | null {
-  if (b.length < 21 || ascii(b, 0, 4) !== "RIFF" || ascii(b, 8, 4) !== "WEBP") return null;
-  const chunk = ascii(b, 12, 4);
-  if (chunk === "VP8 " && b.length >= 30) {
-    return { width: u16le(b, 26) & 0x3fff, height: u16le(b, 28) & 0x3fff };
+  if (b.length < 20 || ascii(b, 0, 4) !== "RIFF" || ascii(b, 8, 4) !== "WEBP") return null;
+  switch (ascii(b, 12, 4)) {
+    case "VP8X":
+      return b.length >= 30 ? { width: u24le(b, 24) + 1, height: u24le(b, 27) + 1 } : null;
+    case "VP8L": {
+      // Signature byte 0x2f, then width-1 and height-1 on 14 bits each.
+      if (b.length < 25 || b[20] !== 0x2f) return null;
+      const bits = u32le(b, 21);
+      return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+    }
+    case "VP8 ":
+      // Frame tag, the 9d 01 2a start code, then width and height on 14 bits (the rest is scale).
+      if (b.length < 30 || b[23] !== 0x9d || b[24] !== 0x01 || b[25] !== 0x2a) return null;
+      return { width: u16le(b, 26) & 0x3fff, height: u16le(b, 28) & 0x3fff };
+    default:
+      return null;
   }
-  if (chunk === "VP8L" && b.length >= 25) {
-    const bits = u32le(b, 21);
-    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
-  }
-  if (chunk === "VP8X" && b.length >= 30) {
-    return { width: u24le(b, 24) + 1, height: u24le(b, 27) + 1 };
-  }
-  return null;
 }
 
-/** The size an image of one of the four formats a provider takes declares, `null` when unreadable. */
-export function imageDimensions(bytes: Uint8Array): Size | null {
+/** The type and size an image declares in its header, `null` for any other bytes or an unreadable header. */
+export function readImageSize(bytes: Uint8Array): ImageSize | null {
   try {
-    return png(bytes) ?? gif(bytes) ?? jpeg(bytes) ?? webp(bytes);
+    const readers: [ImageSizeType, (b: Uint8Array) => Size | null][] = [
+      ["image/png", png],
+      ["image/jpeg", jpeg],
+      ["image/gif", gif],
+      ["image/webp", webp],
+    ];
+    for (const [type, read] of readers) {
+      const size = read(bytes);
+      if (size) return { type, ...size };
+    }
+    return null;
   } catch {
     return null;
   }
-}
-
-/** Whether the image declares a size that is safe to decode. An unreadable header is not safe. */
-export function isDecodable(bytes: Uint8Array): boolean {
-  const size = imageDimensions(bytes);
-  return (
-    size !== null &&
-    size.width > 0 &&
-    size.height > 0 &&
-    size.width * size.height <= IMAGE_MAX_PIXELS
-  );
 }

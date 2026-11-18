@@ -297,6 +297,13 @@ const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
   ["image/webp", "webp"],
   ["image/bmp", "bmp"],
   ["image/svg+xml", "svg"],
+  ["application/zip", "zip"],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"],
+  ["application/vnd.oasis.opendocument.text", "odt"],
+  ["application/vnd.oasis.opendocument.spreadsheet", "ods"],
+  ["application/vnd.oasis.opendocument.presentation", "odp"],
 ]);
 
 /**

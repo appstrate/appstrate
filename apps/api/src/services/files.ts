@@ -69,7 +69,7 @@ import {
   storageLimitExceeded,
   fileCountExceeded,
 } from "../lib/errors.ts";
-import { resolveAgentOutputMime } from "./mime-policy.ts";
+import { RASTER_IMAGE_MIMES, resolveAgentOutputMime } from "./mime-policy.ts";
 import type {
   ChatAttachmentRequest,
   ChatImageContent,
@@ -667,6 +667,46 @@ export function toFileDto(
 // ---------------------------------------------------------------------------
 
 /**
+ * Stream `body` into the files bucket at `storagePath`, through `digester`
+ * (hash + byte count + per-file cap) and the magic-byte sniffer. Answers the
+ * sniffed MIME. The one write path of every stored file's bytes.
+ */
+async function pipeToStorage(
+  storagePath: string,
+  body: ReadableStream<Uint8Array>,
+  digester: ReturnType<typeof createHashingCounter>,
+): Promise<string | undefined> {
+  const detection = await fileTypeStream(body);
+  await storageUploadStream(FILES_BUCKET, storagePath, detection.pipeThrough(digester.stream), {
+    exclusive: true,
+  });
+  return detection.fileType?.mime;
+}
+
+/**
+ * {@link pipeToStorage} for a body the platform holds (an agent output, a
+ * connector import), capped at `perFileCap`. A cap tripped mid-stream, or a
+ * storage error, may leave a partial object: it is dropped, so a cut-short
+ * write never leaves bytes behind nor strands them uncounted.
+ */
+async function storeBody(
+  storagePath: string,
+  body: ReadableStream<Uint8Array>,
+  perFileCap: number,
+): Promise<{ byteCount: number; sha256: string; sniffedMime: string | undefined }> {
+  const digester = createHashingCounter({ perFileCap });
+  let sniffedMime: string | undefined;
+  try {
+    sniffedMime = await pipeToStorage(storagePath, body, digester);
+  } catch (err) {
+    await dropFileObject(storagePath, "stream_error");
+    throw err;
+  }
+  const { bytes: byteCount, sha256 } = digester.result();
+  return { byteCount, sha256, sniffedMime };
+}
+
+/**
  * Materialize a staged upload into a durable file: stream the upload bucket
  * → files bucket (computing sha256 on the fly), then insert the row and
  * increment the org's byte counter in one transaction.
@@ -711,12 +751,9 @@ export async function createFileFromUpload(
   const digester = createHashingCounter();
   try {
     await consumeUploadStream(uploadId, access, async (src) => {
-      const detection = await fileTypeStream(src);
-      await storageUploadStream(FILES_BUCKET, storagePath, detection.pipeThrough(digester.stream), {
-        exclusive: true,
-      });
+      const sniffedMime = await pipeToStorage(storagePath, src, digester);
       const { bytes, sha256 } = digester.result();
-      return { bytes, sniffedMime: detection.fileType?.mime, sha256 };
+      return { bytes, sniffedMime, sha256 };
     });
   } catch (err) {
     // The doc object may have been (partially) written before the throw
@@ -1032,33 +1069,17 @@ export async function createFileFromStream(
   const fileId = prefixedId("file");
   const storagePath = fileStoragePath(scope, fileId, input.name);
 
-  const digester = createHashingCounter({
-    perFileCap: env.FILE_MAX_BYTES,
-  });
-
   // Sniff the magic bytes as the stream flows so the STORED mime can be made
   // honest. Unlike user uploads (which REJECT a declared/sniffed mismatch), an
   // agent output is never rejected — an agent legitimately emits an odd file
   // under a mime it never considered — so a concrete sniffed type that does not
   // match the declared one RELABELS the stored mime ({@link resolveAgentOutputMime}).
   // This keeps the downstream preview/kind logic safe without failing publishes.
-  let sniffedMime: string | undefined;
-  try {
-    const detection = await fileTypeStream(input.body);
-    await storageUploadStream(FILES_BUCKET, storagePath, detection.pipeThrough(digester.stream), {
-      exclusive: true,
-    });
-    sniffedMime = detection.fileType?.mime;
-  } catch (err) {
-    // Cap tripped mid-stream (or a transient storage error) — the object may
-    // have been partially written before the abort. Drop it so a cut-short
-    // upload never leaves a partial object behind (the 413 delete-on-short
-    // contract) nor strands bytes uncounted.
-    await dropFileObject(storagePath, "stream_error");
-    throw err;
-  }
-
-  const { bytes: byteCount, sha256 } = digester.result();
+  const { byteCount, sha256, sniffedMime } = await storeBody(
+    storagePath,
+    input.body,
+    env.FILE_MAX_BYTES,
+  );
   const storedMime = resolveAgentOutputMime(input.mime, sniffedMime);
 
   // Dedup fast path: an identical (run, sha256, name) agent_output already
@@ -1460,21 +1481,11 @@ export async function createChatFileFromBytes(
 
   const fileId = prefixedId("file");
   const storagePath = fileStoragePath(scope, fileId, input.name);
-  const digester = createHashingCounter({ perFileCap: env.FILE_MAX_BYTES });
-  let sniffedMime: string | undefined;
-  try {
-    const detection = await fileTypeStream(
-      new Blob([input.bytes as Uint8Array<ArrayBuffer>]).stream(),
-    );
-    await storageUploadStream(FILES_BUCKET, storagePath, detection.pipeThrough(digester.stream), {
-      exclusive: true,
-    });
-    sniffedMime = detection.fileType?.mime;
-  } catch (err) {
-    await dropFileObject(storagePath, "stream_error");
-    throw err;
-  }
-  const { bytes: byteCount, sha256 } = digester.result();
+  const { byteCount, sha256, sniffedMime } = await storeBody(
+    storagePath,
+    new Blob([input.bytes as Uint8Array<ArrayBuffer>]).stream(),
+    env.FILE_MAX_BYTES,
+  );
   const committed = await commitFileRow({
     scope,
     fileId,
@@ -1495,19 +1506,6 @@ export async function createChatFileFromBytes(
 }
 
 /**
- * The image MIME types a model provider accepts as an image block (Anthropic,
- * OpenAI, Gemini all take these four). Anything else a user attaches (HEIC, SVG,
- * TIFF, BMP…) stays a pointer line: the platform has no converter, and sending
- * bytes a provider rejects would fail the whole turn instead of one attachment.
- */
-export const MODEL_IMAGE_MIMES: ReadonlySet<string> = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-]);
-
-/**
  * Whether a caller may read stored file content in a space: the grant the REST
  * content route guards with (`files:read`). The container ACL of
  * {@link getFileForActor} says whose file it is, not whether this caller reads
@@ -1521,7 +1519,7 @@ export function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
  * The seam behind `PlatformServices.readChatImage`: the bytes of an attached
  * image for a model that reads images, under the container ACL
  * {@link resolveChatAttachment} applies. Every miss — malformed URI, foreign or
- * missing file, not downloadable, not a {@link MODEL_IMAGE_MIMES} type, over the
+ * missing file, not downloadable, not a {@link RASTER_IMAGE_MIMES} type: anything else stays a pointer line, as a provider would reject it, over the
  * caller's cap, object gone from storage — is `null`: the chat keeps the textual
  * pointer for it, so a refusal here never loses the attachment and never fails
  * the turn.
@@ -1548,7 +1546,7 @@ export async function readChatImage(request: ChatImageRequest): Promise<ChatImag
   if (!resolved?.capabilities.download) return null;
   const { row } = resolved;
   const mime = row.mime.split(";")[0]!.trim().toLowerCase();
-  if (!MODEL_IMAGE_MIMES.has(mime) || row.size > request.maxBytes) return null;
+  if (!RASTER_IMAGE_MIMES.has(mime) || row.size > request.maxBytes) return null;
 
   const stream = await streamFileContent(row.storageKey);
   if (!stream) return null;

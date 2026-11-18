@@ -28,7 +28,7 @@
  */
 
 import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
-import { normalizeMime } from "./mime-policy.ts";
+import { normalizeMime, RASTER_IMAGE_MIMES } from "./mime-policy.ts";
 
 /** Preview capability lifetime — deliberately short (a render link, not a session). */
 export const PREVIEW_TOKEN_TTL_SECONDS = 300;
@@ -117,20 +117,14 @@ export function isHtmlMime(mime: string): boolean {
 export type PreviewKind = "html" | "image" | "pdf" | "text";
 
 /**
- * Image mimes served inline, byte-for-byte. Deliberately EXCLUDES
- * `image/svg+xml`: an SVG is ACTIVE content (it can embed `<script>` and event
- * handlers and runs in the embedding context), so it is not inert like a raster
- * image. Routing it safely would mean serving it through the full HTML-style
- * CSP + `sandbox="allow-scripts"` hardening — extra machinery for a rare case —
- * so instead SVG is simply not previewable (still downloadable). See
- * docs/architecture/FILES.md → "Preview kinds".
+ * Image mimes served inline, byte-for-byte: {@link RASTER_IMAGE_MIMES}, which
+ * deliberately EXCLUDES `image/svg+xml`. An SVG is ACTIVE content (it can embed
+ * `<script>` and event handlers and runs in the embedding context), so it is not
+ * inert like a raster image. Routing it safely would mean serving it through the
+ * full HTML-style CSP + `sandbox="allow-scripts"` hardening — extra machinery for
+ * a rare case — so instead SVG is simply not previewable (still downloadable).
+ * See docs/architecture/FILES.md → "Preview kinds".
  */
-const PREVIEW_IMAGE_MIMES: ReadonlySet<string> = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-]);
 
 /**
  * Text-family mimes previewed as PLAINTEXT. A conservative allowlist, NOT a
@@ -155,7 +149,7 @@ export function previewKind(mime: string): PreviewKind | null {
   const base = normalizeMime(mime);
   if (base === "text/html") return "html";
   if (base === "application/pdf") return "pdf";
-  if (PREVIEW_IMAGE_MIMES.has(base)) return "image";
+  if (RASTER_IMAGE_MIMES.has(base)) return "image";
   if (PREVIEW_TEXT_MIMES.has(base)) return "text";
   return null;
 }

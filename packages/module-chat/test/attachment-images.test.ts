@@ -5,7 +5,6 @@ import type { UIMessage } from "ai";
 import {
   ATTACHMENT_IMAGES_PER_MESSAGE,
   ATTACHMENT_IMAGES_REQUEST_MAX_BYTES,
-  TOOL_IMAGES_TURN_MAX_BYTES,
   fitToolImages,
   ATTACHMENT_IMAGE_TURNS,
   loadAttachmentImages,
@@ -130,37 +129,23 @@ describe("fitToolImages (an image a tool returned: read_file, read_resource)", (
   const shrink = (size: number) => async () => ({ data: "S".repeat(size), mimeType: "image/jpeg" });
 
   it("sends the downscaled image, not the original", async () => {
-    const budget = { remaining: TOOL_IMAGES_TURN_MAX_BYTES };
     const fitted = await fitToolImages(
       [{ type: "text", text: "[image image/png — appfile://file_a]" }, image("QUJD".repeat(1000))],
-      budget,
       shrink(10),
     );
     expect(fitted[0]).toEqual({ type: "text", text: "[image image/png — appfile://file_a]" });
     expect(fitted[1]).toEqual({ type: "image", data: "SSSSSSSSSS", mimeType: "image/jpeg" });
-    expect(budget.remaining).toBe(TOOL_IMAGES_TURN_MAX_BYTES - 10);
   });
 
   it("becomes a pointer when the image cannot be downscaled, never the original bytes", async () => {
     const original = "QUJD".repeat(2000);
-    const fitted = await fitToolImages(
-      [image(original)],
-      { remaining: TOOL_IMAGES_TURN_MAX_BYTES },
-      async () => null,
-    );
+    const fitted = await fitToolImages([image(original)], async () => null);
     expect(fitted).toEqual([expect.objectContaining({ type: "text" })]);
     expect(JSON.stringify(fitted)).not.toContain(original);
   });
 
-  it("charges every image of the turn to one budget and drops what no longer fits", async () => {
-    const budget = { remaining: 25 };
-    const fitted = await fitToolImages([image("a"), image("b"), image("c")], budget, shrink(10));
-    expect(fitted.map((block) => block.type)).toEqual(["image", "image", "text"]);
-    expect(budget.remaining).toBe(5);
-  });
-
   it("survives a resizer that throws", async () => {
-    const fitted = await fitToolImages([image("a")], { remaining: 100 }, async () => {
+    const fitted = await fitToolImages([image("a")], async () => {
       throw new Error("worker died");
     });
     expect(fitted).toEqual([expect.objectContaining({ type: "text" })]);

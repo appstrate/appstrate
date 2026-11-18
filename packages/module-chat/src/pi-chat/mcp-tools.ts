@@ -44,13 +44,7 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
-import {
-  fitToolImages,
-  resizeWithPi,
-  TOOL_IMAGES_TURN_MAX_BYTES,
-  type ImageResizer,
-  type ToolImageBudget,
-} from "./attachment-images.ts";
+import { fitToolImages, resizeWithPi, type ImageResizer } from "./attachment-images.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
@@ -60,7 +54,6 @@ const LIST_SKILLS_TOOL = "list_skills";
 /** What a tool that may return an image needs to show it to the model within the turn's limits. */
 interface ToolResultImageOptions {
   modelSeesImages: boolean;
-  budget: ToolImageBudget;
   resize: ImageResizer;
 }
 
@@ -395,10 +388,8 @@ export async function buildPlatformMcpTools(
 
   const runOrigin = new URL(opts.url).origin;
   const { organization } = opts;
-  // One budget for every image any tool of this turn returns (`fitToolImages`).
   const imageOptions: ToolResultImageOptions = {
     modelSeesImages: opts.modelSeesImages === true,
-    budget: { remaining: TOOL_IMAGES_TURN_MAX_BYTES },
     resize: opts.resizeImage ?? resizeWithPi,
   };
   const toolFactories = surface.tools.map((tool) =>
@@ -502,7 +493,7 @@ function makeForwardExtension(
           relayed: isRelayedResult(result),
         });
         const adapted = mcpResultToPi(result as never, scope, options);
-        adapted.content = await fitToolImages(adapted.content, options.budget, options.resize);
+        adapted.content = await fitToolImages(adapted.content, options.resize);
         return withTurnBudgetNote(adapted, turnBudget);
       },
     });
@@ -580,7 +571,7 @@ function makeReadResourceExtension(
         });
         return withTurnBudgetNote(
           {
-            content: await fitToolImages(content, options.budget, options.resize),
+            content: await fitToolImages(content, options.resize),
             details: { uri },
           },
           turnBudget,

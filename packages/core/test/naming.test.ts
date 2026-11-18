@@ -431,6 +431,11 @@ describe("extensionForMime", () => {
 
   it("maps image/svg+xml to svg, not the +xml suffix rule", () => {
     expect(extensionForMime("image/svg+xml")).toBe("svg");
+    expect(extensionForMime("application/zip")).toBe("zip");
+    expect(
+      extensionForMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ).toBe("docx");
+    expect(extensionForMime("application/vnd.oasis.opendocument.text")).toBe("odt");
     expect(extensionForMime("application/atom+xml")).toBe("xml");
   });
 

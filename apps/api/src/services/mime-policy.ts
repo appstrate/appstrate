@@ -103,6 +103,20 @@ const CONTAINER_FAMILIES: ReadonlyArray<{ generic: string; members: Set<string> 
 ];
 
 /**
+ * The raster image types every model provider takes as an image block
+ * (Anthropic, OpenAI, Gemini) and every browser renders: what the platform shows
+ * as a preview and what it sends to a model as pixels. SVG is not one (it can
+ * carry script, and providers refuse it); HEIC, TIFF and BMP are not either, and
+ * the platform has no converter.
+ */
+export const RASTER_IMAGE_MIMES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/**
  * Declared-vs-sniffed MIME compatibility for the magic-byte check. Exact match
  * always passes; otherwise refinement is strictly parent↔child against a
  * container family's generic type (declared xlsx / sniffed application/zip,

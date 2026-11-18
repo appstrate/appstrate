@@ -83,7 +83,6 @@ import {
   streamFileContent,
   projectFileMetadata,
   createChatFileFromBytes,
-  MODEL_IMAGE_MIMES,
   type FileCapabilities,
 } from "../../services/files.ts";
 import {
@@ -94,7 +93,7 @@ import {
 } from "../../services/document-text.ts";
 import { formatBytes } from "@appstrate/core/format";
 import { chargeTurnImport } from "../../services/chat-import-budget.ts";
-import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
+import { isTextShapedMime, normalizeMime, RASTER_IMAGE_MIMES } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
@@ -1749,7 +1748,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
             return { contents: [{ uri: canonicalUri, mimeType: row.mime, text }] };
           }
         }
-      } else if (MODEL_IMAGE_MIMES.has(mime)) {
+      } else if (RASTER_IMAGE_MIMES.has(mime)) {
         // The one binary a model reads as itself. Over the cap it is metadata like any oversized file.
         if (row.size <= RESOURCE_IMAGE_MAX_BYTES) {
           const bytes = await readBytes();
@@ -2027,7 +2026,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
             ? {
                 saveFile: async ({ name, mime, bytes, integrationId, proxyRequestId }) => {
                   // Bounded per turn as well as per call: a turn reads third-party content.
-                  const refund = chargeTurnImport(
+                  const refund = await chargeTurnImport(
                     ctx.chatTurnId ?? ctx.chatSessionId!,
                     bytes.byteLength,
                   );
@@ -2041,8 +2040,8 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
                       bytes,
                       source: { kind: "integration_import", integrationId, proxyRequestId },
                     },
-                  ).catch((error: unknown) => {
-                    refund();
+                  ).catch(async (error: unknown) => {
+                    await refund();
                     throw error;
                   });
                   return {

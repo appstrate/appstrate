@@ -27,6 +27,7 @@
  */
 
 import { z } from "zod";
+import { readImageSize } from "./image-size.ts";
 
 /** Iconify prefix of the Lucide set: `lucide:bot`. */
 export const LUCIDE_ICON_PREFIX = "lucide:";
@@ -187,76 +188,18 @@ export const ICON_IMAGE_MAX_BYTES = 12_000;
 /** Largest uploaded icon image width and height, in pixels. */
 export const ICON_IMAGE_MAX_SIZE = 256;
 
-function fourCC(bytes: Uint8Array, offset: number): string {
-  return String.fromCharCode(...bytes.subarray(offset, offset + 4));
-}
-
-/** The 8-byte signature every PNG file starts with. */
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
 /**
- * The size of a PNG image, read from its `IHDR` chunk, which the format
- * requires first: after the signature, its length (13), `IHDR`, then the width
- * and height as big-endian 32-bit integers (bytes 16–19 and 20–23).
- */
-function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
-  if (bytes.length < 24) return null;
-  const u32 = (i: number) =>
-    ((bytes[i]! << 24) | (bytes[i + 1]! << 16) | (bytes[i + 2]! << 8) | bytes[i + 3]!) >>> 0;
-  if (u32(8) !== 13 || fourCC(bytes, 12) !== "IHDR") return null;
-  return { width: u32(16), height: u32(20) };
-}
-
-/**
- * The canvas size of a WebP image, read from its first chunk (`VP8X`, `VP8L`
- * or `VP8 `) of the RIFF/WEBP container.
- */
-function webpSize(bytes: Uint8Array): { width: number; height: number } | null {
-  if (bytes.length < 20 || fourCC(bytes, 8) !== "WEBP") return null;
-  const b = (i: number) => bytes[i]!;
-  switch (fourCC(bytes, 12)) {
-    case "VP8X": {
-      if (bytes.length < 30) return null;
-      return {
-        width: 1 + (b(24) | (b(25) << 8) | (b(26) << 16)),
-        height: 1 + (b(27) | (b(28) << 8) | (b(29) << 16)),
-      };
-    }
-    case "VP8L": {
-      if (bytes.length < 25 || b(20) !== 0x2f) return null;
-      const bits = (b(21) | (b(22) << 8) | (b(23) << 16) | (b(24) << 24)) >>> 0;
-      return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) };
-    }
-    case "VP8 ": {
-      if (bytes.length < 30) return null;
-      if (b(23) !== 0x9d || b(24) !== 0x01 || b(25) !== 0x2a) return null;
-      return {
-        width: (b(26) | (b(27) << 8)) & 0x3fff,
-        height: (b(28) | (b(29) << 8)) & 0x3fff,
-      };
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * The type and size of an icon image, told apart by its signature: a PNG
- * (`IHDR`) or a RIFF/WEBP container (`VP8X`, `VP8L` or `VP8 `). `null` for any
- * other bytes, or a header that cannot be read in full.
+ * The type and size of an icon image, told apart by its signature: a PNG or a
+ * RIFF/WEBP container. `null` for any other bytes (JPEG and GIF included), or a
+ * header that cannot be read in full.
  */
 export function imageSize(
   bytes: Uint8Array,
 ): { type: IconImageType; width: number; height: number } | null {
-  if (PNG_SIGNATURE.every((byte, i) => bytes[i] === byte)) {
-    const size = pngSize(bytes);
-    return size && { type: "image/png", ...size };
-  }
-  if (bytes.length >= 4 && fourCC(bytes, 0) === "RIFF") {
-    const size = webpSize(bytes);
-    return size && { type: "image/webp", ...size };
-  }
-  return null;
+  const size = readImageSize(bytes);
+  return size && (size.type === "image/png" || size.type === "image/webp")
+    ? { ...size, type: size.type }
+    : null;
 }
 
 /** Longest base64 text that can decode to at most `ICON_IMAGE_MAX_BYTES`. */

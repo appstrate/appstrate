@@ -24,7 +24,7 @@ export const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
  * because a photo is rarely under 700 KiB and the model reads it, not a
  * parser: the chat downscales it before any provider sees it.
  */
-export const RESOURCE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const RESOURCE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 /** Why a result carries a resource's metadata instead of its content. */
 export const RESOURCE_OVERSIZED_NOTE =
