@@ -23,6 +23,7 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  EllipsisIcon,
   MessagesSquareIcon,
   PlusIcon,
   SearchIcon,
@@ -34,6 +35,12 @@ import { relativeAge } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -384,7 +391,7 @@ function ConversationRow({
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
         // ring themselves in `--space-tile-ring`: the row's background in each of its states.
-        className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]"
+        className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)] max-md:pr-[4.5rem]"
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn("block truncate text-left leading-4", unread && "font-semibold")}>
@@ -403,7 +410,7 @@ function ConversationRow({
           every generating↔idle transition. Hover swaps them for the row's
           actions; a reader has none, so for them hover changes nothing. */}
       <div
-        className={`absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md ${canWrite ? "group-hover/menu-item:bg-sidebar-accent" : ""}`}
+        className={`absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md max-md:right-11 max-md:w-6 ${canWrite ? "group-hover/menu-item:bg-sidebar-accent" : ""}`}
       >
         {session.generating ? (
           <Spinner
@@ -418,16 +425,16 @@ function ConversationRow({
           />
         ) : (
           <span
-            className={`text-sidebar-foreground/70 text-xs transition-opacity ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
+            className={`text-sidebar-foreground/70 text-xs transition-opacity max-md:hidden ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
           >
             {relativeTime(session.updatedAt, now, t)}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the
-            invisible buttons tappable — on touch devices (no hover) a tap on
-            the timestamp area would hit the hidden Delete. */}
+            invisible buttons tappable. Below `md` (a phone has no hover) these buttons are
+            gone: the row's actions are the "…" menu after this slot, a 44 px strip. */}
         {canWrite && (
-          <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
+          <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100 max-md:hidden">
             <button
               type="button"
               aria-label={t("threads.settings.openFor", {
@@ -454,6 +461,37 @@ function ConversationRow({
           </div>
         )}
       </div>
+      {canWrite && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("threads.actions.openFor", {
+                title: session.title ?? t("threads.new"),
+              })}
+              className="text-sidebar-foreground/70 active:bg-sidebar-accent absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md md:hidden"
+            >
+              <EllipsisIcon className="size-5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-48">
+            <DropdownMenuItem className="min-h-11" onSelect={() => setSettingsOpen(true)}>
+              <Settings2Icon />
+              {t("threads.settings.title")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive min-h-11"
+              onSelect={() => {
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
+              }}
+            >
+              <Trash2Icon />
+              {t("common:btn.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <AlertDialog
         open={confirmingDelete}
         onOpenChange={(open) => !deleting && setConfirmingDelete(open)}

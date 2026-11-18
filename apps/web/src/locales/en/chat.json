@@ -179,6 +179,7 @@
   "threads.settings.description": "The name shows in the conversation list and at the top of the page.",
   "threads.settings.name": "Name",
   "threads.settings.openFor": "Settings for “{{title}}”",
+  "threads.actions.openFor": "Actions for “{{title}}”",
   "model.loadFailed": "Models unavailable",
   "composer.settings": "Assistant settings",
   "composer.skills": "Skills…",
