@@ -35,6 +35,7 @@ import { useUploadInSpace } from "../../hooks/use-upload";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
+  heldLocalUrl,
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
@@ -123,9 +124,17 @@ export function ChatModulePage() {
   // trigger/source policy here: selecting a file always opens the same
   // Preview tab in the same sidebar.
   const presentFile = useCallback<OpenFile>(
-    (file) => dispatchSidebar({ type: "show-file", file }),
+    (file) =>
+      dispatchSidebar({
+        type: "show-file",
+        file: "local" in file ? { local: file.local, url: URL.createObjectURL(file.local) } : file,
+      }),
     [],
   );
+  // A picked file's object URL lives while the panel holds it. The panel starts empty, so
+  // Strict Mode's replay of the first run has nothing to revoke.
+  const localUrl = heldLocalUrl(sidebarState);
+  useEffect(() => (localUrl ? () => URL.revokeObjectURL(localUrl) : undefined), [localUrl]);
 
   // Browser back/forward bypasses the chat's selection callback. Clear from the
   // popstate callback (not an effect body) so returning to an old entry never

@@ -309,6 +309,7 @@ describe("search_integration_tools", () => {
       expect(best.tool).toBe(TOOL);
       expect(Object.keys(best.input_schema.properties).sort()).toEqual([
         "max_response_bytes",
+        "read_as_file",
         "requests",
         "session_id",
       ]);
@@ -953,6 +954,70 @@ describe("call_integration_tool — result", () => {
       note: "Non-text response body omitted.",
       bytes: 5,
     });
+  });
+
+  it("returns a complete file once as an embedded resource through the governed proxy", async () => {
+    const bytes = "%PDF-contract";
+    const { result, calls } = await apiCall({ requests: [get()], read_as_file: true }, () =>
+      relayed(bytes, {
+        headers: {
+          "content-type": "application/pdf; version=1.7",
+          etag: '"rev1"',
+          location: "https://signed.example/private",
+        },
+      }),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.get("X-Max-Response-Size")).toBe(String(700 * 1024));
+    expect(result.content[1]).toMatchObject({
+      type: "resource",
+      resource: { mimeType: "application/pdf", blob: btoa(bytes) },
+    });
+    expect(result.structuredContent?.results).toMatchObject([{ etag: '"rev1"' }]);
+    expect(JSON.stringify(result)).not.toContain("signed.example");
+    expect(JSON.stringify(result.structuredContent)).not.toContain(btoa(bytes));
+  });
+
+  it("decodes a text file by its declared charset, and refuses one it cannot decode", async () => {
+    const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9]); // "café" in ISO-8859-1
+    const read = (contentType: string) =>
+      apiCall({ requests: [get()], read_as_file: true }, () =>
+        relayed(latin1, { headers: { "content-type": contentType } }),
+      );
+    const decoded = await read("text/plain; charset=ISO-8859-1");
+    expect(decoded.result.content[1]).toMatchObject({ resource: { text: "café" } });
+    // Undeclared means UTF-8, where 0xe9 alone is not a character: refused, never mangled.
+    for (const contentType of ["text/plain", "text/plain; charset=x-unknown"]) {
+      const { payload } = await read(contentType);
+      expect(entries(payload)[0]).toMatchObject({ error: { code: "unsupported_file_type" } });
+    }
+  });
+
+  it("declines a batch or write before dispatching a file read", async () => {
+    for (const requests of [[get(), get()], [get({ method: "POST" })]]) {
+      const { result, calls } = await apiCall({ requests, read_as_file: true });
+      expect(result.isError).toBe(true);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("omits upstream error bodies, incomplete files, and unsupported formats", async () => {
+    for (const [status, mime, truncated, code] of [
+      [403, "text/html", false, "upstream_file_unavailable"],
+      [206, "application/pdf", false, "incomplete_file"],
+      [200, "image/png", true, "incomplete_file"],
+      [200, "application/zip", false, "unsupported_file_type"],
+    ] as const) {
+      const { result, payload } = await apiCall({ requests: [get()], read_as_file: true }, () =>
+        relayed("upstream contents", {
+          status,
+          headers: { "content-type": mime, "x-truncated": String(truncated) },
+        }),
+      );
+      expect(result.isError).toBe(true);
+      expect(entries(payload)[0]).toMatchObject({ status, error: { code } });
+      expect(JSON.stringify(result)).not.toContain("upstream contents");
+    }
   });
 
   it("carries no body for an answer that has none", async () => {

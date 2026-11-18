@@ -203,3 +203,9 @@ export function extractFileIdsFromText(text: string): string[] {
   }
   return [...ids];
 }
+
+/**
+ * Content `_meta` key of an `appfile://` resource read: the stored file's name, which the URI does
+ * not carry (a model input such as a PDF is named by it).
+ */
+export const FILE_NAME_META_KEY = "dev.appstrate/file_name";

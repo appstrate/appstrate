@@ -72,7 +72,9 @@ test("a conversation with no origin is limited to the space picked from « Tous 
       },
     ]);
     await expect(page.getByText("beta.txt", { exact: true })).toBeVisible();
-    await expect(page.getByRole("img", { name: "beta.png" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Aperçu de beta.png", exact: true }),
+    ).toBeVisible();
 
     // Settings › « Limiter à un espace » › the acting spaces.
     await page.getByTestId("composer-settings-trigger").click();

@@ -6,6 +6,8 @@ import {
   isTextShapedMime,
   isTextShapedContentType,
   TEXT_SHAPED_MEDIA_TYPES,
+  previewKind,
+  localPreviewKind,
 } from "../src/mime.ts";
 
 describe("normalizeMime", () => {
@@ -105,5 +107,65 @@ describe("isTextShapedContentType", () => {
     expect(
       isTextShapedContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     ).toBe(false);
+  });
+});
+
+describe("previewKind", () => {
+  it("classifies html", () => {
+    expect(previewKind("text/html")).toBe("html");
+    expect(previewKind("text/html; charset=utf-8")).toBe("html");
+    expect(previewKind("TEXT/HTML")).toBe("html");
+  });
+
+  it("classifies the allowlisted raster image mimes", () => {
+    for (const mime of ["image/png", "image/jpeg", "image/gif", "image/webp"]) {
+      expect(previewKind(mime)).toBe("image");
+    }
+  });
+
+  it("classifies pdf", () => {
+    expect(previewKind("application/pdf")).toBe("pdf");
+  });
+
+  it("classifies the conservative text allowlist as text", () => {
+    for (const mime of ["text/plain", "text/markdown", "text/csv", "application/json"]) {
+      expect(previewKind(mime)).toBe("text");
+    }
+    expect(previewKind("text/markdown; charset=utf-8")).toBe("text");
+  });
+
+  it("excludes SVG (active content) — not previewable", () => {
+    // SVG is scriptable, so it is deliberately NOT routed through the inert
+    // image path; it is downloadable but not previewable.
+    expect(previewKind("image/svg+xml")).toBeNull();
+  });
+
+  it("returns null for non-allowlisted mimes (no text/* blanket, no octet-stream)", () => {
+    expect(previewKind("application/octet-stream")).toBeNull();
+    expect(previewKind("application/xml")).toBeNull();
+    expect(previewKind("text/xml")).toBeNull();
+    expect(previewKind("image/svg+xml")).toBeNull();
+    expect(previewKind("video/mp4")).toBeNull();
+  });
+});
+
+describe("localPreviewKind", () => {
+  it("keeps the image, pdf and text kinds", () => {
+    expect(localPreviewKind("image/png")).toBe("image");
+    expect(localPreviewKind("application/pdf")).toBe("pdf");
+    expect(localPreviewKind("text/markdown")).toBe("text");
+    expect(localPreviewKind("application/json")).toBe("text");
+  });
+
+  it("drops what needs the server's preview origin", () => {
+    expect(localPreviewKind("text/html")).toBeNull();
+  });
+
+  it("returns null wherever previewKind does", () => {
+    expect(localPreviewKind("image/svg+xml")).toBeNull();
+    expect(
+      localPreviewKind("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ).toBeNull();
+    expect(localPreviewKind("")).toBeNull();
   });
 });

@@ -3,11 +3,13 @@
 /**
  * Composer upload staging. The 2-step upload protocol itself (descriptor +
  * PUT to the sink) belongs to the host and arrives through the `uploadFile`
- * injection — the module adds exactly one thing on top: the staged-image
- * preview cache, which is chat-specific.
+ * injection — the module adds two chat-specific caches on top: the staged-image
+ * previews, and the stored file each sent upload resolved to.
  */
 
 import type { UploadFile } from "./runtime-context.ts";
+import { z } from "zod";
+import { UPLOAD_RESOLUTIONS_PART, type UploadResolution } from "../attachments.ts";
 
 /**
  * `upload://` URI → local object URL for images staged this session. Sent-message
@@ -39,4 +41,41 @@ export async function stageComposerFile(
     stagedImagePreviews.set(uri, URL.createObjectURL(file));
   }
   return uri;
+}
+
+/**
+ * `upload://` URI → the stored file the server materialized it into, as the turn's
+ * stream reports it (`data-upload-resolutions`). The sent message keeps its
+ * optimistic `upload://` parts until a reload; this is what lets its chips open
+ * the file meanwhile. Same lifetime as {@link stagedImagePreviews}. Replaced, not
+ * mutated, so the map itself is the `useSyncExternalStore` snapshot.
+ */
+let resolvedUploads: ReadonlyMap<string, UploadResolution["file"]> = new Map();
+const resolvedUploadListeners = new Set<() => void>();
+
+const uploadResolutionsSchema = z.array(
+  z.object({ uri: z.string(), file: z.object({ id: z.string(), spaceId: z.string() }) }),
+) satisfies z.ZodType<UploadResolution[]>;
+
+/**
+ * `useChat`'s `onData`: record the resolutions a turn's stream carried and
+ * re-render the chips reading them. Any other data part is not ours.
+ */
+export function recordUploadResolutions(part: { type: string; data: unknown }): void {
+  if (part.type !== UPLOAD_RESOLUTIONS_PART) return;
+  const parsed = uploadResolutionsSchema.safeParse(part.data);
+  if (!parsed.success) return;
+  const next = new Map(resolvedUploads);
+  for (const { uri, file } of parsed.data) next.set(uri, file);
+  resolvedUploads = next;
+  for (const listener of resolvedUploadListeners) listener();
+}
+
+/** `useSyncExternalStore` pair over the resolved uploads. */
+export function subscribeResolvedUploads(listener: () => void): () => void {
+  resolvedUploadListeners.add(listener);
+  return () => resolvedUploadListeners.delete(listener);
+}
+export function resolvedUploadsSnapshot(): ReadonlyMap<string, UploadResolution["file"]> {
+  return resolvedUploads;
 }

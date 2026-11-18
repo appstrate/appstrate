@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { File as FileIcon, FileArchive, FileCode, FileImage, FileText } from "lucide-react";
 import {
   fileExpiryInfo,
   fileRunHref,
@@ -9,7 +8,7 @@ import {
   producedRunFiles,
   isMarkdownFile,
   isPublishedFileLogEvent,
-  mimeIconFor,
+  localViewableFile,
   mimeKind,
   pinPreviewUrl,
   runFileDirection,
@@ -33,22 +32,6 @@ function file(overrides: Partial<FileLike>): FileLike {
 /** The run whose page is open, and an earlier run that chained a file into it. */
 const RUN = "run_1";
 const EARLIER = "run_0";
-
-describe("mimeIconFor", () => {
-  it("maps common families", () => {
-    expect(mimeIconFor("image/png")).toBe(FileImage);
-    expect(mimeIconFor("text/html")).toBe(FileCode);
-    expect(mimeIconFor("application/json")).toBe(FileCode);
-    expect(mimeIconFor("application/zip")).toBe(FileArchive);
-    expect(mimeIconFor("text/plain")).toBe(FileText);
-    expect(mimeIconFor("application/pdf")).toBe(FileText);
-  });
-
-  it("falls back to the neutral file icon", () => {
-    expect(mimeIconFor("application/octet-stream")).toBe(FileIcon);
-    expect(mimeIconFor("")).toBe(FileIcon);
-  });
-});
 
 describe("fileRunHref", () => {
   it("builds the agent run route with literal scope slashes", () => {
@@ -348,5 +331,43 @@ describe("mimeKind", () => {
     expect(mimeKind("text/html; charset=utf-8")).toBe("html");
     expect(mimeKind("application/xhtml+xml")).toBe("html");
     expect(mimeKind("text/plain")).toBe("text");
+  });
+});
+
+describe("localViewableFile", () => {
+  // `File` is lucide's icon in this file.
+  const picked = (name: string, type: string) => new globalThis.File(["abc"], name, { type });
+
+  it("shows an image or a text file from its object URL", () => {
+    expect(localViewableFile(picked("a.png", "image/png"), "blob:a")).toEqual({
+      id: "blob:a",
+      name: "a.png",
+      mime: "image/png",
+      size: 3,
+      preview_url: "blob:a",
+      preview_kind: "image",
+      local: true,
+    });
+    expect(localViewableFile(picked("n.md", "text/markdown"), "blob:n").preview_kind).toBe("text");
+    expect(localViewableFile(picked("d.json", "application/json"), "blob:d").preview_kind).toBe(
+      "text",
+    );
+    expect(localViewableFile(picked("p.pdf", "application/pdf"), "blob:p")).toMatchObject({
+      preview_kind: "pdf",
+      preview_url: "blob:p",
+    });
+  });
+
+  it("previews neither html nor office files, and hands the viewer no URL for them", () => {
+    for (const [name, type] of [
+      ["p.html", "text/html"],
+      ["d.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      ["x", ""],
+    ] as const) {
+      expect(localViewableFile(picked(name, type), "blob:x")).toMatchObject({
+        preview_kind: null,
+        preview_url: null,
+      });
+    }
   });
 });

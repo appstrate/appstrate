@@ -30,7 +30,7 @@
 import type { ExtensionFactory } from "./pi-sdk.ts";
 
 /** Base64 bytes of tool-result images sent inline in one request. */
-const INLINE_IMAGE_BUDGET_BYTES = 4 * 1024 * 1024;
+export const INLINE_IMAGE_BUDGET_BYTES = 4 * 1024 * 1024;
 
 const OMITTED_IMAGE_TEXT =
   "[image omitted from this request to keep it small — to see it again, read its saved file if the result names one, or call the tool again]";

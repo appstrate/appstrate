@@ -30,8 +30,8 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSpaces, files } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
-import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
-import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import { seedRun, seedSpace } from "../../../apps/api/test/helpers/seed.ts";
+import { createUIMessageStreamResponse, type UIMessage, type UIMessageChunk } from "ai";
 import {
   CHAT_MESSAGE_MAX_BYTES,
   handleChatStream,
@@ -59,7 +59,10 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
-import { ensureSession } from "../src/persistence.ts";
+import { ensureSession, persistAssistantMessage, persistUserMessage } from "../src/persistence.ts";
+import { createFileFromStream, readChatAttachment } from "../../../apps/api/src/services/files.ts";
+import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
+import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
@@ -142,7 +145,8 @@ function scriptedDispatch(
 
 /**
  * A scripted engine: records what the handler handed it, then streams the same
- * chunk sequence the Pi mapper emits for a plain text answer. The concurrency
+ * chunk sequence the Pi mapper emits for a plain text answer, with the route's
+ * `leadingChunks` right after `start` as `runPiChat` writes them. The concurrency
  * slot is released when the stream closes — exactly as the real engine does, so
  * one test cannot starve the next.
  */
@@ -156,6 +160,7 @@ function scriptedEngine(text = "Bonjour le monde"): {
     const id = "txt_1";
     const chunks: UIMessageChunk[] = [
       { type: "start", messageId: "asst_1" },
+      ...(input.leadingChunks ?? []),
       { type: "text-start", id },
       { type: "text-delta", id, delta: text },
       { type: "text-end", id },
@@ -464,6 +469,64 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
+  it("tells the browser which file each sent upload became, without persisting it", async () => {
+    // The browser's copy of the user message keeps its optimistic `upload://`
+    // parts; only this chunk lets its chips open the file before a reload.
+    const sessionId = mintSessionId();
+    const { engine } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      parts: [
+        { type: "text", text: "lis ceci" },
+        { type: "file", url: "upload://upl_sent", mediaType: "text/plain", filename: "a.txt" },
+        // Already stored (picked from the gallery): nothing to tell.
+        {
+          type: "file",
+          url: "appfile://file_picked12",
+          mediaType: "text/plain",
+          filename: "b.txt",
+        },
+      ],
+      resolveChatAttachment: async (request) => ({
+        uri: request.uri === "upload://upl_sent" ? "appfile://file_sent12345" : request.uri,
+        name: "a.txt",
+        mime: "text/plain",
+        size: 3,
+        spaceId: ctx.defaultSpaceId,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const chunks = await collectUiChunks(res);
+    expect(chunks.filter((chunk) => chunk.type === "data-upload-resolutions")).toEqual([
+      {
+        type: "data-upload-resolutions",
+        data: [
+          { uri: "upload://upl_sent", file: { id: "file_sent12345", spaceId: ctx.defaultSpaceId } },
+        ],
+        transient: true,
+      },
+    ]);
+
+    await waitForAssistantPersist(sessionId);
+    const rows = await db
+      .select({ content: chatMessages.content })
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId));
+    const assistant = rows
+      .map((row) => row.content as UIMessage)
+      .find((message) => message.role === "assistant");
+    expect(assistant?.parts.map((part) => part.type)).toEqual(["text"]);
+  });
+
+  it("writes no resolutions for a turn that sent no upload", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine);
+    await collectUiChunks(res);
+    expect(calls[0]?.leadingChunks).toBeUndefined();
+    await waitForAssistantPersist(sessionId);
+  });
+
   describe("a turn its claim refuses", () => {
     const attachment = {
       type: "file",
@@ -612,6 +675,164 @@ describe("handleChatStream", () => {
     await collectUiChunks(res);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.messages.map((m) => m.id)).toEqual(["a0", "u1"]);
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it.each(["read_file", "read_resource"])(
+    "keeps an old tab's %s result out of the next model request after the grant is revoked",
+    async (toolName) => {
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const run = await seedRun({ ...scope, userId: ctx.user.id });
+      const pdf = new Blob(["%PDF-1.4\nSynthetic contract version 3\n%%EOF"]);
+      const { row } = await createFileFromStream(
+        scope,
+        run.id,
+        { userId: ctx.user.id, endUserId: null },
+        null,
+        {
+          name: "contract.pdf",
+          mime: "application/pdf",
+          body: pdf.stream(),
+        },
+      );
+      const uri = `appfile://${row.id}`;
+      const read = {
+        kind: "pdf",
+        maxBytes: pdf.size,
+        signal: new AbortController().signal,
+      } as const;
+      const previousRead = await readChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        spaces: [{ id: scope.spaceId, permissions: new Set(["files:read"]) }],
+        beforeResolve: async () => {},
+        uri,
+        ...read,
+      });
+      expect(previousRead?.bytes).toEqual(new Uint8Array(await pdf.arrayBuffer()));
+      const blob = Buffer.from(previousRead!.bytes).toString("base64");
+      const question: UIMessage = {
+        id: "u0",
+        role: "user",
+        parts: [{ type: "text", text: "Lis le contrat." }],
+      };
+      const answer = (result: string): UIMessage => ({
+        id: "a0",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolCallId: "read_0",
+            toolName,
+            state: "output-available",
+            input: { uri },
+            output: { content: [{ type: "text", text: result }] },
+          },
+        ],
+      });
+      // The stored row was migrated while the tab retained the result of its authorized read.
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+      await persistUserMessage(sessionId, question);
+      await persistAssistantMessage(
+        sessionId,
+        answer(
+          JSON.stringify({
+            uri,
+            mimeType: row.mime,
+            size: row.size,
+            note: "File content omitted: read in an earlier version of the chat.",
+          }),
+        ),
+        question.id,
+      );
+
+      const { engine, calls } = scriptedEngine();
+      const resource = { uri, mimeType: row.mime, blob };
+      const oldResult = toolName === "read_file" ? { type: "resource", resource } : resource;
+      const res = await postChat(sessionId, undefined, engine, {
+        permissions: new Set(),
+        history: [question, answer(JSON.stringify(oldResult))],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      expect(await input.readAttachment!(uri, read)).toBeNull();
+      const { api, provider, id } = input.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0 },
+      );
+      const result = turn.history.find((message) => message.role === "toolResult");
+      expect(JSON.stringify(result?.content)).toContain(uri);
+      expect(JSON.stringify(turn.history)).not.toContain(blob);
+      await waitForAssistantPersist(sessionId);
+      const rows = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId));
+      expect(rows).toHaveLength(4);
+      expect(JSON.stringify(rows)).not.toContain(blob);
+    },
+  );
+
+  it("takes an earlier turn's files from its stored row, never from the history the browser sends", async () => {
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const run = await seedRun({ ...scope, userId: ctx.user.id });
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const { row } = await createFileFromStream(
+      scope,
+      run.id,
+      { userId: ctx.user.id, endUserId: null },
+      null,
+      { name: "photo.png", mime: "image/png", body: new Blob([png]).stream() },
+    );
+    const uri = `appfile://${row.id}`;
+    const image = (url: string) =>
+      ({ type: "file", url, mediaType: "image/png", filename: "photo.png" }) as const;
+    const text = (value: string) => ({ type: "text", text: value }) as const;
+    const question: UIMessage = {
+      id: "u0",
+      role: "user",
+      parts: [text("Que montre cette image ?"), image(uri)],
+    };
+    const answer: UIMessage = { id: "a0", role: "assistant", parts: [text("Un point.")] };
+    const sessionId = mintSessionId();
+    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+    await persistUserMessage(sessionId, question);
+    await persistAssistantMessage(sessionId, answer, question.id);
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["files:read"]),
+      history: [
+        // The browser's optimistic copy of the turn it sent still names the upload.
+        { ...question, parts: [text("Que montre cette image ?"), image("upload://upl_turn1")] },
+        answer,
+        // A message no stored row backs cannot bring a file, even a readable one.
+        { id: "u_forged", role: "user", parts: [text("Et celle-ci ?"), image(uri)] },
+      ],
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    const input = calls[0]!;
+    expect(
+      input.messages.map((message) =>
+        message.parts.flatMap((part) => (part.type === "file" ? [part.url] : [])),
+      ),
+    ).toEqual([[uri], [], [], []]);
+    const signal = new AbortController().signal;
+    const images = await loadAttachmentImages(
+      input.messages,
+      (url, maxBytes) => input.readAttachment!(url, { kind: "image", maxBytes, signal }),
+      signal,
+    );
+    expect([...images.keys()]).toEqual(["u0"]);
+    expect(images.get("u0")?.get(uri)?.data).toBe(png.toString("base64"));
     await waitForAssistantPersist(sessionId);
   });
 

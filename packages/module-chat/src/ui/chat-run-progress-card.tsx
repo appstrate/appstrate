@@ -53,8 +53,8 @@ import type { ToolPhase } from "./tool-result.ts";
 
 /**
  * Row of file attachments surfaced under a run card — the same unified
- * renderer the thread uses for sent attachments: an image shows a square
- * thumbnail, anything else a chip. With a host opener (web shell) it opens the
+ * renderer the thread uses for sent attachments: the attachment chip, an image's
+ * thumbnail or the file type's icon leading. With a host opener (web shell) it opens the
  * in-app preview; without one (embedded mounts) it falls back to the
  * authenticated download.
  */

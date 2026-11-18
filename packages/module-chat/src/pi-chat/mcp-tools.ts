@@ -44,6 +44,9 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
+import { FILE_NAME_META_KEY } from "@appstrate/core/file-uri";
+import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
@@ -52,7 +55,11 @@ const LIST_SKILLS_TOOL = "list_skills";
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
-  content: Array<{ type: "text"; text: string }>;
+  content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  >;
+  /** Local receipts replacing live file contents on SSE and in replay. */
+  persistedContent?: Array<{ type: "text"; text: string }>;
   details: unknown;
   /**
    * Typed connect offers for the UI cards — one per connect URL the payload
@@ -123,6 +130,14 @@ export function mcpResultToPi(
     // text pointer so the model still sees it (parity with the runtime forwarder).
     if (c.type === "image") {
       return { type: "text" as const, text: `[image ${String(c.mimeType ?? "")}]` };
+    }
+    if (
+      c.type === "resource" &&
+      c.resource &&
+      typeof c.resource === "object" &&
+      "blob" in c.resource
+    ) {
+      return { type: "text" as const, text: "[binary resource omitted]" };
     }
     return { type: "text" as const, text: JSON.stringify(scope(c).redacted) };
   });
@@ -234,6 +249,8 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
+  modelSeesImages?: boolean;
+  pdfInput?: TurnPdfInput;
 };
 
 /**
@@ -373,11 +390,11 @@ export async function buildPlatformMcpTools(
           turnBudget: opts.turnBudget,
           ...(opts.inlineRunModel ? { inlineRunModel: opts.inlineRunModel } : {}),
         })
-      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization),
+      : makeForwardExtension(tool, getClient, opts),
   );
   const extensionFactories = [
     ...toolFactories,
-    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization),
+    makeReadResourceExtension(getClient, opts),
     ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
   ];
 
@@ -413,10 +430,9 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
   getClient: () => Promise<AppstrateMcpClient>,
-  signal: AbortSignal,
-  turnBudget: PiTurnBudget,
-  organization: TurnSpaces,
+  opts: BuildPlatformMcpToolsOptions,
 ): ExtensionFactory {
+  const { signal, turnBudget, organization } = opts;
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -426,7 +442,7 @@ function makeForwardExtension(
       parameters: unsafeSchema<Record<string, unknown>>(
         (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
       ),
-      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+      async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
         // The call names its space: refused like `run_and_wait`'s when it is outside the turn's
@@ -451,7 +467,41 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        return withTurnBudgetNote(mcpResultToPi(result as never, scope), turnBudget);
+        // Only platform file reads may supply native inputs. Typed remote tools return
+        // relayed data, even when their schema or result resembles an api_call.
+        const arg = args.arguments;
+        if (
+          toolName === "read_file" ||
+          (toolName === "call_integration_tool" &&
+            !isRelayedResult(result) &&
+            arg &&
+            typeof arg === "object" &&
+            "read_as_file" in arg &&
+            arg.read_as_file === true)
+        ) {
+          const resources = result.content.flatMap((block) =>
+            block.type === "resource" ? [block.resource] : [],
+          );
+          if (resources.length) {
+            const meta = mcpResultToPi(
+              { ...result, content: result.content.filter((block) => block.type !== "resource") },
+              scope,
+            );
+            const file = await liveResources(resources, opts, toolCallId);
+            return withTurnBudgetNote(
+              {
+                ...meta,
+                content: [...meta.content, ...file.content],
+                persistedContent: [
+                  ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                  ...file.receipts,
+                ],
+              },
+              turnBudget,
+            );
+          }
+        }
+        return withTurnBudgetNote(mcpResultToPi(result, scope), turnBudget);
       },
     });
   };
@@ -460,24 +510,20 @@ function makeForwardExtension(
 /**
  * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
  * only server it reaches — how the model reads a skill's `SKILL.md` or one of
- * its files by its `skill://` URI (SEP-2640). Each content is returned whole
- * within the platform's inline bounds ({@link inlineResourceContent}): its
- * text, or a binary file's base64 in `blob`. A refusal reaches the model as the
- * server's error, or, for a resource of a space outside the turn's, as the forward tool's
- * structured refusal.
+ * its files by its `skill://` URI. The same live projection serves embedded resources
+ * from `read_file` and governed connector reads.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
-  signal: AbortSignal,
-  turnBudget: PiTurnBudget,
-  organization: TurnSpaces,
+  opts: BuildPlatformMcpToolsOptions,
 ): ExtensionFactory {
+  const { signal, turnBudget, organization } = opts;
   return (pi: ExtensionAPI) => {
     pi.registerTool({
       name: READ_RESOURCE_TOOL,
       label: READ_RESOURCE_TOOL,
       description:
-        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns each content whole: its text up to 1 MiB, or a binary file's base64 in `blob` up to 700 KiB. A larger content returns its size and a note instead.",
+        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns bounded text, images or PDFs for the current model. Other formats return a description.",
       parameters: unsafeSchema<{ uri: string }>({
         type: "object",
         properties: {
@@ -490,7 +536,7 @@ function makeReadResourceExtension(
         required: ["uri"],
         additionalProperties: false,
       }),
-      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+      async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const uri = (params as { uri?: unknown } | null)?.uri;
         if (typeof uri !== "string" || uri === "") {
@@ -515,11 +561,13 @@ function makeReadResourceExtension(
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
-        const content = result.contents.map((c) => ({
-          type: "text" as const,
-          text: inlineResourceContent(c),
-        }));
-        return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
+        const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
+        // Keep the text of skills in the replay so their procedures still apply on later turns.
+        const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
+        return withTurnBudgetNote(
+          { content, details: { uri }, ...(keepSkill ? {} : { persistedContent: receipts }) },
+          turnBudget,
+        );
       },
     });
   };
@@ -585,31 +633,45 @@ function makeListSkillsExtension(
   };
 }
 
-/**
- * One `resources/read` content as `read_resource` returns it: the text, or
- * `{ uri, mimeType, blob }`, within the bounds the platform's file reads
- * apply; above them, `{ uri, mimeType, size, note }` (`size` in bytes).
- */
-function inlineResourceContent(
-  content: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"][number],
-): string {
-  if ("text" in content && typeof content.text === "string") {
-    const size = Buffer.byteLength(content.text, "utf8");
-    if (size <= RESOURCE_TEXT_MAX_BYTES) return content.text;
-    return JSON.stringify({
-      uri: content.uri,
-      mimeType: content.mimeType,
-      size,
-      note: RESOURCE_OVERSIZED_NOTE,
-    });
+/** One projection for both MCP resource reads and embedded resources from governed tool calls. */
+async function liveResources(
+  resources: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"],
+  opts: Pick<BuildPlatformMcpToolsOptions, "modelSeesImages" | "pdfInput">,
+  toolCallId: string,
+) {
+  const content: PiToolResult["content"] = [];
+  const receipts: NonNullable<PiToolResult["persistedContent"]> = [];
+  for (const resource of resources) {
+    const mimeType = normalizeMime(resource.mimeType) || "application/octet-stream";
+    const text = "text" in resource ? resource.text : undefined;
+    const blob = "blob" in resource ? resource.blob : "";
+    const size = text !== undefined ? Buffer.byteLength(text) : Buffer.byteLength(blob, "base64");
+    let note = "File read for this turn.";
+    if (size > (text !== undefined ? RESOURCE_TEXT_MAX_BYTES : RESOURCE_BLOB_MAX_BYTES)) {
+      note = RESOURCE_OVERSIZED_NOTE;
+    } else if (text !== undefined) {
+      content.push({ type: "text", text });
+    } else if (mimeType === "application/pdf" && opts.pdfInput) {
+      const name = resource._meta?.[FILE_NAME_META_KEY];
+      const pdf = opts.pdfInput.add(
+        { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
+        toolCallId,
+      );
+      note = pdf.note;
+      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
+    } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
+      content.push({ type: "image", mimeType, data: blob });
+    } else {
+      note = "This file format cannot be read by the current model.";
+    }
+    const receipt = {
+      type: "text" as const,
+      text: JSON.stringify({ uri: resource.uri, mimeType, size, note }),
+    };
+    receipts.push(receipt);
+    if (text === undefined || note === RESOURCE_OVERSIZED_NOTE) content.push(receipt);
   }
-  const blob = "blob" in content && typeof content.blob === "string" ? content.blob : "";
-  const size = Buffer.from(blob, "base64").byteLength;
-  return JSON.stringify(
-    size <= RESOURCE_BLOB_MAX_BYTES
-      ? { uri: content.uri, mimeType: content.mimeType, blob }
-      : { uri: content.uri, mimeType: content.mimeType, size, note: RESOURCE_OVERSIZED_NOTE },
-  );
+  return { content, receipts };
 }
 
 /**

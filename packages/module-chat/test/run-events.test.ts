@@ -303,6 +303,17 @@ describe("run-events helpers", () => {
       uri: "upload://upl_abcd1234",
     });
 
+    // …until the turn's stream names the file it became: then it is that file.
+    const resolved = new Map([
+      ["upload://upl_abcd1234", { id: "file_sent1234", spaceId: "spc_a" }],
+    ]);
+    expect(
+      resolveAttachmentContent([{ type: "image", image: "upload://upl_abcd1234" }], resolved),
+    ).toEqual({ kind: "file", id: "file_sent1234", spaceId: "spc_a" });
+    expect(
+      resolveAttachmentContent([{ type: "file", data: "upload://upl_other123" }], resolved),
+    ).toEqual({ kind: "inert", uri: "upload://upl_other123" });
+
     // Malformed / missing / empty content → inert (never throws).
     expect(resolveAttachmentContent([{ type: "image", image: "not-a-uri" }])).toEqual({
       kind: "inert",

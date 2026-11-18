@@ -46,7 +46,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  *
  *  - `USERCONTENT_URL` mode: the allowed origin serves nothing but token-bound
  *    preview bytes, so the frame can only reach the trust level it already had.
- *  - DEFAULT mode: the emitted value is `frame-src 'self'` — the WHOLE app
+ *  - DEFAULT mode: the emitted value is `frame-src 'self' blob:` — the WHOLE app
  *    origin, i.e. the SPA, `/api/*`, `/login`. The frame may navigate itself to
  *    any app-origin page. That is still not an exfiltration channel: the frame is
  *    opaque-origin (the preview response's CSP `sandbox`), so SameSite cookies
@@ -60,20 +60,26 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  * a scheme + host, so it silently stops matching — and the preview frame silently
  * stops loading — the moment `APP_URL` or the proxy in front of it drifts.
  *
+ * `blob:` is also allowed so the chat can preview a PDF the user picked but has
+ * not sent yet (an object URL of the user's own file). It opens no exfiltration
+ * channel: a `blob:` document created by the sandboxed preview frame keeps that
+ * frame's opaque origin and the preview response's restrictions, and navigation
+ * to any network origin stays bounded by the rest of `frame-src`.
+ *
  * Deliberately NOT a full SPA CSP: no `script-src`, no `default-src`, nothing
  * else. The Vite build bootstraps the app from inline markup, so a `script-src`
  * here would break the page; hardening the whole document is a separate project.
  * A directive appearing next to `frame-src` is therefore a regression, and a test
  * pins that.
  *
- * @returns `frame-src <preview-origin>` — the `USERCONTENT_URL` origin when the
+ * @returns `frame-src <preview-origin> blob:` — the `USERCONTENT_URL` origin when the
  *   instance serves previews from a separate domain, else `'self'` (previews are
  *   minted on `APP_URL`, the same origin as this document).
  */
 function buildSpaCsp(): string {
   const usercontent = getEnv().USERCONTENT_URL;
   const previewOrigin = usercontent ? new URL(usercontent).origin : "'self'";
-  return `frame-src ${previewOrigin}`;
+  return `frame-src ${previewOrigin} blob:`;
 }
 
 /**
