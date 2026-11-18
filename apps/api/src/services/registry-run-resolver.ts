@@ -43,7 +43,7 @@
 
 import { getPackage } from "./package-catalog.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
-import { getVersionDetail, requirePublishedPrompt } from "./package-versions.ts";
+import { readVersionArchive, requirePublishedPrompt } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
@@ -148,16 +148,9 @@ export async function resolveRegistryAgent(
   // Published path. `resolveExportVersion` handles both resolution shapes:
   // an explicit spec, else the "latest" dist-tag. It throws `notFound` if
   // nothing resolves — let it bubble.
-  const { version } = await resolveExportVersion(packageId, spec ?? null);
-  const detail = await getVersionDetail(packageId, version, { forExecution: true });
-  if (!detail) {
-    throw new ApiError({
-      status: 404,
-      code: "version_not_found",
-      title: "Version Not Found",
-      detail: `Version '${version}' of '${packageId}' is not available`,
-    });
-  }
+  const detail = await resolveExportVersion(packageId, spec ?? null);
+  const { version } = detail;
+  const content = await readVersionArchive(packageId, version, { forExecution: true });
   if (detail.yanked) {
     throw new ApiError({
       status: 410,
@@ -217,7 +210,7 @@ export async function resolveRegistryAgent(
     });
   }
 
-  const prompt = requirePublishedPrompt(packageId, detail);
+  const prompt = requirePublishedPrompt(packageId, { version, content });
 
   // Build the LoadedPackage from the published version's manifest + prompt
   // while preserving the package row's identity (id, source, updatedAt).

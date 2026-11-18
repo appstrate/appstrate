@@ -19,7 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import { runListConditions } from "../../lib/run-list-filters.ts";
+import { runListConditions, type GlobalRunListFilters } from "../../lib/run-list-filters.ts";
 import { db, type Db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
@@ -1702,11 +1702,6 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 
 type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
-/** A cursor of a run list of one space: a run of that space. */
-function spaceCursor(scope: SpaceScope): SQL {
-  return and(eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId))!;
-}
-
 /**
  * The enriched page + total behind all run lists in this module. Module-private: a caller outside
  * builds its WHERE by hand, and a hand-built `runs` predicate is what the
@@ -1772,78 +1767,46 @@ async function listRunsWithFilter(
   return { ...listResponse(data, { hasMore }), total: countRow?.count ?? 0 };
 }
 
-export async function listPackageRuns(
-  scope: SpaceScope,
-  packageId: string,
-  options: {
-    limit?: number;
-    startingAfter?: string;
-    actor?: Actor | null;
-    status?: RunStatus[];
-    search?: string;
-    /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
-    visibility?: SQL;
-    canReadAgentInput?: boolean;
-  } = {},
-) {
-  const {
-    limit = 20,
-    startingAfter,
-    actor = null,
-    status,
-    search,
-    visibility,
-    canReadAgentInput = false,
-  } = options;
-  const conditions = [
-    eq(runs.packageId, packageId),
+interface ScopedRunListOptions {
+  limit?: number;
+  startingAfter?: string;
+  actor?: Actor | null;
+  status?: RunStatus[];
+  search?: string;
+  /** Caller's run-read predicate; absent for callers with runs:read-all. */
+  visibility?: SQL;
+  canReadAgentInput?: boolean;
+}
+
+function listScopedRuns(scope: SpaceScope, target: SQL, options: ScopedRunListOptions) {
+  const reach = and(
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
-  ];
-  conditions.push(...runListConditions({ status, search }));
-  if (visibility) conditions.push(visibility);
+    options.visibility,
+  )!;
   return listRunsWithFilter(
-    spaceCursor(scope),
-    and(...conditions)!,
-    { limit, startingAfter },
-    actor,
-    () => canReadAgentInput,
+    reach,
+    and(reach, target, ...runListConditions(options))!,
+    { limit: options.limit ?? 20, startingAfter: options.startingAfter },
+    options.actor ?? null,
+    () => options.canReadAgentInput ?? false,
   );
 }
 
-/**
- * The closed set `?kind=` accepts, as a value — the route validates the query
- * parameter against it, so the tuple and the type cannot drift.
- */
-export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
-type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
+export function listPackageRuns(
+  scope: SpaceScope,
+  packageId: string,
+  options: ScopedRunListOptions = {},
+) {
+  return listScopedRuns(scope, eq(runs.packageId, packageId), options);
+}
 
-/** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
-export interface GlobalRunListFilters {
-  limit?: number;
-  startingAfter?: string;
-  kind?: GlobalRunKind;
-  /**
-   * Any of these statuses — "everything that broke" is `["failed", "timeout"]`.
-   * `RunStatus`, not `string`: the route refuses an unknown value with a 400,
-   * and the narrow type keeps a caller from turning a typo into no filter.
-   */
-  status?: RunStatus[];
-  startDate?: Date;
-  endDate?: Date;
-  chatSessionId?: string;
-  /** Only the runs of this package; one the grants do not reach yields no row. */
-  packageId?: string;
-  /**
-   * Free text: the agent a run executed (its scope and name, as stamped on the
-   * run) and the error it ended on; digits also match the run number
-   * (`runSearchCondition`). A substring match, unindexed.
-   */
-  search?: string;
-  /** Only the runs the actor has not read (`unreadRunCondition`). */
-  unread?: boolean;
-  /** `?user=me`: the actor's own runs in every space, even where they read all. */
-  ownOnly?: boolean;
+export function listScheduleRuns(
+  scope: SpaceScope,
+  scheduleId: string,
+  options: ScopedRunListOptions = {},
+) {
+  return listScopedRuns(scope, eq(runs.scheduleId, scheduleId), options);
 }
 
 /**
@@ -1923,44 +1886,6 @@ export async function listGlobalRuns(
     { limit, startingAfter },
     actor,
     (spaceId) => agentInput.has(spaceId),
-  );
-}
-
-export async function listScheduleRuns(
-  scope: SpaceScope,
-  scheduleId: string,
-  options: {
-    limit?: number;
-    startingAfter?: string;
-    actor?: Actor | null;
-    status?: RunStatus[];
-    search?: string;
-    visibility?: SQL;
-    canReadAgentInput?: boolean;
-  } = {},
-) {
-  const {
-    limit = 20,
-    startingAfter,
-    actor = null,
-    status,
-    search,
-    visibility,
-    canReadAgentInput = false,
-  } = options;
-  const conditions = [eq(runs.scheduleId, scheduleId)];
-  conditions.push(...runListConditions({ status, search }));
-  if (visibility) conditions.push(visibility);
-  return listRunsWithFilter(
-    spaceCursor(scope),
-    scopedWhere(runs, {
-      orgId: scope.orgId,
-      spaceId: scope.spaceId,
-      extra: conditions,
-    })!,
-    { limit, startingAfter },
-    actor,
-    () => canReadAgentInput,
   );
 }
 
