@@ -154,6 +154,17 @@ const server = Bun.serve({
   port: 0,
   async fetch(req) {
     const path = new URL(req.url).pathname;
+    if (path.endsWith("/responses")) {
+      capture.authHeaders.push(req.headers.get("authorization") ?? "");
+      capture.bodies.push(await req.text());
+      const event = {
+        type: "response.completed",
+        response: { id: "resp_1", status: "completed", output: [] },
+      };
+      return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
@@ -235,6 +246,8 @@ async function runTurn(
   turn: {
     model?: OrgModel;
     generation?: PiChatInput["generation"];
+    messages?: UIMessage[];
+    readAttachment?: PiChatInput["readAttachment"];
     surfaceKey?: string;
     requestId?: string;
   } = {},
@@ -262,7 +275,8 @@ async function runTurn(
       userId: "user_live",
       chatSessionId: null,
       ...(turn.requestId ? { requestId: turn.requestId } : {}),
-      messages: userTurn("dis bonjour"),
+      messages: turn.messages ?? userTurn("dis bonjour"),
+      readAttachment: turn.readAttachment,
       system: "You are a helpful assistant.",
       generation: turn.generation ?? {},
       platformMcp: {
@@ -330,6 +344,67 @@ describe("runPiChat against a stub provider", () => {
     const reacquired = acquirePiChatSlot();
     expect(reacquired).not.toBeNull();
     reacquired?.release();
+  }, 30_000);
+
+  it("sends a current PDF inside the Responses user input through the existing bearer", async () => {
+    capture.bodies.length = 0;
+    capture.authHeaders.length = 0;
+    const bytes = new TextEncoder().encode("%PDF-1.7\nA native document");
+    const messages = userTurn("Read this document");
+    messages[0]!.parts.push({
+      type: "file",
+      filename: "contract.pdf",
+      mediaType: "application/pdf",
+      url: "appfile://file_live_pdf",
+    });
+    const readAttachment = mock(async () => ({ mime: "application/pdf", bytes }));
+    const { chunks, usage } = await runTurn(() => "pdf-bearer", undefined, undefined, {
+      model: { ...orgModel(), apiShape: "openai-responses" },
+      messages,
+      readAttachment,
+    });
+    expect(readAttachment).toHaveBeenCalledTimes(1);
+    expect(capture.authHeaders).toEqual(["Bearer pdf-bearer"]);
+    const body = JSON.parse(capture.bodies[0]!);
+    const data = Buffer.from(bytes).toString("base64");
+    expect(
+      body.input.findLast((item: { role?: string }) => item.role === "user").content,
+    ).toContainEqual({
+      type: "input_file",
+      filename: "contract.pdf",
+      file_data: `data:application/pdf;base64,${data}`,
+    });
+    expect(JSON.stringify(chunks)).not.toContain(data);
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    expect(usage).toEqual([]);
+  }, 30_000);
+
+  it("sends real image pixels to a vision model and only the pointer to a text model", async () => {
+    const messages = userTurn("Read this image");
+    messages[0]!.parts.push({
+      type: "file",
+      filename: "pixel.png",
+      mediaType: "image/png",
+      url: "appfile://file_live_image",
+    });
+    const bytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const readAttachment = mock(async () => ({ mime: "image/png", bytes }));
+    for (const vision of [true, false]) {
+      capture.bodies.length = 0;
+      const { chunks } = await runTurn(() => "image-bearer", undefined, undefined, {
+        model: { ...orgModel(), input: vision ? ["text", "image"] : ["text"] },
+        messages,
+        readAttachment,
+      });
+      const body = capture.bodies[0]!;
+      expect(body).toContain("appfile://file_live_image");
+      expect(body.includes("data:image/png;base64,")).toBe(vision);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    }
+    expect(readAttachment).toHaveBeenCalledTimes(1);
   }, 30_000);
 
   it("sends an alias's public level as its backing's nearest", async () => {
