@@ -1,0 +1,11 @@
+-- `runs.running_at`: when the run first became `running`. The duration of a run the platform
+-- itself terminates (an orphan found at boot, the stall and boot-deadline watchdogs, a cancel)
+-- is measured from it, and is 0 for a run that never ran, instead of from `started_at`, the
+-- creation of the row.
+--
+-- SHAPE ONLY (`docs/NO_TRANSITIONAL_CODE.md` section 2): a nullable column, no data touched. A row
+-- that predates it stays NULL, which reads as "never ran" for the fallback only: a runner's own
+-- `durationMs` is still preferred.
+--
+-- ROLLBACK: drop the column; a previous build never reads it.
+ALTER TABLE "runs" ADD COLUMN "running_at" timestamp with time zone;

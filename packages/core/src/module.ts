@@ -1409,10 +1409,12 @@ export interface TerminalRunRow {
   runOrigin: "platform" | "remote";
   status: TerminalRunStatus;
   /**
-   * The run's recorded duration in milliseconds — the figure `GET /api/runs/{id}` serves as
-   * `duration`. It starts when the run leaves the queue (the `pending` to `running` flip, or
-   * the runner's own loop start), never at the creation of the row, so waiting for a slot is
-   * not in it. `null` only when the run recorded none.
+   * The run's recorded duration in milliseconds, measured from when the run left `pending`
+   * (the runner's own loop start when it reported one, otherwise the first `running` flip),
+   * never from the creation of the row: queue and provisioning time are not in it, and a run
+   * that never ran lasted 0. Capped at the platform's timeout ceiling, so a terminal written
+   * long after the run stopped (an orphan finalized at the next boot) cannot report more than a
+   * run may last. `null` only when the run recorded none.
    */
   durationMs: number | null;
   /** When the run became terminal — the cursor column. */

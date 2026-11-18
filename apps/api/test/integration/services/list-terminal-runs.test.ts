@@ -13,6 +13,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { listTerminalRuns } from "../../../src/services/state/runs.ts";
+import { _setRunLimitsForTesting } from "../../../src/services/run-limits.ts";
 
 describe("listTerminalRuns", () => {
   let ctx: TestContext;
@@ -40,6 +41,7 @@ describe("listTerminalRuns", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    _setRunLimitsForTesting({ timeout_ceiling_seconds: 1800 });
     ctx = await createTestContext({ orgSlug: "meterorg" });
     await seedAgent({ id: "@meterorg/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
   });

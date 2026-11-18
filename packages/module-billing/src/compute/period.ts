@@ -23,8 +23,9 @@ export const SECONDS_PER_MINUTE = 60;
  * - **A run that recorded no duration counts for nothing**, rather than for a guess.
  *
  * The figure is `runs.duration`, which the platform stamps from the runner's own loop (boot
- * and cold start excluded) and, when the runner posted none, from the moment the run left
- * the queue; time waiting for a slot is not in it. Waiting on a model or a service while
+ * and cold start excluded) and, for a run the platform terminates itself, from the moment the
+ * run first became `running`, capped at the platform's timeout ceiling; a run that never ran
+ * lasted 0, so time waiting for a slot is not in it. Waiting on a model or a service while
  * the sandbox is up IS in it: the environment is occupied.
  */
 export function billableSeconds(run: Pick<TerminalRunRow, "runOrigin" | "durationMs">): number {

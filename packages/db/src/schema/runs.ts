@@ -149,6 +149,12 @@ export const runs = pgTable(
     tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
     startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // The instant the run left `pending` (first `running` flip), stamped once and never moved.
+    // It is the start of the duration a run the PLATFORM terminates is measured from (an
+    // orphan found at boot, a stall, a boot-deadline, a cancel): `started_at` is the creation
+    // of the row and includes provisioning and, for a run that never ran, all of its life. NULL
+    // = the run never started running (and on a row that predates the column).
+    runningAt: timestamp("running_at", { withTimezone: true }),
     duration: integer("duration"),
     scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",

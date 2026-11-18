@@ -904,6 +904,9 @@ export async function updateRun(
   const set: Record<string, unknown> = {};
 
   if (updates.status !== undefined) set.status = updates.status;
+  // Stamped once, at the first flip to `running` and never moved (COALESCE keeps the first):
+  // the start of the duration a run the platform terminates is measured from.
+  if (updates.status === "running") set.runningAt = sql`COALESCE(${runs.runningAt}, now())`;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
 
   // Monotone status invariant, enforced in the WHERE (not read-then-write):
@@ -2207,6 +2210,10 @@ export async function listTerminalRuns(args: {
     .orderBy(asc(runs.completedAt), asc(runs.id))
     .limit(limit);
 
+  // A run never ran longer than the platform's timeout ceiling: a bigger `duration` is an
+  // artifact (a terminal written long after the run stopped, e.g. an orphan finalized at the
+  // next boot) and must not be billed as consumption.
+  const ceilingMs = getPlatformRunLimits().timeout_ceiling_seconds * 1000;
   return rows.flatMap((r) =>
     // `status` is narrowed by the WHERE; the filter below only satisfies the type.
     r.completedAt && r.status !== "pending" && r.status !== "running"
@@ -2216,7 +2223,7 @@ export async function listTerminalRuns(args: {
             orgId: r.orgId,
             runOrigin: r.runOrigin,
             status: r.status,
-            durationMs: r.duration,
+            durationMs: r.duration === null ? null : Math.min(r.duration, ceilingMs),
             completedAt: r.completedAt,
           },
         ]
