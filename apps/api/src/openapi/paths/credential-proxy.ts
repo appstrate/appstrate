@@ -970,7 +970,8 @@ export const credentialProxyPaths = {
         "validates them. An integration declaring no `auths` (AFPS §7.2) is called without any " +
         "connection: its server is reached directly (egress-guarded on the URL and every " +
         "redirect hop, https required for an untrusted host, a refusal answered as the proxy's " +
-        "`403 blocked_target`; the same exchange bound; nothing injected; activation re-checked " +
+        "`403 blocked_target` and a host that does not resolve `502 upstream_unresolvable`, as " +
+        "the proxy answers them; the same exchange bound; nothing injected; activation re-checked " +
         "before each exchange), the call is journaled with no connection, a `connection_id` is refused " +
         "(`credential_not_found`) before any exchange, and the server's 401 or 403 is a " +
         "`502 bad_gateway` (it declares no authentication) that flags nothing. " +

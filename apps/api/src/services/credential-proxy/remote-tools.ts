@@ -392,7 +392,7 @@ export async function listRemoteTools(
  */
 function isCatalogRefusal(err: unknown): boolean {
   if (err instanceof ApiError) return true;
-  if (err instanceof ProxyCallError) return !err.connectionId || isProxyRefusal(err.code);
+  if (err instanceof ProxyCallError) return !err.sent || isProxyRefusal(err.code);
   return isCredentialRejection(err);
 }
 

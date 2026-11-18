@@ -505,11 +505,11 @@ describe("the typed tools of an unauthenticated remote integration", () => {
       }
     });
 
-    for (const [host, kept] of [
+    for (const [host, sameHost] of [
       ["127.0.0.1", true],
       ["localhost", false],
     ] as const) {
-      it(`to ${host} ${kept ? "keeps" : "strips"} the session id the server set`, async () => {
+      it(`to ${host} on another port strips the session id${sameHost ? ", keeping the body" : " and the body"}`, async () => {
         const relay = startRecordingRelay();
         const session = startFakeMcpServer({ tools: ["read_media_file"], sessionId: "sess-1" });
         // `initialize` answered with a session id; every later request redirected to the relay.
@@ -529,10 +529,12 @@ describe("the typed tools of an unauthenticated remote integration", () => {
           // The era probe precedes the session; every request after `initialize` is redirected.
           const inSession = relay.seen.filter((r) => !r.body.includes('"server/discover"'));
           expect(inSession.length).toBeGreaterThan(0);
+          // Another origin, a port change included: the session id is never sent on.
           for (const request of inSession) {
-            expect(request.headers.get("mcp-session-id")).toBe(kept ? "sess-1" : null);
+            expect(request.headers.get("mcp-session-id")).toBeNull();
           }
-          if (kept) {
+          if (sameHost) {
+            // The body follows a same-host redirect; this stateless server needs no session.
             expect(called.status).toBe(200);
             expect(relay.seen.some((r) => r.body.includes('"tools/call"'))).toBe(true);
           } else {
@@ -547,6 +549,24 @@ describe("the typed tools of an unauthenticated remote integration", () => {
         }
       });
     }
+  });
+
+  it("answers a server host that does not resolve as the proxy does: 502 upstream_unresolvable", async () => {
+    await seedProxyIntegration(ctx, unauthenticated("https://mcp.example.invalid/mcp"));
+    const called = await call({ name: "read_media_file" });
+    expect(called.status).toBe(502);
+    expect(called.body.code).toBe("upstream_unresolvable");
+    expect(called.body.detail).toBe(
+      "The MCP server at https://mcp.example.invalid could not be resolved",
+    );
+    expect(called.proxyStatus).toContain("error=dns_error");
+    // As on the proxied path, nothing sent from a first hop that does not resolve: a refusal.
+    const listed = await list({ integration_package_id: ID });
+    expect(listed.body.tools).toEqual([]);
+    expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual([
+      "upstream_unresolvable",
+    ]);
+    expect(await journal()).toEqual([]);
   });
 
   it("re-checks activation before each exchange: switched off mid-operation, no tools/call is sent", async () => {
