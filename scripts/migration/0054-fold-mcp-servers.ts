@@ -90,7 +90,16 @@ import { getEnv } from "../../packages/env/src/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { compareVersionsDesc, matchVersion, resolveVersionString } from "@appstrate/core/semver";
-import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import { stripWrapperPrefix, unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import {
+  buildBundleFromAfps,
+  canonicalBundleDigest,
+  emptyPackageCatalog,
+  readBundleFromBuffer,
+  readBundleSignature,
+  writeBundleToBuffer,
+} from "@appstrate/afps-runtime/bundle";
+import { verifyStoredBundleSignature } from "../../apps/api/src/services/run-launcher/bundle-signature-policy.ts";
 import { downloadFile, uploadFile } from "@appstrate/db/storage";
 import { prefixedId } from "@appstrate/db/ids";
 import type { PackageType } from "@appstrate/core/validation";
@@ -290,7 +299,7 @@ function withPayload(
 ): Files {
   const merged: Files = { ...files };
   for (const [path, bytes] of Object.entries(payload)) {
-    if (path === MANIFEST_FILE) continue;
+    if (path === MANIFEST_FILE || path === "signature.sig") continue;
     const existing = merged[path];
     if (existing === undefined) merged[path] = bytes;
     else if (bytesEqual(existing, bytes))
@@ -312,7 +321,48 @@ function archive(files: Files, manifest: Json): Uint8Array {
 
 async function readZip(bucket: string, key: string): Promise<Files | null> {
   const bytes = await downloadFile(bucket, key);
-  return bytes ? unzipArtifact(new Uint8Array(bytes)) : null;
+  if (!bytes) return null;
+  const files = unzipArtifact(new Uint8Array(bytes));
+  const unwrapped = stripWrapperPrefix(files);
+  return Object.hasOwn(unwrapped, MANIFEST_FILE) ? unwrapped : files;
+}
+
+/** Only the signature is taken from the publisher's bundle. The bytes verified and stored are ours. */
+async function signedVersionArchive(
+  files: Files,
+  manifest: Json,
+  packageId: string,
+  version: string,
+  signingDir: string | undefined,
+  apply: boolean,
+): Promise<Uint8Array> {
+  if (!Object.hasOwn(files, "signature.sig") && getEnv().AFPS_SIGNATURE_POLICY !== "required") {
+    return archive(files, manifest);
+  }
+  const unsigned = { ...files };
+  delete unsigned["signature.sig"];
+  const bundle = await buildBundleFromAfps(archive(unsigned, manifest), emptyPackageCatalog, {
+    depTypes: [],
+  });
+  if (bundle.root !== `${packageId}@${version}`)
+    throw new Error("archive identity does not match stored version");
+  const digest = new Bun.CryptoHasher("sha256").update(canonicalBundleDigest(bundle)).digest("hex");
+  if (!signingDir) throw new Error("publisher signature required; dry-run with --signing-dir DIR");
+  const prefix = resolve(signingDir, digest);
+  const signedFile = Bun.file(`${prefix}.signed.afps-bundle`);
+  if (!(await signedFile.exists())) {
+    if (!apply) await Bun.write(`${prefix}.afps-bundle`, writeBundleToBuffer(bundle));
+    throw new Error(`publisher signature required for ${digest}.afps-bundle`);
+  }
+  const signed = readBundleFromBuffer(new Uint8Array(await signedFile.arrayBuffer()));
+  const signature = readBundleSignature(signed);
+  if (!signature) throw new Error("publisher bundle has no readable signature");
+  const bytes = archive(
+    { ...unsigned, "signature.sig": encoder.encode(JSON.stringify(signature)) },
+    manifest,
+  );
+  await verifyStoredBundleSignature(bytes, packageId, "required");
+  return bytes;
 }
 
 interface ServerRow {
@@ -373,6 +423,7 @@ export interface McpServersFold {
 
 export async function runFoldMcpServers(options: {
   apply: boolean;
+  signingDir?: string;
   out: (line: string) => void;
 }): Promise<McpServersFold> {
   const { apply, out } = options;
@@ -632,7 +683,20 @@ export async function runFoldMcpServers(options: {
       continue;
     }
     const files = withPayload(own, payload, target, result.notes, result.unfolded);
-    const bytes = archive(files, manifest);
+    let bytes: Uint8Array;
+    try {
+      bytes = await signedVersionArchive(
+        files,
+        manifest,
+        row.package_id,
+        row.version,
+        options.signingDir,
+        apply,
+      );
+    } catch (error) {
+      unfolded(target, getErrorMessage(error));
+      continue;
+    }
     writes.push({
       kind: "version",
       packageId: row.package_id,
@@ -896,14 +960,14 @@ if (import.meta.main) {
   try {
     const { values } = parseArgs({
       args: process.argv.slice(2),
-      options: { apply: { type: "boolean" } },
+      options: { apply: { type: "boolean" }, "signing-dir": { type: "string" } },
       strict: true,
     });
     const apply = values.apply === true;
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0054 — ${apply ? "APPLY" : "DRY RUN"}`);
-    const result = await runFoldMcpServers({ apply, out });
+    const result = await runFoldMcpServers({ apply, out, signingDir: values["signing-dir"] });
     code = result.refused ? 1 : 0;
   } catch (error) {
     if (error instanceof StorageUnreadable) code = 2;

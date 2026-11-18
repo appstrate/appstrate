@@ -1535,6 +1535,15 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    path both hold with different bytes. The last one is cured on the integration's side: remove or
    rename its own differing file (draft files, or publish a new version of a published one), then
    re-run; the script never picks between the two copies.
+   For a signed version, or when `AFPS_SIGNATURE_POLICY=required`, run the dry run with
+   `--signing-dir <private-directory>`. It writes the exact prospective unsigned bundles there,
+   named by their canonical content digest. Give each request to the publisher for inspection.
+   The publisher signs it on their own machine with
+   `afps sign <digest>.afps-bundle --key <trusted-key.json> --out <digest>.signed.afps-bundle`.
+   Place the returned bundle alongside its request and repeat the dry run and apply with the same
+   directory. Only its signature is imported. The platform verifies it against the actual migrated
+   content under the configured trust root before any write. Keep the directory for retries. A
+   server's own signature is not an integration payload file.
 4. `0054 --apply`. Per ORG integration still reading `source.server = { name, version }`, the server
    is resolved as the runtime did: a system server is its highest version; an org server goes by
    the pin, exact version (yanked included), then dist-tag name, then semver range, a missing pin
