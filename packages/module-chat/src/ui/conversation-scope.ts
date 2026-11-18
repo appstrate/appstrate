@@ -6,6 +6,7 @@
  */
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import { actsIn, useChatHost } from "./runtime-context.ts";
 
 export interface ConversationScope {
@@ -220,4 +221,55 @@ export function callSpaceOf(part: { providerMetadata?: unknown }): string | unde
   const stamp = (part.providerMetadata as { appstrate?: { spaceId?: unknown } } | undefined)
     ?.appstrate?.spaceId;
   return typeof stamp === "string" && stamp ? stamp : undefined;
+}
+
+/** A message as the thread state holds it: the parts read by {@link fileSpaceOf}. */
+interface ThreadMessageLike {
+  content: readonly { type: string; data?: unknown; args?: unknown; providerMetadata?: unknown }[];
+  attachments?: readonly {
+    content?: readonly {
+      type: string;
+      data?: unknown;
+      image?: unknown;
+      providerMetadata?: unknown;
+    }[];
+  }[];
+}
+
+/**
+ * The space a file of the conversation lives in, read from the part that brought it in: an
+ * attachment, a file part (a connector import, a run's output), or a tool call that read it by its
+ * `appfile://` URI, each stamped with its space ({@link callSpaceOf}). What lets a reference to the
+ * file in the answer's markdown open it where it lives, as its chip does. `undefined` when no part
+ * names it: the caller's current space then answers, as for any file.
+ */
+export function fileSpaceOf(
+  messages: readonly ThreadMessageLike[],
+  fileId: string,
+): string | undefined {
+  const names = (uri: unknown) => typeof uri === "string" && parseFileUri(uri) === fileId;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    for (const part of message.content) {
+      const uri =
+        part.type === "file"
+          ? part.data
+          : part.type === "tool-call"
+            ? (part.args as { uri?: unknown } | undefined)?.uri
+            : undefined;
+      if (names(uri)) {
+        const space = callSpaceOf(part);
+        if (space) return space;
+      }
+    }
+    for (const attachment of message.attachments ?? []) {
+      for (const part of attachment.content ?? []) {
+        if (names(part.type === "image" ? part.image : part.data)) {
+          const space = callSpaceOf(part);
+          if (space) return space;
+        }
+      }
+    }
+  }
+  return undefined;
 }

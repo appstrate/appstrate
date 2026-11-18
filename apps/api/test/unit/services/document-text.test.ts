@@ -174,6 +174,37 @@ describe("extractDocumentTextUncached", () => {
   });
 });
 
+describe("spreadsheet column cap", () => {
+  it("says a sheet is incomplete when a value sits past column 100 (xlsx: A1 label, CW1 total)", async () => {
+    const result = await extractDocumentTextUncached(
+      zip({
+        "xl/workbook.xml": `<workbook><sheets><sheet name="S" r:id="rId1"/></sheets></workbook>`,
+        "xl/_rels/workbook.xml.rels": `<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`,
+        "xl/sharedStrings.xml": "<sst><si><t>Total</t></si></sst>",
+        "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="CW1"><v>4200</v></c></row></sheetData></worksheet>`,
+      }),
+      "xlsx",
+    );
+    expect(result).toMatchObject({ status: "text", truncated: true });
+    expect((result as { text: string }).text).not.toContain("4200");
+    expect((result as { note?: string }).note).toContain("past column 100");
+  });
+
+  it("says the same for an OpenDocument sheet, and nothing for an empty cell past the cap", async () => {
+    const row = (last: string) =>
+      `<table:table-row><table:table-cell><text:p>Total</text:p></table:table-cell>${"<table:table-cell/>".repeat(99)}<table:table-cell><text:p>${last}</text:p></table:table-cell></table:table-row>`;
+    const ods = (last: string) =>
+      extractDocumentTextUncached(
+        zip({ "content.xml": `<doc><table:table table:name="F">${row(last)}</table:table></doc>` }),
+        "ods",
+      );
+    expect(await ods("4200")).toMatchObject({ status: "text", truncated: true });
+    const blank = await ods("");
+    expect(blank).toMatchObject({ status: "text", truncated: false });
+    expect((blank as { note?: string }).note).toBeUndefined();
+  });
+});
+
 describe("extractDocumentText (cached by sha256)", () => {
   const docx = zip({ "word/document.xml": "<w:p><w:r><w:t>cache</w:t></w:r></w:p>" });
 

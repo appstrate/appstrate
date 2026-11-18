@@ -230,7 +230,8 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
     const mcpCtx: McpToolContext = {
       origin: "https://instance.example",
       authHeaders: new Headers(),
-      permissions: new Set<string>(),
+      // The content route's grant, which every reader of file content holds.
+      permissions: new Set<string>(["files:read"]),
       ceiling: undefined,
       actor: { type: "user", id: ctx.user.id },
       scope,

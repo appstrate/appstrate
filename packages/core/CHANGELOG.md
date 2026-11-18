@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (missing, not readable under the container ACL, not a png/jpeg/gif/webp, over the cap). **A module
   providing `PlatformServices` must now supply `readChatImage`**: the member is required.
 
-- **`readImageSize`** (`@appstrate/core/image-size`, #2268): the type and pixel size of a PNG,
+- **`readImageSize`, `ImageSize`, `ImageSizeType`** (`@appstrate/core/image-size`, #2268): the type and pixel size of a PNG,
   JPEG, GIF or WebP image, read from its header alone, never decoding it (`null` for any other or
   truncated bytes). The one header reader: `imageSize` (`@appstrate/core/appearance`) now filters
   it to the icon types, with the same answers as before.

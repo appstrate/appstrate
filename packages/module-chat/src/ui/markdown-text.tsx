@@ -9,6 +9,8 @@ import { parseFileUri } from "@appstrate/core/file-uri";
 import remarkGfm from "remark-gfm";
 import { fileActivation } from "./file-activation.ts";
 import { urlTransform } from "./markdown-url.ts";
+import { useAuiState } from "@assistant-ui/react";
+import { fileSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 
 /**
@@ -41,13 +43,28 @@ function MarkdownLink({
 }
 
 /**
+ * The space of a file the answer references, from the part of the thread that brought it in
+ * ({@link fileSpaceOf}): the same space its chip opens it in. A string or `undefined`, so the
+ * selector does not re-render on unrelated thread changes.
+ */
+function useFileSpace(id: string): string | undefined {
+  return useAuiState((s) => fileSpaceOf(s.thread.messages, id));
+}
+
+/**
  * A link to an `appfile://` file: the platform's own file, so a click opens the host's preview
  * (or its authenticated download), never the raw URI, which no browser can navigate.
  */
 function MarkdownFileLink({ id, children }: { id: string; children?: ReactNode }) {
   const { openFile, downloadFile, t } = useChatHost();
+  const spaceId = useFileSpace(id);
   const name = typeof children === "string" ? children : "";
-  const { onActivate, label } = fileActivation({ id, name }, openFile, downloadFile, t);
+  const { onActivate, label } = fileActivation(
+    { id, name, ...(spaceId && { spaceId }) },
+    openFile,
+    downloadFile,
+    t,
+  );
   return (
     <button
       type="button"
@@ -68,9 +85,15 @@ function MarkdownFileLink({ id, children }: { id: string; children?: ReactNode }
  */
 function MarkdownFileImage({ id, alt }: { id: string; alt: string }) {
   const { useFileImageSrc, openFile, downloadFile, t } = useChatHost();
-  const src = useFileImageSrc(id);
+  const spaceId = useFileSpace(id);
+  const src = useFileImageSrc(id, spaceId);
   if (!src) return <span className="text-muted-foreground">{alt || "image"}</span>;
-  const { onActivate, label } = fileActivation({ id, name: alt }, openFile, downloadFile, t);
+  const { onActivate, label } = fileActivation(
+    { id, name: alt, ...(spaceId && { spaceId }) },
+    openFile,
+    downloadFile,
+    t,
+  );
   return (
     <button type="button" onClick={onActivate} title={label} aria-label={label}>
       <img

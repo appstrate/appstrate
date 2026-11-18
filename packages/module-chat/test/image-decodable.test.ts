@@ -71,25 +71,6 @@ const jpegHeader = (width: number, height: number) =>
     1,
   ]);
 
-const gifHeader = (width: number, height: number) =>
-  new Uint8Array([...ascii("GIF89a"), ...le16(width), ...le16(height), 0, 0, 0]);
-
-const riff = (chunk: string, payload: number[]) =>
-  new Uint8Array([
-    ...ascii("RIFF"),
-    0,
-    0,
-    0,
-    0,
-    ...ascii("WEBP"),
-    ...ascii(chunk),
-    0,
-    0,
-    0,
-    0,
-    ...payload,
-  ]);
-
 /** Screen header, then one frame whose own descriptor declares `frame` (no colour table, one empty LZW block). */
 const gifWithFrame = (screen: [number, number], frame: [number, number]) =>
   new Uint8Array([

@@ -127,6 +127,11 @@ class TextBudget {
   /** Units (pages, sheets, slides) fully or partly written. */
   written = 0;
   truncated = false;
+  /**
+   * A spreadsheet cell holding a value sat past {@link SHEET_MAX_COLUMNS} and was not read: the
+   * output is incomplete even when it fits the cap, and the note must say so.
+   */
+  columnsCut = false;
 
   constructor(private readonly max: number) {}
 
@@ -468,7 +473,6 @@ function readXlsx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
         const declared = reference === undefined ? -1 : columnIndex(reference);
         const column = declared >= 0 ? declared : nextColumn;
         nextColumn = column + 1;
-        if (column >= SHEET_MAX_COLUMNS) continue;
         const type = attribute(cell.attributes, "t");
         const raw = [...elements(cell.body, "v")][0]?.body;
         let value = "";
@@ -477,6 +481,11 @@ function readXlsx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
         else if (type === "b") value = raw === "1" ? "TRUE" : "FALSE";
         else if (raw !== undefined) value = decodeXml(raw);
         if (value === "") continue;
+        // Past the column cap a value is left out, and the result says it is incomplete.
+        if (column >= SHEET_MAX_COLUMNS) {
+          budget.columnsCut = true;
+          continue;
+        }
         while (cells.length < column) cells.push("");
         cells[column] = value.replace(/[\t\r\n]+/g, " ");
         lineChars += cells[column].length + 1;
@@ -537,9 +546,12 @@ function readOpenDocument(
     let rowChars = 0;
     for (const row of elements(table.body, "table:table-row")) {
       if (rowChars > DOCUMENT_TEXT_MAX_CHARS) break;
-      const cells = [...elements(row.body, "table:table-cell")]
-        .slice(0, SHEET_MAX_COLUMNS)
-        .map((cell) => openDocumentText(cell.body).replace(/\n+/g, " "));
+      const all = [...elements(row.body, "table:table-cell")].map((cell) =>
+        openDocumentText(cell.body).replace(/\n+/g, " "),
+      );
+      // Past the column cap a value is left out, and the result says it is incomplete.
+      if (all.slice(SHEET_MAX_COLUMNS).some((cell) => cell.trim() !== "")) budget.columnsCut = true;
+      const cells = all.slice(0, SHEET_MAX_COLUMNS);
       while (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
       if (cells.length > 0) {
         const line = cells.join("\t");
@@ -584,12 +596,21 @@ async function extract(
     const cutByPages = format === "pdf" && units > PDF_MAX_PAGES;
     // The cap can be reached exactly, with nothing cut inside a unit but units left unread: that is
     // a truncation too, and it must say so.
-    const truncated = budget.truncated || cutByPages || (budget.full && budget.written < units);
-    const note = truncated
-      ? units > 1
-        ? `Truncated: the text of ${budget.written} of ${units} ${unit}s is shown (the first ${DOCUMENT_TEXT_MAX_CHARS.toLocaleString("en-US")} characters at most).`
-        : `Truncated at ${DOCUMENT_TEXT_MAX_CHARS.toLocaleString("en-US")} characters.`
-      : undefined;
+    const cutByCap = budget.truncated || cutByPages || (budget.full && budget.written < units);
+    const notes = [
+      ...(cutByCap
+        ? [
+            units > 1
+              ? `Truncated: the text of ${budget.written} of ${units} ${unit}s is shown (the first ${DOCUMENT_TEXT_MAX_CHARS.toLocaleString("en-US")} characters at most).`
+              : `Truncated at ${DOCUMENT_TEXT_MAX_CHARS.toLocaleString("en-US")} characters.`,
+          ]
+        : []),
+      ...(budget.columnsCut
+        ? [`Incomplete: cells past column ${SHEET_MAX_COLUMNS} hold values that are not shown.`]
+        : []),
+    ];
+    const truncated = cutByCap || budget.columnsCut;
+    const note = notes.length > 0 ? notes.join(" ") : undefined;
     return { status: "text", text: budget.text, format, truncated, ...(note ? { note } : {}) };
   } catch (error) {
     // Refused before a slot was granted: the load decided, not the file.

@@ -16,6 +16,7 @@
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import { ApiError } from "@appstrate/core/api-errors";
 import { getRateLimiterFactory } from "../infra/index.ts";
+import type { RateLimiterFactory } from "../infra/rate-limit/interface.ts";
 
 /** Files one turn may import. */
 export const TURN_IMPORT_MAX_FILES = 10;
@@ -26,11 +27,15 @@ const WINDOW_SECONDS = 30 * 60;
 
 let limiters: Promise<{ files: RateLimiterAbstract; bytes: RateLimiterAbstract }> | null = null;
 
+let factoryOverride: RateLimiterFactory | null = null;
+
 function getLimiters() {
-  limiters ??= getRateLimiterFactory().then((factory) => ({
-    files: factory.create(TURN_IMPORT_MAX_FILES, WINDOW_SECONDS, "rl:chat-import-files:"),
-    bytes: factory.create(TURN_IMPORT_MAX_BYTES, WINDOW_SECONDS, "rl:chat-import-bytes:"),
-  }));
+  limiters ??= (factoryOverride ? Promise.resolve(factoryOverride) : getRateLimiterFactory()).then(
+    (factory) => ({
+      files: factory.create(TURN_IMPORT_MAX_FILES, WINDOW_SECONDS, "rl:chat-import-files:"),
+      bytes: factory.create(TURN_IMPORT_MAX_BYTES, WINDOW_SECONDS, "rl:chat-import-bytes:"),
+    }),
+  );
   return limiters;
 }
 
@@ -45,7 +50,10 @@ function limitReached(detail: string): ApiError {
 
 /**
  * Take `points` from one budget, or give them back and refuse: a refused consume still counts in
- * the limiter, and an import it refuses must leave the room it found.
+ * the limiter, and an import it refuses must leave the room it found. `rate-limiter-flexible`
+ * rejects with a `RateLimiterRes` when the budget is spent and with an `Error` when the backend
+ * failed (both of them, the Redis factory carrying an in-memory insurance limiter); a failure
+ * counted nothing, so it is surfaced as the failure it is, never refunded nor read as a quota.
  */
 async function take(
   limiter: RateLimiterAbstract,
@@ -55,7 +63,10 @@ async function take(
 ): Promise<void> {
   try {
     await limiter.consume(turnId, points);
-  } catch {
+  } catch (rejection) {
+    if (!rejection || typeof rejection !== "object" || !("msBeforeNext" in rejection)) {
+      throw rejection;
+    }
     await limiter.reward(turnId, points);
     throw limitReached(refusal);
   }
@@ -87,7 +98,8 @@ export async function chargeTurnImport(
   };
 }
 
-/** @internal Test-only. Fresh limiters, so no turn carries counts from another test. */
-export function _resetTurnImportsForTesting(): void {
+/** @internal Test-only. Fresh limiters, built by `factory` when given, else the platform's. */
+export function _resetTurnImportsForTesting(factory: RateLimiterFactory | null = null): void {
   limiters = null;
+  factoryOverride = factory;
 }
