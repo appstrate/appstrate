@@ -4,8 +4,8 @@ import { describe, expect, it } from "bun:test";
 import {
   acceptsFileInput,
   fileDelivery,
-  fileInputRefused,
   piInputModalities,
+  refusedFileKinds,
 } from "../src/file-input.ts";
 
 describe("acceptsFileInput", () => {
@@ -18,21 +18,24 @@ describe("acceptsFileInput", () => {
     expect(acceptsFileInput({ api: "openai-completions", input: ["text"] }, "image")).toBe(false);
   });
 
-  it("sends a PDF on an API shape with a wire format for it, whatever the modalities", () => {
+  it("sends a PDF on an API shape with a wire format for it, unless declared text-only", () => {
     for (const api of [
       "openai-responses",
       "openai-codex-responses",
       "anthropic-messages",
       "openai-completions",
     ]) {
-      expect(acceptsFileInput({ api, input: ["text"] }, "pdf")).toBe(true);
+      expect(acceptsFileInput({ api, input: ["text", "image"] }, "pdf")).toBe(true);
       expect(acceptsFileInput({ api, input: null }, "pdf")).toBe(true);
+      // Providers read PDF pages as images.
+      expect(acceptsFileInput({ api, input: ["text"] }, "pdf")).toBe(false);
     }
     expect(
       acceptsFileInput({ api: "mistral-conversations", input: ["text", "image"] }, "pdf"),
     ).toBe(false);
     expect(acceptsFileInput({ api: null, input: ["text", "image"] }, "pdf")).toBeNull();
     expect(acceptsFileInput({ api: undefined, input: null }, "pdf")).toBeNull();
+    expect(acceptsFileInput({ api: null, input: ["text"] }, "pdf")).toBe(false);
   });
 });
 
@@ -41,35 +44,40 @@ describe("fileDelivery", () => {
     expect(fileDelivery({ api: "openai-responses", input: null })).toEqual({
       image: true,
       pdf: true,
-      refused: false,
+      refused: [],
     });
     expect(fileDelivery({ api: "mistral-conversations", input: ["text"] })).toEqual({
       image: false,
       pdf: false,
-      refused: false,
+      refused: [],
     });
   });
 
-  it("sends no file at all once the model refused one", () => {
-    expect(fileDelivery({ api: "openai-responses", input: null }, { refused: true })).toEqual({
+  it("withholds only the kinds the model refused", () => {
+    const model = { api: "openai-responses", input: null };
+    expect(fileDelivery(model, { refused: ["image"] })).toEqual({
       image: false,
+      pdf: true,
+      refused: ["image"],
+    });
+    expect(fileDelivery(model, { refused: ["pdf"] })).toEqual({
+      image: true,
       pdf: false,
-      refused: true,
+      refused: ["pdf"],
     });
   });
 });
 
-describe("fileInputRefused", () => {
-  const failed = (modelId: string, errorReason?: string) => ({
+describe("refusedFileKinds", () => {
+  const turn = (modelId: string, refused?: string[]) => ({
     role: "assistant",
     metadata: {
       appstrate: {
         turn: {
-          finishReason: "error",
-          errorCategory: "invalid_request",
-          ...(errorReason ? { errorReason } : {}),
+          finishReason: "stop",
           modelId,
-          stepCount: 1,
+          ...(refused ? { refusedFileKinds: refused } : {}),
+          stepCount: 2,
           maxSteps: 16,
           maxStepsReached: false,
         },
@@ -78,17 +86,16 @@ describe("fileInputRefused", () => {
   });
   const user = { role: "user", parts: [] };
 
-  it("holds for the preset that refused, for the rest of the thread", () => {
-    expect(
-      fileInputRefused([user, failed("preset-a", "file_input_refused"), user], "preset-a"),
-    ).toBe(true);
+  it("collects the preset's refused kinds for the rest of the thread", () => {
+    const thread = [user, turn("preset-a", ["image"]), user, turn("preset-a", ["pdf"]), user];
+    expect(refusedFileKinds(thread, "preset-a").sort()).toEqual(["image", "pdf"]);
   });
 
-  it("does not hold for another preset, nor without the marker", () => {
-    const thread = [user, failed("preset-a", "file_input_refused")];
-    expect(fileInputRefused(thread, "preset-b")).toBe(false);
-    expect(fileInputRefused([user, failed("preset-a")], "preset-a")).toBe(false);
-    expect(fileInputRefused([user], "preset-a")).toBe(false);
+  it("is empty for another preset, and without a recorded refusal", () => {
+    const thread = [user, turn("preset-a", ["image"])];
+    expect(refusedFileKinds(thread, "preset-b")).toEqual([]);
+    expect(refusedFileKinds([user, turn("preset-a")], "preset-a")).toEqual([]);
+    expect(refusedFileKinds([user], "preset-a")).toEqual([]);
   });
 });
 

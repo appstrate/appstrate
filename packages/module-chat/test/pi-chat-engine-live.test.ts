@@ -163,6 +163,67 @@ function anthropicSse(): Response {
   );
 }
 
+/** The stub's tool call for this provider request, while `mcpSurface.call` has steps left. */
+function stubCall(step: number) {
+  const call = mcpSurface.call;
+  return call && step <= call.steps ? call : undefined;
+}
+
+/** An Anthropic Messages SSE stream calling the surface's tool. */
+function anthropicToolSse(call: NonNullable<StubSurface["call"]>, step: number): Response {
+  const events = [
+    {
+      type: "message_start",
+      message: {
+        id: `msg_${step}`,
+        type: "message",
+        role: "assistant",
+        model: "m",
+        content: [],
+        usage: { input_tokens: 12, output_tokens: 0 },
+      },
+    },
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", id: `toolu_live_${step}`, name: call.name, input: {} },
+    },
+    {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "input_json_delta", partial_json: JSON.stringify(call.arguments) },
+    },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 4 } },
+    { type: "message_stop" },
+  ];
+  return new Response(
+    events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+/** An OpenAI chat-completions SSE stream calling the surface's tool. */
+function openAiToolSse(call: NonNullable<StubSurface["call"]>, step: number): Response {
+  const chunk = (delta: unknown, finish: string | null = null) =>
+    `data: ${JSON.stringify({ id: "c1", object: "chat.completion.chunk", model: "m", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+  const frames =
+    chunk({ role: "assistant" }) +
+    chunk({
+      tool_calls: [
+        {
+          index: 0,
+          id: `call_live_${step}`,
+          type: "function",
+          function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+        },
+      ],
+    }) +
+    chunk({}, "tool_calls") +
+    `data: [DONE]\n\n`;
+  return new Response(frames, { headers: { "content-type": "text/event-stream" } });
+}
+
 const capture: Capture = { authHeaders: [], bodies: [] };
 
 /**
@@ -191,6 +252,10 @@ let providerRefusal: number | null = null;
 /** The error body of that refusal. Reset in `afterEach`. */
 const AUTH_REFUSAL = { message: "Authentication Fails", type: "authentication_error" };
 let providerRefusalError = AUTH_REFUSAL;
+/** Which completion requests the refusal applies to (all by default). Reset in `afterEach`. */
+let providerRefuses: (body: string) => boolean = () => true;
+/** Completion requests refused so far; each refusal's message names its rank. */
+let providerRefusals = 0;
 
 const server = Bun.serve({
   port: 0,
@@ -236,10 +301,18 @@ const server = Bun.serve({
     }
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
-      capture.bodies.push(await req.text());
-      if (providerRefusal !== null) {
-        return Response.json({ error: providerRefusalError }, { status: providerRefusal });
+      const body = await req.text();
+      capture.bodies.push(body);
+      if (providerRefusal !== null && providerRefuses(body)) {
+        const rank = ++providerRefusals;
+        const error =
+          rank > 1
+            ? { ...providerRefusalError, message: `${providerRefusalError.message} (#${rank})` }
+            : providerRefusalError;
+        return Response.json({ error }, { status: providerRefusal });
       }
+      const call = stubCall(capture.bodies.length);
+      if (call) return openAiToolSse(call, capture.bodies.length);
       if (!providerPark) return openAiSse();
       const park = providerPark;
       park.arrived();
@@ -258,7 +331,8 @@ const server = Bun.serve({
     if (path.endsWith("/v1/messages")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      return anthropicSse();
+      const call = stubCall(capture.bodies.length);
+      return call ? anthropicToolSse(call, capture.bodies.length) : anthropicSse();
     }
     if (path.startsWith("/api/mcp/")) return mcpResponse(req);
     return new Response("unexpected: " + path, { status: 404 });
@@ -272,6 +346,8 @@ afterEach(() => {
   providerPark = null;
   providerRefusal = null;
   providerRefusalError = AUTH_REFUSAL;
+  providerRefuses = () => true;
+  providerRefusals = 0;
   mcpSurface = EMPTY_SURFACE;
 });
 
@@ -323,6 +399,8 @@ async function runTurn(
     surfaceKey?: string;
     requestId?: string;
     presetId?: string;
+    /** pi-ai compat flags set on the bound model, as a catalog entry would carry them. */
+    compat?: Record<string, unknown>;
   } = {},
 ) {
   const binding = createPiProxyModelBinding({
@@ -330,6 +408,7 @@ async function runTurn(
     origin: ORIGIN,
     mintBearer,
   })!;
+  if (turn.compat) Object.assign(binding.model, { compat: turn.compat });
   const slot = acquirePiChatSlot();
   expect(slot).not.toBeNull();
 
@@ -587,7 +666,11 @@ describe("runPiChat against a stub provider", () => {
     expect(readAttachment).toHaveBeenCalledTimes(2);
   }, 30_000);
 
-  it("stops sending files to a model that refused one, for that model only", async () => {
+  const PIXEL = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const imageTurn = () => {
     const messages = userTurn("Read this image");
     messages[0]!.parts.push({
       type: "file",
@@ -595,33 +678,50 @@ describe("runPiChat against a stub provider", () => {
       mediaType: "image/png",
       url: "appfile://file_live_image",
     });
-    const bytes = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-      "base64",
-    );
-    const readAttachment = mock(async () => ({ mime: "image/png", bytes }));
+    return messages;
+  };
+  const finishMetadata = (chunks: Array<{ type: string; [k: string]: unknown }>) =>
+    (chunks.find((c) => c.type === "finish") as { messageMetadata?: UIMessage["metadata"] })
+      .messageMetadata;
+
+  it("replays a request refused with an image once without it, then withholds images from that model only", async () => {
+    const messages = imageTurn();
+    const readAttachment = mock(async () => ({ mime: "image/png", bytes: PIXEL }));
     const model = { ...orgModel(), input: ["text", "image"] as OrgModel["input"] };
 
+    capture.bodies.length = 0;
     providerRefusal = 400;
     providerRefusalError = { message: "Could not process image", type: "invalid_request_error" };
-    const refused = await recordingWarnAndError(() =>
-      runTurn(() => "refusal-bearer", undefined, undefined, { model, messages, readAttachment }),
-    );
-    expect(capture.bodies.at(-1)).toContain("data:image/png;base64,");
-    expect(refused.result.chunks.find((c) => c.type === "error")?.errorText).toBe(
-      "appstrate:chat-turn-error:invalid_request+file_input_refused",
-    );
-    const finish = refused.result.chunks.find((c) => c.type === "finish") as {
-      messageMetadata?: UIMessage["metadata"];
-    };
-    expect(finish.messageMetadata).toMatchObject({
-      appstrate: { turn: { errorReason: "file_input_refused", modelId: "preset_live" } },
+    providerRefuses = (body) => body.includes("data:image/png;base64,");
+    const { chunks } = await runTurn(() => "refusal-bearer", undefined, undefined, {
+      model,
+      messages,
+      readAttachment,
     });
+    expect(capture.bodies).toHaveLength(2);
+    expect(capture.bodies[0]).toContain("data:image/png;base64,");
+    expect(capture.bodies[1]).not.toContain("data:image/png;base64,");
+    expect(capture.bodies[1]).toContain("[file withheld: the model refused it]");
+    // Not the failed attempt's error: the turn went on and answered.
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    expect(
+      chunks
+        .filter((c) => c.type === "text-delta")
+        .map((c) => (c as { delta?: string }).delta)
+        .join(""),
+    ).toContain(ANSWER);
+    const metadata = finishMetadata(chunks);
+    expect(metadata).toMatchObject({
+      appstrate: {
+        turn: { finishReason: "stop", refusedFileKinds: ["image"], modelId: "preset_live" },
+      },
+    });
+    expect(JSON.stringify(metadata)).not.toContain("errorReason");
 
     providerRefusal = null;
     const history: UIMessage[] = [
       ...messages,
-      { id: "a1", role: "assistant", parts: [], metadata: finish.messageMetadata },
+      { id: "a1", role: "assistant", parts: [], metadata },
       { id: "u2", role: "user", parts: [{ type: "text", text: "Try again" }] },
     ];
     for (const [presetId, sent] of [
@@ -629,19 +729,136 @@ describe("runPiChat against a stub provider", () => {
       ["preset_other", true],
     ] as const) {
       capture.bodies.length = 0;
-      const { chunks } = await runTurn(() => "after-refusal", undefined, undefined, {
+      const next = await runTurn(() => "after-refusal", undefined, undefined, {
         model,
         messages: history,
         readAttachment,
         presetId,
       });
       const body = capture.bodies[0]!;
+      expect(capture.bodies).toHaveLength(1);
       expect(body).toContain("appfile://file_live_image");
       expect(body.includes("data:image/png;base64,")).toBe(sent);
-      expect(body.includes("refused a file earlier in this conversation")).toBe(!sent);
-      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+      expect(body.includes("refused a file of this kind earlier in this conversation")).toBe(!sent);
+      expect(next.chunks.some((chunk) => chunk.type === "error")).toBe(false);
     }
   }, 30_000);
+
+  it("keeps the first error and records no refusal when the request fails without its image too", async () => {
+    const readAttachment = mock(async () => ({ mime: "image/png", bytes: PIXEL }));
+    capture.bodies.length = 0;
+    providerRefusal = 400;
+    providerRefusalError = {
+      message: "Unsupported parameter: 'temperature' is not supported with this model.",
+      type: "invalid_request_error",
+    };
+    const { result, warn } = await recordingWarnAndError(() =>
+      runTurn(() => "non-file-4xx", undefined, undefined, {
+        model: { ...orgModel(), input: ["text", "image"] },
+        messages: imageTurn(),
+        readAttachment,
+      }),
+    );
+    // One replay, without the image, then the original error stands.
+    expect(capture.bodies).toHaveLength(2);
+    expect(capture.bodies[0]).toContain("data:image/png;base64,");
+    expect(capture.bodies[1]).not.toContain("data:image/png;base64,");
+    expect(result.chunks.find((c) => c.type === "error")?.errorText).toBe(
+      "appstrate:chat-turn-error:invalid_request",
+    );
+    const turn = (finishMetadata(result.chunks) as { appstrate: { turn: Record<string, unknown> } })
+      .appstrate.turn;
+    expect(turn).toMatchObject({ finishReason: "error", errorCategory: "invalid_request" });
+    expect(turn).not.toHaveProperty("refusedFileKinds");
+    expect(turn).not.toHaveProperty("errorReason");
+    // The error shown is the first request's, not its replay's.
+    const logged = warn.find(([msg]) => msg === MODEL_ERROR_LOG)?.[1] as { err?: string };
+    expect(logged.err).toContain("Unsupported parameter");
+    expect(logged.err).not.toContain("(#2)");
+  }, 30_000);
+
+  it.each([
+    {
+      apiShape: "anthropic-messages",
+      piProvider: "anthropic",
+      compat: undefined,
+      expectWire: (messages: { role: string; content: unknown }[], data: string) => {
+        const results = messages.flatMap((m) =>
+          m.role === "user" && Array.isArray(m.content) ? (m.content as { type?: string }[]) : [],
+        );
+        const result = results.find((block) => block.type === "tool_result") as {
+          tool_use_id: string;
+          content: unknown[];
+        };
+        expect(result.tool_use_id).toBe("toolu_live_1");
+        expect(result.content).toContainEqual({
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data },
+        });
+      },
+    },
+    {
+      apiShape: "openai-completions",
+      piProvider: "openai",
+      compat: { requiresAssistantAfterToolResult: true },
+      expectWire: (messages: { role: string; content: unknown }[], data: string) => {
+        const tool = messages.findIndex((m) => m.role === "tool");
+        expect(JSON.stringify(messages[tool]!.content)).not.toContain(data);
+        expect(messages[tool + 1]).toEqual({
+          role: "assistant",
+          content: "I have processed the tool results.",
+        });
+        expect(messages[tool + 2]).toMatchObject({ role: "user" });
+        expect(messages[tool + 2]!.content).toContainEqual({
+          type: "file",
+          file: { filename: "document.pdf", file_data: `data:application/pdf;base64,${data}` },
+        });
+      },
+    },
+  ] as const)(
+    "sends a connector PDF through real pi-ai on $apiShape",
+    async ({ apiShape, piProvider, compat, expectWire }) => {
+      capture.bodies.length = 0;
+      const name = "call_integration_tool";
+      const data = btoa("%PDF-1.7 connector-only file");
+      mcpSurface = {
+        tools: [
+          {
+            name,
+            inputSchema: {
+              type: "object",
+              properties: { tool: { type: "string" }, arguments: { type: "object" } },
+            },
+          },
+        ],
+        call: {
+          name,
+          arguments: { tool: "crm__api_call", arguments: { read_as_file: true } },
+          steps: 1,
+          result: {
+            content: [
+              { type: "text", text: '{"results":[{"status":200}]}' },
+              {
+                type: "resource",
+                resource: { uri: "urn:uuid:document", mimeType: "application/pdf", blob: data },
+              },
+            ],
+          },
+        },
+      };
+      const { chunks } = await runTurn(() => "tool-read", undefined, undefined, {
+        model: { ...orgModel(), apiShape, pi_provider: piProvider, input: ["text", "image"] },
+        ...(compat ? { compat } : {}),
+      });
+      expect(capture.bodies).toHaveLength(2);
+      expect(capture.bodies[0]).not.toContain(data);
+      expect(capture.bodies[1]).not.toContain("[pdf:");
+      expectWire(JSON.parse(capture.bodies[1]!).messages, data);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+      expect(JSON.stringify(chunks)).not.toContain(data);
+    },
+    30_000,
+  );
 
   it("sends an alias's public level as its backing's nearest", async () => {
     // The loopback listing is unprojected: the binding carries the backing

@@ -663,7 +663,7 @@ async function liveResources(
       if (pdf.reference) content.push({ type: "text", text: pdf.reference });
     } else if (isRasterImageMime(mimeType) && opts.delivery?.image) {
       content.push({ type: "image", mimeType, data: blob });
-    } else if (isRasterImageMime(mimeType) && opts.delivery?.refused) {
+    } else if (isRasterImageMime(mimeType) && opts.delivery?.refused.includes("image")) {
       note = `Image not sent: ${FILE_INPUT_REFUSED_NOTE}.`;
     } else {
       note = "This file format cannot be read by the current model.";

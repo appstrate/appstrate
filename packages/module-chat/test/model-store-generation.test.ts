@@ -73,16 +73,19 @@ describe("the model a conversation is on", () => {
     expect(getSelectedModelFileInput("image")).toBe(true);
   });
 
-  it("sends a PDF on an API shape with a wire format for it, null when the shape is hidden", () => {
+  it("sends a PDF on an API shape with a wire format for it, unless text-only, null when hidden", () => {
     setModelCatalog([
       { id: "alias" },
+      { id: "responses-vision", apiShape: "openai-responses", input: ["text", "image"] },
       { id: "responses-text", apiShape: "openai-responses", input: ["text"] },
       { id: "mistral", apiShape: "mistral-conversations", input: ["text", "image"] },
     ]);
     setSelectedModel("alias");
     expect(getSelectedModelFileInput("pdf")).toBeNull();
-    setSelectedModel("responses-text");
+    setSelectedModel("responses-vision");
     expect(getSelectedModelFileInput("pdf")).toBe(true);
+    setSelectedModel("responses-text");
+    expect(getSelectedModelFileInput("pdf")).toBe(false);
     setSelectedModel("mistral");
     expect(getSelectedModelFileInput("pdf")).toBe(false);
   });

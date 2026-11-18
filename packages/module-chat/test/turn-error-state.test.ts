@@ -163,37 +163,6 @@ describe("turnErrorState", () => {
     ).toEqual(expected);
   });
 
-  it("names a refused file the same way, live or reloaded, without a retry", () => {
-    const shown = {
-      category: "invalid_request" as const,
-      retryable: false,
-      reason: "file_input_refused" as const,
-    };
-    const expected = {
-      text: "turn.error.fileInputRefused",
-      retryable: false,
-      requestId: undefined,
-    };
-    expect(
-      turnErrorState(
-        message(
-          turn({
-            finishReason: "error",
-            errorCategory: "invalid_request",
-            errorRetryable: false,
-            errorReason: "file_input_refused",
-          }),
-        ),
-        t,
-        manager,
-        true,
-      ),
-    ).toEqual(expected);
-    expect(
-      turnErrorState(failed(assistantError(clientTurnErrorMarker(shown))), t, manager, true),
-    ).toEqual(expected);
-  });
-
   it("keeps the category's sentence for a reason it has no sentence for", () => {
     expect(
       turnErrorState(

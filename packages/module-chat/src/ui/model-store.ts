@@ -30,7 +30,8 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
-import { acceptsFileInput, type FileInputKind } from "../file-input.ts";
+import type { FileInputKind } from "@appstrate/core/chat-turn-metadata";
+import { acceptsFileInput } from "../file-input.ts";
 
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";

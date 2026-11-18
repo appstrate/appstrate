@@ -34,7 +34,7 @@ import {
   UploadIcon,
   XIcon,
 } from "lucide-react";
-import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
+import { turnLimitReached, turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -51,7 +51,7 @@ import {
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { getSelectedModel, getSelectedModelFileInput, subscribeModel } from "./model-store.ts";
-import { fileInputRefused } from "../file-input.ts";
+import { refusedFileKinds } from "../file-input.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
@@ -425,18 +425,35 @@ function ComposerAttachmentError() {
   );
 }
 
-/** The selected model refused a file earlier in this thread: the server now sends it references only. */
+const FILE_REFUSED_KEY = new Map<unknown, string>([
+  ["image", "imageRefused"],
+  ["pdf", "pdfRefused"],
+]);
+/** Joined, not an array: the selectors reading it are `useSyncExternalStore` snapshots. */
+const refusedKeys = (kinds: readonly unknown[] = []) =>
+  kinds
+    .flatMap((kind) => FILE_REFUSED_KEY.get(kind) ?? [])
+    .sort()
+    .join(",");
+
+/** The selected model refused a file kind earlier in this thread: the server now sends it references only. */
 function ComposerFileRefused() {
   const { t } = useChatHost();
   const selected = React.useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
-  const refused = useAuiState(
-    (s) => selected !== null && fileInputRefused(s.thread.messages.map(sourceMessage), selected),
+  const keys = useAuiState((s) =>
+    selected === null
+      ? ""
+      : refusedKeys(refusedFileKinds(s.thread.messages.map(sourceMessage), selected)),
   );
-  if (!refused) return null;
+  if (!keys) return null;
   return (
-    <p role="status" className="text-muted-foreground text-xs">
-      {t("composer.fileRefused")}
-    </p>
+    <>
+      {keys.split(",").map((key) => (
+        <p key={key} role="status" className="text-muted-foreground text-xs">
+          {t(`composer.${key}`)}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -758,6 +775,29 @@ function TurnModelBadge() {
   );
 }
 
+/** The model refused a file on this turn: the turn went on without it. */
+function TurnFileRefusedNotice() {
+  const { t } = useChatHost();
+  const keys = useAuiState((s) =>
+    refusedKeys(turnMetadataFromMessage(sourceMessage(s.message))?.refusedFileKinds),
+  );
+  if (!keys) return null;
+  return (
+    <>
+      {keys.split(",").map((key) => (
+        <div
+          key={key}
+          className="text-muted-foreground mt-3 flex items-center gap-2 text-xs"
+          role="status"
+        >
+          <AlertTriangleIcon className="size-3.5 shrink-0" />
+          <span>{t(`turn.${key}`)}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function TurnLimitNotice() {
   const { t } = useChatHost();
   const reached = useAuiState((s) => turnLimitReached(sourceMessage(s.message)));
@@ -844,6 +884,7 @@ function AssistantMessage() {
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className="text-foreground text-sm leading-relaxed">
         <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
+        <TurnFileRefusedNotice />
         <TurnLimitNotice />
         <MessageError />
       </div>

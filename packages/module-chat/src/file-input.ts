@@ -6,7 +6,7 @@
  * impossible; otherwise send, and the provider decides — the user chose the model.
  */
 
-import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { turnMetadataFromMessage, type FileInputKind } from "@appstrate/core/chat-turn-metadata";
 import type { ModelInputModality } from "@appstrate/core/module";
 
 /**
@@ -26,8 +26,6 @@ export function isPdfWireApi(api: string | null | undefined): api is PdfWireApi 
   return (PDF_WIRE_APIS as readonly unknown[]).includes(api);
 }
 
-export type FileInputKind = "image" | "pdf";
-
 export interface FileInputModel {
   api: string | null | undefined;
   input: readonly string[] | null | undefined;
@@ -37,36 +35,44 @@ export interface FileInputModel {
 export interface FileDelivery {
   image: boolean;
   pdf: boolean;
-  /** The model refused a file earlier in the conversation: it gets references only. */
-  refused: boolean;
+  /** Kinds the model refused earlier in the conversation: it gets references only. */
+  refused: readonly FileInputKind[];
 }
 
-/** The model-facing words for a file withheld because the model refused one earlier. */
+/** The model-facing words for a file withheld because the model refused one of its kind earlier. */
 export const FILE_INPUT_REFUSED_NOTE =
-  "this model refused a file earlier in this conversation, so files reach it only as references: say so rather than guess the content";
+  "this model refused a file of this kind earlier in this conversation, so such files reach it only as references: say so rather than guess the content";
 
 /** `true` = send, `false` = declared impossible, `null` = cannot tell (the API shape is hidden). */
 export function acceptsFileInput(model: FileInputModel, kind: FileInputKind): boolean | null {
-  if (kind === "image") return model.input ? model.input.includes("image") : true;
+  const declaresImages = model.input ? model.input.includes("image") : null;
+  if (kind === "image") return declaresImages !== false;
+  // Providers read PDF pages as images: a model declared text-only cannot read one.
+  if (declaresImages === false) return false;
   return model.api ? isPdfWireApi(model.api) : null;
 }
 
 /**
- * Whether this preset refused a file in the thread (`file_input_refused` on a failed turn it
- * answered). Sticky for the rest of the thread, every file kind; another preset is unaffected.
+ * The file kinds this preset refused in the thread (`refusedFileKinds` on its turns). Sticky for
+ * the rest of the thread; another preset is unaffected.
  */
-export function fileInputRefused(messages: readonly unknown[], presetId: string): boolean {
-  return messages.some((message) => {
+export function refusedFileKinds(messages: readonly unknown[], presetId: string): FileInputKind[] {
+  const kinds = new Set<FileInputKind>();
+  for (const message of messages) {
     const turn = turnMetadataFromMessage(message);
-    return turn?.errorReason === "file_input_refused" && turn.modelId === presetId;
-  });
+    if (turn?.modelId !== presetId) continue;
+    for (const kind of turn.refusedFileKinds ?? []) kinds.add(kind);
+  }
+  return [...kinds];
 }
 
-export function fileDelivery(model: FileInputModel, { refused = false } = {}): FileDelivery {
-  if (refused) return { image: false, pdf: false, refused };
+export function fileDelivery(
+  model: FileInputModel,
+  { refused = [] }: { refused?: readonly FileInputKind[] } = {},
+): FileDelivery {
   return {
-    image: acceptsFileInput(model, "image") !== false,
-    pdf: acceptsFileInput(model, "pdf") === true,
+    image: !refused.includes("image") && acceptsFileInput(model, "image") !== false,
+    pdf: !refused.includes("pdf") && acceptsFileInput(model, "pdf") === true,
     refused,
   };
 }

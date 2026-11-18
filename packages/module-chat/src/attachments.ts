@@ -70,7 +70,7 @@ function imageNote(
   context: AttachmentContext | undefined,
 ): string {
   if (!context || !isImageMime(part.mediaType)) return "";
-  if (context.delivery.refused) return ` — ${FILE_INPUT_REFUSED_NOTE}`;
+  if (context.delivery.refused.includes("image")) return ` — ${FILE_INPUT_REFUSED_NOTE}`;
   if (!context.delivery.image) {
     return " — you cannot view images with this model: say so rather than guess its content";
   }

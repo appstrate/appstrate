@@ -318,7 +318,7 @@ export function buildStructuredPiTurn(
     estimateTokens,
     baseTokens,
     images,
-    delivery = { image: false, pdf: false, refused: false },
+    delivery = { image: false, pdf: false, refused: [] },
     pdfReceipts,
   }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {

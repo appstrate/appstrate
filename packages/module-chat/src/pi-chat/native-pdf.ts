@@ -13,7 +13,7 @@ import {
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
 const REFERENCE = /\[pdf:[0-9a-f-]{36}\]/g;
 
-export const PDF_INPUT_UNSUPPORTED =
+const PDF_INPUT_UNSUPPORTED =
   "This model's chat adapter does not accept PDF input. Use an inline run to inspect the file.";
 
 interface PdfFile {
@@ -236,7 +236,7 @@ export function createTurnPdfInput(
   // `delivery` decides whether a PDF goes; the API only picks its wire format.
   const encoder: PdfEncoder | undefined =
     delivery.pdf && isPdfWireApi(model.api) ? ENCODERS[model.api] : undefined;
-  const unsupported = delivery.refused
+  const unsupported = delivery.refused.includes("pdf")
     ? `PDF not sent: ${FILE_INPUT_REFUSED_NOTE}.`
     : PDF_INPUT_UNSUPPORTED;
   const files: StoredFile[] = [];
@@ -292,50 +292,6 @@ export function createTurnPdfInput(
       pi.on("before_provider_request", ({ payload }) => {
         if (!encoder || !files.length || !payload || typeof payload !== "object") return;
         return encoder.encode(payload as Message, strip, model.compat);
-      });
-    },
-  };
-}
-
-/** The part types pi-ai and the encoders above write for an image or a file, across the chat's APIs. */
-const FILE_PART_TYPES = new Set<unknown>([
-  "image",
-  "document",
-  "input_image",
-  "input_file",
-  "image_url",
-  "file",
-]);
-
-/** Walks messages, their content and tool outputs only: a tool call's arguments are the model's. */
-function carriesFilePart(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(carriesFilePart);
-  if (!value || typeof value !== "object") return false;
-  const { type, content, output } = value as Record<string, unknown>;
-  return FILE_PART_TYPES.has(type) || carriesFilePart(content) || carriesFilePart(output);
-}
-
-/** Whether a provider payload's conversation (not its tool schemas) carries an image or a file. */
-export function payloadCarriesFile(payload: unknown): boolean {
-  if (!payload || typeof payload !== "object") return false;
-  const { messages, input } = payload as Record<string, unknown>;
-  return carriesFilePart(messages) || carriesFilePart(input);
-}
-
-interface FileInputProbe {
-  /** Whether the latest provider request of the turn carried a file. */
-  sent(): boolean;
-  /** Must be the last `before_provider_request` handler, so it reads the payload as sent. */
-  extension: ExtensionFactory;
-}
-
-export function createFileInputProbe(): FileInputProbe {
-  let sent = false;
-  return {
-    sent: () => sent,
-    extension(pi) {
-      pi.on("before_provider_request", ({ payload }) => {
-        sent = payloadCarriesFile(payload);
       });
     },
   };

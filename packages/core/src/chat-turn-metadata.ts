@@ -121,6 +121,9 @@ export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: nu
   );
 }
 
+/** A file the chat can hand a model as content rather than as a reference. */
+export type FileInputKind = "image" | "pdf";
+
 export interface AppstrateTurnMetadata {
   finishReason?: ChatTurnFinishReason;
   /**
@@ -163,6 +166,12 @@ export interface AppstrateTurnMetadata {
    */
   modelId?: string;
   modelLabel?: string;
+  /**
+   * File kinds this turn's model refused: a request carrying them failed as an invalid request
+   * and its replay without them succeeded. From then on the chat sends that model (`modelId`)
+   * files of these kinds only as references in this conversation.
+   */
+  refusedFileKinds?: FileInputKind[];
 }
 
 export interface ChatMessageMetadata {

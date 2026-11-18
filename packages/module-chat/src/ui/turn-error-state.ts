@@ -164,8 +164,6 @@ const TURN_ERROR_REASON_KEY: Record<string, string> = {
   // Only a platform release clears it: no reconnection link, and the category
   // (`invalid_request`) already refuses the retry.
   runtime_version_too_old: "turn.error.runtimeVersionTooOld",
-  // The next turns send this model references only; the category already refuses the retry.
-  file_input_refused: "turn.error.fileInputRefused",
 };
 
 /** A dead credential cannot be retried: it names where it is fixed instead. */

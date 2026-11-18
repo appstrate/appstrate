@@ -71,7 +71,6 @@ describe("runErrorText", () => {
     );
     const run = { status: "failed", error: "400 …", model_error: refusal };
     expect(runErrorText(run, t, "runtime_version_too_old")).toBe("run.error.runtimeVersionTooOld");
-    expect(runErrorText(run, t, "file_input_refused")).toBe("run.error.fileInputRefused");
     // A cancellation stays a cancellation, whatever the journal says.
     expect(runErrorText({ status: "cancelled", error: null }, t, "runtime_version_too_old")).toBe(
       "run.cancelledByUser",
