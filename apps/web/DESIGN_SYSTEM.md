@@ -903,10 +903,24 @@ becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
+On a phone, two more rules, because a desktop browser shows none of them:
+
+- **16 px where a thumb types or reads.** A field's font is `text-base md:text-sm` (what `Input`
+  and `Textarea` do): iOS Safari zooms the page on focus of a field under 16 px and never zooms
+  back. A raw `<textarea>` or `<input>` (the chat composer, a search field) carries the same
+  classes. Running text a user reads at length (a chat message) is `text-base` below `md` too.
+- **Heights in `dvh`, never `vh`, `h-screen` or `min-h-screen`** (`test/viewport-units.test.ts`
+  fails on them): `vh` ignores the browser's toolbars. A screen that must stay above the
+  on-screen keyboard sizes itself `h-[var(--keyboard-viewport-height,100dvh)]` and shifts by
+  `top-[var(--keyboard-viewport-top,0px)]` (`useKeyboardViewport`, mounted by `MainLayout` for the
+  chat). Android is handled by `interactive-widget=resizes-content` in `index.html`; never add
+  `maximum-scale`, which blocks the user's zoom.
+
 ## Checklist before handing UI work over
 
 - [ ] Uses the pattern of this file for each need; a new pattern added here.
 - [ ] Every role: same tabs, locked content explained, no 403 toast.
-- [ ] Light, dark, 1440 px and 390 px; nominal, empty, heavy and error states.
+- [ ] Light, dark, 1440 px and 390 px (and 360 px); nominal, empty, heavy and error states.
+- [ ] A screen with a field or a bottom bar: checked with the keyboard open on a phone.
 - [ ] fr and en, no literal string, no raw server text.
 - [ ] `bun test` and `bun run typecheck` in `apps/web`, `bun run check` from the root.
