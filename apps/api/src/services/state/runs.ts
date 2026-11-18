@@ -63,7 +63,7 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
-import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
+import type { LlmUsageLedgerRow, ModelCost, TerminalRunRow } from "@appstrate/core/module";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import {
   resolvedConnectionMapSchema,
@@ -2165,6 +2165,62 @@ export async function listLlmUsage(args: {
     pricingStatus: r.pricingStatus,
     settled: r.settled,
   }));
+}
+
+/**
+ * Cursor read of finished runs, ordered by `(completed_at, id)` ASC — the platform side of
+ * `PlatformServices.runs.listTerminal`. A metering module settles a run's compute time from
+ * it without a cross-module SQL join into `runs`.
+ *
+ * Only terminal runs with a `completed_at` are visible (`idx_runs_completed_at` is partial on
+ * exactly that). `after` is the exclusive keyset, compared as a row value so the two columns
+ * order together. The limit clamps like {@link listLlmUsage}'s.
+ */
+export async function listTerminalRuns(args: {
+  after?: { completedAt: Date; id: string };
+  limit?: number;
+}): Promise<TerminalRunRow[]> {
+  const limit = Math.min(
+    Math.max(args.limit ?? LLM_USAGE_LIST_DEFAULT_LIMIT, 1),
+    LLM_USAGE_LIST_MAX_LIMIT,
+  );
+  const rows = await db
+    .select({
+      id: runs.id,
+      orgId: runs.orgId,
+      runOrigin: runs.runOrigin,
+      status: runs.status,
+      duration: runs.duration,
+      completedAt: runs.completedAt,
+    })
+    .from(runs)
+    .where(
+      and(
+        inArray(runs.status, [...terminalRunStatusValues]),
+        sql`${runs.completedAt} IS NOT NULL`,
+        args.after
+          ? sql`(${runs.completedAt}, ${runs.id}) > (${args.after.completedAt.toISOString()}::timestamptz, ${args.after.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(asc(runs.completedAt), asc(runs.id))
+    .limit(limit);
+
+  return rows.flatMap((r) =>
+    // `status` is narrowed by the WHERE; the filter below only satisfies the type.
+    r.completedAt && r.status !== "pending" && r.status !== "running"
+      ? [
+          {
+            id: r.id,
+            orgId: r.orgId,
+            runOrigin: r.runOrigin,
+            status: r.status,
+            durationMs: r.duration,
+            completedAt: r.completedAt,
+          },
+        ]
+      : [],
+  );
 }
 
 /**

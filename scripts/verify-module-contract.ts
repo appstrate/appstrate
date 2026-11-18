@@ -302,6 +302,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   logger: { owners: ["module-observability"] },
   http: { owners: ["module-chat", "module-observability"] },
   usage: { owners: ["module-billing"] },
+  runs: { owners: ["module-billing"] },
   inProcess: { owners: ["module-chat"] },
   resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },

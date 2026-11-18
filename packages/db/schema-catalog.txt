@@ -1127,6 +1127,7 @@ index CREATE INDEX idx_run_reads_unread ON public.run_reads USING btree (org_id,
 index CREATE INDEX idx_runs_api_key_id ON public.runs USING btree (api_key_id) WHERE (api_key_id IS NOT NULL)
 index CREATE INDEX idx_runs_boot_deadline_sweep ON public.runs USING btree (boot_deadline_at) WHERE ((boot_deadline_at IS NOT NULL) AND (sink_closed_at IS NULL) AND (last_event_sequence = 0))
 index CREATE INDEX idx_runs_chat_session_started ON public.runs USING btree (chat_session_id, started_at) WHERE (chat_session_id IS NOT NULL)
+index CREATE INDEX idx_runs_completed_at ON public.runs USING btree (completed_at, id) WHERE (completed_at IS NOT NULL)
 index CREATE INDEX idx_runs_end_user_id ON public.runs USING btree (end_user_id)
 index CREATE INDEX idx_runs_model_credential_id ON public.runs USING btree (model_credential_id) WHERE (model_credential_id IS NOT NULL)
 index CREATE INDEX idx_runs_org_id ON public.runs USING btree (org_id)

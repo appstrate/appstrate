@@ -16,7 +16,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { getClientIp } from "../client-ip.ts";
-import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts";
+import { listLlmUsage, getSettledFrontierId, listTerminalRuns } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
 import {
   recordChatUsage,
@@ -42,7 +42,8 @@ import type { AppEnv } from "../../types/index.ts";
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
  * minimal — `usage.list` / `usage.settledFrontier` (the billing module's cursor sweep
- * of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
+ * of the `llm_usage` ledger), `runs.listTerminal` (its compute-minutes settlement),
+ * `inProcess.dispatch`, and the chat seam
  * (`resolveChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
  * which the chat module drives the single generic in-process Pi chat engine,
  * meters it, and gates admission — the module resolves credentials/tokens,
@@ -63,6 +64,11 @@ function buildPlatformServices(): PlatformServices {
     usage: {
       list: listLlmUsage,
       settledFrontier: getSettledFrontierId,
+    },
+    // Finished-run cursor — the sole consumer is the billing module, which settles a
+    // run's compute minutes from it (the module has no read access to `runs`).
+    runs: {
+      listTerminal: listTerminalRuns,
     },
     inProcess: {
       // In-process self-dispatch through the full platform middleware chain.
