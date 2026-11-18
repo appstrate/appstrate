@@ -20,7 +20,7 @@ import {
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { getTestApp } from "../../helpers/app.ts";
-import { db, truncateAll } from "../../helpers/db.ts";
+import { countTestSelects, db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -257,6 +257,47 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
     app.request(path, { headers: { ...headers, "X-Space-Id": owner.defaultSpaceId } });
   const archivePath = (uri: string) =>
     `/api/packages/skills/served/archive?uri=${encodeURIComponent(uri)}`;
+
+  it.skipIf(process.env.TEST_TIER !== "0")(
+    "keeps the warm catalogue query count constant as skills are published",
+    async () => {
+      const measure = async (size: number) => {
+        const list = async () => {
+          const response = await rest(ownerHeaders(), "/api/packages/skills/served");
+          expect(response.status).toBe(200);
+          expect(
+            ((await response.json()) as { data: Entry[] }).data.filter((entry) =>
+              entry.uri.includes("/skillsext/"),
+            ),
+          ).toHaveLength(size);
+        };
+        await list();
+        return countTestSelects(list);
+      };
+      const one = await measure(1);
+      expect(one).toBeGreaterThan(0);
+      for (let i = 1; i < 10; i++)
+        await seedPublishedSkill(`@skillsext/test-${i}`, `test-${i}`, owner.defaultSpaceId);
+      expect(await measure(10)).toBe(one);
+    },
+  );
+
+  it("omits a latest tag pointing at another package's version", async () => {
+    const [team] = await db
+      .select()
+      .from(packageDistTags)
+      .where(eq(packageDistTags.packageId, TEAM));
+    await db
+      .update(packageDistTags)
+      .set({ versionId: team!.versionId })
+      .where(eq(packageDistTags.packageId, TONE));
+    const response = await rest(ownerHeaders(), "/api/packages/skills/served");
+    expect(response.status).toBe(200);
+    expect(
+      ((await response.json()) as { data: Entry[] }).data.map((entry) => entry.uri),
+    ).not.toContain(toneUri());
+    expect((await rest(ownerHeaders(), archivePath(toneUri()))).status).toBe(404);
+  });
 
   it("serves the entries and bytes the MCP endpoint serves to the same caller", async () => {
     const mcp = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});

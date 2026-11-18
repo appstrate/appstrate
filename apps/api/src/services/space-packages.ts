@@ -545,7 +545,11 @@ function latestTagJoin(packageIdColumn: AnyPgColumn) {
         .select({ one: sql`1` })
         .from(packageVersions)
         .where(
-          and(eq(packageVersions.id, packageDistTags.versionId), eq(packageVersions.yanked, false)),
+          and(
+            eq(packageVersions.id, packageDistTags.versionId),
+            eq(packageVersions.packageId, packageIdColumn),
+            eq(packageVersions.yanked, false),
+          ),
         ),
     ),
   );

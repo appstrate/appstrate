@@ -21,13 +21,28 @@ import { conflict, forbidden } from "../../../../src/lib/errors.ts";
 import { createServedSkillCache } from "../../../../src/services/served-skill-cache.ts";
 import { serveSkill, skillName, type ServedSkill } from "../../../../src/services/served-skill.ts";
 import type { ServedSkillsContext } from "../../../../src/services/served-skills.ts";
-import { buildSkillServer } from "../../../../src/modules/mcp/skills.ts";
+import { buildSkillServer as createServer } from "../../../../src/modules/mcp/skills.ts";
 import type { SkillRead } from "../../../../src/services/skill-read.ts";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const sha256 = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const SPACE = "spc_1";
 const placed = (...ids: string[]) => ids.map((packageId) => ({ packageId, spaceId: SPACE }));
+
+type Fixture = Omit<ServedSkillsContext, "listActiveSkills"> & {
+  listActiveSkills: (definition: "published" | "draft") => Promise<ReturnType<typeof placed>>;
+};
+
+function buildSkillServer(ctx: Fixture) {
+  return createServer({
+    ...ctx,
+    listActiveSkills: async (definition) =>
+      (await ctx.listActiveSkills(definition)).map(({ spaceId, packageId }) => ({
+        spaceId,
+        read: () => ctx.readSkill(spaceId, packageId, definition),
+      })),
+  });
+}
 
 describe("serveSkill", () => {
   const md = (name: string) =>
@@ -157,9 +172,9 @@ describe("skills/list, skills/get and resources/read", () => {
     };
   }
 
-  function server(overrides: Partial<ServedSkillsContext> = {}) {
+  function server(overrides: Partial<Fixture> = {}) {
     const unservable: string[] = [];
-    const ctx: ServedSkillsContext = {
+    const ctx: Fixture = {
       spaceIds: [SPACE],
       listActiveSkills: async () => placed("@acme/tone", "@acme/hidden"),
       readSkill: async (_spaceId, packageId, definition) => {
@@ -434,7 +449,7 @@ describe("the served skill cache", () => {
   it("shares concurrent archive reads across spaces and retries a failed read", async () => {
     let reads = 0;
     const spaces = [SPACE, "spc_2"];
-    const ctx: ServedSkillsContext = {
+    const ctx: Fixture = {
       cache: createServedSkillCache(1024),
       spaceIds: spaces,
       listActiveSkills: async () => spaces.map((spaceId) => ({ spaceId, packageId: "@acme/tone" })),
