@@ -361,7 +361,10 @@ function readPptx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
 function sharedStrings(files: Record<string, Uint8Array>): string[] {
   const xml = member(files, "xl/sharedStrings.xml");
   if (xml === null) return [];
-  return [...elements(xml, "si")].map((entry) => runsText(entry.body));
+  // One string may be referenced by thousands of cells: each is cut to the output cap once.
+  return [...elements(xml, "si")].map((entry) =>
+    runsText(entry.body).slice(0, DOCUMENT_TEXT_MAX_CHARS),
+  );
 }
 
 /** Sheet name + archive path, in workbook order. */
@@ -412,7 +415,11 @@ function readXlsx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
       const cells: string[] = [];
       // `r` is optional in SpreadsheetML: a cell without one sits right after the previous cell.
       let nextColumn = 0;
+      let lineChars = 0;
       for (const cell of elements(row.body, "c")) {
+        // The row is cut at the output cap while it is built: a cell referencing a long shared
+        // string many times over would otherwise assemble megabytes before the cap is looked at.
+        if (lineChars > DOCUMENT_TEXT_MAX_CHARS) break;
         const reference = attribute(cell.attributes, "r");
         const declared = reference === undefined ? -1 : columnIndex(reference);
         const column = declared >= 0 ? declared : nextColumn;
@@ -428,6 +435,7 @@ function readXlsx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
         if (value === "") continue;
         while (cells.length < column) cells.push("");
         cells[column] = value.replace(/[\t\r\n]+/g, " ");
+        lineChars += cells[column].length + 1;
       }
       if (cells.some((cell) => cell !== "")) {
         const line = cells.join("\t");
