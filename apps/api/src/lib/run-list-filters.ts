@@ -6,11 +6,10 @@ import { eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { parseListLimit } from "@appstrate/core/list-query";
-import { scopedNameRegex } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { GLOBAL_RUN_KINDS, type GlobalRunListFilters } from "../services/state/runs.ts";
 import { invalidRequest } from "./errors.ts";
-import { parseStrictQuery } from "./list-query.ts";
+import { closedSet, packageIdFilter, parseStrictQuery } from "./list-query.ts";
 import { likeContains } from "./like-pattern.ts";
 
 /** `runs.run_number` is an int4: a larger number names no run, and binding it overflows. */
@@ -64,14 +63,6 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
   return conditions;
 }
 
-/**
- * A closed-set filter. An unrecognised value is a 400: dropping it would widen
- * a list the caller reads as narrowed. An empty value (`?kind=`) reads as
- * absent — how a form or a URL builder emitting every key spells "no filter".
- */
-export const closedSet = <const T extends readonly [string, ...string[]]>(values: T) =>
-  z.preprocess((value) => (value === "" ? undefined : value), z.enum(values).optional());
-
 // Built on first use: `services/state/runs.ts` imports this module, so `GLOBAL_RUN_KINDS` is not
 // initialised yet while it loads.
 const runListQuerySchema = () =>
@@ -92,18 +83,6 @@ const runListQuerySchema = () =>
       startingAfter: z.string().optional(),
     })
     .strict();
-
-/**
- * The `packageId` filter of a list (runs, schedules): one package id. An empty
- * value reads as absent, as on the closed sets.
- */
-export const packageIdFilter = z.preprocess(
-  (value) => (value === "" ? undefined : value),
-  z
-    .string()
-    .regex(scopedNameRegex, { error: "packageId must be a package id (@scope/name)" })
-    .optional(),
-);
 
 /** `start_date` / `end_date`: an ISO date, a 400 otherwise. */
 function parseDate(raw: string | undefined, name: string): Date | undefined {

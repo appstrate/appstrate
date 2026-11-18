@@ -25,8 +25,9 @@
  * core test helper mints one; it shares the API key's `principalKind`, which is
  * what `callerPersonalOwnerId` reads.
  *
- * The reach every list shares (owner, guest, role preview, pinned and unscoped
- * API keys, end-user, unknown parameter, another organization) is in
+ * The reach every org read shares, the list and `/{id}` alike (owner, guest,
+ * role preview, pinned and unscoped API keys, end-user, unknown parameter,
+ * another organization) is in
  * `cross-space-reads.test.ts`; the MCP door in
  * `modules/mcp/test/integration/org-reads.test.ts`.
  */
@@ -43,7 +44,6 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedEndUser,
   seedPackage,
   seedRun,
   seedSpace,
@@ -304,35 +304,7 @@ describe("GET /api/orgs/{orgId}/runs", () => {
       }
     });
 
-    it("bounds a space-pinned API key to its space", async () => {
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: un,
-        createdBy: owner.user.id,
-        scopes: ["runs:read-all"],
-      });
-      const headers = { Authorization: `Bearer ${key.rawKey}` };
-      expect((await read(r.unMember!, headers)).status).toBe(200);
-      expect((await read(r.defaultOwner!, headers)).status).toBe(404);
-    });
-
-    it("answers a role preview with the persona's reach", async () => {
-      const headers = session(owner, { "X-View-As": "org_role=member" });
-      expect((await read(r.defaultOwner!, headers)).status).toBe(200);
-      expect((await read(r.unOwner!, headers)).status).toBe(404);
-    });
-
-    it("refuses an end-user, and an unknown query parameter", async () => {
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: un,
-        createdBy: owner.user.id,
-        scopes: ["runs:read-all"],
-      });
-      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
-      const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
-      expect((await read(r.unOwner!, headers)).status).toBe(403);
-      expect((await read(r.unOwner!, session(member), "?bogus=1")).status).toBe(400);
+    it("refuses a malformed wait", async () => {
       expect((await read(r.unOwner!, session(member), "?wait=-1")).status).toBe(400);
     });
   });

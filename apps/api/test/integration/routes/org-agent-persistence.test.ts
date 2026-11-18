@@ -14,10 +14,9 @@
  * | member session                           | own + shared            | every actor                   | nothing            | nothing                     |
  * | owner session                            | every actor             | every actor                   | nothing            | every actor                 |
  * | member loopback bearer, `persistence:read` ceiling | own + shared  | own + shared                  | nothing            | nothing                     |
- * | API key pinned to Deux                   | nothing                 | every actor                   | nothing            | nothing                     |
  *
- * A credential whose ceiling lacks `persistence:read` and an end-user are
- * refused; a role preview reads with the persona's actor partition.
+ * A role preview reads with the persona's actor partition. The reach every org
+ * read shares (pinned key, ceiling, end-user, …) is in `cross-space-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -25,8 +24,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
-  seedApiKey,
-  seedEndUser,
   seedPackage,
   seedRun,
   seedSpace,
@@ -231,47 +228,12 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
   });
 
   describe("credentials", () => {
-    const keyFor = async (spaceId: string, scopes: string[]) => {
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId,
-        createdBy: member.user.id,
-        scopes,
-      });
-      return { Authorization: `Bearer ${key.rawKey}` };
-    };
-
-    it("bounds an API key pinned to a space to that space's rows", async () => {
-      const { memories } = await read(
-        await keyFor(s.deux, ["persistence:read", "persistence:delete"]),
-      );
-      expect(memories).toEqual(everyActor("deux").sort());
-    });
-
-    it("refuses a credential whose ceiling holds no persistence:read", async () => {
-      const res = await app.request(path(), { headers: await keyFor(s.deux, ["agents:read"]) });
-      expect(res.status).toBe(403);
-      const bearer = await app.request(path(), {
-        headers: memberLoopbackHeaders(member, owner.orgId, ["agents:read"]),
-      });
-      expect(bearer.status).toBe(403);
-    });
-
     it("reads a delegated bearer without persistence:delete in its own actor partition", async () => {
       const { memories } = await read(
         memberLoopbackHeaders(member, owner.orgId, ["persistence:read"]),
       );
       // The member holds `persistence:delete` in Deux; the bearer's ceiling does not.
       expect(memories).toEqual([...ownAndShared("un"), ...ownAndShared("deux")].sort());
-    });
-
-    it("refuses an end-user", async () => {
-      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: s.deux });
-      const headers = {
-        ...(await keyFor(s.deux, ["persistence:read"])),
-        "Appstrate-User": endUser.id,
-      };
-      expect((await app.request(path(), { headers })).status).toBe(403);
     });
 
     it("reads a role preview with the persona's actor partition", async () => {

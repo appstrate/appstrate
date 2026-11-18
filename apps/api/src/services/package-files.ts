@@ -16,7 +16,6 @@ import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storag
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { getVersionForDownload, versionArtifactUnavailable } from "./package-versions.ts";
-import { lockIdleAgent } from "./state/runs.ts";
 import { withPackageDraftLock } from "./package-locks.ts";
 import {
   CONFIG_BY_TYPE,
@@ -600,8 +599,6 @@ export function createPackageDraft(
 }
 
 export type MutateDraftFilesInput = {
-  /** Restoring a version refuses an agent running in the working space. */
-  requireIdleInSpace?: string;
   /**
    * The draft-version assertion (the route's `If-Match`), evaluated under the
    * draft lock so check and write are one step. Imports may omit it.
@@ -639,13 +636,6 @@ export async function mutatePackageDraftFiles(
   const label = CONFIG_BY_TYPE[target.type].labelSingular;
 
   return withPackageDraftLock(target.id, async (tx) => {
-    if (target.type === "agent" && input.requireIdleInSpace) {
-      await lockIdleAgent(
-        tx,
-        { orgId: target.orgId, spaceId: input.requireIdleInSpace },
-        target.id,
-      );
-    }
     const [row] = await tx
       .select({
         draftManifest: packages.draftManifest,

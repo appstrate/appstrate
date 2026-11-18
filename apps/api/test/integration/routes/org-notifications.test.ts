@@ -15,8 +15,8 @@
  *
  * One notification is read in whichever space holds it through
  * `GET /api/orgs/{orgId}/notifications/{id}`, and marked read in its own space
- * through the space routes; the reach every org list shares is in
- * `cross-space-reads.test.ts`.
+ * through the space routes; the reach every org read shares (pinned key, role
+ * preview, end-user, …) is in `cross-space-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -28,7 +28,7 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedEndUser, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
+import { seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
@@ -187,14 +187,14 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
     });
   });
 
-  it("answers a role preview with the persona's reach, the previewer's own notifications", async () => {
+  it("keeps the previewer's own notifications under a role preview, never the persona's", async () => {
     const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
     const res = await app.request(listPath(), {
       headers: { ...session(owner), "X-View-As": "org_role=member" },
     });
     expect(res.status, await res.clone().text()).toBe(200);
     const rows = ((await res.json()) as { data: ListedNotification[] }).data;
-    // Un is closed and the persona joined none of it: its notification is out of reach.
+    // The member's notification of the default space stays out: a persona has no feed.
     expect(rows.map((row) => row.id)).toEqual([ownDefault]);
   });
 
@@ -202,16 +202,6 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
     const onePath = (id: string) => `/api/orgs/${owner.orgId}/notifications/${id}`;
     const status = async (id: string, headers: Record<string, string>) =>
       (await app.request(onePath(id), { headers })).status;
-
-    const pinnedKey = async () => {
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: un,
-        createdBy: owner.user.id,
-        scopes: ["runs:read"],
-      });
-      return { Authorization: `Bearer ${key.rawKey}` };
-    };
 
     it("finds the caller's notification in whichever space holds it", async () => {
       const res = await app.request(onePath(n.unMember!), { headers: session(member) });
@@ -225,26 +215,6 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
       expect(await status(n.foreign!, session(member))).toBe(404);
       expect(await status(n.unOwner!, session(member))).toBe(404);
       expect(await status("not-a-uuid", session(member))).toBe(404);
-    });
-
-    it("bounds a space-pinned API key to its space", async () => {
-      const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
-      const headers = await pinnedKey();
-      expect(await status(n.unOwner!, headers)).toBe(200);
-      expect(await status(ownDefault, headers)).toBe(404);
-    });
-
-    it("answers a role preview with the persona's reach", async () => {
-      const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
-      const headers = { ...session(owner), "X-View-As": "org_role=member" };
-      expect(await status(ownDefault, headers)).toBe(200);
-      expect(await status(n.unOwner!, headers)).toBe(404);
-    });
-
-    it("refuses an end-user", async () => {
-      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
-      const headers = { ...(await pinnedKey()), "Appstrate-User": endUser.id };
-      expect(await status(n.unOwner!, headers)).toBe(403);
     });
   });
 });

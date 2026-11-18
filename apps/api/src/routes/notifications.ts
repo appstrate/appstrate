@@ -18,7 +18,7 @@ import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListLimit } from "@appstrate/core/list-query";
 import { z } from "zod";
 import { parseEmptyQuery, parseStrictQuery } from "../lib/list-query.ts";
-import { closedSet } from "../lib/run-list-filters.ts";
+import { closedSet } from "../lib/list-query.ts";
 
 /**
  * The feed's ceiling: the feed is the recipient's own, so no role grant is asked

@@ -1842,7 +1842,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create an agent version from draft",
       description:
-        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. A pending or running execution of this agent in the request space blocks publication." +
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden." +
         PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1885,7 +1885,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "A run is in progress in the request space, the draft is unchanged, or the version already exists (`agent_in_use`, `no_changes`, `version_exists`).",
+            "The draft is unchanged, or the version already exists (`no_changes`, `version_exists`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1900,9 +1900,7 @@ export const packagesPaths = {
       operationId: "restoreAgentVersion",
       tags: ["Packages"],
       summary: "Restore an agent version into the draft",
-      description:
-        "Restore a published version into the draft. A pending or running execution of this agent in the request space blocks restoration." +
-        PACKAGE_MUTATION_AUTHORITY,
+      description: "Restore a published version into the draft." + PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1926,8 +1924,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description:
-            "The agent has a pending or running execution in the request space (`agent_in_use`).",
+          description: "The draft was modified concurrently (`conflict`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

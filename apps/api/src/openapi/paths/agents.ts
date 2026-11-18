@@ -441,7 +441,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204. An unknown query parameter, or a `kind` / `actor_type` outside its set, is a `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -489,6 +489,7 @@ export const agentsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

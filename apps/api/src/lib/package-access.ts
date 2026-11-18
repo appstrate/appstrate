@@ -391,7 +391,6 @@ export async function resolvePackageHome(
     accessible,
   );
   if (!readSpaceIds.length) return null;
-  // The home endpoint orders the remaining ids lexically.
   const rank = (id: string) => (id === pkg.homeSpaceId ? 0 : 1);
   readSpaceIds.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
   return {

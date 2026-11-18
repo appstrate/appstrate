@@ -6,7 +6,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import { parseStrictQuery } from "../lib/list-query.ts";
-import { closedSet } from "../lib/run-list-filters.ts";
+import { closedSet } from "../lib/list-query.ts";
 import { listAgentIndex } from "../services/package-index.ts";
 import {
   listPinnedSlots,
@@ -599,9 +599,11 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
-      const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actor_type");
-      const actorIdParam = c.req.query("actor_id");
+      const {
+        kind: kindParam,
+        actor_type: actorTypeParam,
+        actor_id: actorIdParam,
+      } = parseStrictQuery(c, persistenceQuerySchema.omit({ runId: true }));
 
       // Same actor-override guard the GET path applies: only a holder of
       // `persistence:delete` may target another actor's rows (or omit the

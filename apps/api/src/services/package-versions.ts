@@ -44,7 +44,6 @@ import type { DbOrTx } from "../lib/db-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { lockPackageVersions, withPackageDraftLock } from "./package-locks.ts";
-import type { SpaceScope } from "../lib/scope.ts";
 import { lockIdleAgent } from "./state/runs.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
@@ -53,7 +52,6 @@ import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 // ─────────────────────────────────────────────
 
 interface CreateVersionParams {
-  requireIdleIn?: SpaceScope;
   packageId: string;
   version: string;
   integrity: string;
@@ -153,7 +151,6 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
 
   return await db.transaction(async (tx) => {
     await lockPackageVersions(tx, packageId);
-    if (params.requireIdleIn) await lockIdleAgent(tx, params.requireIdleIn, packageId);
 
     const outcome = await planVersionCreation(tx, packageId, version);
 
@@ -761,7 +758,6 @@ type CreateVersionResult =
  *  (published versions are immutable — the old silent-success path overwrote the stored
  *  bytes while keeping the stale integrity row). */
 export async function createVersionFromDraft(params: {
-  requireIdleInSpace?: string;
   packageId: string;
   orgId: string;
   userId: string;
@@ -899,10 +895,6 @@ export async function createVersionFromDraft(params: {
   }
 
   const result = await createVersionAndUpload({
-    requireIdleIn:
-      pkg.type === "agent" && params.requireIdleInSpace
-        ? { orgId, spaceId: params.requireIdleInSpace }
-        : undefined,
     packageId,
     version,
     createdBy: userId,
@@ -1121,7 +1113,6 @@ export async function replaceVersionContent(params: {
  *  cannot overwrite published bytes (leaving the row's stale integrity hash to
  *  fail every subsequent run) or delete a good artifact. */
 export async function createVersionAndUpload(params: {
-  requireIdleIn?: SpaceScope;
   packageId: string;
   version: string;
   createdBy: string | null;
@@ -1145,7 +1136,6 @@ export async function createVersionAndUpload(params: {
     // createPackageVersion's transaction; the artifact upload runs in there
     // too, only on a `created` outcome, so row and bytes commit together.
     return await createPackageVersion({
-      requireIdleIn: params.requireIdleIn,
       packageId,
       version,
       integrity,

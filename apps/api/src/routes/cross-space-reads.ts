@@ -118,6 +118,7 @@ export function createCrossSpaceReadsRouter() {
         orgId,
         packageId,
         grants.map((g) => g.spaceId),
+        "agent",
       );
       if (!placements.length) throw agentNotFound(packageId);
       const ids = new Set(placements.map((row) => row.id));

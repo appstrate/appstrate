@@ -62,6 +62,7 @@ import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
+import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import {
@@ -719,7 +720,11 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId)))
       .for("key share");
     if (!agent) throw notFound(`Agent '${packageId}' no longer exists`);
-    if (params.versionRef && params.versionRef !== "draft" && agent.source !== "system") {
+    if (
+      params.versionRef &&
+      params.versionRef !== VERSION_SELECTOR_DRAFT &&
+      agent.source !== "system"
+    ) {
       const [version] = await tx
         .select({ id: packageVersions.id })
         .from(packageVersions)
@@ -1464,11 +1469,7 @@ async function countActiveRunsForPackage(
  * this package through runs.package_id. FOR UPDATE waits for earlier admissions and holds later
  * ones until the mutation commits. The count must be a separate statement after that wait.
  */
-export async function lockIdleAgent(
-  tx: Db,
-  scope: OrgScope & { spaceId?: string },
-  packageId: string,
-): Promise<void> {
+export async function lockIdleAgent(tx: Db, scope: OrgScope, packageId: string): Promise<void> {
   await tx
     .select({ id: packages.id })
     .from(packages)
@@ -1478,7 +1479,7 @@ export async function lockIdleAgent(
   if (active > 0) {
     throw conflict(
       "agent_in_use",
-      `${active} run(s) still running for this agent${scope.spaceId === undefined ? ", in this space or another space of the organization" : ""}`,
+      `${active} run(s) still running for this agent, in this space or another space of the organization`,
     );
   }
 }

@@ -1179,7 +1179,6 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const result = await createVersionFromDraft({
-      requireIdleInSpace: getSpaceScope(c).spaceId,
       packageId: itemId,
       orgId,
       userId: user.id,
@@ -1290,7 +1289,6 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
         precondition: { assertVersion: (current) => assertIfMatch(c, current) },
-        requireIdleInSpace: getSpaceScope(c).spaceId,
         manifest: asRecord(detail.manifest),
         draftContent: content,
         replace: files,

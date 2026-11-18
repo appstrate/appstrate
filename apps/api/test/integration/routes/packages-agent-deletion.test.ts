@@ -159,7 +159,8 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(body.detail).toContain("another space of the organization");
     await assertDbHas(packages, eq(packages.id, "@delorg/elsewhere"));
 
-    // The run froze its version: publishing another one leaves it untouched.
+    // A published run froze its version, and a draft run already reads every draft save:
+    // publishing and restoring wait for no run, in any space.
     const published = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
       method: "POST",
       headers: authHeaders(ctx),
@@ -175,26 +176,6 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     });
     expect(removedVersion.status).toBe(409);
     expect(await removedVersion.json()).toHaveProperty("code", "agent_in_use");
-
-    await seedRun({
-      packageId: "@delorg/elsewhere",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-    });
-    const busyRestore = await restore();
-    expect(busyRestore.status).toBe(409);
-    expect(await busyRestore.json()).toHaveProperty("code", "agent_in_use");
-    await db
-      .update(packages)
-      .set({ draftContent: "Revised prompt" })
-      .where(eq(packages.id, "@delorg/elsewhere"));
-    const busyPublish = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ version: "0.3.0" }),
-    });
-    expect(busyPublish.status).toBe(409);
-    expect(await busyPublish.json()).toHaveProperty("code", "agent_in_use");
   });
 
   it.skipIf(isEmbeddedDb)(
