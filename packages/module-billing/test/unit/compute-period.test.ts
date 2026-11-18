@@ -5,7 +5,12 @@
  * up, no minimum, remote runs free) and where a calendar month starts and ends.
  */
 import { describe, expect, it } from "bun:test";
-import { billableSeconds, periodEndOf, periodStartOf } from "../../src/compute/period.ts";
+import {
+  billableSeconds,
+  periodEndOf,
+  periodStartOf,
+  quotaStanding,
+} from "../../src/compute/period.ts";
 
 describe("billableSeconds", () => {
   it("counts a 40 second run as 40 seconds", () => {
@@ -51,5 +56,25 @@ describe("calendar month (UTC)", () => {
   it("ends a month at the start of the next, across a year boundary", () => {
     expect(periodEndOf("2026-11-01").toISOString()).toBe("2026-12-01T00:00:00.000Z");
     expect(periodEndOf("2026-12-01").toISOString()).toBe("2027-01-01T00:00:00.000Z");
+  });
+});
+
+describe("quotaStanding", () => {
+  it("reads 100 % exactly when the quota is used up, never before", () => {
+    expect(quotaStanding(0, 1000)).toEqual({ quotaSeconds: 60_000, percent: 0, exhausted: false });
+    expect(quotaStanding(59_999, 1000)).toEqual({
+      quotaSeconds: 60_000,
+      percent: 99,
+      exhausted: false,
+    });
+    expect(quotaStanding(60_000, 1000)).toEqual({
+      quotaSeconds: 60_000,
+      percent: 100,
+      exhausted: true,
+    });
+  });
+
+  it("caps the share at 100 when the soft cap let consumption overshoot", () => {
+    expect(quotaStanding(90_000, 1000)).toMatchObject({ percent: 100, exhausted: true });
   });
 });

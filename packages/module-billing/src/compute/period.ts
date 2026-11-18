@@ -34,6 +34,24 @@ export function billableSeconds(run: Pick<TerminalRunRow, "runOrigin" | "duratio
   return Math.ceil(ms / 1000);
 }
 
+/**
+ * Where a month's consumption stands against the minutes the plan includes: the quota in
+ * seconds, the share used (floored, capped at 100) and whether it is used up. The ONE place
+ * that arithmetic is written, so the admission gate, the dashboard gauge and the 80 % warning
+ * cannot disagree: `percent` reads 100 exactly when `exhausted`, i.e. when a new run is refused.
+ */
+export function quotaStanding(
+  usedSeconds: number,
+  includedMinutes: number,
+): { quotaSeconds: number; percent: number; exhausted: boolean } {
+  const quotaSeconds = includedMinutes * SECONDS_PER_MINUTE;
+  return {
+    quotaSeconds,
+    percent: quotaSeconds > 0 ? Math.min(100, Math.floor((usedSeconds / quotaSeconds) * 100)) : 0,
+    exhausted: usedSeconds >= quotaSeconds,
+  };
+}
+
 /** First day (`YYYY-MM-01`) of the UTC calendar month `at` falls in — the `period_start` key. */
 export function periodStartOf(at: Date): string {
   return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-01`;

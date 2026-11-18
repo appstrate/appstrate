@@ -13,12 +13,12 @@
 import { eq } from "drizzle-orm";
 import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
-import { COMPUTE_WARNING_THRESHOLD, getPlans, isPlanId } from "../config.ts";
+import { QUOTA_WARNING_THRESHOLD, getPlans, isPlanId } from "../config.ts";
 import { getAppUrl } from "../platform.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
 import { logger } from "../logger.ts";
-import { SECONDS_PER_MINUTE, periodEndOf, periodStartOf } from "./period.ts";
+import { SECONDS_PER_MINUTE, periodEndOf, periodStartOf, quotaStanding } from "./period.ts";
 
 /** What one settlement batch added to one org's month. */
 export interface ComputeIncrement {
@@ -30,14 +30,11 @@ export interface ComputeIncrement {
 }
 
 /** Fire-and-forget: a warning must never fail, or delay, a settlement pass. */
-export function emitComputeSignals(
-  increments: readonly ComputeIncrement[],
-  now = new Date(),
-): void {
+export function emitComputeSignals(increments: readonly ComputeIncrement[]): void {
   void (async () => {
     for (const inc of increments) {
       try {
-        await warnIfCrossed(inc, now);
+        await warnIfCrossed(inc);
       } catch (err) {
         logger.error("compute warning failed", {
           orgId: inc.orgId,
@@ -48,9 +45,9 @@ export function emitComputeSignals(
   })();
 }
 
-async function warnIfCrossed(inc: ComputeIncrement, now: Date): Promise<void> {
+async function warnIfCrossed(inc: ComputeIncrement): Promise<void> {
   // A late settlement of a past month is history, not a warning about now.
-  if (inc.periodStart !== periodStartOf(now)) return;
+  if (inc.periodStart !== periodStartOf(new Date())) return;
 
   const [account] = await getBillingDb()
     .select({ planId: billingAccounts.planId })
@@ -61,18 +58,18 @@ async function warnIfCrossed(inc: ComputeIncrement, now: Date): Promise<void> {
   const included = plan.includedComputeMinutes;
   if (included === null || included <= 0) return;
 
-  const quotaSeconds = included * SECONDS_PER_MINUTE;
+  const { quotaSeconds, exhausted } = quotaStanding(inc.secondsUsed, included);
   const previous = (inc.secondsUsed - inc.addedSeconds) / quotaSeconds;
   const current = inc.secondsUsed / quotaSeconds;
 
-  if (current >= 1) {
+  if (exhausted) {
     logger.warn("Compute quota reached (new runs are refused until the month renews)", {
       orgId: inc.orgId,
       secondsUsed: inc.secondsUsed,
       includedMinutes: included,
     });
   }
-  if (previous < COMPUTE_WARNING_THRESHOLD && current >= COMPUTE_WARNING_THRESHOLD) {
+  if (previous < QUOTA_WARNING_THRESHOLD && current >= QUOTA_WARNING_THRESHOLD) {
     sendBillingEmail(inc.orgId, "compute-warning", {
       planName: plan.name,
       usagePercent: Math.min(100, Math.round(current * 100)),
