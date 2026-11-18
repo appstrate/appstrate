@@ -50,6 +50,7 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import { getSelectedModelAcceptsImages, subscribeModel } from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
@@ -776,9 +777,41 @@ export function MessageError() {
   );
 }
 
+/**
+ * A file the assistant's turn produced inside the conversation (a connector import): the same
+ * thumbnail or chip a sent attachment renders, from the part's `appfile://` URI. The file's name
+ * and space ride the part's metadata (the stream chunk has no filename). A part that is not a
+ * platform file URI renders nothing: a `data:` or remote URL is never fetched by the chat.
+ */
+function AssistantFilePart({
+  data,
+  mimeType,
+  filename,
+  providerMetadata,
+}: {
+  data: string;
+  mimeType: string;
+  filename?: string;
+  providerMetadata?: unknown;
+}) {
+  const id = parseFileUri(data);
+  if (!id) return null;
+  const meta = (
+    providerMetadata as { appstrate?: { name?: unknown; spaceId?: unknown } } | undefined
+  )?.appstrate;
+  const name = filename ?? (typeof meta?.name === "string" ? meta.name : "");
+  const spaceId = typeof meta?.spaceId === "string" ? meta.spaceId : undefined;
+  return (
+    <div className="my-1">
+      <FileAttachment file={{ id, name, mime: mimeType, ...(spaceId && { spaceId }) }} />
+    </div>
+  );
+}
+
 /** Module-level: assistant-ui memoizes each part on these members' identity. */
 const ASSISTANT_PART_COMPONENTS = {
   Text: MarkdownText,
+  File: AssistantFilePart,
   Reasoning: ReasoningText,
   ReasoningGroup,
   tools: { Fallback: ToolFallback },

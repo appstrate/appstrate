@@ -25,6 +25,8 @@
  */
 
 import type { UIMessageChunk } from "ai";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import { addRequestUsage } from "@appstrate/runner-pi/pi-model";
@@ -171,6 +173,7 @@ export class PiChatUiStreamMapper {
       message?: unknown;
       messages?: unknown[];
       toolCallId?: string;
+      toolName?: string;
       result?: unknown;
       isError?: boolean;
     };
@@ -188,6 +191,7 @@ export class PiChatUiStreamMapper {
       case "tool_execution_end":
         return this.mapToolExecutionEnd({
           toolCallId: String(e.toolCallId ?? ""),
+          toolName: String(e.toolName ?? ""),
           result: e.result,
           isError: e.isError === true,
         });
@@ -304,6 +308,7 @@ export class PiChatUiStreamMapper {
 
   private mapToolExecutionEnd(ev: {
     toolCallId: string;
+    toolName: string;
     result: unknown;
     isError: boolean;
   }): UIMessageChunk[] {
@@ -322,6 +327,7 @@ export class PiChatUiStreamMapper {
         toolCallId: ev.toolCallId,
         output: persistedToolOutput(ev.result),
       },
+      ...savedFileChunks(ev.toolName, ev.result),
     ];
   }
 
@@ -414,6 +420,41 @@ interface PiToolCallBlock {
   id: string;
   name: string;
   arguments?: Record<string, unknown>;
+}
+
+/**
+ * The files an integration `api_call` stored in the conversation (`save_as_file`), as assistant
+ * `file` parts: the thread shows them where they were imported, a thumbnail or a chip, with no
+ * need for the model to restate them. Only the platform's own `api_call` answer is read: a result
+ * the platform marked `relayed` is a third party's text and is never trusted for a file it names,
+ * and only the top-level `file` of an entry counts (an upstream's body sits under `body`).
+ */
+function savedFileChunks(toolName: string, result: unknown): UIMessageChunk[] {
+  if (toolName !== "call_integration_tool") return [];
+  if ((result as { relayed?: unknown } | null)?.relayed === true) return [];
+  const payload = unwrapMcpResult(result);
+  const entries = (payload as { results?: unknown } | null)?.results;
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry): UIMessageChunk[] => {
+    const file = (entry as { file?: Record<string, unknown> } | null)?.file;
+    if (!file || typeof file.uri !== "string" || !parseFileUri(file.uri)) return [];
+    const spaceId = typeof file.space_id === "string" ? file.space_id : undefined;
+    return [
+      {
+        type: "file",
+        url: file.uri,
+        mediaType: typeof file.mime === "string" ? file.mime : "application/octet-stream",
+        // The ai-SDK chunk has no filename: the name rides the part's metadata, like the size.
+        providerMetadata: {
+          appstrate: {
+            ...(typeof file.name === "string" ? { name: file.name } : {}),
+            ...(typeof file.size === "number" ? { size: file.size } : {}),
+            ...(spaceId ? { spaceId } : {}),
+          },
+        },
+      },
+    ];
+  });
 }
 
 /** Read the `toolCall` content block at `index` from a partial assistant message. */

@@ -2,9 +2,14 @@
 
 /** Streaming-aware markdown renderer for assistant messages (GFM + prose). */
 
+import type { ReactNode } from "react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { cn } from "@appstrate/ui/cn";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import remarkGfm from "remark-gfm";
+import { fileActivation } from "./file-activation.ts";
+import { urlTransform } from "./markdown-url.ts";
+import { useChatHost } from "./runtime-context.ts";
 
 /**
  * Open links in a new tab so a click never navigates the chat SPA away — the
@@ -24,8 +29,10 @@ function MarkdownLink({
 }: {
   node?: unknown;
   href?: string;
-  children?: React.ReactNode;
+  children?: ReactNode;
 }) {
+  const fileId = href ? parseFileUri(href) : null;
+  if (fileId) return <MarkdownFileLink id={fileId}>{children}</MarkdownFileLink>;
   return (
     <a {...props} href={href} target="_blank" rel="noopener noreferrer">
       {children}
@@ -33,8 +40,65 @@ function MarkdownLink({
   );
 }
 
+/**
+ * A link to an `appfile://` file: the platform's own file, so a click opens the host's preview
+ * (or its authenticated download), never the raw URI, which no browser can navigate.
+ */
+function MarkdownFileLink({ id, children }: { id: string; children?: ReactNode }) {
+  const { openFile, downloadFile, t } = useChatHost();
+  const name = typeof children === "string" ? children : "";
+  const { onActivate, label } = fileActivation({ id, name }, openFile, downloadFile, t);
+  return (
+    <button
+      type="button"
+      onClick={onActivate}
+      title={label}
+      className="text-primary cursor-pointer underline underline-offset-2"
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * `![alt](appfile://…)`: the image, fetched through the host's authenticated image hook (the
+ * content route needs the session, so a plain `<img src>` could not load it). Inline elements
+ * only: a markdown image sits inside a paragraph. While it loads, or when it cannot be shown,
+ * the alt text stands in, as for any broken image.
+ */
+function MarkdownFileImage({ id, alt }: { id: string; alt: string }) {
+  const { useFileImageSrc, openFile, downloadFile, t } = useChatHost();
+  const src = useFileImageSrc(id);
+  if (!src) return <span className="text-muted-foreground">{alt || "image"}</span>;
+  const { onActivate, label } = fileActivation({ id, name: alt }, openFile, downloadFile, t);
+  return (
+    <button type="button" onClick={onActivate} title={label} aria-label={label}>
+      <img
+        src={src}
+        alt={alt}
+        className="my-1 max-h-96 max-w-full rounded-lg border object-contain"
+      />
+    </button>
+  );
+}
+
+function MarkdownImage({
+  node: _node,
+  src,
+  alt,
+  ...props
+}: {
+  node?: unknown;
+  src?: string;
+  alt?: string;
+}) {
+  const fileId = src ? parseFileUri(src) : null;
+  if (fileId) return <MarkdownFileImage id={fileId} alt={alt ?? ""} />;
+  return <img {...props} src={src} alt={alt} />;
+}
+
 /** Stable identity for the same reason as {@link MarkdownLink}. */
-const MARKDOWN_COMPONENTS = { a: MarkdownLink };
+const MARKDOWN_COMPONENTS = { a: MarkdownLink, img: MarkdownImage };
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -83,6 +147,7 @@ function Markdown({ className }: { className?: string }) {
         className,
       )}
       components={MARKDOWN_COMPONENTS}
+      urlTransform={urlTransform}
     />
   );
 }

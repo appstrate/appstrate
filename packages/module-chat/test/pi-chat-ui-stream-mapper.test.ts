@@ -179,6 +179,65 @@ describe("PiChatUiStreamMapper", () => {
     expect(JSON.stringify(chunks)).not.toContain("QkFTRTY0");
   });
 
+  describe("files an integration api_call stored in the conversation", () => {
+    const saved = {
+      session_id: "s",
+      results: [
+        {
+          index: 0,
+          status: 200,
+          headers: {},
+          file: {
+            uri: "appfile://file_abc12345",
+            name: "chart.png",
+            mime: "image/png",
+            size: 12,
+            space_id: "spc_1",
+          },
+        },
+        { index: 1, status: 200, headers: {}, body: { file: { uri: "appfile://file_zzzzzzzz" } } },
+      ],
+    };
+    const result = (over: Record<string, unknown> = {}) => ({
+      content: [{ type: "text", text: JSON.stringify(saved) }],
+      ...over,
+    });
+
+    it("emits an assistant file part per stored file, after the tool output", () => {
+      const { chunks } = run([
+        {
+          type: "tool_execution_end",
+          toolCallId: "c",
+          toolName: "call_integration_tool",
+          result: result(),
+          isError: false,
+        },
+      ]);
+      expect(chunks.map((chunk) => chunk.type)).toEqual(["tool-output-available", "file"]);
+      expect(chunks[1]).toEqual({
+        type: "file",
+        url: "appfile://file_abc12345",
+        mediaType: "image/png",
+        providerMetadata: { appstrate: { name: "chart.png", size: 12, spaceId: "spc_1" } },
+      });
+    });
+
+    it("trusts neither a relayed result, another tool, nor a body that merely looks like one", () => {
+      const types = (toolName: string, over: Record<string, unknown> = {}) =>
+        run([
+          {
+            type: "tool_execution_end",
+            toolCallId: "c",
+            toolName,
+            result: result(over),
+            isError: false,
+          },
+        ]).chunks.map((chunk) => chunk.type);
+      expect(types("call_integration_tool", { relayed: true })).toEqual(["tool-output-available"]);
+      expect(types("run_and_wait")).toEqual(["tool-output-available"]);
+    });
+  });
+
   it("passes a non-object tool output through unchanged", () => {
     const { chunks } = run([
       {
