@@ -9,9 +9,10 @@
  * Out of the mode, nothing changes.
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it } from "bun:test";
+import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
+import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
@@ -25,10 +26,7 @@ const { RunsPage } = await import("../runs-page.tsx");
 const { SchedulesListPage } = await import("../schedules-list.tsx");
 const { RouteGate } = await import("../../components/route-gate.tsx");
 const { OrgSwitcher } = await import("../../components/org-switcher.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
+const { memberSpaceClient, renderInSpace } = await import("../../test/space-context.ts");
 const { DashboardPage } = await import("../dashboard.tsx");
 const { PackageIndexPage } = await import("../package-index.tsx");
 const { IntegrationsPage } = await import("../integrations-page.tsx");
@@ -36,6 +34,8 @@ const { FilesPage } = await import("../files.tsx");
 const { fileFixture } = await import("../../test/render.tsx");
 const { makeRun } = await import("../../test/run-fixture.ts");
 const { WorkingSpaceName } = await import("../../components/space-name.tsx");
+const { RunAgentButton } = await import("../../components/run-agent-button.tsx");
+const { useRuns } = await import("../../hooks/use-paginated-runs.ts");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -115,12 +115,6 @@ const packageRow = (space_ids: string[], extra: Record<string, unknown> = {}) =>
   ...extra,
 });
 
-let stubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
 function renderIn(
   overview: boolean,
   node: React.ReactElement,
@@ -128,51 +122,10 @@ function renderIn(
   seed: (queryClient: QueryClient) => void = () => {},
   spaces: readonly ReturnType<typeof space>[] = SPACES,
 ) {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: overview ? { "u_1:org_1": true } : {},
-    }),
-  ];
-  const queryClient = new QueryClient();
-  queryClient.setQueryData(
-    ["orgs"],
-    [
-      {
-        id: "org_1",
-        name: "Acme",
-        slug: "acme",
-        icon: null,
-        color: null,
-        role: "member",
-        deleting_at: null,
-        permissions: [],
-        createdAt: "2026-09-05T00:00:00Z",
-      },
-    ],
-  );
-  queryClient.setQueryData(
-    ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-    {
-      object: "list",
-      hasMore: false,
-      data: spaces,
-    },
-  );
+  const queryClient = memberSpaceClient(spaces);
   seed(queryClient);
-  const html = render(<SidebarProvider>{node}</SidebarProvider>, {
+  const html = renderInSpace(<SidebarProvider>{node}</SidebarProvider>, {
+    overview,
     queryClient,
     initialEntries: [url],
   });
@@ -296,8 +249,8 @@ describe("the agent index in the mode", () => {
 
   it("offers a row's run where one of its spaces grants it, whatever the working space grants", () => {
     const run = (spaces: typeof SPACES) =>
-      renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, spaces).html.includes(
-        'aria-label="Lancer"',
+      /aria-label="Lancer dans [^"]+"/.test(
+        renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, spaces).html,
       );
     const without = (space: (typeof SPACES)[number]) => ({
       ...space,
@@ -325,11 +278,17 @@ describe("the agent index in the mode", () => {
         (qc) => qc.setQueryData(["agents", "org_1", "across-spaces"], [agent(spaceIds)]),
         [SPACES[0]!, runner("spc_b"), runner("spc_c")],
       );
-      const at = html.indexOf('aria-label="Lancer"');
+      const at = html.indexOf('aria-label="Lancer dans');
       return html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at));
     };
-    expect(runButton(["spc_a", "spc_b"])).not.toContain('aria-haspopup="menu"');
-    expect(runButton(["spc_b", "spc_c"])).toContain('aria-haspopup="menu"');
+    // In the working space, named: one click.
+    const here = runButton(["spc_a", "spc_b"]);
+    expect(here).toContain('aria-label="Lancer dans Studio"');
+    expect(here).not.toContain('aria-haspopup="menu"');
+    // Elsewhere, between two spaces: the menu, asking.
+    const between = runButton(["spc_b", "spc_c"]);
+    expect(between).toContain('aria-label="Lancer dans…"');
+    expect(between).toContain('aria-haspopup="menu"');
   });
 
   it("offers no write while the space listing has not answered: it appears once, never flips", () => {
@@ -338,7 +297,7 @@ describe("the agent index in the mode", () => {
       qc.setQueryData(["agents", "org_1", "spc_a"], [agent(["spc_a"])]);
     });
     expect(html).not.toContain("data-page-actions-trigger");
-    expect(html).not.toContain('aria-label="Lancer"');
+    expect(html).not.toContain('aria-label="Lancer');
   });
 
   it("offers the creation, import and catalogue a space grants", () => {
@@ -584,8 +543,8 @@ describe("the dashboard in the mode", () => {
   it("offers the assistant, and an agent's run on its card where a space grants it", () => {
     const { html } = renderIn(true, <DashboardPage />, "/", seed);
     expect(html).toContain("data-page-actions-trigger");
-    // One card for the agent of two spaces; only spc_a grants `agents:run`.
-    expect(html.match(/aria-label="Lancer"/g)).toHaveLength(1);
+    // One card for the agent of two spaces; only spc_a grants `agents:run`: named.
+    expect(html.match(/aria-label="Lancer dans Studio"/g)).toHaveLength(1);
     // Out of the mode, a working space that reads runs offers the assistant and the agent's run.
     const here = renderIn(
       false,
@@ -649,5 +608,71 @@ describe("the gate", () => {
     const html = renderIn(false, gate, "/runs?enterSpace=spc_b").html;
     expect(html).toContain("attente");
     expect(html).not.toContain("ouvert");
+  });
+});
+
+describe("an agent's page", () => {
+  const runner = (id: string) => space(id, ["agents:read", "agents:run", "runs:read"]);
+  const reader = (id: string) => space(id, ["agents:read", "runs:read"]);
+  const detail = (space_ids: string[]) =>
+    reporter({ active: true, home_space_id: "spc_a", space_ids, read_space_ids: space_ids });
+
+  /** The page's « Lancer »: its opening tag, or `null` when it is absent. */
+  const runButton = (overview: boolean, spaceIds: string[], spaces: ReturnType<typeof space>[]) => {
+    const { html } = renderIn(
+      overview,
+      <RunAgentButton
+        packageId="@acme/reporter"
+        detail={detail(spaceIds)}
+        spaceIds={spaceIds}
+        preferWorkingSpace={false}
+        showLabel
+      />,
+      "/agents/@acme/reporter",
+      () => {},
+      spaces,
+    );
+    const at = html.search(/>Lancer( dans[^<]*)?</);
+    return at < 0
+      ? null
+      : html.slice(
+          html.lastIndexOf("<button", at),
+          html.indexOf(">", html.lastIndexOf("<button", at)),
+        );
+  };
+
+  it("asks which space between the agent's spaces that run it, the working one included", () => {
+    const html = runButton(true, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")]);
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('title="Lancer dans…"');
+  });
+
+  it("asks nothing with one space running it, and runs in the working space out of the mode", () => {
+    const one = runButton(true, ["spc_a", "spc_b"], [reader("spc_a"), runner("spc_b")]);
+    expect(one).toContain('title="Lancer dans spc_b"');
+    expect(one).not.toContain('aria-haspopup="menu"');
+    const here = runButton(false, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")]);
+    expect(here).toContain('title="Lancer"');
+    expect(here).not.toContain('aria-haspopup="menu"');
+  });
+
+  it("offers no run where none of its spaces runs it", () => {
+    expect(runButton(true, ["spc_a", "spc_b"], [reader("spc_a"), reader("spc_b")])).toBeNull();
+  });
+
+  it("lists the agent's runs of every space in the mode, its space's out of it", () => {
+    function Probe() {
+      useRuns({ packageId: "@acme/reporter", spanning: true });
+      useRuns({ packageId: "@acme/reporter" });
+      return null;
+    }
+    const { asked } = renderIn(true, <Probe />, "/agents/@acme/reporter", () => {}, [
+      runner("spc_a"),
+      runner("spc_b"),
+    ]);
+    expect(asked("paginated-runs").map((key) => key.slice(1, 4))).toEqual([
+      ["org_1", "across-spaces", "/agents/@acme/reporter/runs"],
+      ["org_1", "spc_a", "/agents/@acme/reporter/runs"],
+    ]);
   });
 });

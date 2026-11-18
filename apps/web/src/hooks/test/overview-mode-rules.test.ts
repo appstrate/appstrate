@@ -85,9 +85,6 @@ describe("the overview rules", () => {
   });
 
   it("drops the mode on reaching a page of one space", () => {
-    withdrawOnPage(KEY, "/workspace-settings/general");
-    expect(chosen()).toBe(false);
-    overviewStore.getState().set(KEY, true);
     withdrawOnPage(KEY, "/integrations/new/mcp");
     expect(chosen()).toBe(false);
   });

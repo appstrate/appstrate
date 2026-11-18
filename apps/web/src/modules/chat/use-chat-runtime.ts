@@ -88,15 +88,15 @@ export function useChatCan() {
 }
 
 /**
- * The ids of the spaces the chat acts in (the backend's acting set). The module lists the skills
- * of these, and a new conversation takes the selected space as its origin only when it is one of
- * them.
+ * The ids of the spaces the chat acts in (the backend's acting set), `null` until the space
+ * listing has answered. The module lists the skills of these, and a new conversation takes the
+ * selected space as its origin only when it is one of them.
  */
-export function useChatActingSpaceIds(): string[] {
+export function useChatActingSpaceIds(): string[] | null {
   const { data: spaces } = useSpaces();
   const orgPermissions = useOrg().currentOrg?.permissions;
   return useMemo(
-    () => actingSpaces(spaces, orgPermissions).map((space) => space.id),
+    () => (spaces ? actingSpaces(spaces, orgPermissions).map((space) => space.id) : null),
     [spaces, orgPermissions],
   );
 }

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Database, Layers, LayoutGrid, Play, Settings2, TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
@@ -14,14 +13,19 @@ import {
   useAgentBundleExport,
   usePackageDownload,
   useVersionInfo,
+  useAgentsAmong,
   type Versioned,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
-import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
+import {
+  canReadRuns,
+  packagePermission,
+  packageSightPermissions,
+} from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
-import { usePackageActivationState } from "../hooks/use-library";
-import { EmptyState, ResourceErrorState } from "../components/page-states";
+import { EmptyState } from "../components/page-states";
+import { UnreadableDetail } from "../components/unreadable-detail";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { isQueryInFlight } from "../lib/query-state";
@@ -51,6 +55,9 @@ import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpacesFor } from "../hooks/use-space-action";
+import { ModelRequiredAlert } from "../components/agent-detail/model-required-alert";
 import { EditorDirtyReportContext } from "../hooks/use-editor-state";
 
 type PackageTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
@@ -76,40 +83,8 @@ const PACKAGE_TABS: TabSpec[] = [
 
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
-const MODEL_ALERT_COPY = {
-  "detail.titleModel": {
-    title: "models.alert.noModel",
-    description: "models.alert.noModelDescription",
-    askAdmin: "models.alert.noModelAskAdmin",
-  },
-  "detail.titleNoDefaultModel": {
-    title: "models.alert.noDefaultModel",
-    description: "models.alert.noDefaultModelDescription",
-    askAdmin: "models.alert.noDefaultModelAskAdmin",
-  },
-} as const;
-
 function stringOr<T>(value: unknown, fallback: T): string | T {
   return typeof value === "string" ? value : fallback;
-}
-
-/** No model a run could use: said where it can be acted on, graded by who may act. */
-function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentModelBlocker> }) {
-  const { t } = useTranslation(["settings"]);
-  const { can } = usePermissions();
-
-  const copy = blocker && MODEL_ALERT_COPY[blocker];
-  if (!copy) return null;
-
-  return (
-    <Alert variant="destructive" className="mb-4">
-      <AlertTitle>{t(copy.title)}</AlertTitle>
-      {/* Only `models:write` can act on it (POST /api/models, PUT /api/models/default). */}
-      <AlertDescription>
-        {t(can("models:write") ? copy.description : copy.askAdmin)}
-      </AlertDescription>
-    </Alert>
-  );
 }
 
 // ─── Main Page ──────────────────────────────────────────────────────
@@ -123,30 +98,41 @@ export function UnifiedPackageDetailPage({ type }: { type: "agent" | "skill" }) 
 function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
-  // Only an agent has a narrower read: without `agents:read` a runner launches
-  // it and follows its own runs, but does not see what it is made of.
-  const fullRead = type !== "agent" || can("agents:read");
   const {
     scope,
     name,
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  // Each tab below is fed by a read of its own, none implied by this route.
-  const tabReads = {
-    runs: canReadRuns(can),
-    memory: can("persistence:read"),
-    usedBy: packageSightPermissions("agent").some(can),
-  };
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
   const detailQuery = usePackageDetail(type, packageId);
   const { data: detail, error } = detailQuery;
+
+  // Each tab below is fed by a read of its own, none implied by this route. In « Tous les
+  // espaces » a tab listing rows across spaces opens where some space admits its list (runs,
+  // agents) or grants its read (memory); the agent's own content where a readable placement grants full access.
+  const { on: overview } = useOverviewMode();
+  const runSpaces = useAdmittingSpaces("runs");
+  const agentSpaces = useAdmittingSpaces("agents");
+  const memoryReach = useSpacesFor({ permission: "persistence:read" });
+  const agentReach = useSpacesFor({ permission: "agents:read" }, detail?.read_space_ids);
+  const tabReads = {
+    runs: overview ? runSpaces.length > 0 : canReadRuns(can),
+    memory: memoryReach.offered,
+    usedBy: overview ? agentSpaces.length > 0 : packageSightPermissions("agent").some(can),
+  };
+  // Only an agent has a narrower read: without `agents:read` a runner launches
+  // it and follows its own runs, but does not see what it is made of.
+  const fullRead = type !== "agent" || agentReach.offered;
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
   // The model verdict alone: it holds whatever else blocks the run first. Read
   // here, beside the detail, so the alert does not wait for the loading gate.
-  const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined);
+  // In « Tous les espaces » the run's space is chosen at launch: no one space's pin is read.
+  const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined, {
+    spanning: overview,
+  });
 
   // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
@@ -186,12 +172,11 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
     (!latestVersionForDiff ||
       hasActualChanges(latestVersionForDiff, currentManifest, currentContent));
 
+  // The agents « Utilisé par » lists, which the overview counts.
+  const usedByIds = pkgDetail?.agents.map((agent) => agent.id);
+  const usedBy = useAgentsAmong(usedByIds, overview);
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // A skill detail carries no `active`; an agent's does, so the query is not mounted there.
-  const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
-    enabled: type !== "agent",
-  });
   // The detail response is the authority on the home contract; `undefined` (not loaded) reads as "no".
   const homeSpaceId = base?.home_space_id;
   const homeWritable = base?.home_writable;
@@ -211,7 +196,16 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading))
     return <PackageDetailSkeleton type={type} />;
-  if (error || !detail) return <ResourceErrorState error={error} />;
+  if (error || !detail || (overview && isVersionView && !can(packagePermission(type, "read"))))
+    return (
+      <UnreadableDetail
+        kind={type}
+        version={isVersionView}
+        id={packageId}
+        error={error}
+        pending={<PackageDetailSkeleton type={type} />}
+      />
+    );
 
   // A published version whose stored archive is unavailable EXISTS — redirecting
   // to the live page (what any other version failure does) would hide that it
@@ -276,6 +270,8 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
     color: type === "agent" ? agentDetail?.color : undefined,
     readsPublished: type === "agent" && agentDetail?.definition === "published",
     homeSpaceName,
+    homeSpaceId: homeSpaceId ?? null,
+    spaceIds: (agentDetail ?? pkgDetail)?.space_ids ?? [],
   };
 
   // ── Render ──
@@ -373,7 +369,6 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
                   onDownload={downloadPackage}
                   onCreateVersion={() => setCreatingVersion(true)}
                   createVersionBlockedReason={unsavedReason}
-                  isActiveHere={isActiveInCurrentSpace}
                   catalogueVersion={catalogueVersion}
                 />
               </>
@@ -467,7 +462,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
                 <PackageOverview
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
                   historical={isHistoricalVersion}
-                  agentCount={pkgDetail.agents.length}
+                  agentCount={!tabReads.usedBy || usedBy.isError ? null : usedBy.data?.length}
                   onOpenFiles={() => setTab("settings")}
                   onOpenUsage={() => setTab("usedBy")}
                 />
@@ -487,7 +482,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
               {!tabReads.usedBy ? (
                 <RoleLimitNotice>{t("detail.roleLimit.usedBy")}</RoleLimitNotice>
               ) : (
-                pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
+                usedByIds && <PackageUsage agentIds={usedByIds} />
               )}
             </DetailTabPanel>
           </>

@@ -7,11 +7,13 @@ import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
 import { runDetailPath } from "../lib/package-paths";
 import { useSpaceLink } from "../hooks/use-current-space";
+import { SpaceNameOf } from "./space-name";
 
 /**
  * A run as a dense list row, wherever runs are listed outside a table (the
  * dashboard, the chat's context panel): its identity (`RunIdentity`, the runs
- * table's « Run » column), then its status.
+ * table's « Run » column), then the run's space in a list spanning spaces (the runs table's
+ * « Espace » cell), then its status.
  * The row is the run's link when the run still has an agent to live under.
  */
 export function RunRow({
@@ -19,6 +21,7 @@ export function RunRow({
   agentName,
   agent,
   dense = false,
+  spanning = false,
   className,
 }: {
   run: EnrichedRun;
@@ -27,12 +30,15 @@ export function RunRow({
   agent?: Pick<AgentListItem, "icon" | "color">;
   /** A narrow panel: a compact status. */
   dense?: boolean;
+  /** « Tous les espaces »: the row names its run's space. */
+  spanning?: boolean;
   className?: string;
 }) {
   const linkInSpace = useSpaceLink();
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />
+      {spanning && <RowSpaceName spaceId={run.spaceId} />}
       <RunStatusBadge status={run.status} unread={run.unread} compact={dense} />
     </>
   );
@@ -51,4 +57,12 @@ export function RunRow({
   ) : (
     <div className={rowClass}>{content}</div>
   );
+}
+
+/**
+ * The space of a row in a list spanning spaces, between its identity and its status: the runs
+ * table's « Espace » cell, given at most a third of the row so the identity keeps the rest.
+ */
+export function RowSpaceName({ spaceId }: { spaceId: string | undefined }) {
+  return <SpaceNameOf spaceId={spaceId} className="text-muted-foreground max-w-[33%] shrink" />;
 }

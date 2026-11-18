@@ -36,3 +36,11 @@ export function missingScopingHeaders(
     Object.entries(scoping).filter(([k]) => !present.has(k) && !(otherOrg && k === VIEW_AS_HEADER)),
   );
 }
+
+/**
+ * The request options naming the space a typed-client request acts in (spread into the
+ * options): none without `spaceId`, so the middleware scopes it to the working space.
+ */
+export function spaceHeader(spaceId?: string | null): { headers?: { "X-Space-Id": string } } {
+  return spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
+}

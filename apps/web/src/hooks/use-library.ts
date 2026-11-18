@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
+import { useSpacesOf } from "./use-spaces";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
@@ -32,7 +32,7 @@ export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = 
   );
 }
 
-/** One space's own library page; `enabled: false` is for a caller already holding the answer (e.g. a package detail), and still reads a cached snapshot. */
+/** The working space's library; `enabled: false` reads only the cache. */
 function useSpaceLibrary(options: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
@@ -102,51 +102,13 @@ function applyActivation(
   };
 }
 
-/**
- * Whether a package RUNS in the current space: `true`, `false`, or `undefined` ("the library says
- * nothing"). The library lists only what the caller may READ, and a `runner` holds `agents:run`
- * without `agents:read`, so a package ABSENT from the payload is `undefined` (never "inactive",
- * which would grey out a launch the server accepts). Readers test `=== false` / `=== true`.
- * The package's HOME is not derived here; it comes from the package's own detail
- * (`home_space_id`). Agent surfaces use `AgentDetail.active` instead; pass `enabled: false` from a
- * page that already holds the answer.
- */
-export function usePackageActivationState(packageId: string, options: { enabled?: boolean } = {}) {
-  const { data: libraryData } = useSpaceLibrary(options);
-  const currentSpaceId = useCurrentSpaceId();
-  return useMemo(
-    () => activationStateOf(libraryData, packageId, currentSpaceId),
-    [libraryData, packageId, currentSpaceId],
-  );
-}
-
-/** The verdict above, as a pure function of the snapshot — see its doc. */
-export function activationStateOf(
-  library: Pick<LibraryResponse, "packages"> | undefined,
-  packageId: string,
-  spaceId: string | null,
-): {
-  isActiveInCurrentSpace: boolean | undefined;
-  placement: LibraryPlacement | undefined;
-} {
-  const libraryPkg = library
-    ? Object.values(library.packages)
-        .flat()
-        .find((p) => p.id === packageId)
-    : undefined;
-  if (!libraryPkg) return { isActiveInCurrentSpace: undefined, placement: undefined };
-  const placement = placementIn(libraryPkg, spaceId);
-  return {
-    /** Placed here AND switched on — the exact predicate the run gate checks. */
-    isActiveInCurrentSpace: placement?.state === "active",
-    /** How it got here and what state it is in; `undefined` when not placed. */
-    placement,
-  };
-}
-
-/** Invalidates both library forms (organization's and current space's); one alone leaves the other stale. */
+/** A placement change affects both libraries and the readable spaces used by direct links. */
 export function invalidateLibraries(qc: QueryClient) {
-  return invalidatePaths(qc, ["/api/library", "/api/spaces/{id}/library"]);
+  return invalidatePaths(qc, [
+    "/api/library",
+    "/api/spaces/{id}/library",
+    "/api/packages/{scope}/{name}/home",
+  ]);
 }
 
 /** Activation changes affect the library and every space's package/agent cache. */
@@ -170,7 +132,7 @@ export function useSetPackageActive() {
   const invalidate = useInvalidatePackageActivation();
   const scope = useOrgOnlyScope();
   const currentSpaceId = useCurrentSpaceId();
-  // Both library queries render the same row: patching only one snaps the clicked switch back until the refetch.
+  // Both libraries render the row: both are patched.
   const libraryKey = $api.queryOptions("get", "/api/library", {
     params: { header: scope.header },
   }).queryKey;
@@ -205,7 +167,7 @@ export function useSetPackageActive() {
       });
     },
     onMutate: async ({ spaceId, packageId, active }) => {
-      // The space form answers only for its own space: patched only for a write aimed at it.
+      // The space library holds the working space only.
       const keys: ReadonlyArray<readonly unknown[]> = [
         libraryKey,
         ...(spaceId === currentSpaceId ? [spaceLibraryKey] : []),
@@ -229,31 +191,64 @@ export function useSetPackageActive() {
   });
 }
 
-/** One package's switch in the current space: the server's two verdicts (`activation` on its library row) and the two acts. A row the library does not carry answers `false` both ways. */
+/** `packageId`'s row in a library snapshot, of any type. */
+function libraryRow(
+  library: Pick<LibraryResponse, "packages"> | undefined,
+  packageId: string,
+): LibraryPackageItem | undefined {
+  return library
+    ? Object.values(library.packages)
+        .flat()
+        .find((pkg) => pkg.id === packageId)
+    : undefined;
+}
+
+/**
+ * One package's placement switches (`usePlacementDeeds` turns them into deeds), over every space
+ * of `/api/library` with `spanning`, else the working space's library: `activateIn` (off or not
+ * placed, and the reader may switch it on), `deactivateIn` (runs, and may be switched off),
+ * `removeFrom` (a share the reader may take out). In the library's space order.
+ */
+export function usePackageActivationInSpaces(
+  packageId: string,
+  { spanning }: { spanning: boolean },
+) {
+  const setActive = useSetPackageActive();
+  const workingSpaceId = useCurrentSpaceId();
+  const { data: orgLibrary } = useCatalogueLibrary({ enabled: spanning });
+  const { data: spaceLibrary } = useSpaceLibrary({ enabled: !spanning });
+  const library = spanning ? orgLibrary : spaceLibrary;
+  const row = libraryRow(library, packageId);
+  const spaceIds = !row
+    ? []
+    : spanning
+      ? (library?.spaces ?? []).map((space) => space.id)
+      : workingSpaceId
+        ? [workingSpaceId]
+        : [];
+  const targets = useSpacesOf(spaceIds);
+  const runsIn = (spaceId: string) => placementIn(row!, spaceId)?.state === "active";
+  return {
+    activateIn: targets.filter(({ id }) => !runsIn(id) && activationGate(row!, id, true).allowed),
+    deactivateIn: targets.filter(({ id }) => runsIn(id) && activationGate(row!, id, false).allowed),
+    removeFrom: targets.filter(({ id }) => mayRemoveFromSpace(row!, id)),
+    setActive: (spaceId: string, active: boolean, options?: { onSuccess?: () => void }) =>
+      setActive.mutate({ spaceId, packageId, active }, options),
+    pending: setActive.isPending,
+  };
+}
+
+/** The working space's « Activer »: whether its library row lets the reader switch it on, and the act. */
 export function usePackageActivation(packageId: string) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
   const { data: library } = useSpaceLibrary();
-  const row = useMemo(
-    () =>
-      library
-        ? Object.values(library.packages)
-            .flat()
-            .find((pkg) => pkg.id === packageId)
-        : undefined,
-    [library, packageId],
-  );
-  const may = (next: boolean) => !!spaceId && !!row && activationGate(row, spaceId, next).allowed;
-  const set = (active: boolean, options?: { onSuccess?: () => void }) => {
-    if (spaceId) setActive.mutate({ spaceId, packageId, active }, options);
-  };
+  const row = libraryRow(library, packageId);
   return {
-    mayActivate: may(true),
-    mayDeactivate: may(false),
-    /** A placement someone else put here, which this caller may take out of the space. */
-    mayRemove: !!row && mayRemoveFromSpace(row, spaceId),
-    activate: (options?: { onSuccess?: () => void }) => set(true, options),
-    deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
+    mayActivate: !!spaceId && !!row && activationGate(row, spaceId, true).allowed,
+    activate: (options?: { onSuccess?: () => void }) => {
+      if (spaceId) setActive.mutate({ spaceId, packageId, active: true }, options);
+    },
     pending: setActive.isPending,
   };
 }

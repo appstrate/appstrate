@@ -23,7 +23,7 @@ export function chatPath(transport: Pick<ChatTransport, "orgId">, suffix = ""): 
  */
 export function selectedOriginSpaceId(
   transport: Pick<ChatTransport, "spaceId"> | null | undefined,
-  actingSpaceIds: readonly string[],
+  actingSpaceIds: readonly string[] | null,
 ): string | undefined {
   const spaceId = transport?.spaceId;
   return spaceId && actsIn(actingSpaceIds, spaceId) ? spaceId : undefined;

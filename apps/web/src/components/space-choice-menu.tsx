@@ -23,11 +23,10 @@ import { SpaceName } from "./space-name";
 
 /**
  * A space's state in a menu that has one: `done` ticks it, inert, its text at the end (where the
- * deed is already done); `badge` follows its name.
+ * deed is already done).
  */
 interface SpaceEntryState {
   done?: string;
-  badge?: string;
 }
 
 type EntryStates = (spaceId: string) => SpaceEntryState;
@@ -48,13 +47,7 @@ function SpaceChoiceItems({ choice, states }: { choice: SpaceChoiceMenu; states?
             onSelect={() => choice.onPick(space.id)}
           >
             {states && <Check className={state?.done ? "text-success" : "invisible"} aria-hidden />}
-            <SpaceName space={space} size="md" className="flex-1">
-              {state?.badge && (
-                <span className="bg-primary/15 text-primary rounded px-1 text-[10px] leading-4 font-medium">
-                  {state.badge}
-                </span>
-              )}
-            </SpaceName>
+            <SpaceName space={space} size="md" className="flex-1" />
             {state?.done && (
               <span className="text-muted-foreground shrink-0 text-xs">{state.done}</span>
             )}

@@ -1498,7 +1498,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
 
         expect(calls[0]!.system).toContain(
-          `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
+          `This conversation's space is Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
         );
         // The default pins nothing: the turn acts on the organization endpoint.
         expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
@@ -1561,7 +1561,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
         // The stable origin is the default, and the body's space touched and limited nothing.
         expect(calls[0]!.system).toContain(
-          `This conversation was started in Alpha (\`${ctx.defaultSpaceId}\`)`,
+          `This conversation's space is Alpha (\`${ctx.defaultSpaceId}\`)`,
         );
         expect([...(await tokenSpaceIds(calls[0]!))!].sort()).toEqual(
           [ctx.defaultSpaceId, spaceB].sort(),

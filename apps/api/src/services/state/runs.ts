@@ -26,6 +26,7 @@ import {
   runs,
   runLogs,
   packages,
+  packageVersions,
   profiles,
   endUsers,
   apiKeys,
@@ -61,6 +62,7 @@ import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
+import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import {
@@ -708,6 +710,33 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
     // visible consequence, deliberate: a request that is both over-cap and
     // references a deleted file now answers 429 instead of 409.
     await enforceOrgConcurrencyCap(tx, scope);
+
+    // Take the run FK's lock before file locks. If deletion won during preflight, refuse
+    // this launch. A version deletion takes FOR UPDATE on this same package, so a pinned
+    // version checked after the lock cannot disappear before the pending run commits.
+    const [agent] = await tx
+      .select({ source: packages.source })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId)))
+      .for("key share");
+    if (!agent) throw notFound(`Agent '${packageId}' no longer exists`);
+    if (
+      params.versionRef &&
+      params.versionRef !== VERSION_SELECTOR_DRAFT &&
+      agent.source !== "system"
+    ) {
+      const [version] = await tx
+        .select({ id: packageVersions.id })
+        .from(packageVersions)
+        .where(
+          and(
+            eq(packageVersions.packageId, packageId),
+            eq(packageVersions.version, params.versionRef),
+          ),
+        );
+      if (!version)
+        throw notFound(`Version '${params.versionRef}' of '${packageId}' no longer exists`);
+    }
 
     const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
     if (consumedFileIds.length > 0) {
@@ -1410,20 +1439,12 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
 }
 
 /**
- * Count a package's active (pending/running) runs through `handle`.
- *
- * `handle` is what separates the two callers: {@link getRunningRunsForPackage}
- * reads with the base client (its own snapshot, no locks), while
- * {@link deletePackageRuns} passes its open transaction so the count is taken
- * under the run-admission advisory lock and sees what that lock is holding back.
- *
- * `visibility` narrows the count to what a caller may read; the mutation
- * guards pass none, because "is this agent busy" is about the agent, not about
- * who is watching.
+ * Active runs of this package in the requested space, or in the whole org.
+ * Reads may apply the viewer's visibility. Mutation guards count every actor under their lock.
  */
 async function countActiveRunsForPackage(
   handle: Db | DbTx,
-  scope: SpaceScope,
+  scope: OrgScope & { spaceId?: string },
   packageId: string,
   visibility?: SQL,
 ): Promise<number> {
@@ -1431,8 +1452,8 @@ async function countActiveRunsForPackage(
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     inArray(runs.status, [...activeRunStatusValues]),
-    eq(runs.spaceId, scope.spaceId),
   ];
+  if (scope.spaceId !== undefined) conditions.push(eq(runs.spaceId, scope.spaceId));
 
   if (visibility) conditions.push(visibility);
 
@@ -1441,6 +1462,26 @@ async function countActiveRunsForPackage(
     .from(runs)
     .where(and(...conditions));
   return row?.count ?? 0;
+}
+
+/**
+ * Serialize a package mutation against run admission. A run INSERT takes FOR KEY SHARE on
+ * this package through runs.package_id. FOR UPDATE waits for earlier admissions and holds later
+ * ones until the mutation commits. The count must be a separate statement after that wait.
+ */
+export async function lockIdleAgent(tx: Db, scope: OrgScope, packageId: string): Promise<void> {
+  await tx
+    .select({ id: packages.id })
+    .from(packages)
+    .where(and(eq(packages.orgId, scope.orgId), eq(packages.id, packageId)))
+    .for("update");
+  const active = await countActiveRunsForPackage(tx, scope, packageId);
+  if (active > 0) {
+    throw conflict(
+      "agent_in_use",
+      `${active} run(s) still running for this agent, in this space or another space of the organization`,
+    );
+  }
 }
 
 export async function getRunningRunsForPackage(
@@ -1791,6 +1832,8 @@ export interface GlobalRunListFilters {
   startDate?: Date;
   endDate?: Date;
   chatSessionId?: string;
+  /** Only the runs of this package; one the grants do not reach yields no row. */
+  packageId?: string;
   /**
    * Free text: the agent a run executed (its scope and name, as stamped on the
    * run) and the error it ended on; digits also match the run number
@@ -1805,7 +1848,7 @@ export interface GlobalRunListFilters {
 
 /**
  * Runs of `orgId` across the spaces of `grants`, paginated, with optional
- * kind / status / date / chat-session filters. Powers `GET /api/runs` (one
+ * kind / status / date / package / chat-session filters. Powers `GET /api/runs` (one
  * grant, the request's space) and `GET /api/orgs/{orgId}/runs` (one per space
  * the caller reaches): a space where the caller reads every run contributes
  * all of them, any other its actor's own (`runReadCondition`), and a row shows
@@ -1825,6 +1868,7 @@ export async function listGlobalRuns(
     startDate,
     endDate,
     chatSessionId,
+    packageId,
     search,
     unread = false,
     ownOnly = false,
@@ -1836,6 +1880,7 @@ export async function listGlobalRuns(
   if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
+  if (packageId) conditions.push(eq(runs.packageId, packageId));
   if (chatSessionId) {
     conditions.push(eq(runs.chatSessionId, chatSessionId));
     conditions.push(
@@ -1919,26 +1964,24 @@ export async function listScheduleRuns(
   );
 }
 
-/**
- * One run, enriched. `visibility` is the caller's run-read predicate
- * (`lib/run-visibility.ts`): a run the caller may not read simply misses, so
- * the handler's existing `notFound` covers it — hidden is 404, never 403.
- * Agent input requires an explicit agents:read grant; callers without one
- * retain the run's observable result but cannot read imposed input values.
- */
+/** Enrich one run under its space's grant. Mutation responses have already authorized the run. */
 export async function getRunFull(
-  scope: SpaceScope,
+  orgId: string,
+  grants: readonly SpaceGrant[],
   id: string,
-  actor: Actor | null = null,
-  visibility?: SQL,
-  canReadAgentInput = false,
+  actor: Actor | null,
+  visibility: SQL | undefined,
 ) {
+  if (!grants.length) return null;
   const conditions = [
     eq(runs.id, id),
-    eq(runs.orgId, scope.orgId),
-    eq(runs.spaceId, scope.spaceId),
+    eq(runs.orgId, orgId),
+    inArray(
+      runs.spaceId,
+      grants.map((grant) => grant.spaceId),
+    ),
+    visibility,
   ];
-  if (visibility) conditions.push(visibility);
 
   // `packages.draftManifest` + `draftContent` (the agent's full prompt) are
   // consumed ONLY by the inline branch below, so they are deliberately NOT in
@@ -1972,7 +2015,7 @@ export async function getRunFull(
     const [pkg] = await db
       .select({ manifest: packages.draftManifest, content: packages.draftContent })
       .from(packages)
-      .where(and(eq(packages.id, row.run.packageId), orgOrSystemFilter(scope.orgId)))
+      .where(and(eq(packages.id, row.run.packageId), orgOrSystemFilter(orgId)))
       .limit(1);
     const manifest = pkg?.manifest as Record<string, unknown> | null | undefined;
     inlineManifest = manifest && Object.keys(manifest).length > 0 ? manifest : null;
@@ -1980,7 +2023,10 @@ export async function getRunFull(
   }
 
   return {
-    ...mapEnrichedRun(row, canReadAgentInput),
+    ...mapEnrichedRun(
+      row,
+      grants.some((g) => g.spaceId === row.run.spaceId && readsAgentContent(g.permissions)),
+    ),
     inline_manifest: inlineManifest,
     inline_prompt: inlinePrompt,
   };

@@ -1309,7 +1309,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
+            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1765,7 +1765,8 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+          description:
+            "Agent in use: it has runs in progress in some space of the organization. RFC 9457 problem+json with `code` of `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1841,7 +1842,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create an agent version from draft",
       description:
-        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs." +
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden." +
         PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1884,7 +1885,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
+            "The draft is unchanged, or the version already exists (`no_changes`, `version_exists`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1899,9 +1900,7 @@ export const packagesPaths = {
       operationId: "restoreAgentVersion",
       tags: ["Packages"],
       summary: "Restore an agent version into the draft",
-      description:
-        "Restore a published version into the draft. Requires no runs in progress." +
-        PACKAGE_MUTATION_AUTHORITY,
+      description: "Restore a published version into the draft." + PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1925,7 +1924,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent in use. RFC 9457 problem+json with `code` `agent_in_use`.",
+          description: "The draft was modified concurrently (`conflict`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1988,7 +1987,8 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent has runs in progress (`agent_in_use`).",
+          description:
+            "Agent has runs in progress in some space of the organization (`agent_in_use`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -2004,7 +2004,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Locate a package: its type, its home and the spaces you read it from",
       description:
-        "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.",
+        "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's sight permission (agents:read or agents:run for an agent) and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2527,7 +2527,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
+            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

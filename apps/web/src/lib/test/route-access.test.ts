@@ -31,7 +31,7 @@ describe("route declarations", () => {
     // compile time; a hand-written `<Route path=…>` in the main layout or the
     // overlay tree would bypass it.
     const app = source("../../app.tsx");
-    const mounted = app.slice(app.indexOf("<MainLayout />"));
+    const mounted = app.slice(app.indexOf("<MainLayout "));
     expect(mounted.match(/<Route\s+path=/g)).toEqual(["<Route path="]);
     expect(mounted).toContain('<Route path="*"');
     expect(app).toMatch(/const PAGES: Record<RoutePath, ReactNode> =/);

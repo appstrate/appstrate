@@ -47,6 +47,7 @@
     "./etag": "./src/etag.ts",
     "./pagination-link": "./src/pagination-link.ts",
     "./list-query": "./src/list-query.ts",
+    "./error-cause": "./src/error-cause.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",

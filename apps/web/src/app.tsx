@@ -453,13 +453,13 @@ function BootScreen() {
  * HERE, above the route gate, which waits on it before it refuses. The realtime sync
  * covers the chat too: a chat turn runs agents.
  */
-function MainLayout() {
+function MainLayout({ search }: { search: string }) {
   const studioSidebar = useSidebarStore();
   const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
-  useSpaceResolver();
+  useSpaceResolver(search);
   useOverviewRules();
   useGlobalRunSync();
 
@@ -686,7 +686,8 @@ export function App() {
                   }
                 />
               ))}
-              <Route element={<MainLayout />}>
+              {/* The address bar's search: the page tree reads the page under an overlay. */}
+              <Route element={<MainLayout search={location.search} />}>
                 {flatPaths(false).map(pageRoute)}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

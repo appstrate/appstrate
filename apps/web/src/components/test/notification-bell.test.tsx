@@ -14,6 +14,8 @@
 
 import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
+import { QueryClient } from "@tanstack/react-query";
+import { $api } from "../../api/client.ts";
 import { render } from "../../test/render.tsx";
 import { NotificationContent } from "../notification-bell.tsx";
 
@@ -21,12 +23,15 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 const PACKAGE_ID = "@acme/worker";
+/** The working space, where every fixture lives unless a test says otherwise. */
+const SPACE = "spc_here";
+const OTHER_SPACE = "spc_there";
 
 type Notifications = Parameters<typeof NotificationContent>[0]["notifications"];
 
 function renderList(
   notifications: Notifications,
-  canReach: (target: string) => boolean = () => true,
+  canReach: (target: string, spaceId: string | undefined) => boolean = () => true,
 ): string {
   return render(
     <NotificationContent
@@ -34,6 +39,7 @@ function renderList(
       notifications={notifications}
       agentName={(id) => (id === PACKAGE_ID ? "Worker" : undefined)}
       canReach={canReach}
+      currentSpaceId={SPACE}
       onItemClick={() => {}}
       markAllRead={() => {}}
     />,
@@ -45,6 +51,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n1",
+        spaceId: SPACE,
         type: "package_shared",
         runId: null,
         payload: {
@@ -69,6 +76,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n3",
+        spaceId: SPACE,
         type: "run_failed",
         runId: "run_1",
         payload: { packageId: PACKAGE_ID, agent_name: "Stamped", status: "failed" },
@@ -86,6 +94,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n6",
+        spaceId: SPACE,
         type: "run_failed",
         runId: "run_3",
         payload: { packageId: "@acme/switched-off", agent_name: "Hello World", status: "failed" },
@@ -102,6 +111,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n7",
+        spaceId: SPACE,
         type: "agent_message",
         runId: "run_4",
         payload: {
@@ -128,6 +138,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n9",
+        spaceId: SPACE,
         type: "agent_message",
         runId: "run_6",
         payload: {
@@ -149,6 +160,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n8",
+        spaceId: SPACE,
         type: "agent_message",
         runId: "run_5",
         payload: null,
@@ -169,6 +181,7 @@ describe("NotificationContent", () => {
     const notifications: Notifications = [
       {
         id: "n4",
+        spaceId: SPACE,
         type: "run_failed",
         runId: "run_2",
         payload: { packageId: PACKAGE_ID, agent_name: "Stamped", status: "timeout" },
@@ -177,6 +190,7 @@ describe("NotificationContent", () => {
       },
       {
         id: "n5",
+        spaceId: SPACE,
         type: "package_shared",
         runId: null,
         payload: { packageId: PACKAGE_ID, package_type: "agent", shared_by_name: "Bob" },
@@ -196,6 +210,7 @@ describe("NotificationContent", () => {
     const row: Notifications = [
       {
         id: "n6",
+        spaceId: SPACE,
         type: "run_failed",
         runId: "run_3",
         payload: { packageId: PACKAGE_ID, agent_name: null, status: "failed" },
@@ -210,6 +225,7 @@ describe("NotificationContent", () => {
           notifications={row}
           agentName={() => "Worker"}
           canReach={() => true}
+          currentSpaceId={SPACE}
           onItemClick={() => {}}
           markAllRead={() => {}}
           hasMore={hasMore}
@@ -218,5 +234,83 @@ describe("NotificationContent", () => {
       );
     expect(list(true)).toContain("Afficher plus");
     expect(list(false)).not.toContain("Afficher plus");
+  });
+  describe("« Tous les espaces »", () => {
+    const rows: Notifications = [
+      {
+        id: "n10",
+        spaceId: OTHER_SPACE,
+        type: "run_failed",
+        runId: "run_10",
+        payload: { packageId: PACKAGE_ID, agent_name: null, status: "failed" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+      {
+        id: "n11",
+        spaceId: OTHER_SPACE,
+        type: "agent_message",
+        runId: "run_11",
+        payload: { packageId: PACKAGE_ID, agent_name: null, title: "Prêt", message: "Fini." },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+      {
+        id: "n12",
+        spaceId: SPACE,
+        type: "package_shared",
+        runId: null,
+        payload: { packageId: PACKAGE_ID, package_type: "agent", shared_by_name: "Bob" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ];
+
+    function renderSpanning(): string {
+      const queryClient = new QueryClient();
+      const spacesKey = $api.queryOptions("get", "/api/spaces", {
+        params: { header: { "X-Org-Id": undefined } },
+      }).queryKey;
+      queryClient.setQueryData(spacesKey, {
+        object: "list",
+        data: [
+          { id: SPACE, name: "Studio", access: "member", permissions: [] },
+          { id: OTHER_SPACE, name: "Coffre", access: "member", permissions: [] },
+        ],
+        hasMore: false,
+      });
+      return render(
+        <NotificationContent
+          unread={rows.length}
+          notifications={rows}
+          agentName={() => "Worker"}
+          canReach={() => true}
+          currentSpaceId={SPACE}
+          spanning
+          onItemClick={() => {}}
+          markAllRead={() => {}}
+        />,
+        { queryClient },
+      );
+    }
+
+    it("names each row's space", () => {
+      const html = renderSpanning();
+      expect(html.split(">Coffre<")).toHaveLength(3);
+      expect(html.split(">Studio<")).toHaveLength(2);
+    });
+
+    it("opens a notification of another space in that space: its run, or its own page", () => {
+      const html = renderSpanning();
+      expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_10?enterSpace=${OTHER_SPACE}"`);
+      expect(html).toContain(`href="/notifications/n11?enterSpace=${OTHER_SPACE}"`);
+      // The working space's own row moves nowhere.
+      expect(html).toContain('href="/notifications/n12"');
+    });
+
+    it("names no space with a space selected", () => {
+      const html = renderList(rows);
+      expect(html).not.toContain("Coffre");
+    });
   });
 });

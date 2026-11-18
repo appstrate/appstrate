@@ -29,7 +29,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
-import { placementRowJoin } from "./package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
 import {
   activeHereSql,
@@ -382,6 +382,31 @@ export function activeInSpaces<Q extends PgSelect>(
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
     .where(activePackagesFilter({ orgId }, type))
     .groupBy(packages.id, ...groupBy);
+}
+
+/** Readable placements, including switched-off ones, in home-first space listing order. */
+export async function packagePlacementsInSpaces(
+  orgId: string,
+  packageId: string,
+  spaceIds: readonly string[],
+  type: PackageType,
+) {
+  if (!spaceIds.length) return [];
+  return db
+    .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
+    .from(packages)
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+    .where(
+      and(
+        eq(packages.id, packageId),
+        eq(packages.type, type),
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        placementReadFilter(spaces.id),
+      ),
+    )
+    .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
 }
 
 /**

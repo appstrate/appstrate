@@ -162,9 +162,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
 export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
-  // The working space's badge: « Tous les espaces » neither shows nor asks it.
+  // The Runs entry's own count (`NavOrg`): the working space's, or every reached space's.
   const { on: overview } = useOverviewMode();
-  const unreadRuns = useUnreadRunCount({ enabled: !overview });
+  const unreadRuns = useUnreadRunCount({ spanning: overview });
   const collapsed = !isMobile && state === "collapsed";
 
   return (
@@ -204,7 +204,7 @@ export function ShellHeader() {
         {collapsed && (
           <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
-            {!overview && unreadRuns > 0 && (
+            {unreadRuns > 0 && (
               <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
             )}
           </SidebarTrigger>

@@ -18,6 +18,7 @@ const { useRuns } = await import("../use-paginated-runs.ts");
 const { useAllSchedules } = await import("../use-schedules.ts");
 const { useFiles, useFilesPaged } = await import("../use-files.ts");
 const { useAgents, usePackageList } = await import("../use-packages.ts");
+const { useNotifications, useUnreadCount } = await import("../use-notifications.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
 
 /** The `refetchInterval` the hook's query was built with, keyed under `prefix`. */
@@ -66,5 +67,29 @@ describe("polling a list spanning spaces", () => {
       ACROSS_SPACES_POLL_MS,
     );
     expect(intervalOf(() => useFiles(), "get", "/api/files")).toBeUndefined();
+  });
+
+  it("polls the notification feed and its count at one pace, across spaces or in one", () => {
+    // A notification comes of a run or a share: the 5-minute backstop, in the mode too.
+    expect(
+      intervalOf(
+        () => useNotifications({ spanning: true }),
+        "get",
+        "/api/orgs/{orgId}/notifications",
+      ),
+    ).toBe(300_000);
+    expect(
+      intervalOf(
+        () => useUnreadCount({ spanning: true }),
+        "get",
+        "/api/orgs/{orgId}/notifications/unread-count",
+      ),
+    ).toBe(300_000);
+    // One space's feed and its count: the stream keeps them live, the poll is the backstop —
+    // both, or a missed share leaves the badge and the bell disagreeing.
+    expect(intervalOf(() => useNotifications(), "get", "/api/notifications")).toBe(300_000);
+    expect(intervalOf(() => useUnreadCount(), "get", "/api/notifications/unread-count")).toBe(
+      300_000,
+    );
   });
 });

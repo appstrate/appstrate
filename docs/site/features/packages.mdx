@@ -35,7 +35,7 @@ Every package has a mutable **draft** and immutable **versions**.
 - Editing writes the draft. Saving a draft requires the `ETag` of what you last read, sent as `If-Match`. A stale tag answers `412`, a missing one `428`, so two editors cannot overwrite each other silently.
 - **Publishing** freezes the draft into a version: `POST /api/packages/{type}/{scope}/{name}/versions`, where `type` is `agents`, `skills` or `integrations`. The version comes from the manifest or from the `version` you send in the body.
 - Versions are **semver and forward-only**: a new version must be strictly higher than every existing one. A duplicate is `409 version_exists`.
-- An unchanged draft cannot be published again (`409 no_changes`). For an agent, publishing, restoring, deleting a version and deleting the agent are refused while one of its runs is in progress (`agent_in_use`).
+- An unchanged draft cannot be published again (`409 no_changes`). Deleting the agent or one of its versions is refused while a run of it is pending or running in any space of the organization (`409 agent_in_use`); publishing and restoring wait for no run.
 - Each version stores an **integrity hash** (SHA-256 SRI). Downloads return it in `X-Integrity`.
 - `POST .../versions/{version}/restore` copies a version back into the draft. `DELETE .../versions/{version}` removes a version permanently and moves the dist-tag to the best remaining stable version.
 

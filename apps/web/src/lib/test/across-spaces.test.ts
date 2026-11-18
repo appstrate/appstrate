@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  detailElsewhere,
   linkedSpaceEnterable,
   linkedSpacePath,
   linkedSpaceStep,
@@ -30,6 +31,19 @@ describe("linkedSpacePath", () => {
   it("names the space of a row of another space", () => {
     expect(linkedSpacePath("/schedules/sch_1", "spc_2", "spc_1")).toBe(
       "/schedules/sch_1?enterSpace=spc_2",
+    );
+  });
+
+  it("merges into the query the link carries and keeps its hash last", () => {
+    expect(
+      linkedSpacePath("/agents/@a/x?agentSettings=connections#settings", "spc_2", "spc_1"),
+    ).toBe("/agents/@a/x?agentSettings=connections&enterSpace=spc_2#settings");
+    expect(linkedSpacePath("/agents/@a/x#runs", "spc_2", "spc_1")).toBe(
+      "/agents/@a/x?enterSpace=spc_2#runs",
+    );
+    // A stale space the link already names is replaced, never doubled.
+    expect(linkedSpacePath("/runs?enterSpace=spc_9", "spc_2", "spc_1")).toBe(
+      "/runs?enterSpace=spc_2",
     );
   });
 
@@ -85,5 +99,25 @@ describe("entering the space a link names (`?enterSpace=B`)", () => {
     expect(step("spc_closed", "spc_a", listing)).toBe("drop");
     expect(step("spc_gone", "spc_a", listing)).toBe("drop");
     expect(step("spc_b", "spc_a", undefined, true)).toBe("drop");
+  });
+});
+
+describe("detailElsewhere", () => {
+  const target = "/agents/@acme/a?agentSettings=connections#settings";
+  const placements = ["spc_b", "spc_c"];
+  const open = () => true;
+
+  it("keeps the page, query and hash, entering the next enterable placement after the refusal", () => {
+    expect(detailElsewhere(placements, target, "spc_a", open)).toBe(
+      "/agents/@acme/a?agentSettings=connections&enterSpace=spc_b#settings",
+    );
+    const inC = "/agents/@acme/a?agentSettings=connections&enterSpace=spc_c#settings";
+    expect(detailElsewhere(placements, target, "spc_b", open)).toBe(inC);
+    expect(detailElsewhere(placements, target, "spc_a", (id) => id !== "spc_b")).toBe(inC);
+  });
+
+  it("stops after the last refusal, or before the working space resolves", () => {
+    expect(detailElsewhere(placements, target, "spc_c", open)).toBeNull();
+    expect(detailElsewhere(placements, target, null, open)).toBeNull();
   });
 });

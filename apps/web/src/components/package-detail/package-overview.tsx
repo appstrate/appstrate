@@ -20,7 +20,8 @@ export function PackageOverview({
 }: {
   content?: string | null;
   historical: boolean;
-  agentCount: number;
+  /** The agents the « Utilisé par » tab lists; `undefined` while read, `null` when unknown. */
+  agentCount: number | null | undefined;
   onOpenFiles: () => void;
   onOpenUsage: () => void;
 }) {
@@ -53,14 +54,16 @@ export function PackageOverview({
           title={t("run.infoUsage")}
           icon={Layers}
           headerAction={
-            agentCount > 0
-              ? { label: t("packageOverview.openUsage"), onClick: onOpenUsage }
-              : undefined
+            agentCount ? { label: t("packageOverview.openUsage"), onClick: onOpenUsage } : undefined
           }
         >
-          <p className="text-2xl font-semibold tabular-nums">{agentCount}</p>
+          <p className="text-2xl font-semibold tabular-nums">
+            {agentCount === undefined ? <SkeletonLine className="w-10" /> : (agentCount ?? "—")}
+          </p>
           <p className="text-muted-foreground mt-1 text-sm">
-            {t("packageOverview.agents", { count: agentCount })}
+            {agentCount === null
+              ? t("detail.overview.unknown")
+              : t("packageOverview.agents", { count: agentCount ?? 0 })}
           </p>
           {historical && (
             <p className="text-muted-foreground mt-3 text-xs">{t("packageOverview.liveUsage")}</p>

@@ -145,11 +145,14 @@ export function FileAttachment({
   /** `spaceId`: the file's space when known (the space of the call that produced it). */
   file: { id: string; name: string; mime?: string | null; spaceId?: string };
 }) {
-  const { openFile: opener, downloadFile, t } = useChatHost();
+  const { openFile: opener, downloadFile, t, useSpaceLabelOf } = useChatHost();
   const canIn = useCanIn();
+  const spaceName = useSpaceLabelOf()(file.spaceId);
   // Preview, download and thumbnail all read the file's content (`files:read`), in its space.
-  if (!canIn(file.spaceId, "files:read"))
-    return <InertAttachmentChip name={file.name} title={t("file.noAccess")} />;
+  if (!canIn(file.spaceId, "files:read")) {
+    const title = spaceName ? t("file.noAccessIn", { name: spaceName }) : t("file.noAccess");
+    return <InertAttachmentChip name={file.name} title={title} />;
+  }
   const { onActivate, label } = fileActivation(file, opener, downloadFile, t);
   if (isImageMime(file.mime)) {
     return (

@@ -381,7 +381,7 @@ export function formatCallerContext(
     opts.restricted && opts.origin
       ? `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`): pass \`${opts.origin.id}\` as the \`space_id\` of every call; no other space can be reached. The user lifts the limit in the composer.`
       : opts.origin
-        ? `This conversation was started in ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`.`
+        ? `This conversation's space is ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`.`
         : fallback
           ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`.`
           : "Ask the user which space when the request does not say; never guess it.",
