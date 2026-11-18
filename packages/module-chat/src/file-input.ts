@@ -8,8 +8,22 @@
 
 import type { ModelInputModality } from "@appstrate/core/module";
 
-/** API shapes the chat has a PDF wire format for. */
-const PDF_WIRE_APIS: readonly string[] = ["openai-responses"];
+/**
+ * API shapes the chat has a PDF wire format for, each encoded in `pi-chat/native-pdf.ts`.
+ * Mistral's conversations API documents PDFs only by hosted URL, so it has none.
+ */
+const PDF_WIRE_APIS = [
+  "openai-responses",
+  "openai-codex-responses",
+  "anthropic-messages",
+  "openai-completions",
+] as const;
+
+export type PdfWireApi = (typeof PDF_WIRE_APIS)[number];
+
+export function isPdfWireApi(api: string | null | undefined): api is PdfWireApi {
+  return (PDF_WIRE_APIS as readonly unknown[]).includes(api);
+}
 
 export type FileInputKind = "image" | "pdf";
 
@@ -27,7 +41,7 @@ export interface FileDelivery {
 /** `true` = send, `false` = declared impossible, `null` = cannot tell (the API shape is hidden). */
 export function acceptsFileInput(model: FileInputModel, kind: FileInputKind): boolean | null {
   if (kind === "image") return model.input ? model.input.includes("image") : true;
-  return model.api ? PDF_WIRE_APIS.includes(model.api) : null;
+  return model.api ? isPdfWireApi(model.api) : null;
 }
 
 export function fileDelivery(model: FileInputModel): FileDelivery {

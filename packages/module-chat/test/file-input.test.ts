@@ -14,8 +14,15 @@ describe("acceptsFileInput", () => {
   });
 
   it("sends a PDF on an API shape with a wire format for it, whatever the modalities", () => {
-    expect(acceptsFileInput({ api: "openai-responses", input: ["text"] }, "pdf")).toBe(true);
-    expect(acceptsFileInput({ api: "openai-responses", input: null }, "pdf")).toBe(true);
+    for (const api of [
+      "openai-responses",
+      "openai-codex-responses",
+      "anthropic-messages",
+      "openai-completions",
+    ]) {
+      expect(acceptsFileInput({ api, input: ["text"] }, "pdf")).toBe(true);
+      expect(acceptsFileInput({ api, input: null }, "pdf")).toBe(true);
+    }
     expect(
       acceptsFileInput({ api: "mistral-conversations", input: ["text", "image"] }, "pdf"),
     ).toBe(false);
