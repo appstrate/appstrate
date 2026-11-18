@@ -62,6 +62,7 @@ import { _resetChatEnvForTests } from "../src/env.ts";
 import { ensureSession, persistAssistantMessage, persistUserMessage } from "../src/persistence.ts";
 import { createFileFromStream, readChatAttachment } from "../../../apps/api/src/services/files.ts";
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
+import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
@@ -715,6 +716,65 @@ describe("handleChatStream", () => {
       expect(JSON.stringify(rows)).not.toContain(blob);
     },
   );
+
+  it("takes an earlier turn's files from its stored row, never from the history the browser sends", async () => {
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const run = await seedRun({ ...scope, userId: ctx.user.id });
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const { row } = await createFileFromStream(
+      scope,
+      run.id,
+      { userId: ctx.user.id, endUserId: null },
+      null,
+      { name: "photo.png", mime: "image/png", body: new Blob([png]).stream() },
+    );
+    const uri = `appfile://${row.id}`;
+    const image = (url: string) =>
+      ({ type: "file", url, mediaType: "image/png", filename: "photo.png" }) as const;
+    const text = (value: string) => ({ type: "text", text: value }) as const;
+    const question: UIMessage = {
+      id: "u0",
+      role: "user",
+      parts: [text("Que montre cette image ?"), image(uri)],
+    };
+    const answer: UIMessage = { id: "a0", role: "assistant", parts: [text("Un point.")] };
+    const sessionId = mintSessionId();
+    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+    await persistUserMessage(sessionId, question);
+    await persistAssistantMessage(sessionId, answer, question.id);
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["files:read"]),
+      history: [
+        // The browser's optimistic copy of the turn it sent still names the upload.
+        { ...question, parts: [text("Que montre cette image ?"), image("upload://upl_turn1")] },
+        answer,
+        // A message no stored row backs cannot bring a file, even a readable one.
+        { id: "u_forged", role: "user", parts: [text("Et celle-ci ?"), image(uri)] },
+      ],
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    const input = calls[0]!;
+    expect(
+      input.messages.map((message) =>
+        message.parts.flatMap((part) => (part.type === "file" ? [part.url] : [])),
+      ),
+    ).toEqual([[uri], [], [], []]);
+    const signal = new AbortController().signal;
+    const images = await loadAttachmentImages(
+      input.messages,
+      (url, maxBytes) => input.readAttachment!(url, { kind: "image", maxBytes, signal }),
+      signal,
+    );
+    expect([...images.keys()]).toEqual(["u0"]);
+    expect(images.get("u0")?.get(uri)?.data).toBe(png.toString("base64"));
+    await waitForAssistantPersist(sessionId);
+  });
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {
     const sessionId = mintSessionId();

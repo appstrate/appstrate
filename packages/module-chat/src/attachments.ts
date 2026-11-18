@@ -151,3 +151,30 @@ export async function materializeUserAttachments(
   }
   return { ...message, parts: rewritten };
 }
+
+/**
+ * The thread with the file parts of each message before the last replaced by its stored
+ * row's (`stored`, by message id), where the message held its first file part. The browser
+ * submits the history it holds, whose file parts can still name the `upload://` it sent
+ * (only the stored row was rewritten to `appfile://`), or anything else: the stored row is
+ * the one source of an earlier message's files.
+ */
+export function withStoredHistoryFiles(
+  messages: UIMessage[],
+  stored: ReadonlyMap<string, FileUIPart[]>,
+): UIMessage[] {
+  return messages.map((message, index) => {
+    if (index === messages.length - 1) return message;
+    const files = stored.get(message.id) ?? [];
+    const parts = message.parts ?? [];
+    if (!files.length && !parts.some((part) => part.type === "file")) return message;
+    let placed = false;
+    const rebuilt = parts.flatMap<UIMessage["parts"][number]>((part) => {
+      if (part.type !== "file") return [part];
+      if (placed) return [];
+      placed = true;
+      return files;
+    });
+    return { ...message, parts: placed ? rebuilt : [...rebuilt, ...files] };
+  });
+}

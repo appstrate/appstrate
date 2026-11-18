@@ -34,7 +34,7 @@ import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
-import { materializeUserAttachments } from "./attachments.ts";
+import { materializeUserAttachments, withStoredHistoryFiles } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
@@ -51,6 +51,7 @@ import {
   type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
+  storedFileParts,
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
@@ -295,7 +296,7 @@ export async function handleChatStream(
   if (!validated.success) {
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
   }
-  const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
+  let messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
   // The origin space and limit ride the turn but are read only by the turn that CREATES the
   // conversation (`ensureSession` validates them then): an existing one keeps its own.
   const asksOrigin = body.spaceId !== undefined || body.restricted === true;
@@ -357,6 +358,18 @@ export async function handleChatStream(
           originRequest,
         )
       : Promise.resolve(ephemeralConversation());
+  // The earlier turns' files, read once the row is known to be the caller's. An ephemeral
+  // turn has no stored row, so its history carries no file.
+  const historyFiles = conversation.then(() =>
+    sessionId && lastMessage?.id
+      ? storedFileParts(
+          sessionId,
+          messages
+            .slice(0, -1)
+            .flatMap((message) => (typeof message.id === "string" ? [message.id] : [])),
+        )
+      : new Map(),
+  );
 
   const origin = selfOrigin();
   // Single platform-call seam: re-enter the platform app in-process (or loopback
@@ -539,8 +552,9 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn]);
+  const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }, stored] =
+    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyFiles]);
+  messages = withStoredHistoryFiles(messages, stored);
   let chosen;
   try {
     chosen = pickModel(models, modelId);
@@ -690,8 +704,8 @@ export async function handleChatStream(
   // stores only `appfile://`) and before it reaches the engine (the model is
   // shown the attachment as a text line, never a raw file URL). After the claim,
   // because resolving an attachment touches its space on the conversation, which a
-  // refused turn must not widen. Only the last message can carry fresh uploads —
-  // earlier turns already hold rewritten `appfile://` URIs.
+  // refused turn must not widen. Only the last message can carry fresh uploads:
+  // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
   // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
   const attachmentSpaces = spaces.map((space) => ({
     id: space.id,
