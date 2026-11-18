@@ -75,6 +75,14 @@ import {
 import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
+  ACTION_BAR_CLASS,
+  ACTION_ROW_CLASS,
+  COMPOSER_BUTTON_CLASS,
+  ICON_BUTTON_CLASS,
+  QUEUE_ICON_BUTTON_CLASS,
+  TOUCH_AREA_CLASS,
+} from "./touch-targets.ts";
+import {
   flushDecision,
   joinQueued,
   type MessageQueue,
@@ -315,7 +323,10 @@ function ComposerAttachmentChip() {
               <button
                 type="button"
                 aria-label={t("composer.removeAttachment")}
-                className="text-muted-foreground hover:text-foreground shrink-0"
+                className={cn(
+                  "text-muted-foreground hover:text-foreground shrink-0",
+                  TOUCH_AREA_CLASS,
+                )}
               >
                 <XIcon className="size-3.5" />
               </button>
@@ -495,7 +506,7 @@ function QueuedMessages({
             </span>
             <IconButton
               label={t("composer.queue.edit")}
-              className="size-6"
+              className={QUEUE_ICON_BUTTON_CLASS}
               disabled={!composerEmpty}
               onClick={() => {
                 queue.remove(index);
@@ -506,7 +517,7 @@ function QueuedMessages({
             </IconButton>
             <IconButton
               label={t("composer.queue.remove")}
-              className="size-6"
+              className={QUEUE_ICON_BUTTON_CLASS}
               onClick={() => queue.remove(index)}
             >
               <XIcon />
@@ -601,7 +612,7 @@ function Composer({
               <Button
                 type="button"
                 size="icon"
-                className="size-8 shrink-0 rounded-lg"
+                className={COMPOSER_BUTTON_CLASS}
                 aria-label={t("composer.send")}
               >
                 <SendHorizontalIcon />
@@ -613,7 +624,7 @@ function Composer({
               type="button"
               size="icon"
               variant="outline"
-              className="size-8 shrink-0 rounded-lg"
+              className={COMPOSER_BUTTON_CLASS}
               aria-label={t("composer.queue.add")}
               title={t("composer.queue.add")}
               disabled={!canQueue}
@@ -626,7 +637,7 @@ function Composer({
                 type="button"
                 size="icon"
                 variant="secondary"
-                className="size-8 shrink-0 rounded-lg"
+                className={COMPOSER_BUTTON_CLASS}
                 aria-label={t("composer.stop")}
               >
                 <SquareIcon className="fill-current" />
@@ -824,7 +835,7 @@ function AssistantMessage() {
         <TurnLimitNotice />
         <MessageError />
       </div>
-      <div className="mt-1 flex h-7 items-center gap-2">
+      <div className={ACTION_ROW_CLASS}>
         <TurnModelBadge />
         {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
             mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
@@ -832,7 +843,7 @@ function AssistantMessage() {
             height at each inference start/finish — the whole transcript would
             visibly jump. Copy stays usable mid-stream (copies the current
             snapshot), which is the seamless behavior we want. */}
-        <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <ActionBarPrimitive.Root className={ACTION_BAR_CLASS}>
           <ActionBarPrimitive.Copy asChild>
             <IconButton label={t("common:btn.copy")}>
               <MessagePrimitive.If copied>
@@ -865,7 +876,7 @@ const IconButton = React.forwardRef<
     aria-label={label}
     title={label}
     {...props}
-    className={cn("text-muted-foreground size-7 [&_svg]:size-3.5", props.className)}
+    className={cn(ICON_BUTTON_CLASS, props.className)}
   >
     {children}
   </Button>

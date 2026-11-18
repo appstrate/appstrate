@@ -9,6 +9,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { XIcon } from "lucide-react";
 import { badgeVariants } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
+import { TOUCH_AREA_CLASS } from "./touch-targets.ts";
 
 const ICON = "[&>svg]:size-3.5 [&>svg]:shrink-0";
 
@@ -67,7 +68,10 @@ export function RemovableChip({
         aria-label={removeLabel}
         disabled={removeDisabled}
         onClick={onRemove}
-        className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
+        className={cn(
+          "hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50",
+          TOUCH_AREA_CLASS,
+        )}
       >
         <XIcon className="size-3" />
       </button>
