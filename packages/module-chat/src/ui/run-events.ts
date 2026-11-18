@@ -638,9 +638,10 @@ export function mergeRunFiles(a: readonly ChatRunFile[], b: readonly ChatRunFile
  * for an image part, `data` for a file part). Only an `appfile://` URI is
  * downloadable: the content route serves stored files. A just-sent
  * optimistic `upload://` URI (materialized to `appfile://` only in the
- * server-persisted copy), or anything unparseable, is inert — the raw URI is
- * carried along so the renderer can still resolve a local preview for it (the
- * staged-image cache is keyed by `upload://` URI).
+ * server-persisted copy) resolves through `resolvedUploads` once the turn's stream
+ * named its file; until then, or for anything unparseable, it is inert — the raw
+ * URI is carried along so the renderer can still resolve a local preview for it
+ * (the staged-image cache is keyed by `upload://` URI).
  */
 type ResolvedAttachment =
   { kind: "file"; id: string; spaceId?: string } | { kind: "inert"; uri?: string };
@@ -656,15 +657,18 @@ interface AttachmentContentPart {
 
 export function resolveAttachmentContent(
   content: readonly AttachmentContentPart[] | undefined,
+  resolvedUploads: ReadonlyMap<string, { id: string; spaceId: string }> = new Map(),
 ): ResolvedAttachment {
   const part = content?.[0];
   const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
-  const id = typeof uri === "string" ? parseFileUri(uri) : null;
+  if (typeof uri !== "string") return { kind: "inert" };
+  const id = parseFileUri(uri);
   if (id) {
     const spaceId = part?.providerMetadata?.appstrate?.spaceId;
     return { kind: "file", id, ...(typeof spaceId === "string" ? { spaceId } : {}) };
   }
-  return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
+  const uploaded = resolvedUploads.get(uri);
+  return uploaded ? { kind: "file", ...uploaded } : { kind: "inert", uri };
 }
 
 /**

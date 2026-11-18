@@ -78,6 +78,8 @@ export interface PiChatInput {
   requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
+  /** Chunks written right after the turn opens, before any of its own (route-side facts). */
+  leadingChunks?: UIMessageChunk[];
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
@@ -325,6 +327,7 @@ export function runPiChat(input: PiChatInput): Response {
         // (this producer runs eagerly and `runPiChat` returns synchronously),
         // so the silence bought nothing.
         write(mapper.startChunk(crypto.randomUUID()));
+        for (const chunk of input.leadingChunks ?? []) write(chunk);
 
         // Platform MCP tools (every tool the server declares to the caller),
         // and the Pi SDK's value graph. They are independent — the SDK import

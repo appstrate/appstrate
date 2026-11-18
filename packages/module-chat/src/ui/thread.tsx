@@ -51,7 +51,11 @@ import {
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
-import { stagedImagePreviewUrl } from "./upload.ts";
+import {
+  resolvedUploadsSnapshot,
+  stagedImagePreviewUrl,
+  subscribeResolvedUploads,
+} from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useAttachTarget, useConversationScope, useSpaceName } from "./conversation-scope.ts";
 import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
@@ -348,10 +352,10 @@ function FileAttachmentPart({ filename }: { filename?: string }) {
 /**
  * One sent attachment on a user message. An `appfile://` (server-persisted, or a
  * reloaded conversation) is interactive: image mime → thumbnail, else a
- * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
- * unparseable URI shows the local File as a thumbnail when it's an image still
- * held by the runtime, else an inert chip — the content route serves files
- * only.
+ * download chip. So is a just-sent optimistic `upload://` once the turn's stream
+ * named the file it became. Before that instant, or for an unparseable URI, it
+ * shows the local File as a thumbnail when it's an image still held by the
+ * runtime, else an inert chip — the content route serves files only.
  */
 function SentAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
@@ -359,13 +363,17 @@ function SentAttachmentChip() {
   // The content array reference is stable for a settled attachment, so this
   // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
   const content = useAuiState((s) => s.attachment.content);
-  const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
+  // Re-resolves when the stream reports what a sent `upload://` became.
+  const resolutions = React.useSyncExternalStore(subscribeResolvedUploads, resolvedUploadsSnapshot);
+  const resolved = React.useMemo(
+    () => resolveAttachmentContent(content, resolutions),
+    [content, resolutions],
+  );
 
   if (resolved.kind !== "file") {
-    // Just-sent optimistic attachment (`upload://`, not yet materialized): the
-    // staged-image cache still holds a local preview of the picked file. Not
-    // interactive — there is no file id to preview or download yet; the
-    // persisted `appfile://` part takes over on reload.
+    // Just-sent optimistic attachment (`upload://`) whose file the stream has not
+    // named yet: the staged-image cache still holds a local preview of the picked
+    // file. Not interactive for that instant — there is no file id yet.
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
     if (localSrc && isImageMime(contentType))
       return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
