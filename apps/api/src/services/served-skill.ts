@@ -29,7 +29,11 @@ import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/pa
 export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
 
 /** Appstrate packaging, not skill content: archives carry them, a skill directory does not. */
-const PACKAGING_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, "RECORD"]);
+const PACKAGING_ENTRIES: ReadonlySet<string> = new Set([
+  PACKAGE_MANIFEST_FILE,
+  "RECORD",
+  "signature.sig",
+]);
 
 /**
  * The served skill name: the frontmatter `name` when it is a valid Agent

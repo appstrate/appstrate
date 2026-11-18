@@ -194,9 +194,8 @@ entry_point, mcp_config, tools? }` and ships the server payload (`server/**`)
   in its own archive, next to `manifest.json`. `mcp_config.env` holds literal
   values merged into the runner env; the auth's `delivery.env` wins on
   conflict.
-  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (a
-    manifest that still carries it is refused on every write path, naming the
-    key), `delivery.env.*.user_config_key`, `source.server.{name, version,
+  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (the
+    engine ignores this key. Use `dependencies.integrations` to declare the integration), `delivery.env.*.user_config_key`, `source.server.{name, version,
 vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
     permissions, the `createMcpServerPackage` chat operation,
     `@appstrate/core/mcp-server-bundle` and the `afps bundle` CLI command.

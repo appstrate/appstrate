@@ -39,7 +39,8 @@ describe("serveSkill", () => {
       {
         "SKILL.md": encode(md("tone")),
         "manifest.json": encode("{}"),
-        RECORD: encode("sig"),
+        RECORD: encode("record"),
+        "signature.sig": encode("signature"),
         "scripts/run.bin": script,
       },
       null,
