@@ -74,7 +74,14 @@ import {
 } from "./file-attachment.tsx";
 import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
-import { ASSISTANT_MESSAGE_CLASS, COMPOSER_INPUT_CLASS, USER_MESSAGE_CLASS } from "./phone-text.ts";
+import {
+  ASSISTANT_MESSAGE_CLASS,
+  COMPOSER_INPUT_CLASS,
+  DISCLAIMER_CLASS,
+  THREAD_FOOTER_CLASS,
+  THREAD_VIEWPORT_CLASS,
+  USER_MESSAGE_CLASS,
+} from "./phone-text.ts";
 import {
   flushDecision,
   joinQueued,
@@ -147,12 +154,12 @@ export function Thread({
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-          <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+          <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
             <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
             <div className="min-h-6 flex-grow" />
 
-            <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+            <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
               <ScrollToBottom />
               <Composer
                 tools={composerTools}
@@ -240,9 +247,7 @@ function ThreadWelcome({
 function Disclaimer() {
   const { can, t } = useChatHost();
   if (!can("chat:write")) return null;
-  return (
-    <p className="text-muted-foreground/70 px-4 text-center text-xs">{t("thread.disclaimer")}</p>
-  );
+  return <p className={DISCLAIMER_CLASS}>{t("thread.disclaimer")}</p>;
 }
 
 function ScrollToBottom() {

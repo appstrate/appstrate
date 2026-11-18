@@ -26,3 +26,15 @@ export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxe
 /** Rendered markdown: the body, inline code and code blocks follow the message size. */
 export const MARKDOWN_PROSE_CLASS =
   "prose prose-base md:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm md:[&_pre]:text-xs";
+
+/** The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the page). */
+export const THREAD_VIEWPORT_CLASS =
+  "relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain px-4 pt-6";
+
+/** The sticky footer holding the composer; `group/footer` lets the disclaimer react to the focus. */
+export const THREAD_FOOTER_CLASS =
+  "group/footer bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4";
+
+/** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
+export const DISCLAIMER_CLASS =
+  "text-muted-foreground/70 px-4 text-center text-xs max-md:group-focus-within/footer:hidden";
