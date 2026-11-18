@@ -84,6 +84,9 @@ const ZIP_LIMITS = {
 const PDF_TIME_BUDGET_MS = 20_000;
 /** PDFs read at once: the rest wait, so a burst of them cannot monopolize the event loop. */
 const PDF_MAX_CONCURRENT = 2;
+/** PDFs allowed to wait for a slot, and for how long: past either the read answers `failed`. */
+const PDF_MAX_QUEUED = 8;
+const PDF_QUEUE_WAIT_MS = 30_000;
 /** Cells of one spreadsheet row kept: a wider row is a layout artifact, not data a model reads. */
 const SHEET_MAX_COLUMNS = 100;
 
@@ -320,26 +323,96 @@ function paragraphText(xml: string, textTag: string, paragraphTag: string): stri
   return tidy(out.join(""));
 }
 
-/** At most `limit` of the functions passed to the returned `run` are in flight; the others queue. */
-export function createGate(limit: number): <T>(work: () => Promise<T>) => Promise<T> {
+/** Why a gate refused or ended a piece of work. */
+class GateError extends Error {
+  constructor(readonly reason: "queue_full" | "wait_timeout" | "hold_timeout") {
+    super(`gate: ${reason}`);
+    this.name = "GateError";
+  }
+}
+
+interface GateOptions {
+  /** Pieces of work in flight at once. */
+  limit: number;
+  /** Callers allowed to wait for a slot; the next one is refused at once (`queue_full`). */
+  maxWaiting: number;
+  /** How long a caller waits for a slot before it is refused (`wait_timeout`). */
+  waitMs: number;
+  /** How long a piece of work keeps its slot: past it the slot is freed and the work aborted (`hold_timeout`). */
+  holdMs: number;
+}
+
+/**
+ * At most `limit` pieces of work run at once, the others wait in a bounded queue for a bounded time,
+ * and no piece of work keeps its slot for ever: a hung one is abandoned (its `signal` aborts, its
+ * slot goes to the next caller). Without those bounds one hostile input holds a slot until restart
+ * and `limit` of them refuse everyone else.
+ */
+export function createGate(
+  options: GateOptions,
+): <T>(work: (signal: AbortSignal) => Promise<T>) => Promise<T> {
   let active = 0;
-  const waiting: Array<() => void> = [];
+  const waiting: Array<{ grant: () => void; timer: ReturnType<typeof setTimeout> }> = [];
+
+  const release = () => {
+    const next = waiting.shift();
+    if (next) {
+      clearTimeout(next.timer);
+      next.grant();
+    } else active -= 1;
+  };
+
   return async (work) => {
-    // A waiter is handed the slot of the one that finished, so a caller arriving in between
-    // cannot take it and push the count past the limit.
-    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
-    else active += 1;
+    if (active >= options.limit) {
+      if (waiting.length >= options.maxWaiting) throw new GateError("queue_full");
+      // A waiter is handed the slot of the one that finished, so a caller arriving in between
+      // cannot take it and push the count past the limit.
+      await new Promise<void>((grant, reject) => {
+        const entry = {
+          grant,
+          timer: setTimeout(() => {
+            waiting.splice(waiting.indexOf(entry), 1);
+            reject(new GateError("wait_timeout"));
+          }, options.waitMs),
+        };
+        waiting.push(entry);
+      });
+    } else active += 1;
+
+    const abandon = new AbortController();
+    let held = true;
+    const free = () => {
+      if (!held) return;
+      held = false;
+      release();
+    };
+    const hold = setTimeout(() => {
+      abandon.abort();
+      free();
+    }, options.holdMs);
     try {
-      return await work();
+      return await Promise.race([
+        work(abandon.signal),
+        new Promise<never>((_, reject) =>
+          abandon.signal.addEventListener("abort", () => reject(new GateError("hold_timeout")), {
+            once: true,
+          }),
+        ),
+      ]);
     } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else active -= 1;
+      clearTimeout(hold);
+      free();
     }
   };
 }
 
-const pdfGate = createGate(PDF_MAX_CONCURRENT);
+const pdfGate = createGate({
+  limit: PDF_MAX_CONCURRENT,
+  maxWaiting: PDF_MAX_QUEUED,
+  waitMs: PDF_QUEUE_WAIT_MS,
+  // The reader's own time budget, plus what parsing and one page may add before it looks again.
+  holdMs: PDF_TIME_BUDGET_MS + 15_000,
+});
 
 // ---------------------------------------------------------------------------
 // Formats
@@ -349,12 +422,15 @@ async function readPdf(
   bytes: Uint8Array,
   budget: TextBudget,
   timeBudgetMs: number,
+  abandoned: AbortSignal,
 ): Promise<{ units: number }> {
   const pdf = await getDocumentProxy(new Uint8Array(bytes));
   try {
     const units = pdf.numPages;
     const started = performance.now();
     for (let pageNumber = 1; pageNumber <= Math.min(units, PDF_MAX_PAGES); pageNumber++) {
+      // The gate gave up on this read (a hung parse or page): stop touching pdf.js.
+      if (abandoned.aborted) throw new GateError("hold_timeout");
       if (budget.full) break;
       if (pageNumber > 1 && performance.now() - started > timeBudgetMs) {
         budget.cut();
@@ -566,7 +642,7 @@ async function extract(
   try {
     let units: number;
     if (format === "pdf") {
-      ({ units } = await pdfGate(() => readPdf(bytes, budget, pdfTimeBudgetMs)));
+      ({ units } = await pdfGate((signal) => readPdf(bytes, budget, pdfTimeBudgetMs, signal)));
     } else {
       const files = unzipBounded(bytes, ZIP_LIMITS);
       if (format === "docx") ({ units } = readDocx(files, budget));
@@ -594,7 +670,10 @@ async function extract(
     // Never log the content or the error text of a user's file: its format and kind of failure only.
     logger.warn("document text extraction failed", {
       format,
-      reason: error instanceof DecompressionLimitError ? error.reason : "unreadable",
+      reason:
+        error instanceof DecompressionLimitError || error instanceof GateError
+          ? error.reason
+          : "unreadable",
     });
     return { status: "failed", format };
   }
