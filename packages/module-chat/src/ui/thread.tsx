@@ -74,6 +74,7 @@ import {
 } from "./file-attachment.tsx";
 import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
+import { COMPOSER_INPUT_CLASS } from "./phone-text.ts";
 import {
   flushDecision,
   joinQueued,
@@ -581,6 +582,7 @@ function Composer({
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
+        enterKeyHint="send"
         addAttachmentOnPaste
         placeholder={t("composer.placeholder")}
         onKeyDown={(e) => {
@@ -590,7 +592,7 @@ function Composer({
           e.preventDefault();
           enqueue();
         }}
-        className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
+        className={COMPOSER_INPUT_CLASS}
       />
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">{tools}</div>
