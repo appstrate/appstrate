@@ -8,6 +8,7 @@ import {
   bigint,
   integer,
   numeric,
+  date,
   timestamp,
   index,
   uniqueIndex,
@@ -229,4 +230,72 @@ export const billingManagers = pgTable(
   // resolver's point lookup AND, through its leading column, every org-scoped
   // read and delete this table takes.
   (table) => [primaryKey({ columns: [table.orgId, table.userId] })],
+);
+
+/**
+ * Compute seconds an org has consumed in one calendar month (UTC) — the counter the
+ * monthly compute-minutes quota is read from. One row per `(org, month)`: the month is part
+ * of the key, so the quota "resets" by the next month simply having no row yet. Nothing
+ * zeroes anything and a prior month stays as the audit of what that month consumed.
+ *
+ * Seconds, not minutes: a run is counted to the second (rounded up) with no per-run
+ * minimum, and the UI divides by 60. `bigint` with `mode: "number"` like every counter here
+ * — exact in a JS number far past any real total.
+ *
+ * Written only by the settlement pass (`src/compute/settlement.ts`), in the same
+ * transaction as the claims in {@link settledRuns}, so a row never counts a run twice.
+ */
+export const computeUsage = pgTable(
+  "ee_compute_usage",
+  {
+    orgId: uuid("org_id").notNull(),
+    /** First day of the UTC calendar month the seconds were consumed in. */
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    secondsUsed: bigint("seconds_used", { mode: "number" }).default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.orgId, table.periodStart] })],
+);
+
+/**
+ * Idempotency claim: one row per run whose compute time has been settled. The primary key is
+ * the arbiter (`ON CONFLICT DO NOTHING`), so a run re-read by the replay window, by a second
+ * replica or after a restart is counted once. `seconds` is what the run was worth (0 for a
+ * remote run, which is claimed but not counted) and stays as the audit of the figure.
+ *
+ * Never purged, like `ee_billed_llm_usage`: one small row per finished run is cheaper than
+ * any retention machinery, and keeping it is what makes a cursor rewind harmless. No FK to
+ * the platform `runs` table (a module declares none across its boundary).
+ */
+export const settledRuns = pgTable(
+  "ee_settled_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    orgId: uuid("org_id").notNull(),
+    seconds: integer("seconds").notNull(),
+    /** The month the run was counted in (the month it completed, UTC). */
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    settledAt: timestamp("settled_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("idx_ee_settled_runs_org_id").on(table.orgId)],
+);
+
+/**
+ * Single-row watermark of the compute settlement sweep over finished runs, a
+ * `(completed_at, run_id)` keyset into `PlatformServices.runs.listTerminal`. Seeded by
+ * the module's `init()` with `now()`: runs that finished before the module metered compute are not
+ * billed retroactively. Monotonic — only ever moved forward — and, like the ledger cursor,
+ * safe to rewind by hand because the claims in {@link settledRuns} make a re-read a no-op.
+ *
+ * The boolean `id` PK + `CHECK (id)` pins it to exactly one row.
+ */
+export const computeCursor = pgTable(
+  "ee_compute_cursor",
+  {
+    id: boolean("id").primaryKey().default(true),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+    runId: text("run_id").default("").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [check("ee_compute_cursor_single_row", sql`${table.id}`)],
 );

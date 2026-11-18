@@ -10,10 +10,29 @@
  */
 
 import type { Context } from "hono";
-import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
+import type { LlmUsageLedgerRow, PlatformServices, TerminalRunRow } from "@appstrate/core/module";
 
 /** Ordered ledger rows the platform would return, ascending by `id`. */
 export const mockLedger: LlmUsageLedgerRow[] = [];
+
+/**
+ * Finished runs the platform would return from `runs.listTerminal`. Tests push rows (see
+ * `seedTerminalRun`) instead of inserting into the platform-owned `runs` table.
+ */
+export const mockRuns: TerminalRunRow[] = [];
+
+/** Set when the next `runs.listTerminal` read should throw. */
+let mockRunsError = false;
+
+export function resetMockRuns(): void {
+  mockRuns.length = 0;
+  mockRunsError = false;
+}
+
+/** Make the next `runs.listTerminal` read throw — drives settlement failure paths. */
+export function setMockRunsError(): void {
+  mockRunsError = true;
+}
 
 /** Set when the next ledger read should throw (simulate a platform/DB blip). */
 let mockLedgerError = false;
@@ -128,6 +147,31 @@ export const mockPlatformServices = {
       const unsettled = mockLedger.filter((r) => !r.settled).map((r) => r.id);
       if (unsettled.length > 0) return Math.min(...unsettled) - 1;
       return Math.max(...mockLedger.map((r) => r.id));
+    },
+  },
+  runs: {
+    listTerminal: async ({
+      after,
+      limit = 500,
+    }: {
+      after?: { completedAt: Date; id: string };
+      limit?: number;
+    }): Promise<TerminalRunRow[]> => {
+      if (mockRunsError) {
+        mockRunsError = false;
+        throw new Error("mock runs read failure");
+      }
+      const ordered = [...mockRuns].sort(
+        (a, b) => a.completedAt.getTime() - b.completedAt.getTime() || a.id.localeCompare(b.id),
+      );
+      return ordered
+        .filter(
+          (r) =>
+            !after ||
+            r.completedAt.getTime() > after.completedAt.getTime() ||
+            (r.completedAt.getTime() === after.completedAt.getTime() && r.id > after.id),
+        )
+        .slice(0, limit);
     },
   },
   setFileStorageLimit: async (orgId: string, bytes: number | null): Promise<void> => {

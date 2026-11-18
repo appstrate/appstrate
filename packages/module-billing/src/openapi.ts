@@ -13,6 +13,7 @@ import { CHECKOUT_PLAN_IDS, PLAN_IDS } from "./config.ts";
 
 const billingAccountSchemaRef = { $ref: "#/components/schemas/BillingAccount" } as const;
 const billingPlanSchemaRef = { $ref: "#/components/schemas/BillingPlan" } as const;
+const billingComputeRef = { $ref: "#/components/schemas/BillingCompute" } as const;
 const billingUpgradePlanRef = { $ref: "#/components/schemas/BillingUpgradePlan" } as const;
 const checkoutPlanIdRef = { $ref: "#/components/schemas/BillingCheckoutPlanId" } as const;
 // Billing errors use the platform's shared RFC 9457 Problem Details schema
@@ -41,7 +42,15 @@ export function openApiComponentSchemas(): Record<string, unknown> {
     },
     BillingPlan: {
       type: "object",
-      required: ["id", "name", "price", "credit_quota", "file_storage_bytes"],
+      required: [
+        "id",
+        "name",
+        "price",
+        "credit_quota",
+        "file_storage_bytes",
+        "included_compute_minutes",
+        "max_concurrent_runs",
+      ],
       properties: {
         id: { type: "string", enum: [...PLAN_IDS] },
         name: { type: "string", description: 'Display name (e.g. "Free", "Starter")' },
@@ -52,6 +61,49 @@ export function openApiComponentSchemas(): Record<string, unknown> {
           description:
             "Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit.",
         },
+        included_compute_minutes: {
+          type: ["integer", "null"],
+          description:
+            "Compute minutes the plan includes per calendar month (UTC). `null` while the plan carries no compute quota.",
+        },
+        max_concurrent_runs: {
+          type: ["integer", "null"],
+          description:
+            "Runs the org may have in flight at once on this plan. `null` leaves the deployment-wide limit.",
+        },
+      },
+    },
+    BillingCompute: {
+      type: "object",
+      required: [
+        "used_seconds",
+        "included_minutes",
+        "usage_percent",
+        "period_start",
+        "period_end",
+        "max_concurrent_runs",
+      ],
+      description:
+        "The org's compute consumption for the current calendar month (UTC). Each finished platform run counts for its duration rounded up to the second; a remote run counts for nothing. A new run is refused once the included minutes are used up; runs already started finish.",
+      properties: {
+        used_seconds: { type: "integer", minimum: 0 },
+        included_minutes: {
+          type: ["integer", "null"],
+          description: "Minutes included this month. `null` when the plan has no compute quota.",
+        },
+        usage_percent: {
+          type: "integer",
+          minimum: 0,
+          maximum: 100,
+          description: "Share of the included minutes used. 0 when the plan has no compute quota.",
+        },
+        period_start: { type: "string", format: "date-time" },
+        period_end: {
+          type: "string",
+          format: "date-time",
+          description: "When the allowance renews: the start of next month, UTC.",
+        },
+        max_concurrent_runs: { type: ["integer", "null"] },
       },
     },
     // The intersection is what carries the narrowing to a client: a caller that
@@ -109,6 +161,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
       required: [
         "plan",
         "plans",
+        "compute",
         "usage_percent",
         "credits_used",
         "credit_quota",
@@ -127,6 +180,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
           },
         },
         plans: { type: "array", items: billingPlanSchemaRef },
+        compute: billingComputeRef,
         usage_percent: { type: "integer", minimum: 0, maximum: 100 },
         credits_used: { type: "integer" },
         credit_quota: { type: "integer" },

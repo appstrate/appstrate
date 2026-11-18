@@ -10,7 +10,7 @@ managers. Apache-2.0, like the rest of the repository.
   `billing:*` permission strings, no Stripe code loaded. It ships inert in the
   platform image, exactly like the other opt-in modules.
 - **Its tables live in the platform database.** The module reads `DATABASE_URL`,
-  opens a `postgres` pool of its own on it and migrates its seven `ee_*` tables
+  opens a `postgres` pool of its own on it and migrates its ten `ee_*` tables
   there at `init()`, under a migration journal of its own —
   `drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`.
   It needs PostgreSQL, so it refuses to start on the tier-0 PGlite adapter.
@@ -99,7 +99,7 @@ construction plus two explicit repairs":
 
 ### Module-owned tables
 
-These seven tables live in the **platform** database (`DATABASE_URL`). `migrateBillingDb` applies `drizzle/migrations` there at boot and records what it applied in `drizzle.ee_migrations`, a journal of this module's own: two journals in one database, and the core schema in `packages/db` still declares no `ee_*` table. A dev box running `docker-compose.dev.yml` needs no extra step — the database is already there. There is no FK between an `ee_*` table and a platform one, and the platform `llm_usage` ledger is read through the `ctx.services.usage` cursor (`list` / `settledFrontier`), never a SQL join across the module boundary:
+These ten tables live in the **platform** database (`DATABASE_URL`). `migrateBillingDb` applies `drizzle/migrations` there at boot and records what it applied in `drizzle.ee_migrations`, a journal of this module's own: two journals in one database, and the core schema in `packages/db` still declares no `ee_*` table. A dev box running `docker-compose.dev.yml` needs no extra step — the database is already there. There is no FK between an `ee_*` table and a platform one, and the platform `llm_usage` ledger is read through the `ctx.services.usage` cursor (`list` / `settledFrontier`), never a SQL join across the module boundary:
 
 - `ee_billing_accounts` — plan, credits (used/quota), Stripe subscription status, customer/subscription IDs
 - `ee_usage_records` — per-context cost records keyed `(context_type, context_id)` — a run, a chat session, or the org's durable `(unattributed, orgId)` bucket. Carries both cumulative `cost_usd` (`numeric(24,12)`, the delta-billing basis) and the debited `cost_credits` (integer); the sweep bills `dollarsToCredits(cost_usd) − cost_credits` so sub-credit remainders carry forward instead of flooring to 0 each pass. `numeric`, not `double precision`: the `unattributed` bucket is one row per org that grows forever, and the sweep reconstructs the pre-pass cumulative as `cost_usd − delta` — both the accumulation and that reconstruction must be exact. Customer accounting data: never purged
@@ -107,7 +107,19 @@ These seven tables live in the **platform** database (`DATABASE_URL`). `migrateB
 - `ee_billing_cursor` — single-row watermark: the highest `llm_usage.id` the sweep has processed. Monotonic for every code path (`GREATEST`); re-seeding it by hand stays available as an operator recovery, and cannot double-bill because the claims are still there
 - `ee_stripe_events` — webhook idempotency (claim + confirm pattern)
 - `ee_free_tier_claims` — anti-abuse for free tier (non-renewable per email)
+- `ee_compute_usage` — `(org_id, period_start)` PK: seconds of platform compute an org consumed in one UTC calendar month. The monthly reset is the next month having no row yet; nothing is zeroed
+- `ee_settled_runs` — idempotency claim: one row per run whose compute time was settled (PK `run_id`, `ON CONFLICT DO NOTHING`), with the seconds it was worth (0 for a remote run). Never purged
+- `ee_compute_cursor` — single-row `(completed_at, run_id)` watermark of the compute settlement sweep, seeded at `now()` by the module's `init()` so history is not billed retroactively
 - `ee_billing_managers` — `(org_id, user_id, added_by, created_at)`, PK `(org_id, user_id)`: the org users granted `billing:*` without an admin role. `user_id` / `added_by` are `text` (the platform's `user.id` is text, not uuid); no FK, like every `ee_*` table
+
+### Compute minutes
+
+The Free plan includes **1 000 compute minutes per UTC calendar month** and **three concurrent runs** (`FREE_INCLUDED_COMPUTE_MINUTES`, `FREE_MAX_CONCURRENT_RUNS` in `src/config.ts`); the paid plans declare neither yet (`null`), so they are metered but not gated. The LLM is outside this quota: the credits above price it.
+
+- **What counts.** A finished platform run counts for its recorded `duration`, **rounded up to the second, no minimum**. Failed, timed out and cancelled runs count for the time they consumed; scheduled and API runs count like manual ones; a run on its own LLM key counts too. A **remote** run (`runOrigin: "remote"`) counts for nothing, a chat turn is not metered, and a run that recorded no duration counts for nothing. `runs.duration` comes from the runner's own loop (boot excluded) or, when the runner posted none, from the moment the run left `pending`, so time spent waiting for a slot is not billed; time spent waiting on a model or a service while the sandbox is up is.
+- **Settlement** (`src/compute/settlement.ts`). A sweep reads finished runs through `ctx.services.runs.listTerminal` by `(completed_at, id)` keyset, claims each run once in `ee_settled_runs` and adds its seconds to `ee_compute_usage`, claims, counter and watermark in one transaction. It re-reads a 10-minute window below the watermark (a run's `completed_at` is stamped before its closing transaction commits), and the claims make that free of double counting. A terminal `onRunStatusChange` pokes a pass so the gauge follows the run; a 60 s timer is the catch-up that does not depend on an event arriving. A run counts in the month it **completed**.
+- **Admission** (`src/compute/admission.ts`, in `beforeUsage`, before the credit quote). A run that owns platform compute (`context: "run"`, platform plane, a `timeoutSeconds` bound) is refused with `429 org_run_concurrency_exceeded` above the plan's concurrency, and with `402 compute_quota_exceeded` once the month's seconds reach the included minutes, BYOK runs included. A run already started is never killed: the system-proxy seam (`timeoutSeconds: null`), remote runs and chat turns pass through. It is a **soft cap**: nothing is reserved, so the overshoot is bounded by the concurrency times the longest a run may last, and the concurrency check can be exceeded by launches racing in the same instant (the platform's atomic `max_concurrent_per_org` stays the hard ceiling). An org with no billing account is not gated.
+- **Gauge and warning.** `GET /api/billing` carries `compute` (`used_seconds`, `included_minutes`, `usage_percent`, the month's start and end, `max_concurrent_runs`); the sidebar and the billing page draw it, and the page warns from 80 %. One `compute-warning` email goes to the billing recipients when a settlement carries an org across 80 %.
 
 ### Exports
 
@@ -637,7 +649,7 @@ in-memory `llm_usage` ledger (`mock-platform.ts`) in place of the real
 `services.usage`, and the in-memory org directory (`org-queries.ts`) in place of
 the platform's member lookups. Both are plain setters, not mocks. Every
 integration test file calls `useBillingTestSeams()` at the top; it is idempotent.
-`test/tables.ts` lists the seven `ee_*` tables, so the root `truncateAll()`
+`test/tables.ts` lists the ten `ee_*` tables, so the root `truncateAll()`
 clears them between tests along with every platform table.
 
 ### The Stripe mock, and what it cannot prove

@@ -346,6 +346,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // type.
   BillingAccount: "module-billing billing wire DTO; the row lives in a table of the module's own",
   BillingPlan: "module-billing plan catalog wire DTO, built from `config.ts`; no persisted row",
+  BillingCompute:
+    "module-billing compute-minutes wire DTO, built from the module's own counters and the plan catalog; no persisted row",
   BillingUpgradePlan:
     "module-billing BillingPlan narrowed to the plans checkout accepts; an allOf intersection, no persisted row",
   BillingCheckoutPlanId:
