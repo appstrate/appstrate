@@ -184,15 +184,15 @@ let inFlight: Promise<void> | null = null;
 let rerun = false;
 
 /**
- * Settle soon, from a terminal `onRunStatusChange`. Single-flight per process: a call during
- * a pass asks for one more pass when it ends instead of stacking a second concurrent one.
- * Fire-and-forget and never throws — an event handler must not fail a run's finalize, and the
- * sweep timer repairs whatever this missed.
+ * Run a settlement pass, single-flight per process: a call during a pass asks for one more
+ * pass when it ends instead of stacking a second concurrent one, and shares the promise of the
+ * one in flight. Never rejects: a failing pass is logged, and the next trigger or the timer
+ * repairs it.
  */
-export function requestSettlement(): void {
+function settleSingleFlight(): Promise<void> {
   if (inFlight) {
     rerun = true;
-    return;
+    return inFlight;
   }
   inFlight = (async () => {
     do {
@@ -208,6 +208,15 @@ export function requestSettlement(): void {
   })().finally(() => {
     inFlight = null;
   });
+  return inFlight;
+}
+
+/**
+ * Settle soon, from a terminal `onRunStatusChange`. Fire-and-forget: an event handler must not
+ * fail a run's finalize, and the sweep timer repairs whatever this missed.
+ */
+export function requestSettlement(): void {
+  void settleSingleFlight();
 }
 
 /** Test-only: await the pass a {@link requestSettlement} started, if any. */
@@ -220,25 +229,21 @@ export async function _awaitSettlementForTests(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const SWEEP_INTERVAL_MS = 60_000;
+/** How long `shutdown()` waits for a pass before letting the DB pool close anyway. */
+const DRAIN_TIMEOUT_MS = 60_000;
 let timer: ReturnType<typeof setTimeout> | null = null;
-let tick: Promise<unknown> | null = null;
 let stopped = true;
 
 function scheduleNext(): void {
   if (stopped) return;
   const jitter = 0.9 + Math.random() * 0.2;
   timer = setTimeout(() => {
-    tick = settleTerminalRuns()
-      .catch((err) => {
-        logger.error("compute sweep failed", {
-          err: err instanceof Error ? err.message : String(err),
-        });
-      })
-      .finally(() => {
-        tick = null;
-        scheduleNext();
-      });
+    // Shares the event-poked passes' single flight, so a tick and an event never both read
+    // and claim the same window.
+    void settleSingleFlight().finally(scheduleNext);
   }, SWEEP_INTERVAL_MS * jitter);
+  // A trailing tick must not keep the process alive.
+  timer.unref?.();
 }
 
 /** Arm the catch-up sweep. Idempotent. */
@@ -255,7 +260,20 @@ export function stopComputeSweeper(): void {
   timer = null;
 }
 
-/** Let an in-flight pass finish before the DB pool closes. */
+/**
+ * Let an in-flight pass finish before the DB pool closes, for at most `DRAIN_TIMEOUT_MS`:
+ * a wedged pass rolls back on its own and loses nothing (the claims make the next pass redo
+ * it), so shutdown must not hang on it.
+ */
 export async function drainComputeSweeper(): Promise<void> {
-  await Promise.allSettled([tick, inFlight].filter((p): p is Promise<unknown> => p !== null));
+  if (!inFlight) return;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    inFlight,
+    new Promise<void>((resolve) => {
+      deadline = setTimeout(resolve, DRAIN_TIMEOUT_MS);
+      deadline.unref?.();
+    }),
+  ]);
+  if (deadline) clearTimeout(deadline);
 }
