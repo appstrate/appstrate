@@ -188,3 +188,62 @@ describe("extractDocumentText (cached by sha256)", () => {
     ).toEqual({ status: "unsupported", reason: "format" });
   });
 });
+
+describe("hostile markup", () => {
+  /** Every extraction of a hostile file must come back fast: the scan runs on the API's event loop. */
+  const TIME_LIMIT_MS = 1500;
+  const timed = async (
+    bytes: Uint8Array,
+    format: "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp",
+  ) => {
+    const started = performance.now();
+    const result = await extractDocumentTextUncached(bytes, format);
+    expect(performance.now() - started).toBeLessThan(TIME_LIMIT_MS);
+    return result;
+  };
+
+  const workbook = (sheet: string, sharedStrings = "<sst></sst>") =>
+    zip({
+      "xl/workbook.xml": `<workbook><sheets><sheet name="S" r:id="rId1"/></sheets></workbook>`,
+      "xl/_rels/workbook.xml.rels": `<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`,
+      "xl/sharedStrings.xml": sharedStrings,
+      "xl/worksheets/sheet1.xml": sheet,
+    });
+
+  it("reads 80 000 unclosed <si> in linear time (a quadratic scan took 10 s)", async () => {
+    await timed(workbook("<worksheet/>", `<sst>${"<si>".repeat(80_000)}</sst>`), "xlsx");
+  });
+
+  it("reads 80 000 unclosed <c> and <row> in linear time", async () => {
+    await timed(workbook(`<worksheet><sheetData><row>${'<c r="A1">'.repeat(80_000)}`), "xlsx");
+    await timed(workbook(`<worksheet><sheetData>${"<row>".repeat(80_000)}`), "xlsx");
+  });
+
+  it("reads 80 000 never-terminated tags of a docx, pptx and OpenDocument file in linear time", async () => {
+    await timed(zip({ "word/document.xml": "<w:t".repeat(80_000) }), "docx");
+    await timed(zip({ "ppt/slides/slide1.xml": "<a:t".repeat(80_000) }), "pptx");
+    await timed(zip({ "content.xml": `<office:text>${"<text:p".repeat(80_000)}` }), "odt");
+    await timed(
+      zip({ "content.xml": `<table:table table:name="T">${"<table:table-cell>".repeat(80_000)}` }),
+      "ods",
+    );
+    await timed(zip({ "content.xml": "<draw:page>".repeat(80_000) }), "odp");
+  });
+
+  it("still reads the well-formed part that precedes a never-closed element", async () => {
+    const result = await timed(
+      zip({ "word/document.xml": "<w:p><w:r><w:t>kept</w:t></w:r></w:p><w:p><w:r><w:t" }),
+      "docx",
+    );
+    expect(result).toMatchObject({ status: "text", text: "kept" });
+  });
+
+  it("refuses a content member over the XML cap instead of walking it", async () => {
+    const huge = `<worksheet><sheetData>${'<row><c r="A1"><v>1</v></c></row>'.repeat(520_000)}</sheetData></worksheet>`;
+    expect(huge.length).toBeGreaterThan(16 * 1024 * 1024);
+    expect(await extractDocumentTextUncached(workbook(huge), "xlsx")).toEqual({
+      status: "failed",
+      format: "xlsx",
+    });
+  });
+});

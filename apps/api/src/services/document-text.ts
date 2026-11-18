@@ -173,9 +173,17 @@ function safeCodePoint(code: number, fallback: string): string {
 
 const utf8 = new TextDecoder("utf-8");
 
+/**
+ * Inflated bytes one content XML member may weigh. The unzip bounds the archive as a whole; this is
+ * the bound on what the scans below read, so a 30 MiB `sheet1.xml` is refused, not walked.
+ */
+const XML_MEMBER_MAX_BYTES = 16 * 1024 * 1024;
+
 function member(files: Record<string, Uint8Array>, path: string): string | null {
   const bytes = files[path];
-  return bytes ? utf8.decode(bytes) : null;
+  if (!bytes) return null;
+  if (bytes.byteLength > XML_MEMBER_MAX_BYTES) throw new Error("content member too large");
+  return utf8.decode(bytes);
 }
 
 /** The numeric suffix of `…/slide12.xml`, for natural ordering. */
@@ -193,33 +201,110 @@ function tidy(text: string): string {
     .trim();
 }
 
-/** Stand-ins for the line and tab breaks the markup implies, outside any text run. */
-const PARAGRAPH_BREAK = "\u0001";
-const TAB_BREAK = "\u0002";
+/**
+ * Walk markup left to right, one `indexOf` per `<` and per `>`: every byte is looked at a bounded
+ * number of times, whatever the input. A document is untrusted and the scan runs on the API's
+ * event loop, so nothing here may backtrack: a pattern like `<c\b[^>]*>[\s\S]*?</c>` rescans to the
+ * end of the string from every opening tag that is never closed, which is quadratic (80 000 unclosed
+ * tags took 10 s). A tag that is never terminated ends the walk.
+ */
+function walkMarkup(
+  xml: string,
+  onText: (text: string) => void,
+  onTag: (name: string, closing: boolean, selfClosing: boolean) => void,
+): void {
+  let position = 0;
+  while (position < xml.length) {
+    const open = xml.indexOf("<", position);
+    if (open === -1) {
+      onText(xml.slice(position));
+      return;
+    }
+    if (open > position) onText(xml.slice(position, open));
+    const close = xml.indexOf(">", open + 1);
+    if (close === -1) return;
+    const inner = xml.slice(open + 1, close);
+    const closing = inner.startsWith("/");
+    const selfClosing = inner.endsWith("/");
+    const start = closing ? 1 : 0;
+    let end = start;
+    while (end < inner.length && !/[\s/]/.test(inner[end]!)) end += 1;
+    onTag(inner.slice(start, end), closing, selfClosing);
+    position = close + 1;
+  }
+}
+
+/**
+ * The elements named `name`, in order, with their attribute text and body. Linear for the reason
+ * given at {@link walkMarkup}: each search starts where the previous element ended, and an element
+ * that is never closed ends the scan instead of being searched for again from the next opening tag.
+ * Elements do not nest here (the same tag inside itself closes at the first end tag).
+ */
+function* elements(xml: string, name: string): Generator<{ attributes: string; body: string }> {
+  const open = `<${name}`;
+  const end = `</${name}>`;
+  let position = 0;
+  while (position < xml.length) {
+    const start = xml.indexOf(open, position);
+    if (start === -1) return;
+    const after = start + open.length;
+    // `<c` must not match `<col`: the name ends at a blank, `>` or `/`.
+    if (!/[\s>/]/.test(xml[after] ?? "")) {
+      position = after;
+      continue;
+    }
+    const close = xml.indexOf(">", after);
+    if (close === -1) return;
+    const attributes = xml.slice(after, close);
+    if (attributes.endsWith("/")) {
+      yield { attributes: attributes.slice(0, -1), body: "" };
+      position = close + 1;
+      continue;
+    }
+    const stop = xml.indexOf(end, close + 1);
+    if (stop === -1) return;
+    yield { attributes, body: xml.slice(close + 1, stop) };
+    position = stop + end.length;
+  }
+}
+
+/** The concatenated bodies of the `<t>` runs of `fragment`. */
+function runsText(fragment: string, tag = "t"): string {
+  let text = "";
+  for (const run of elements(fragment, tag)) text += run.body;
+  return decodeXml(text);
+}
+
+/** One attribute's value, from an element's attribute text. */
+const attributePatterns = new Map<string, RegExp>();
+
+function attribute(attributes: string, name: string): string | undefined {
+  let pattern = attributePatterns.get(name);
+  if (!pattern) {
+    pattern = new RegExp(`(?:^|\\s)${name.replace(/[:.]/g, "\\$&")}="([^"]*)"`);
+    attributePatterns.set(name, pattern);
+  }
+  return pattern.exec(attributes)?.[1];
+}
 
 /** The text of a WordprocessingML / DrawingML fragment: runs concatenated, paragraphs on lines. */
 function paragraphText(xml: string, textTag: string, paragraphTag: string): string {
-  const marked = xml
-    .replace(new RegExp(`</${paragraphTag}>`, "g"), PARAGRAPH_BREAK)
-    .replace(/<w:br\s*\/>|<a:br\s*\/>/g, PARAGRAPH_BREAK)
-    .replace(/<w:tab\s*\/>/g, TAB_BREAK)
-    .replace(/<\/w:tc>/g, TAB_BREAK)
-    .replace(/<\/w:tr>/g, PARAGRAPH_BREAK);
   const out: string[] = [];
   let inText = false;
-  for (const match of marked.matchAll(/<(\/?)([A-Za-z0-9]+:[A-Za-z0-9]+)[^>]*?(\/?)>|([^<]+)/g)) {
-    const [, closing, tag, selfClosing, text] = match;
-    if (text !== undefined) {
+  walkMarkup(
+    xml,
+    (text) => {
       if (inText) out.push(decodeXml(text));
-      else
-        out.push(
-          [...text].filter((char) => char === PARAGRAPH_BREAK || char === TAB_BREAK).join(""),
-        );
-      continue;
-    }
-    if (tag === textTag) inText = closing !== "/" && selfClosing !== "/";
-  }
-  return tidy(out.join("").replaceAll(PARAGRAPH_BREAK, "\n").replaceAll(TAB_BREAK, "\t"));
+    },
+    (name, closing, selfClosing) => {
+      if (name === textTag) inText = !closing && !selfClosing;
+      else if (closing && (name === paragraphTag || name === "w:tr")) out.push("\n");
+      else if (!closing && (name === "w:br" || name === "a:br")) out.push("\n");
+      else if (!closing && name === "w:tab") out.push("\t");
+      else if (closing && name === "w:tc") out.push("\t");
+    },
+  );
+  return tidy(out.join(""));
 }
 
 // ---------------------------------------------------------------------------
@@ -276,11 +361,7 @@ function readPptx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
 function sharedStrings(files: Record<string, Uint8Array>): string[] {
   const xml = member(files, "xl/sharedStrings.xml");
   if (xml === null) return [];
-  return [...xml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((entry) =>
-    decodeXml(
-      [...entry[1]!.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((text) => text[1]).join(""),
-    ),
-  );
+  return [...elements(xml, "si")].map((entry) => runsText(entry.body));
 }
 
 /** Sheet name + archive path, in workbook order. */
@@ -289,15 +370,15 @@ function workbookSheets(files: Record<string, Uint8Array>): { name: string; path
   const rels = member(files, "xl/_rels/workbook.xml.rels");
   if (workbook === null || rels === null) throw new Error("not an xlsx");
   const targets = new Map<string, string>();
-  for (const rel of rels.matchAll(/<Relationship\b([^>]*)\/?>/g)) {
-    const id = /\bId="([^"]*)"/.exec(rel[1]!)?.[1];
-    const target = /\bTarget="([^"]*)"/.exec(rel[1]!)?.[1];
+  for (const rel of elements(rels, "Relationship")) {
+    const id = attribute(rel.attributes, "Id");
+    const target = attribute(rel.attributes, "Target");
     if (id && target) targets.set(id, target);
   }
   const sheets: { name: string; path: string }[] = [];
-  for (const sheet of workbook.matchAll(/<sheet\b([^>]*)\/?>/g)) {
-    const name = /\bname="([^"]*)"/.exec(sheet[1]!)?.[1];
-    const rid = /\br:id="([^"]*)"/.exec(sheet[1]!)?.[1];
+  for (const sheet of elements(workbook, "sheet")) {
+    const name = attribute(sheet.attributes, "name");
+    const rid = attribute(sheet.attributes, "r:id");
     const target = rid ? targets.get(rid) : undefined;
     if (name === undefined || !target) continue;
     sheets.push({
@@ -308,7 +389,7 @@ function workbookSheets(files: Record<string, Uint8Array>): { name: string; path
   return sheets;
 }
 
-/** Column letters of a cell reference (`AB12` → 27), 0-based. */
+/** Column letters of a cell reference (`AB12` → 27), 0-based; -1 for none. */
 function columnIndex(reference: string): number {
   let index = 0;
   for (const char of /^[A-Z]+/.exec(reference)?.[0] ?? "")
@@ -324,32 +405,51 @@ function readXlsx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
     const xml = member(files, sheet.path);
     if (xml === null) continue;
     const rows: string[] = [];
-    for (const row of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    let rowChars = 0;
+    for (const row of elements(xml, "row")) {
+      // Enough rows to fill the budget: the rest would be cut, so it is not read.
+      if (rowChars > DOCUMENT_TEXT_MAX_CHARS) break;
       const cells: string[] = [];
-      for (const cell of row[1]!.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-        const attributes = cell[1]!;
-        const body = cell[2] ?? "";
-        const column = columnIndex(/\br="([A-Z]+\d+)"/.exec(attributes)?.[1] ?? "");
+      for (const cell of elements(row.body, "c")) {
+        const column = columnIndex(attribute(cell.attributes, "r") ?? "");
         if (column < 0 || column >= SHEET_MAX_COLUMNS) continue;
-        const type = /\bt="([^"]*)"/.exec(attributes)?.[1];
-        const raw = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+        const type = attribute(cell.attributes, "t");
+        const raw = [...elements(cell.body, "v")][0]?.body;
         let value = "";
         if (type === "s") value = raw === undefined ? "" : (strings[Number(raw)] ?? "");
-        else if (type === "inlineStr")
-          value = decodeXml(
-            [...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((text) => text[1]).join(""),
-          );
+        else if (type === "inlineStr") value = runsText(cell.body);
         else if (type === "b") value = raw === "1" ? "TRUE" : "FALSE";
         else if (raw !== undefined) value = decodeXml(raw);
         if (value === "") continue;
         while (cells.length < column) cells.push("");
         cells[column] = value.replace(/[\t\r\n]+/g, " ");
       }
-      if (cells.some((cell) => cell !== "")) rows.push(cells.join("\t"));
+      if (cells.some((cell) => cell !== "")) {
+        const line = cells.join("\t");
+        rows.push(line);
+        rowChars += line.length + 1;
+      }
     }
     budget.add(`--- Sheet: ${sheet.name} ---\n${rows.join("\n")}`);
   }
   return { units: sheets.length };
+}
+
+/** The text of an OpenDocument fragment: paragraphs on lines, the tab, break and space elements as such. */
+function openDocumentText(fragment: string): string {
+  const out: string[] = [];
+  walkMarkup(
+    fragment,
+    (text) => out.push(text),
+    (name, closing) => {
+      if (closing) {
+        if (name === "text:p" || name === "text:h") out.push("\n");
+      } else if (name === "text:tab") out.push("\t");
+      else if (name === "text:line-break") out.push("\n");
+      else if (name === "text:s") out.push(" ");
+    },
+  );
+  return tidy(decodeXml(out.join("")));
 }
 
 /** OpenDocument: `content.xml` carries the body of text, spreadsheet and presentation alike. */
@@ -360,43 +460,35 @@ function readOpenDocument(
 ): { units: number } {
   const xml = member(files, "content.xml");
   if (xml === null) throw new Error("not an OpenDocument file");
-  const paragraphs = (fragment: string) =>
-    tidy(
-      decodeXml(
-        fragment
-          .replace(/<text:tab\s*\/>/g, "\t")
-          .replace(/<text:line-break\s*\/>/g, "\n")
-          .replace(/<text:s\b[^>]*\/>/g, " ")
-          .replace(/<\/text:(?:p|h)>/g, "\n")
-          .replace(/<[^>]+>/g, ""),
-      ),
-    );
   if (format === "odt") {
-    budget.add(paragraphs(xml.slice(xml.indexOf("<office:text"))));
+    const body = xml.indexOf("<office:text");
+    budget.add(openDocumentText(body === -1 ? xml : xml.slice(body)));
     return { units: 1 };
   }
   if (format === "odp") {
-    const pages = [...xml.matchAll(/<draw:page\b[^>]*>([\s\S]*?)<\/draw:page>/g)];
+    const pages = [...elements(xml, "draw:page")];
     pages.forEach((page, index) => {
-      if (!budget.full) budget.add(`--- Slide ${index + 1} ---\n${paragraphs(page[1]!)}`);
+      if (!budget.full) budget.add(`--- Slide ${index + 1} ---\n${openDocumentText(page.body)}`);
     });
     return { units: pages.length };
   }
-  const tables = [...xml.matchAll(/<table:table\b([^>]*)>([\s\S]*?)<\/table:table>/g)];
+  const tables = [...elements(xml, "table:table")];
   for (const table of tables) {
     if (budget.full) break;
-    const name = decodeXml(/\btable:name="([^"]*)"/.exec(table[1]!)?.[1] ?? "");
+    const name = decodeXml(attribute(table.attributes, "table:name") ?? "");
     const rows: string[] = [];
-    for (const row of table[2]!.matchAll(
-      /<table:table-row\b[^>]*>([\s\S]*?)<\/table:table-row>/g,
-    )) {
-      const cells = [
-        ...row[1]!.matchAll(/<table:table-cell\b[^>]*?(?:\/>|>([\s\S]*?)<\/table:table-cell>)/g),
-      ]
+    let rowChars = 0;
+    for (const row of elements(table.body, "table:table-row")) {
+      if (rowChars > DOCUMENT_TEXT_MAX_CHARS) break;
+      const cells = [...elements(row.body, "table:table-cell")]
         .slice(0, SHEET_MAX_COLUMNS)
-        .map((cell) => paragraphs(cell[1] ?? "").replace(/\n+/g, " "));
+        .map((cell) => openDocumentText(cell.body).replace(/\n+/g, " "));
       while (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
-      if (cells.length > 0) rows.push(cells.join("\t"));
+      if (cells.length > 0) {
+        const line = cells.join("\t");
+        rows.push(line);
+        rowChars += line.length + 1;
+      }
     }
     budget.add(`--- Sheet: ${name} ---\n${rows.join("\n")}`);
   }
