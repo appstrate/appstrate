@@ -2,8 +2,9 @@
 
 /**
  * The typed tools of a remote MCP integration outside a run: its `tools/list` and one
- * `tools/call` over the credential proxy (`mcp-over-proxy.ts`), with the connection the proxy's
- * selection picks first.
+ * `tools/call` (`mcp-over-proxy.ts`), over the credential proxy with the connection the proxy's
+ * selection picks first, or, for an unauthenticated integration (AFPS §7.2), directly, with no
+ * connection at all.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -19,6 +20,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import {
   allowsUndeclaredTools,
   getApiCallConfigs,
+  isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -36,6 +38,7 @@ import { readIntegrationManifestForProxy } from "../integration-service.ts";
 import { ProxyCallError } from "./core.ts";
 import { assertActiveOutsideRun, noConnectionMessage } from "./integration-resolver.ts";
 import {
+  directMcpOperation,
   isCredentialRejection,
   listToolPages,
   mcpServerFailure,
@@ -76,22 +79,28 @@ interface ReadCatalog {
   truncated: boolean;
 }
 
-/** Holds no credential and decides no access: read only with a connection the selection chose. */
+/**
+ * Holds no credential and decides no access: read only with a connection the selection chose, or
+ * for an unauthenticated integration, whose catalog is the same for every caller.
+ */
 const catalogCache = createCache<ReadCatalog>({
   name: "remote-integration-tools",
   ttlMs: CATALOG_TTL_MS,
   max: MAX_CACHED_CATALOGS,
 });
 
-/** A reconnect may rewrite the variables the URL is rendered from: the URL is in the key. */
+/**
+ * A reconnect may rewrite the variables the URL is rendered from: the URL is in the key. Without
+ * a connection (`-`), the catalog is shared by the organization's callers.
+ */
 function remoteCatalogKey(entry: {
   orgId: string;
-  connectionId: string;
+  connectionId: string | null;
   integrationId: string;
   version: string;
   url: string;
 }): string {
-  return `${entry.orgId}:${entry.connectionId}:${entry.integrationId}@${entry.version}:${entry.url}`;
+  return `${entry.orgId}:${entry.connectionId ?? "-"}:${entry.integrationId}@${entry.version}:${entry.url}`;
 }
 
 /** @internal Test-only: a variable heads a rendered host, which no loopback test server can be. */
@@ -125,28 +134,34 @@ function streamableRemote(integrationId: string, manifest: IntegrationManifest) 
 
 /**
  * The caller's connection, selected as `proxyCall` selects it (for `tool` when given), and the
- * server URL rendered from its variables (AFPS §7.12).
+ * server URL rendered from its variables (AFPS §7.12). An unauthenticated integration binds no
+ * connection (`null`): one named is refused before any exchange.
  */
 async function remoteConnection(
   input: RemoteToolsInput & { connectionId?: string },
   manifest: IntegrationManifest,
   tool?: string,
-): Promise<{ connectionId: string; url: string }> {
-  const connection = await selectAccessibleConnection(
-    input.integrationId,
-    manifest,
-    input.connectionId ?? null,
-    {
-      spaceId: input.scope.spaceId,
-      actor: input.actor,
-      reach: input.reach,
-      naming: "connection_id",
-      ...(tool !== undefined ? { tool } : {}),
-    },
-  ).catch(async (err: unknown) => {
-    throw await withConnectOffers(err, input);
-  });
-  if (!connection) {
+): Promise<{ connectionId: string | null; url: string }> {
+  const unauthenticated = isUnauthenticatedIntegration(manifest);
+  const connection = unauthenticated
+    ? null
+    : await selectAccessibleConnection(input.integrationId, manifest, input.connectionId ?? null, {
+        spaceId: input.scope.spaceId,
+        actor: input.actor,
+        reach: input.reach,
+        naming: "connection_id",
+        ...(tool !== undefined ? { tool } : {}),
+      }).catch(async (err: unknown) => {
+        throw await withConnectOffers(err, input);
+      });
+  if (unauthenticated && input.connectionId) {
+    throw proxyProblem(
+      "credential_not_found",
+      `Integration '${input.integrationId}' declares no authentication and binds no connection: call it without \`connection_id\`.`,
+      "connection_id",
+    );
+  }
+  if (!unauthenticated && !connection) {
     throw proxyProblem(
       "credential_not_found",
       noConnectionMessage({
@@ -158,7 +173,7 @@ async function remoteConnection(
       input.connectionId ? "connection_id" : undefined,
     );
   }
-  const remote = renderRemoteSource(manifest, connection.variables);
+  const remote = renderRemoteSource(manifest, connection?.variables ?? null);
   if (!remote) {
     throw new ApiError({
       status: 422,
@@ -167,7 +182,7 @@ async function remoteConnection(
       detail: `Integration '${input.integrationId}' builds its server URL from the connection's variables, and they do not render it; reconnect with valid values.`,
     });
   }
-  return { connectionId: connection.id, url: remote.url };
+  return { connectionId: connection?.id ?? null, url: remote.url };
 }
 
 async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {
@@ -202,9 +217,10 @@ export function offeredRemoteToolNames(
 /** A failed operation, with the HTTP status of the last exchange its server answered. */
 type OperationFailure = (err: unknown, receivedStatus: number | undefined) => unknown;
 
+/** One operation on the server: through `connectionId`, or directly when it is `null`. */
 async function withClient<T>(
   input: Omit<RemoteToolsInput, "signal"> & {
-    connectionId: string;
+    connectionId: string | null;
     timeoutMs: number;
     signal: AbortSignal | null;
   },
@@ -213,15 +229,17 @@ async function withClient<T>(
   failure: OperationFailure = (err) => err,
 ): Promise<T> {
   const timeout = AbortSignal.timeout(input.timeoutMs);
-  const operation = proxiedMcpOperation({
+  const base = {
     scope: input.scope,
     actor: input.actor,
     integrationId: input.integrationId,
-    connectionId: input.connectionId,
-    reach: input.reach,
     caller: input.caller,
     deadline: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
-  });
+  };
+  const operation =
+    input.connectionId === null
+      ? directMcpOperation(base)
+      : proxiedMcpOperation({ ...base, connectionId: input.connectionId, reach: input.reach });
   let client: AppstrateMcpClient | undefined;
   try {
     return await operation.guard(
@@ -278,15 +296,17 @@ export interface RemoteToolCatalog {
 }
 
 /**
- * The tools the caller's connection offers, from the server's cached `tools/list`, read only
- * after the connection is selected. The `tools/list` runs under its own timeout, so a caller whose
- * `signal` ends first leaves it running for the next one; a server that cannot be listed leaves
- * the declared names, and a refusal ({@link isCatalogRefusal}) is thrown.
+ * The tools the caller's connection offers (an unauthenticated integration's, without one), from
+ * the server's cached `tools/list`, read only after the connection is selected. The `tools/list`
+ * runs under its own timeout, so a caller whose `signal` ends first leaves it running for the next
+ * one; a server that cannot be listed leaves the declared names, and a refusal
+ * ({@link isCatalogRefusal}) is thrown.
  */
 export async function listRemoteTools(
   input: RemoteToolsInput & { manifest: IntegrationManifest; connectionId?: string },
 ): Promise<RemoteToolCatalog> {
   const manifest = streamableRemote(input.integrationId, input.manifest);
+  const unauthenticated = isUnauthenticatedIntegration(manifest);
   const { connectionId, url } = await remoteConnection(input, manifest);
   const key = remoteCatalogKey({
     orgId: input.scope.orgId,
@@ -316,7 +336,7 @@ export async function listRemoteTools(
       if (input.signal.aborted && err === input.signal.reason) {
         // The listing runs on for the next one.
       } else if (isCatalogRefusal(err)) {
-        throw mcpServerFailure(err, { integrationId: input.integrationId, url });
+        throw mcpServerFailure(err, { integrationId: input.integrationId, url, unauthenticated });
       } else {
         listingFailure =
           err instanceof ProxyCallError
@@ -358,9 +378,10 @@ export async function listRemoteTools(
 }
 
 /**
- * Whether a failed catalog read is the caller's to see: a refusal of the proxy, before any
- * exchange or after one (its own 4xx), or the server refusing the connection's credential. Any
- * other failure is the server's, and leaves the declared names.
+ * Whether a failed catalog read is the caller's to see: a refusal of the proxy or of the egress
+ * guard, before any exchange or after one (its own 4xx), or the server refusing the connection's
+ * credential (an unauthenticated integration's server asking for one). Any other failure is the
+ * server's, and leaves the declared names.
  */
 function isCatalogRefusal(err: unknown): boolean {
   if (err instanceof ApiError) return true;
@@ -370,7 +391,8 @@ function isCatalogRefusal(err: unknown): boolean {
 
 /**
  * One `tools/call`, its result without reserved `_meta` keys. Activation is checked first; a tool
- * outside the catalog, or a connection not serving it, is refused before any exchange.
+ * outside the catalog, or a connection not serving it (any connection, for an unauthenticated
+ * integration), is refused before any exchange.
  */
 export async function callRemoteTool(
   input: RemoteToolsInput & {
@@ -410,6 +432,7 @@ export async function callRemoteTool(
       mcpServerFailure(err, {
         integrationId: input.integrationId,
         url,
+        unauthenticated: connectionId === null,
         failed: "did not answer the tool call",
         tooLarge: "the tool ran, but its result is too large to relay; ask it for less",
         toolCall: calling,

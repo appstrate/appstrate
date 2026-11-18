@@ -673,6 +673,24 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
     expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
     expect(open.authorizations.length).toBeGreaterThan(0);
     expect(open.authorizations.every((a) => a === null)).toBe(true);
+    // Journaled like any operation outside a run: one row, without a connection.
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.integrationId, OPEN_ID));
+    expect(rows.map((row) => [row.connectionId, row.actorId, row.outcome])).toEqual([
+      [null, ctx.user.id, "200"],
+    ]);
+  });
+
+  it("refuses a server the egress guard refuses, before any exchange", async () => {
+    await seedProxyIntegration(ctx, unauthenticated("http://mcp.untrusted.test/mcp"));
+    const res = await syncOpen();
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { detail: string }).detail).toContain(
+      "refused by the egress guard",
+    );
   });
 
   it("answers 502 when the server asks for a credential: never authorized ad hoc", async () => {

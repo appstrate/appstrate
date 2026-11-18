@@ -1034,4 +1034,88 @@ describe("mcp integration tools", () => {
       expect(open).not.toContain("closed this space's credential proxy");
     });
   });
+  describe("an unauthenticated remote integration's typed tools (AFPS §7.2)", () => {
+    const OPEN_ID = "@cporg/files";
+    const OPEN_TOOL = "cporg_files__read_media_file";
+    /** A 1×1 transparent PNG. */
+    const IMAGE = {
+      type: "image" as const,
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      mimeType: "image/png",
+    };
+    let server: FakeMcpServer;
+    let restoreEgress: () => void;
+
+    beforeAll(() => {
+      restoreEgress = allowLoopbackOAuthEgress();
+      server = startFakeMcpServer({
+        tools: [
+          { name: "read_media_file", description: "Reads an image.", result: { content: [IMAGE] } },
+        ],
+      });
+    });
+
+    afterAll(() => {
+      server.stop();
+      restoreEgress();
+    });
+
+    beforeEach(async () => {
+      forgetProtocolEras();
+      server.requests.length = 0;
+      // No `auths`: nothing to connect, nothing to inject.
+      await seedProxyIntegration(owner, {
+        type: "integration",
+        schema_version: "0.3",
+        name: OPEN_ID,
+        version: "1.0.0",
+        display_name: "Files",
+        source: { kind: "remote", remote: { url: server.url, transport: "streamable-http" } },
+        tools_policy: { read_media_file: {} },
+      } as unknown as IntegrationManifest);
+    });
+
+    for (const preset of ["admin", "operator"] as const) {
+      it(`is searched and called with no connection by a space ${preset}`, async () => {
+        const member = preset === "admin" ? owner : await memberContext(owner, "member", preset);
+        const caller = await instanceCaller(member);
+
+        const targeted = await callTool(caller, "search_integration_tools", {
+          integration: OPEN_ID,
+        });
+        expect(targeted.isError).toBe(false);
+        expect(targeted.data.best_match).toMatchObject({
+          tool: OPEN_TOOL,
+          integration_package_id: OPEN_ID,
+          description: "Files. Reads an image.",
+          input_schema: { type: "object", properties: {} },
+        });
+        // An empty `not_ready` is left out.
+        expect(targeted.data.not_ready ?? []).toEqual([]);
+        const general = await callTool(caller, "search_integration_tools", { query: "image" });
+        expect((general.data.best_match as { tool: string }).tool).toBe(OPEN_TOOL);
+
+        const envelope = await mcp(caller, "tools/call", {
+          name: "call_integration_tool",
+          arguments: { tool: OPEN_TOOL, arguments: {} },
+        });
+        const result = envelope.result as {
+          isError?: boolean;
+          content: unknown[];
+          _meta?: Record<string, unknown>;
+        };
+        expect(result.isError ?? false).toBe(false);
+        expect(result.content).toEqual([IMAGE]);
+        expect(result._meta?.["dev.appstrate/relayed"]).toBe(true);
+        // Nothing injected: not the caller's MCP token, no credential at all.
+        expect(server.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
+        expect(server.requests.every((r) => r.headers.get("authorization") === null)).toBe(true);
+        const connections = await db
+          .select()
+          .from(integrationConnections)
+          .where(eq(integrationConnections.integrationId, OPEN_ID));
+        expect(connections).toEqual([]);
+      });
+    }
+  });
 });

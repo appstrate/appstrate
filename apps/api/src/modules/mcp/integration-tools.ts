@@ -147,13 +147,14 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
   const descriptor: Tool = {
     name: "search_integration_tools",
     description:
-      "Search the tools of the integrations you hold a connection of in this space, by keyword " +
+      "Search the tools of the integrations you hold a connection of, or that need none, in " +
+      "this space, by keyword " +
       "and/or integration; with neither, list them, `limit` at a time. They are each " +
       "integration's `api_call` tools and, for an integration backed by a remote MCP server, " +
       "the typed tools that server offers. Each result has the `tool` name to pass to " +
       "call_integration_tool, its `integration_package_id`, a `description` and the " +
       "`connection_ids` it reaches among the result's `connections`, each with the " +
-      "`connection_id` to pass; `catalog_unreadable: true` marks a typed " +
+      "`connection_id` to pass (empty: omit `connection_id`); `catalog_unreadable: true` marks a typed " +
       "tool whose server could not be listed, named without description or schema. " +
       "Listing a cold server's catalog sends the connection's credential, which has effects: " +
       "the listing is journaled as a call of the connection, a 401 goes through the forced " +
@@ -351,7 +352,8 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
             "The connection to call with, one of the tool's `connection_ids`. " +
             "Without it the proxy chooses as for an `api_call`, and refuses with the candidate " +
             "connections when several qualify. For an `api_call` tool, it applies to each " +
-            "request that names no `connection_id` of its own.",
+            "request that names no `connection_id` of its own. Omit it for a tool whose " +
+            "`connection_ids` is empty: its integration binds no connection.",
         },
       },
     },
