@@ -120,16 +120,19 @@ async function settleBatch(
 }
 
 /**
- * Create the watermark at `now()` if it does not exist yet. Called by `init()`, after the
+ * Create the watermark if it does not exist yet, positioned so the first pass starts at `now`. Called by `init()`, after the
  * migration and before the first pass: a run that finished before the module metered compute
  * is not billed retroactively, and a run still in flight at that moment settles when it ends.
  * Idempotent and race-safe (`ON CONFLICT DO NOTHING`); a warm boot is a no-op, so a module
  * that was off for a while resumes from where it stopped and settles the gap.
  */
 export async function ensureComputeCursorSeeded(): Promise<void> {
+  // Dated one replay window AHEAD: a pass reads from `watermark - window`, so a watermark at
+  // `now` would reach back and bill the runs of the ten minutes before the module was
+  // enabled. At `now + window` the first pass starts exactly at `now`.
   await getBillingDb()
     .insert(computeCursor)
-    .values({ completedAt: new Date(), runId: "" })
+    .values({ completedAt: new Date(Date.now() + REPLAY_WINDOW_MS), runId: "" })
     .onConflictDoNothing({ target: computeCursor.id });
 }
 
