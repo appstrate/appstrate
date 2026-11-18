@@ -56,6 +56,7 @@ import {
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import {
+  startBreakingEventStreamRelay,
   startFakeMcpServer,
   type FakeMcpServer,
   type FakeMcpServerOptions,
@@ -1556,6 +1557,26 @@ describe("the typed tools of a remote MCP integration", () => {
         });
       } finally {
         tokenServer.stop(true);
+      }
+    });
+
+    it("answers at once when an event-stream answer breaks mid-read: 502 upstream_unreachable", async () => {
+      _setRemoteToolTimeoutsForTesting({ callMs: 4_000 });
+      const relay = startBreakingEventStreamRelay(server.url);
+      try {
+        await seedProxyIntegration(
+          ctx,
+          remote({ url: relay.url, authorizedUris: [`${relay.origin}/**`] }),
+        );
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+        const started = Date.now();
+        const res = await post("call", { integration_package_id: ID, name: "search" });
+        const problem = (await res.json()) as { code: string };
+        expect([res.status, problem.code]).toEqual([502, "upstream_unreachable"]);
+        // The SDK swallows the stream's error: only failing the operation answers before 4 s.
+        expect(Date.now() - started).toBeLessThan(2_000);
+      } finally {
+        relay.stop();
       }
     });
 

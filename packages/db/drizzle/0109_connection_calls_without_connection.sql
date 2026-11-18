@@ -5,8 +5,8 @@
 -- SHAPE ONLY (`docs/NO_TRANSITIONAL_CODE.md` §2). Existing rows keep their connection.
 --
 -- ROLLBACK: a previous build reads `connection_id` as non-null and would serialize a NULL row
--- against its own contract. Delete the rows with a NULL `connection_id`, then restore the
--- constraint, or roll forward.
+-- against its own contract. Delete the rows with a NULL `connection_id`, then restore `NOT NULL`
+-- on `connection_id` (the CHECK may stay), or roll forward.
 
 ALTER TABLE "connection_calls" ALTER COLUMN "connection_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "connection_calls" ADD CONSTRAINT "connection_calls_no_connection_no_owner" CHECK ("connection_calls"."connection_id" IS NOT NULL OR ("connection_calls"."owner_type" IS NULL AND "connection_calls"."owner_id" IS NULL));

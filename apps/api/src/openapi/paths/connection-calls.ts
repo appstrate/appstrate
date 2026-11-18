@@ -144,7 +144,16 @@ const PAGINATION =
 const ownConnectionCallSchema = {
   allOf: [
     connectionCallSchema,
-    { type: "object", properties: { connection_id: { type: "string", format: "uuid" } } },
+    {
+      type: "object",
+      properties: {
+        connection_id: {
+          type: "string",
+          format: "uuid",
+          description: "The connection the call used: never null here, the caller owns it.",
+        },
+      },
+    },
   ],
 } as const;
 

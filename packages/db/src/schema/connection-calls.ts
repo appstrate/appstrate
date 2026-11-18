@@ -23,9 +23,10 @@ import {
  * value that may name a row that no longer exists.
  *
  * `connection_id` is NULL when the integration binds no connection (unauthenticated, AFPS §7.2),
- * and `owner_*` with it (`connection_calls_no_connection_no_owner`). `owner_type` / `owner_id` are the connection's owner when the call was
- * made (`user` / `end_user`), NULL when the connection was gone by then. `actor_type` /
- * `actor_id` are who acted, `api_key_id` the key they acted through, if any.
+ * and `owner_*` with it (`connection_calls_no_connection_no_owner`). `owner_type` / `owner_id`
+ * are the connection's owner when the call was made (`user` / `end_user`), NULL when the
+ * connection was gone by then. `actor_type` / `actor_id` are who acted, `api_key_id` the key
+ * they acted through, if any.
  *
  * `host` comes from the target as the caller wrote it, before substitution: a `{{field}}`
  * placeholder is stored as written, so the row never holds a decrypted credential value. `outcome`

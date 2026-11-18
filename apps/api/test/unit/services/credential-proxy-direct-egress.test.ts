@@ -40,7 +40,10 @@ describe("the direct path's redirect rules", () => {
   });
 
   it("follows a redirect to https on another public host", async () => {
-    const { sent } = await follow("https://other.public.example/mcp");
+    const { outcome, sent } = await follow("https://other.public.example/mcp");
     expect(sent[1]).toBe("https://other.public.example/mcp");
+    // Followed until the guard's own redirect ceiling: no floor refused it.
+    expect(outcome).toBeInstanceOf(SsrfBlockedError);
+    expect(outcome).toMatchObject({ reason: "too-many-redirects" });
   });
 });

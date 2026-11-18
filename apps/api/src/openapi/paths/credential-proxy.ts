@@ -1061,9 +1061,10 @@ export const credentialProxyPaths = {
             "`credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's " +
             "refusals of the server URL, before anything is sent: `unauthorized_target` " +
             "(`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), " +
-            "`credential_exfiltration_refused` (`http_request_denied`). For an integration " +
-            "declaring no auths, `blocked_target` also answers the egress guard refusing a " +
-            "redirect hop, after the first hop was sent.",
+            "`credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also " +
+            "answers the egress guard refusing a redirect hop, after the first hop was sent; for " +
+            "an integration declaring no auths, also plain `http` to a host the operator does " +
+            "not trust, on the server URL (nothing sent) or a hop.",
           headers: PROXY_STATUS_HEADER,
           content: problemContent,
         },

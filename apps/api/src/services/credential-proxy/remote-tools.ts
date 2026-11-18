@@ -248,7 +248,7 @@ async function withClient<T>(
     input.connectionId === null
       ? directMcpOperation({
           ...base,
-          // The activation check `proxyCall` makes on each exchange: switched off since, none sent.
+          // The activation check `proxyCall` makes on each exchange: switched off since, nothing is sent.
           beforeExchange: () => assertIntegrationActive(input.integrationId, input.scope.spaceId),
         })
       : proxiedMcpOperation({ ...base, connectionId: input.connectionId, reach: input.reach });

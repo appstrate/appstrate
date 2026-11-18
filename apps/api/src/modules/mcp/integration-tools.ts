@@ -155,10 +155,10 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "and the `connection_ids` it reaches among the result's `connections`, each with the " +
       "`connection_id` to pass (empty: omit `connection_id`); `catalog_unreadable: true` " +
       "marks a typed tool whose server could not be listed, named without description or " +
-      "schema. Listing a cold server's catalog through a connection sends its credential: the " +
-      "listing is journaled as a call of the connection, a 401 goes through the forced " +
-      "refresh, which can rotate its stored OAuth tokens, and a refusal can flag the " +
-      "connection for reconnection; without one, journaled with none. " +
+      "schema. A cold catalog listed through a connection sends its credential: it is " +
+      "journaled as the connection's call, a 401 triggers the forced refresh, which can " +
+      "rotate its OAuth tokens, and a refusal can flag the connection to reconnect; " +
+      "listing an integration that binds no connection is journaled with no connection. " +
       "`total` counts every match; `note` says when more matched than are shown, or when a " +
       "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
       "`not_ready`, the integrations active here you have no usable connection of and whose " +

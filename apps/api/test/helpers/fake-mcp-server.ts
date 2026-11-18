@@ -141,3 +141,32 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
     stop: () => http.stop(true),
   };
 }
+
+/**
+ * A loopback relay to `upstream` whose `tools/call` answer opens a 200 event stream (a comment,
+ * no event) that errors `afterMs` later: the stream an MCP client swallows the error of.
+ */
+export function startBreakingEventStreamRelay(upstream: string, afterMs = 50) {
+  const http = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const body = await req.text();
+      if (!body.includes('"tools/call"')) {
+        return fetch(upstream, { method: req.method, headers: req.headers, body });
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            // A comment sends the headers and opens the stream; no event follows.
+            controller.enqueue(new TextEncoder().encode(": open\n\n"));
+            setTimeout(() => controller.error(new Error("event stream broken")), afterMs);
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  const origin = `http://127.0.0.1:${http.port}`;
+  return { url: `${origin}/mcp`, origin, stop: () => http.stop(true) };
+}

@@ -15,7 +15,7 @@ import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { initProxyLimits } from "../../../src/services/proxy-limits.ts";
 import { _setRemoteToolTimeoutsForTesting } from "../../../src/services/credential-proxy/remote-tools.ts";
-import { withAuthEnv } from "../../helpers/auth-env.ts";
+import { withEnv as withTestEnv } from "../../helpers/env.ts";
 import { journaledCalls } from "../../helpers/connection-calls.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -32,6 +32,7 @@ import { bearerApiKeyAuth, seedProxyIntegration } from "../../helpers/credential
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import {
   PNG_IMAGE_CONTENT,
+  startBreakingEventStreamRelay,
   startFakeMcpServer,
   type FakeMcpServer,
 } from "../../helpers/fake-mcp-server.ts";
@@ -91,7 +92,7 @@ function startServer(respond: (req: Request) => Response | Promise<Response>) {
 
 /** Runs `use` under `env`, the proxy limits read again from it. */
 const withEnv = (env: Record<string, string>, use: () => Promise<void>) =>
-  withAuthEnv(env, use, initProxyLimits);
+  withTestEnv(env, use, initProxyLimits);
 
 /** Runs `use` under shortened remote-tool deadlines, restored afterwards. */
 async function withTimeouts(next: { callMs?: number; listMs?: number }, use: () => Promise<void>) {
@@ -605,6 +606,24 @@ describe("the typed tools of an unauthenticated remote integration", () => {
       }
     });
   }
+
+  it("answers at once when an event-stream answer breaks mid-read: 502 upstream_unreachable", async () => {
+    const relay = startBreakingEventStreamRelay(server.url);
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(relay.url));
+      await withTimeouts({ callMs: 4_000 }, async () => {
+        const started = Date.now();
+        const called = await call({ name: "read_media_file" });
+        expect([called.status, called.body.code]).toEqual([502, "upstream_unreachable"]);
+        // The SDK swallows the stream's error: only failing the operation answers before 4 s.
+        expect(Date.now() - started).toBeLessThan(2_000);
+      });
+      // Journaled once, as answered: the status received, not the later read failure.
+      expect((await journal()).map((row) => row.outcome).at(-1)).toBe("200");
+    } finally {
+      relay.stop();
+    }
+  });
 
   it("keeps the declared names when its server cannot be reached; a call is a journaled 502", async () => {
     await seedProxyIntegration(ctx, unauthenticated("http://127.0.0.1:9/mcp"));

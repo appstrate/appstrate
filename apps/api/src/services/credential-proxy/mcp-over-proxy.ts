@@ -34,7 +34,7 @@ import type { ProxyReach } from "../integration-connections.ts";
 import type { ResolvedIntegrationVersion } from "../integration-service.ts";
 import { getCredentialProxyLimits } from "../proxy-limits.ts";
 import { recordConnectionCall, type ConnectionCall } from "./call-journal.ts";
-import { proxyCall, ProxyCallError } from "./core.ts";
+import { bodyReadError, proxyCall, ProxyCallError } from "./core.ts";
 
 export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
 
@@ -330,20 +330,56 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
     if (result.status === 401 || result.status === 403) {
       fail(new McpCredentialRejectedError(result.status, result.credential));
     }
-    // A body cut at the bound fails the operation, rather than handing the client half a message.
     const answered = result;
-    const relayed =
-      result.body?.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          flush() {
-            if (!answered.truncated) return;
-            const err = new McpExchangeTooLargeError(maxResponseBytes);
-            fail(err);
-            throw err;
-          },
-        }),
-      ) ?? null;
+    const relayed = relayAnswer(result.body, {
+      bound: maxResponseBytes,
+      truncated: () => answered.truncated === true,
+      readFailure: (err) => bodyReadError(err, answered.redactedHost, answered.connectionId),
+      fail,
+    });
     return new Response(relayed, { status: result.status, headers: result.headers });
+  });
+}
+
+/**
+ * An answer's body, relayed to the MCP client: past `bound` (or cut there, `truncated`), or
+ * failing mid-read, it fails the operation with that failure and errors the stream. The SDK
+ * swallows an event stream's error and would wait for its timeout; the operation answers at once.
+ */
+function relayAnswer(
+  body: ReadableStream<Uint8Array> | null,
+  opts: {
+    bound: number;
+    truncated?: () => boolean;
+    readFailure: (err: unknown) => Error;
+    fail: (err: Error) => void;
+  },
+): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  let read = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const failWith = (err: Error) => {
+        opts.fail(err);
+        controller.error(err);
+        void reader.cancel(err).catch(() => {});
+      };
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        return failWith(opts.readFailure(err));
+      }
+      if (chunk.done) {
+        if (opts.truncated?.()) return failWith(new McpExchangeTooLargeError(opts.bound));
+        return controller.close();
+      }
+      read += chunk.value.byteLength;
+      if (read > opts.bound) return failWith(new McpExchangeTooLargeError(opts.bound));
+      controller.enqueue(chunk.value);
+    },
+    cancel: (reason) => reader.cancel(reason),
   });
 }
 
@@ -392,20 +428,12 @@ export function directMcpOperation(
       throw failed(err);
     }
     reached(null, String(res.status));
-    // An answer past the bound fails the operation, rather than handing the client half a message.
-    let read = 0;
-    const relayed =
-      res.body?.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          transform(chunk, controller) {
-            read += chunk.byteLength;
-            if (read <= bound) return controller.enqueue(chunk);
-            const err = new McpExchangeTooLargeError(bound);
-            fail(err);
-            controller.error(err);
-          },
-        }),
-      ) ?? null;
+    // The journal keeps the status received: a body failing later is not journaled again.
+    const relayed = relayAnswer(res.body, {
+      bound,
+      readFailure: (err) => directFailure(err, target.origin),
+      fail,
+    });
     return new Response(relayed, { status: res.status, headers: res.headers });
   });
 }
