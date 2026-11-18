@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the open conversation is anchored to: its origin space and whether it is limited to it.
- * Published by `Conversation` to everything below it (the composer's limit item and chip, the
- * skills picker, the tool cards), which would otherwise each re-derive
- * it from the host's selected space — the one thing that does NOT define an existing conversation.
+ * What the open conversation is anchored to: its origin space and whether it is limited to it,
+ * published by `Conversation` to the composer, the skills picker and the tool cards.
  */
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { actsIn, useChatHost } from "./runtime-context.ts";
-import { useLatest } from "./use-latest.ts";
 
 export interface ConversationScope {
   /**
@@ -58,16 +55,12 @@ export type LimitUnavailableReason = "generating" | "no-acting-space" | "outside
  * origin picks it among `spaceIds`, the spaces the chat acts in; `unavailable`, with the reason,
  * `null` while the acting set is not known.
  */
-export type LimitAvailability =
+type LimitAvailability =
   | { kind: "toggle"; spaceId: string }
   | { kind: "choose"; spaceIds: readonly string[] }
   | { kind: "unavailable"; reason: LimitUnavailableReason | null };
 
-/**
- * The one decision on « Limiter à… ». Not while a turn generates (the server refuses). A limited
- * conversation can always be released, whatever the acting set became. One with an origin limits
- * to it while the chat acts there. One without takes the space it is limited to as its origin.
- */
+/** The one decision on « Limiter à… »: a limited conversation can always be released. */
 export function limitAvailability(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted" | "generating">,
   actingSpaceIds: readonly string[] | null,
@@ -103,11 +96,8 @@ export type AttachAvailability =
   | { kind: "unavailable"; reason: AttachUnavailableReason | null };
 
 /**
- * The one decision on the space a file is uploaded into, which the conversation then touches.
- * The origin while the chat acts there; a limited conversation takes files only there. Without
- * one, the space the host has selected (`selectedSpaceId`) when the chat acts there; in
- * « Tous les espaces » (`null`), the one acting space, else the user picks. Never the host's
- * working space unseen.
+ * The one decision on the space a file is uploaded into. Never the host's working space unseen:
+ * in « Tous les espaces » (`selectedSpaceId` `null`) without an origin, the user picks.
  */
 export function attachAvailability(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
@@ -128,25 +118,21 @@ export function attachAvailability(
   return { kind: "choose", spaceIds: actingSpaceIds };
 }
 
-/**
- * The open conversation's {@link attachAvailability}, with the space last picked for it: a
- * dropped file, which cannot ask, goes there while the choice stands.
- */
-export interface AttachTarget {
+/** The open conversation's {@link attachAvailability} and the space a file goes to now. */
+interface AttachTarget {
   availability: AttachAvailability;
-  /** The space last picked in a `choose`; it counts only while it is one of the choices. */
-  picked: string | null;
+  /** The decided space, else the one picked while it is one of the choices; `null` for none. */
+  spaceId: string | null;
   /** Picks the space the next files go to. */
   pick: (spaceId: string) => void;
 }
 
-/** Where a file added now is uploaded: the decided space, else the one picked; none otherwise. */
+/** Where a file goes now: the decided space, else the one picked while it is a choice. */
 export function attachSpaceOf(
-  target: Pick<AttachTarget, "availability" | "picked">,
+  availability: AttachAvailability,
+  picked: string | null,
 ): string | null {
-  const { availability } = target;
   if (availability.kind === "attach") return availability.spaceId;
-  const { picked } = target;
   return availability.kind === "choose" && picked && availability.spaceIds.includes(picked)
     ? picked
     : null;
@@ -154,7 +140,7 @@ export function attachSpaceOf(
 
 const NO_ATTACH_TARGET: AttachTarget = {
   availability: { kind: "unavailable", reason: null },
-  picked: null,
+  spaceId: null,
   pick: () => {},
 };
 
@@ -167,56 +153,37 @@ export function useAttachTarget(): AttachTarget {
 }
 
 /**
- * The open conversation's {@link AttachTarget}, under the space the host shows (`selectedSpaceId`,
- * `null` in « Tous les espaces »), and a getter of the space a file added now goes to, read by the
- * attachment adapter. A pick answers the choice offered under the space shown when it was made:
- * showing another drops it.
+ * The open conversation's {@link AttachTarget} under the space the host shows (`selectedSpaceId`,
+ * `null` in « Tous les espaces »). A pick answers the choice offered when it was made: a target
+ * that is no longer that choice drops it.
  */
 export function useConversationAttachTarget(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
   selectedSpaceId: string | null,
-): { target: AttachTarget; getSpaceId: () => string | null } {
+): AttachTarget {
   const { actingSpaceIds } = useChatHost();
   const [picked, pick] = useState<string | null>(null);
   const { originSpaceId, restricted } = scope;
-  const target = useMemo(
-    () => ({
-      availability: attachAvailability(
-        { originSpaceId, restricted },
-        actingSpaceIds,
-        selectedSpaceId,
-      ),
-      picked,
-      pick,
-    }),
-    [originSpaceId, restricted, actingSpaceIds, selectedSpaceId, picked],
+  const availability = useMemo(
+    () => attachAvailability({ originSpaceId, restricted }, actingSpaceIds, selectedSpaceId),
+    [originSpaceId, restricted, actingSpaceIds, selectedSpaceId],
   );
-  // Leaving the overview or losing the chosen space cancels the choice for future drops.
-  if (
-    picked &&
-    (target.availability.kind !== "choose" || !target.availability.spaceIds.includes(picked))
-  ) {
-    pick(null);
-  }
-  return { target, getSpaceId: useLatest(attachSpaceOf(target)) };
+  const spaceId = attachSpaceOf(availability, picked);
+  if (picked && (availability.kind !== "choose" || spaceId === null)) pick(null);
+  return useMemo(() => ({ availability, spaceId, pick }), [availability, spaceId]);
 }
 
 /**
- * The plain name of `spaceId`, for accessible names (the node below carries a tile a label would
- * drop); the generic « this space » when the host does not name it.
+ * `spaceId` as the host names it: the plain `label` for accessible names, the `node` (tile and
+ * name) for what is shown. `undefined` when there is none or the host cannot name it: the caller
+ * then says the generic sentence.
  */
-export function useSpaceLabel(spaceId: string | null): string {
-  const { t, useSpaceLabelOf } = useChatHost();
-  return useSpaceLabelOf()(spaceId) ?? t("composer.limit.thisSpace");
-}
-
-/**
- * `spaceId` as the host renders it (tile and name); without one, the generic « this space ».
- * Never a plain string for an accessible name: use {@link useSpaceLabel} for those.
- */
-export function useSpaceNode(spaceId: string | null): ReactNode {
-  const { t, renderSpaces } = useChatHost();
-  return spaceId ? renderSpaces([spaceId]) : t("composer.limit.thisSpace");
+export function useSpaceName(
+  spaceId: string | null,
+): { label: string; node: ReactNode } | undefined {
+  const { renderSpaces, useSpaceLabelOf } = useChatHost();
+  const label = useSpaceLabelOf()(spaceId);
+  return spaceId && label ? { label, node: renderSpaces([spaceId]) } : undefined;
 }
 
 /** The origin space a limited conversation acts in alone: set only while it is limited. */
@@ -227,12 +194,9 @@ export function limitedSpaceOf(
 }
 
 /**
- * The space a tool call acted in: the one the engine stamped on the call when it dispatched it
- * (`providerMetadata.appstrate.spaceId`, which the AI SDK stores as `callProviderMetadata` and
- * the runtime hands the card as `providerMetadata`: the origin of a limited conversation, the
- * named `space_id` otherwise). The engine stamps every call that acts in a space. Read from the
- * call itself, never from the conversation's present limit, which can change after the call was
- * made. `undefined` for a call that acts in no space.
+ * The space a tool call acted in, as the engine stamped it on the call
+ * (`providerMetadata.appstrate.spaceId`): read from the call, never from the conversation's present
+ * limit, which can change afterwards. `undefined` for a call that acts in no space.
  */
 export function callSpaceOf(part: { providerMetadata?: unknown }): string | undefined {
   const stamp = (part.providerMetadata as { appstrate?: { spaceId?: unknown } } | undefined)

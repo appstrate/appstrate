@@ -4,19 +4,16 @@
  * assistant-ui `AttachmentAdapter` for the chat composer (pinned
  * `@assistant-ui/react` 0.14.27). Its three methods:
  *
- *  - `add({file})` — register a picked file as a pending attachment (a chip),
- *    with the space it is uploaded into, read then (`spaceOf`): a file that has
- *    none is refused, and the client-side size guard rejects an over-cap file
- *    here, before any upload.
- *  - `send(pending)` — on composer submit, stage the bytes into that space through
- *    the host's uploader and return a complete attachment whose `file` content part carries
- *    the `upload://upl_x` URI. react-ai-sdk's `toCreateMessage` maps that part to
+ *  - `add({file})` — register a picked file as a pending attachment (a chip). A
+ *    file added while there is no space to upload into (`spaceOf`) is refused,
+ *    and the client-side size guard rejects an over-cap file here, before any upload.
+ *  - `send(pending)` — on composer submit, stage the bytes through the host's
+ *    uploader into the space read then (the turn acts there), and return a
+ *    complete attachment whose `file` content part carries the `upload://upl_x` URI. react-ai-sdk's `toCreateMessage` maps that part to
  *    an ai-SDK file part (`url: upload://…`) on the outgoing UIMessage; the
  *    server then materializes it into a durable `appfile://` file.
  *  - `remove()` — no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
- *
- * The space is fixed when the file is added: the user picked it then, or saw it decided.
  *
  * The uploader and the translator come from the host injection seam
  * (`runtime-context.ts`) — the adapter owns no transport and no literal text.
@@ -50,7 +47,7 @@ function uploadFailureKey(err: unknown): string {
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
-  /** The space a file added now is uploaded into (`attachSpaceOf`), `null` for none. */
+  /** The space a file is uploaded into now (`attachSpaceOf`), `null` for none. */
   spaceOf: () => string | null;
 }): AttachmentAdapter {
   const { upload, t, spaceOf } = deps;
@@ -61,13 +58,11 @@ export function createChatAttachmentAdapter(deps: {
     // Any file type — the composer accepts arbitrary files (the agent's
     // input schema, not the composer, decides what a run will accept).
     accept: "*",
-    add({ file }): Promise<PendingAttachment & { spaceId: string }> {
+    add({ file }): Promise<PendingAttachment> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
-      const spaceId = spaceOf();
-      if (spaceId === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
+      if (spaceOf() === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
       return Promise.resolve({
         id: crypto.randomUUID(),
-        spaceId,
         type: "file",
         name: file.name,
         contentType: file.type || "application/octet-stream",
@@ -77,9 +72,8 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
-      if (!("spaceId" in attachment) || typeof attachment.spaceId !== "string")
-        throw new Error(t("upload.failed"));
-      const { spaceId, ...pending } = attachment;
+      const spaceId = spaceOf();
+      if (spaceId === null) throw new Error(t("composer.attachUnavailable"));
       let uri: string;
       try {
         uri = await stageComposerFile(upload, attachment.file, spaceId);
@@ -95,7 +89,7 @@ export function createChatAttachmentAdapter(deps: {
         throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
       return {
-        ...pending,
+        ...attachment,
         status: { type: "complete" },
         content: [
           {

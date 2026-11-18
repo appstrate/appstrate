@@ -5,8 +5,8 @@
  * carries. Before the first message the conversation does not exist: its origin is the space the
  * host has selected (or, without one, the space the user limits it to) and its limit a local
  * choice, both sent with that message. Afterwards the limit is the server's, changed by a PATCH
- * (optimistic, rolled back on failure, refused while a turn generates) that keeps the session
- * detail and every list row in step. The origin is immutable once set: a conversation without one
+ * (refused while a turn generates): every reader projects it while it is pending, and a success
+ * writes it into the session detail and every list row. The origin is immutable once set: a conversation without one
  * takes it only by being limited to it.
  */
 
@@ -54,13 +54,18 @@ function limitedRow<T extends SessionSummary>(row: T, change: LimitChange): T {
 
 const limitMutationKey = (orgId: string | undefined) => ["chat-session-limit", orgId] as const;
 
-/** List and detail readers project pending changes over their latest server row. A refusal
- * simply drops the projection, including when a refetch changed the row during the PATCH. */
-export function usePendingSessionLimits(orgId: string | undefined) {
-  const pending = useMutationState({
+/** The limit changes in flight, read by every reader: a refusal simply drops them. */
+function usePendingLimits(orgId: string | undefined): LimitChange[] {
+  return useMutationState({
     filters: { mutationKey: limitMutationKey(orgId), status: "pending" },
     select: (mutation) => mutation.state.variables as LimitChange,
   });
+}
+
+/** List and detail readers project pending changes over their latest server row, so a refetch
+ * during the PATCH keeps its own changes whatever the PATCH's outcome. */
+export function usePendingSessionLimits(orgId: string | undefined) {
+  const pending = usePendingLimits(orgId);
   return useCallback(
     <T extends SessionSummary>(row: T): T => {
       const change = pending.find((limit) => limit.id === row.id);
@@ -121,7 +126,11 @@ export function useConversationLimit({
   }, [persistedAtMount, getLatest]);
 
   const detailKey = sessionQueryKey(transport?.orgId, id);
-  const { mutate, isPending, variables } = useMutation({
+  // The scope reads the same projection as the list and detail: it also covers a conversation
+  // created in this mount that no list holds yet.
+  const pending = usePendingLimits(transport?.orgId).find((limit) => limit.id === id);
+  const isPending = pending !== undefined;
+  const { mutate } = useMutation({
     mutationKey: limitMutationKey(transport?.orgId),
     mutationFn: ({ id: sessionId, ...patch }: LimitChange) =>
       setSessionLimit(transport!, sessionId, patch),
@@ -138,13 +147,8 @@ export function useConversationLimit({
         patchSessionsCache(cache, (rows) => rows.map((row) => limitedRow(row, change))),
       );
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: detailKey });
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
-    },
   });
 
-  const pending = isPending ? variables : undefined;
   const originSpaceId = exists ? (pending?.spaceId ?? current.spaceId) : draft.spaceId;
   const restricted = exists ? (pending?.restricted ?? current.restricted) : draft.restricted;
   const change = useCallback(

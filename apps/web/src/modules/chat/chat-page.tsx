@@ -19,6 +19,7 @@ import {
   ChatTransportProvider,
   SelectConversationProvider,
   type OpenFile,
+  type SpaceChoiceMenu,
 } from "@appstrate/module-chat/ui";
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
@@ -39,7 +40,7 @@ import { ConversationContextToggle, ConversationSidebar } from "./conversation-s
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
-import { ChatSpaceChoiceMenu } from "./space-choice-menu";
+import { SpaceChoiceDropdown, SpaceChoiceSubmenu } from "../../components/space-choice-menu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -47,7 +48,7 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { useSpaceLabelOf } from "../../hooks/use-spaces";
+import { useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -214,3 +215,25 @@ export function ChatModulePage() {
     </ChatTransportProvider>
   );
 }
+
+/** The chat's « in which space? » menu: the app's own, from a button or a menu entry. */
+const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({
+  variant,
+  label,
+  spaceIds,
+  onPick,
+  trigger,
+  testId,
+}) => {
+  const spaces = useSpacesOf(spaceIds);
+  const choice = { label, spaces, onPick };
+  return variant === "dropdown" ? (
+    <SpaceChoiceDropdown choice={choice}>{trigger}</SpaceChoiceDropdown>
+  ) : (
+    <SpaceChoiceSubmenu
+      choice={choice}
+      trigger={trigger}
+      marks={testId ? { "data-testid": testId } : undefined}
+    />
+  );
+};

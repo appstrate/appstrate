@@ -397,45 +397,33 @@ describe("chat sessions", () => {
         expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
       });
 
-      it("refuses a space the caller cannot act in (400 naming spaceId)", async () => {
+      it("refuses a space outside the caller's acting set, the row unchanged (400 naming spaceId)", async () => {
         const acting = (await seedSpace({ orgId: ctx.orgId, name: "Acting", visibility: "closed" }))
           .id;
         const readOnly = (
           await seedSpace({ orgId: ctx.orgId, name: "Read only", visibility: "closed" })
         ).id;
+        const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
+          .id;
+        const foreign = await createTestContext({ orgSlug: "foreignspace" });
         const member = await memberContext(ctx, "member", "viewer");
         await seedSpaceMember({ spaceId: acting, userId: member.user.id, presetRole: "runner" });
         await seedSpaceMember({ spaceId: readOnly, userId: member.user.id, presetRole: "viewer" });
         await db
           .insert(chatSessions)
           .values({ id: "chs_no_origin", orgId: ctx.orgId, userId: member.user.id });
-        const refused = await patch(member, "chs_no_origin", {
-          spaceId: readOnly,
-          restricted: true,
-        });
-        expect(refused.status).toBe(400);
-        expect(await fieldOf(refused)).toContain("spaceId");
-        expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: null, restricted: false });
+        // Read only, a closed space never joined, another organization's, an unknown id.
+        for (const spaceId of [readOnly, closed, foreign.defaultSpaceId, "spc_nonexistent"]) {
+          const refused = await patch(member, "chs_no_origin", { spaceId, restricted: true });
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+          expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: null, restricted: false });
+        }
+        expect(await touchedBy("chs_no_origin")).toEqual([]);
         expect(
           (await patch(member, "chs_no_origin", { spaceId: acting, restricted: true })).status,
         ).toBe(204);
         expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: acting, restricted: true });
-      });
-
-      it("refuses a space outside the caller's acting set, the row unchanged (400 naming spaceId)", async () => {
-        // A closed space the caller never joined, a space of another organization, an unknown id.
-        const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
-          .id;
-        const member = await memberContext(ctx, "member", "operator");
-        const foreign = await createTestContext({ orgSlug: "foreignspace" });
-        const overview = await createSession(member);
-        for (const spaceId of [closed, foreign.defaultSpaceId, "spc_nonexistent"]) {
-          const refused = await patch(member, overview.id, { spaceId, restricted: true });
-          expect(refused.status).toBe(400);
-          expect(await fieldOf(refused)).toContain("spaceId");
-          expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
-        }
-        expect(await touchedBy(overview.id)).toEqual([]);
       });
 
       it("refuses it while a turn is running (409): the turn claims on the scope it read", async () => {
@@ -475,6 +463,9 @@ describe("chat sessions", () => {
       const refused = await patch(ctx, created.id, { restricted: false });
       expect(refused.status).toBe(409);
       expect(((await refused.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+      expect(await restrictedOf(created.id)).toBe(true);
+      // Restating the limit changes nothing, so the turn does not stand in the way.
+      expect((await patch(ctx, created.id, { restricted: true })).status).toBe(204);
       expect(await restrictedOf(created.id)).toBe(true);
     });
   });

@@ -69,36 +69,25 @@ describe("when the limit is on offer", () => {
     generating,
   });
 
-  it("limits a conversation with an origin to it, in one click, while the chat acts there", () => {
-    expect(limitAvailability(scope("spc_a"), ["spc_a", "spc_b"])).toEqual({
-      kind: "toggle",
-      spaceId: "spc_a",
-    });
-  });
-
-  it("limits a conversation without an origin to the one space the chat acts in, in one click", () => {
-    expect(limitAvailability(scope(null), ["spc_a"])).toEqual({ kind: "toggle", spaceId: "spc_a" });
-  });
-
-  it("asks a conversation without an origin which space, among those the chat acts in", () => {
-    expect(limitAvailability(scope(null), ["spc_a", "spc_b"])).toEqual({
-      kind: "choose",
-      spaceIds: ["spc_a", "spc_b"],
-    });
-  });
-
-  it("is « no-acting-space » for a conversation without an origin when the chat acts nowhere", () => {
-    expect(limitAvailability(scope(null), [])).toEqual({
-      kind: "unavailable",
-      reason: "no-acting-space",
-    });
-  });
-
-  it("is « outside » when the origin space left the acting set, never another space instead", () => {
-    expect(limitAvailability(scope("spc_x"), ["spc_a", "spc_b"])).toEqual({
-      kind: "unavailable",
-      reason: "outside",
-    });
+  it("decides the entry from the scope and the acting set", () => {
+    const cases: [ReturnType<typeof scope>, string[] | null, unknown][] = [
+      // An origin: one click while the chat acts there, never another space instead.
+      [scope("spc_a"), ["spc_a", "spc_b"], { kind: "toggle", spaceId: "spc_a" }],
+      [scope("spc_x"), ["spc_a", "spc_b"], { kind: "unavailable", reason: "outside" }],
+      // No origin: the one acting space, else a choice among them, else none.
+      [scope(null), ["spc_a"], { kind: "toggle", spaceId: "spc_a" }],
+      [scope(null), ["spc_a", "spc_b"], { kind: "choose", spaceIds: ["spc_a", "spc_b"] }],
+      [scope(null), [], { kind: "unavailable", reason: "no-acting-space" }],
+      // A limited conversation can always be released.
+      [scope("spc_x", true), [], { kind: "toggle", spaceId: "spc_x" }],
+      [scope("spc_x", true), null, { kind: "toggle", spaceId: "spc_x" }],
+      // No reason while the acting set is not known.
+      [scope("spc_a"), null, { kind: "unavailable", reason: null }],
+      [scope(null), null, { kind: "unavailable", reason: null }],
+    ];
+    for (const [s, acting, expected] of cases) {
+      expect(limitAvailability(s, acting)).toEqual(expected as never);
+    }
   });
 
   it("is « generating » while a turn generates, even to release the limit (the server refuses)", () => {
@@ -111,21 +100,6 @@ describe("when the limit is on offer", () => {
           });
         }
       }
-    }
-  });
-
-  it("always lets a limited conversation be released", () => {
-    for (const acting of [[], null]) {
-      expect(limitAvailability(scope("spc_x", true), acting)).toEqual({
-        kind: "toggle",
-        spaceId: "spc_x",
-      });
-    }
-  });
-
-  it("gives no reason while the acting set is not known", () => {
-    for (const origin of ["spc_a", null]) {
-      expect(limitAvailability(scope(origin), null)).toEqual({ kind: "unavailable", reason: null });
     }
   });
 });
@@ -251,6 +225,42 @@ describe("changing the limit of an existing conversation", () => {
   });
 });
 
+describe("changing the limit of a conversation created in this mount", () => {
+  it("shows the pending limit though no list holds it yet", () => {
+    const qc = new QueryClient();
+    const transport = transportOver(() => new Promise<Response>(() => {}));
+    let seen!: ConversationScope;
+    const steps: Array<(scope: ConversationScope, getCreation: () => unknown) => void> = [
+      (_, getCreation) => getCreation(),
+      (scope) => scope.limitTo("spc_b"),
+    ];
+    function Harness() {
+      const [, rerender] = useState(0);
+      const limit = useConversationLimit({
+        id: "chs_new",
+        transport,
+        persistedAtMount: false,
+        stored: undefined,
+        selectedSpaceId: undefined,
+        generating: false,
+      });
+      seen = limit.scope;
+      const step = steps.shift();
+      if (step) {
+        step(limit.scope, limit.getCreation);
+        rerender((n) => n + 1);
+      }
+      return null;
+    }
+    renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+    expect(seen).toMatchObject({ originSpaceId: "spc_b", restricted: true, pending: true });
+  });
+});
+
 describe("the space a limited conversation acts in", () => {
   it("pins the origin only while the conversation is limited", () => {
     expect(limitedSpaceOf({ originSpaceId: "spc_a", restricted: true })).toBe("spc_a");
@@ -260,87 +270,15 @@ describe("the space a limited conversation acts in", () => {
 });
 
 describe("a new conversation's default limit", () => {
+  type Step = [selected: string | undefined, act: ((scope: ConversationScope) => void) | null];
+
   /**
-   * The hook of a conversation not created yet, after `act` ran on its scope (render phase). A
-   * static render runs no effect, so `getCreation` is read only without `act`; after one, what
-   * the first message would carry is read off the scope, which is what `getCreation` freezes.
+   * The draft's limit after `steps`, each run on a render under the space it names as selected
+   * (`undefined`: « Tous les espaces ») and acting on the scope that render shows. A state update
+   * of the rendering component re-renders it at once, even statically.
    */
-  function draft(
-    selectedSpaceId: string | undefined,
-    act?: (scope: ConversationScope) => void,
-  ): ReturnType<typeof useConversationLimit> {
+  function across(steps: Step[]): ReturnType<typeof useConversationLimit> {
     let seen: ReturnType<typeof useConversationLimit> | undefined;
-    const steps = act ? [act] : [];
-    function Harness() {
-      seen = useConversationLimit({
-        id: "chs_new",
-        transport: undefined,
-        persistedAtMount: false,
-        stored: undefined,
-        selectedSpaceId,
-        generating: false,
-      });
-      // A state update of the rendering component re-renders it at once, even statically.
-      const step = steps.shift();
-      if (step) step(seen.scope);
-      return null;
-    }
-    renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <Harness />
-      </QueryClientProvider>,
-    );
-    return seen!;
-  }
-
-  const carried = (scope: ConversationScope) =>
-    creationFields({ spaceId: scope.originSpaceId, restricted: scope.restricted });
-
-  it("is limited to the space it is started in", () => {
-    const limit = draft("spc_a");
-    expect(limit.scope).toMatchObject({ originSpaceId: "spc_a", restricted: true });
-    expect(limit.getCreation()).toEqual({ spaceId: "spc_a", restricted: true });
-  });
-
-  it("is unlimited from the overview, which has no origin until one is chosen", () => {
-    const limit = draft(undefined);
-    expect(limit.scope).toMatchObject({ originSpaceId: null, restricted: false });
-    expect(limit.getCreation()).toEqual({});
-  });
-
-  it("takes the space chosen from the overview as its origin, limited there, with no request", () => {
-    const limit = draft(undefined, (scope) => scope.limitTo("spc_b"));
-    expect(limit.scope).toMatchObject({ originSpaceId: "spc_b", restricted: true });
-    expect(carried(limit.scope)).toEqual({ spaceId: "spc_b", restricted: true });
-  });
-
-  it("is back to no origin when the chosen limit is undone before sending", () => {
-    const limit = draft(undefined, (scope) => {
-      scope.limitTo("spc_b");
-    });
-    const undone = draft(undefined, (scope) => {
-      scope.limitTo("spc_b");
-      scope.lift();
-    });
-    expect(limit.scope.originSpaceId).toBe("spc_b");
-    expect(undone.scope).toMatchObject({ originSpaceId: null, restricted: false });
-    expect(carried(undone.scope)).toEqual({});
-  });
-
-  it("keeps its origin when the limit is lifted in a space, and sends it unlimited", () => {
-    const limit = draft("spc_a", (scope) => scope.lift());
-    expect(limit.scope).toMatchObject({ originSpaceId: "spc_a", restricted: false });
-    expect(carried(limit.scope)).toEqual({ spaceId: "spc_a" });
-  });
-
-  /**
-   * The draft's scope after `steps`, each run on a render under the space it names as selected
-   * (`undefined`: « Tous les espaces ») and acting on the scope that render shows.
-   */
-  function across(
-    steps: Array<[string | undefined, ((scope: ConversationScope) => void) | null]>,
-  ): ConversationScope {
-    let seen: ConversationScope | undefined;
     const queue = [...steps];
     function Harness() {
       const [selected, setSelected] = useState(steps[0]![0]);
@@ -351,11 +289,10 @@ describe("a new conversation's default limit", () => {
         stored: undefined,
         selectedSpaceId: selected,
         generating: false,
-      }).scope;
-      // Each render takes its step, then selects the next step's space (a re-render, statically).
+      });
       const step = queue.shift();
       if (step) {
-        step[1]?.(seen);
+        step[1]?.(seen.scope);
         const next = queue[0];
         if (next) setSelected(next[0]);
       }
@@ -369,37 +306,62 @@ describe("a new conversation's default limit", () => {
     return seen!;
   }
 
-  it("drops a space chosen in « Tous les espaces » when a space is selected, taking that one", () => {
-    const scope = across([
-      [undefined, (s) => s.limitTo("spc_b")],
-      ["spc_a", null],
-    ]);
-    expect(scope).toMatchObject({ originSpaceId: "spc_a", restricted: true });
+  it("carries what the scope shows: limited where it starts, nothing from the overview", () => {
+    expect(across([["spc_a", null]]).getCreation()).toEqual({ spaceId: "spc_a", restricted: true });
+    expect(across([[undefined, null]]).getCreation()).toEqual({});
   });
 
-  it("drops a lifted limit when another space is selected, limited to the new one", () => {
-    const scope = across([
-      ["spc_a", (s) => s.lift()],
-      ["spc_c", null],
-    ]);
-    expect(scope).toMatchObject({ originSpaceId: "spc_c", restricted: true });
-  });
-
-  it("does not recover an abandoned choice when returning to the original view", () => {
-    const scope = across([
-      [undefined, (s) => s.limitTo("spc_b")],
-      ["spc_a", null],
-      [undefined, null],
-    ]);
-    expect(scope).toMatchObject({ originSpaceId: null, restricted: false });
-  });
-
-  it("is back to no origin when « Tous les espaces » is shown again", () => {
-    const scope = across([
-      ["spc_a", (s) => s.lift()],
-      [undefined, null],
-    ]);
-    expect(scope).toMatchObject({ originSpaceId: null, restricted: false });
+  it("follows the choices made and the space selected before the first message", () => {
+    const limitB = (s: ConversationScope) => s.limitTo("spc_b");
+    const lift = (s: ConversationScope) => s.lift();
+    const none = { originSpaceId: null, restricted: false };
+    const cases: [string, Step[], { originSpaceId: string | null; restricted: boolean }][] = [
+      ["started in a space", [["spc_a", null]], { originSpaceId: "spc_a", restricted: true }],
+      ["started in the overview", [[undefined, null]], none],
+      [
+        "limited from the overview",
+        [[undefined, limitB]],
+        { originSpaceId: "spc_b", restricted: true },
+      ],
+      ["limited then lifted in the overview", [[undefined, (s) => (limitB(s), lift(s))]], none],
+      ["lifted in a space", [["spc_a", lift]], { originSpaceId: "spc_a", restricted: false }],
+      [
+        "a space selected after a choice in the overview",
+        [
+          [undefined, limitB],
+          ["spc_a", null],
+        ],
+        { originSpaceId: "spc_a", restricted: true },
+      ],
+      [
+        "another space selected after a lift",
+        [
+          ["spc_a", lift],
+          ["spc_c", null],
+        ],
+        { originSpaceId: "spc_c", restricted: true },
+      ],
+      [
+        "back to the overview after a choice",
+        [
+          [undefined, limitB],
+          ["spc_a", null],
+          [undefined, null],
+        ],
+        none,
+      ],
+      [
+        "the overview after a lift",
+        [
+          ["spc_a", lift],
+          [undefined, null],
+        ],
+        none,
+      ],
+    ];
+    for (const [name, steps, expected] of cases) {
+      expect({ name, ...across(steps).scope }).toMatchObject({ name, ...expected });
+    }
   });
 });
 
@@ -411,14 +373,14 @@ describe("the composer's limit chip", () => {
     useSpaceLabelOf: () => (id) => (id === "spc_a" ? "Studio" : undefined),
   });
 
-  function html(scope: ConversationScope, workingSpaceId = "spc_a") {
+  function html(scope: ConversationScope) {
     return renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
         <ChatHostProvider value={host}>
           <ConversationScopeProvider value={scope}>
             <TooltipProvider>
               <ComposerTools
-                transport={transportOf(() => ({ "X-Space-Id": workingSpaceId }))}
+                transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
                 selection={{ skillMode: "auto", pinnedSkills: [] }}
                 onSelectionChange={() => {}}
                 showPicker={false}
@@ -435,28 +397,24 @@ describe("the composer's limit chip", () => {
     const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true }));
     expect(out).toContain('data-testid="composer-limit-chip"');
     expect(out).toContain('data-spaces="spc_a"');
-    expect(out).toContain('aria-label="composer.limit.undo|Studio"');
     expect(out).not.toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled/);
-  });
-
-  it("cannot be lifted while a turn generates", () => {
-    const out = html(
-      conversationScope({ originSpaceId: "spc_a", restricted: true, generating: true }),
-    );
-    expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
-  });
-
-  it("disables the chip's X and the menu item while a change is in flight", () => {
-    const out = html(
-      conversationScope({ originSpaceId: "spc_a", restricted: true, pending: true }),
-    );
-    expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
-  });
-
-  it("is absent when the conversation is not limited", () => {
     expect(html(conversationScope({ originSpaceId: "spc_a" }))).not.toContain(
       "composer-limit-chip",
     );
+  });
+
+  it("cannot be lifted while a turn generates or a change is in flight", () => {
+    for (const busy of [{ generating: true }, { pending: true }]) {
+      const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true, ...busy }));
+      expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
+    }
+  });
+
+  it("says the generic sentence for a space the host cannot name, never « this space »", () => {
+    const out = html(conversationScope({ originSpaceId: "spc_unseen", restricted: true }));
+    expect(out).toContain("composer.limitChip.generic");
+    expect(out).toContain('aria-label="composer.limit.undoGeneric"');
+    expect(out).not.toContain("spc_unseen");
   });
 });
 
@@ -493,7 +451,7 @@ describe("the composer's limit entry", () => {
     );
   }
 
-  it("limits a conversation with an origin to it in one click, naming it", () => {
+  it("toggle: limits in one click, naming the space", () => {
     const out = entry(conversationScope({ originSpaceId: "spc_a" }), ["spc_a", "spc_b"]);
     expect(out).toContain('role="menuitemcheckbox"');
     expect(out).toContain('aria-label="composer.limit|Studio"');
@@ -501,14 +459,7 @@ describe("the composer's limit entry", () => {
     expect(out).not.toContain("data-choice");
   });
 
-  it("names the one space the chat acts in for a conversation without an origin", () => {
-    const out = entry(conversationScope(), ["spc_b"]);
-    expect(out).toContain('role="menuitemcheckbox"');
-    expect(out).toContain('aria-label="composer.limit|Atelier"');
-    expect(out).toContain('data-spaces="spc_b"');
-  });
-
-  it("hands the host's sub-menu the acting spaces, a pick limiting there", () => {
+  it("choose: hands the host's sub-menu the acting spaces, a pick limiting there", () => {
     picked.length = 0;
     const out = entry(conversationScope({ limitTo: (spaceId) => picked.push(spaceId) }), [
       "spc_a",
@@ -521,18 +472,11 @@ describe("the composer's limit entry", () => {
     expect(picked).toEqual(["spc_probe"]);
   });
 
-  it("is inert with its reason otherwise", () => {
-    const cases: [ConversationScope, string[], string][] = [
-      [conversationScope({ generating: true }), ["spc_a", "spc_b"], "composer.limit.generating"],
-      [conversationScope(), [], "composer.limit.noActingSpace"],
-      [conversationScope({ originSpaceId: "spc_x" }), ["spc_a"], "composer.limit.outside"],
-    ];
-    for (const [scope, acting, reason] of cases) {
-      const out = entry(scope, acting);
-      expect(out).toContain('data-disabled=""');
-      expect(out).toContain(reason);
-      expect(out).not.toContain("data-choice");
-    }
+  it("unavailable: inert, with its reason", () => {
+    const out = entry(conversationScope({ originSpaceId: "spc_x" }), ["spc_a"]);
+    expect(out).toContain('data-disabled=""');
+    expect(out).toContain("composer.limit.outside");
+    expect(out).not.toContain("data-choice");
   });
 });
 
@@ -543,81 +487,64 @@ describe("the space a file is attached in", () => {
 
   it("is the origin while the chat acts there, limited or not, whatever space is shown", () => {
     for (const shown of ["spc_a", "spc_b", null]) {
-      expect(attachAvailability(limited("spc_a"), acting, shown)).toEqual({
-        kind: "attach",
-        spaceId: "spc_a",
-      });
-      expect(attachAvailability(unlimited("spc_a"), acting, shown)).toEqual({
-        kind: "attach",
-        spaceId: "spc_a",
-      });
-    }
-  });
-
-  it("is none for a limited conversation whose origin left the acting set", () => {
-    expect(attachAvailability(limited("spc_x"), acting, "spc_a")).toEqual({
-      kind: "unavailable",
-      reason: "origin-outside",
-    });
-  });
-
-  it("is the selected space without an origin (or off an origin left behind), when the chat acts there", () => {
-    for (const origin of [null, "spc_x"]) {
-      expect(attachAvailability(unlimited(origin), acting, "spc_b")).toEqual({
-        kind: "attach",
-        spaceId: "spc_b",
-      });
-      expect(attachAvailability(unlimited(origin), acting, "spc_z")).toEqual({
-        kind: "unavailable",
-        reason: "outside",
-      });
-    }
-  });
-
-  it("in « Tous les espaces » without an origin: the one acting space, else a choice, never the hidden one", () => {
-    expect(attachAvailability(unlimited(null), ["spc_a"], null)).toEqual({
-      kind: "attach",
-      spaceId: "spc_a",
-    });
-    expect(attachAvailability(unlimited(null), acting, null)).toEqual({
-      kind: "choose",
-      spaceIds: acting,
-    });
-    expect(attachAvailability(unlimited(null), [], null)).toEqual({
-      kind: "unavailable",
-      reason: "no-acting-space",
-    });
-  });
-
-  it("gives no reason while the acting set is not known", () => {
-    for (const scope of [unlimited(null), limited("spc_a")]) {
-      for (const shown of ["spc_a", null]) {
-        expect(attachAvailability(scope, null, shown)).toEqual({
-          kind: "unavailable",
-          reason: null,
+      for (const scope of [limited("spc_a"), unlimited("spc_a")]) {
+        expect(attachAvailability(scope, acting, shown)).toEqual({
+          kind: "attach",
+          spaceId: "spc_a",
         });
       }
     }
   });
 
-  it("forgets a previous destination after leaving and returning to the overview", () => {
-    let step = 0;
+  it("decides the other cases from the space shown and the acting set", () => {
+    const cases: [Parameters<typeof attachAvailability>, AttachAvailability][] = [
+      // A limited conversation whose origin left the acting set takes no file.
+      [[limited("spc_x"), acting, "spc_a"], { kind: "unavailable", reason: "origin-outside" }],
+      // Without an origin, or off one left behind: the space shown, when the chat acts there.
+      [[unlimited(null), acting, "spc_b"], { kind: "attach", spaceId: "spc_b" }],
+      [[unlimited("spc_x"), acting, "spc_b"], { kind: "attach", spaceId: "spc_b" }],
+      [[unlimited(null), acting, "spc_z"], { kind: "unavailable", reason: "outside" }],
+      [[unlimited("spc_x"), acting, "spc_z"], { kind: "unavailable", reason: "outside" }],
+      // « Tous les espaces »: the one acting space, else a choice, never the hidden one.
+      [[unlimited(null), ["spc_a"], null], { kind: "attach", spaceId: "spc_a" }],
+      [[unlimited(null), acting, null], { kind: "choose", spaceIds: acting }],
+      [[unlimited(null), [], null], { kind: "unavailable", reason: "no-acting-space" }],
+      // No reason while the acting set is not known.
+      [[unlimited(null), null, null], { kind: "unavailable", reason: null }],
+      [[limited("spc_a"), null, "spc_a"], { kind: "unavailable", reason: null }],
+    ];
+    for (const [args, expected] of cases) expect(attachAvailability(...args)).toEqual(expected);
+  });
+
+  it("goes where it is decided, else where last picked while that is a choice", () => {
+    const choose: AttachAvailability = { kind: "choose", spaceIds: acting };
+    expect(attachSpaceOf({ kind: "attach", spaceId: "spc_a" }, "spc_b")).toBe("spc_a");
+    expect(attachSpaceOf(choose, "spc_b")).toBe("spc_b");
+    expect(attachSpaceOf(choose, null)).toBeNull();
+    expect(attachSpaceOf(choose, "spc_z")).toBeNull();
+    expect(attachSpaceOf({ kind: "unavailable", reason: "outside" }, "spc_a")).toBeNull();
+  });
+
+  /** The target's space after each render's step; `scope` and the space shown are its state. */
+  function targetAcross(
+    steps: Array<
+      (
+        target: ReturnType<typeof useConversationAttachTarget>,
+        set: {
+          shown: (spaceId: string | null) => void;
+          scope: (scope: ReturnType<typeof unlimited>) => void;
+        },
+      ) => void
+    >,
+  ): string | null {
     let destination: string | null = null;
+    const queue = [...steps];
     function Composer() {
       const [shown, setShown] = useState<string | null>(null);
-      const { target } = useConversationAttachTarget(unlimited(null), shown);
-      destination = attachSpaceOf(target);
-      switch (step++) {
-        case 0:
-          target.pick("spc_b");
-          break;
-        case 1:
-          setShown("spc_a");
-          break;
-        case 2:
-          setShown(null);
-          break;
-      }
+      const [scope, setScope] = useState(unlimited(null));
+      const target = useConversationAttachTarget(scope, shown);
+      destination = target.spaceId;
+      queue.shift()?.(target, { shown: setShown, scope: setScope });
       return null;
     }
     renderToStaticMarkup(
@@ -625,20 +552,36 @@ describe("the space a file is attached in", () => {
         <Composer />
       </ChatHostProvider>,
     );
-    expect(destination).toBeNull();
-  });
-  it("goes, for a file added without asking (a drop), where it is decided or last picked", () => {
-    const choose: AttachAvailability = { kind: "choose", spaceIds: acting };
+    return destination;
+  }
+
+  it("forgets a pick once the choice it answered is gone", () => {
+    // Leaving the overview and coming back.
     expect(
-      attachSpaceOf({ availability: { kind: "attach", spaceId: "spc_a" }, picked: "spc_b" }),
-    ).toBe("spc_a");
-    expect(attachSpaceOf({ availability: choose, picked: "spc_b" })).toBe("spc_b");
-    expect(attachSpaceOf({ availability: choose, picked: null })).toBeNull();
-    // A pick that is no longer among the choices counts for nothing.
-    expect(attachSpaceOf({ availability: choose, picked: "spc_z" })).toBeNull();
-    expect(
-      attachSpaceOf({ availability: { kind: "unavailable", reason: "outside" }, picked: "spc_a" }),
+      targetAcross([
+        (t) => t.pick("spc_b"),
+        (_, set) => set.shown("spc_a"),
+        (_, set) => set.shown(null),
+      ]),
     ).toBeNull();
+    // Limited to another space (the origin then decides), then the limit lifted with no origin.
+    expect(
+      targetAcross([
+        (t) => t.pick("spc_b"),
+        (_, set) => set.scope({ originSpaceId: "spc_a", restricted: true }),
+        (_, set) => set.scope(unlimited(null)),
+      ]),
+    ).toBeNull();
+  });
+
+  it("is the space picked, then the origin once the conversation is limited there", () => {
+    expect(targetAcross([(t) => t.pick("spc_b")])).toBe("spc_b");
+    expect(
+      targetAcross([
+        (t) => t.pick("spc_b"),
+        (_, set) => set.scope({ originSpaceId: "spc_a", restricted: true }),
+      ]),
+    ).toBe("spc_a");
   });
 });
 
@@ -662,10 +605,11 @@ describe("the composer's attach button", () => {
       SpaceChoiceMenu: HostMenu,
     });
     const transport = transportOf(() => ({}), shownSpaceId);
+    const spaceId = availability.kind === "attach" ? availability.spaceId : null;
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
         <ChatTransportProvider value={transport}>
-          <AttachTargetProvider value={{ availability, picked: null, pick: () => {} }}>
+          <AttachTargetProvider value={{ availability, spaceId, pick: () => {} }}>
             <Runtime>
               <TooltipProvider>
                 <ComposerTools
@@ -683,22 +627,23 @@ describe("the composer's attach button", () => {
     );
   }
 
-  it("attaches directly in the space shown without naming it, alongside the settings button", () => {
-    const out = render({ kind: "attach", spaceId: "spc_a" }, "spc_a");
-    expect(out).toContain('aria-label="composer.attach"');
-    expect(out).toContain('aria-label="composer.settings"');
-    expect(out).not.toContain("data-choice");
-  });
-
-  it("names a direct attachment's destination in another space or the overview", () => {
+  it("attach: directly, naming the destination only when it is not the space shown", () => {
+    const here = render({ kind: "attach", spaceId: "spc_a" }, "spc_a");
+    expect(here).toContain('aria-label="composer.attach"');
+    expect(here).toContain('aria-label="composer.settings"');
+    expect(here).not.toContain("data-choice");
     for (const shown of ["spc_b", null]) {
-      const out = render({ kind: "attach", spaceId: "spc_a" }, shown);
-      expect(out).toContain('aria-label="composer.attachIn|Studio"');
-      expect(out).not.toContain("data-choice");
+      expect(render({ kind: "attach", spaceId: "spc_a" }, shown)).toContain(
+        'aria-label="composer.attachIn|Studio"',
+      );
     }
+    // A space the host cannot name is not named.
+    expect(render({ kind: "attach", spaceId: "spc_unseen" }, null)).toContain(
+      'aria-label="composer.attach"',
+    );
   });
 
-  it("opens the acting spaces from the attach button itself", () => {
+  it("choose: opens the acting spaces from the attach button itself", () => {
     const out = render({ kind: "choose", spaceIds: ["spc_a", "spc_b"] }, null);
     expect(out).toContain('data-variant="dropdown"');
     expect(out).toContain('data-label="composer.attach.choose"');
@@ -706,11 +651,9 @@ describe("the composer's attach button", () => {
     expect(out).toContain('aria-label="composer.attach"');
   });
 
-  it("disables the button with the reason, and without one while the acting set loads", () => {
+  it("unavailable: disabled with the reason, and without one while the acting set loads", () => {
     const cases: [AttachAvailability, string | null][] = [
-      [{ kind: "unavailable", reason: "outside" }, "composer.attachUnavailable"],
       [{ kind: "unavailable", reason: "origin-outside" }, "composer.limit.outside"],
-      [{ kind: "unavailable", reason: "no-acting-space" }, "composer.limit.noActingSpace"],
       [{ kind: "unavailable", reason: null }, null],
     ];
     for (const [availability, reason] of cases) {

@@ -148,9 +148,8 @@ export type UseFileImageSrc = (id: string, spaceId?: string) => string | null | 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink) into `spaceId`,
  * returning the `upload://upl_x` URI the server materializes into a durable file there. The
- * chat names the space of every upload (`attachAvailability`), never the host's working one.
- * The module adds only its staged-image preview cache on top (`upload.ts`). Travels as a
- * `ChatPage` prop, not through context (see the file header).
+ * module adds only its staged-image preview cache on top (`upload.ts`). Travels as a `ChatPage`
+ * prop, not through context (see the file header).
  */
 export type UploadFile = (file: File, spaceId: string, signal?: AbortSignal) => Promise<string>;
 

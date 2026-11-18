@@ -94,6 +94,7 @@ import { useConversationLimit } from "./conversation-limit.ts";
 import {
   AttachTargetProvider,
   ConversationScopeProvider,
+  useAttachTarget,
   useConversationAttachTarget,
   useConversationScope,
 } from "./conversation-scope.ts";
@@ -511,8 +512,8 @@ const Conversation = memo(function Conversation({
     selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
     generating: rest.serverGenerating === true,
   });
-  // The space a file goes to (`attachAvailability`), and the one last picked when it is asked.
-  const attach = useConversationAttachTarget(scope, transport?.spaceId ?? null);
+  // The space a file goes to (`attachAvailability`).
+  const attachTarget = useConversationAttachTarget(scope, transport?.spaceId ?? null);
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
@@ -560,7 +561,7 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <AttachTargetProvider value={attach.target}>
+      <AttachTargetProvider value={attachTarget}>
         <ConversationInner
           id={id}
           transport={transport}
@@ -570,7 +571,6 @@ const Conversation = memo(function Conversation({
           composerSlot={composerSlot}
           getChosenSkills={getChosenSkills}
           getCreation={getCreation}
-          getAttachSpaceId={attach.getSpaceId}
           {...rest}
         />
       </AttachTargetProvider>
@@ -617,7 +617,6 @@ function ConversationInner({
   serverUpdatedAt,
   getChosenSkills,
   getCreation,
-  getAttachSpaceId,
 }: Omit<
   ConversationProps,
   "canPinSkills" | "canWrite" | "authorsPackages" | "storedSpaceId" | "storedRestricted"
@@ -627,14 +626,13 @@ function ConversationInner({
   getChosenSkills: () => ChatSkillSelection | undefined;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
-  /** The space a file added now is uploaded into, `null` for none. */
-  getAttachSpaceId: () => string | null;
 }) {
   const queryClient = useQueryClient();
   const { t } = useChatHost();
   // File attachments: the composer stages picked files through the HOST uploader, into the
-  // space each was added for, and sends them as `upload://` file parts the server
+  // space the conversation acts in when the turn is sent, as `upload://` file parts the server
   // materializes into durable files.
+  const getAttachSpaceId = useLatest(useAttachTarget().spaceId);
   const attachments = useMemo(
     () => createChatAttachmentAdapter({ upload: uploadFile, t, spaceOf: getAttachSpaceId }),
     [uploadFile, t, getAttachSpaceId],

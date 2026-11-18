@@ -17,7 +17,7 @@
  * asserted there rather than through markup this renderer cannot produce.
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -32,12 +32,9 @@ installFakeStorage({
 });
 
 const { ChatAccessSummary, ChatCapabilityList } = await import("./chat-access-summary.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
 const { $api } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
@@ -122,39 +119,16 @@ function summary(options: {
     );
   }
 
-  // `renderToStaticMarkup` takes zustand's SERVER snapshot, so the current org
-  // and space are seeded on `getInitialState` — `localStorage` would be too
-  // late, the stores read it at their first import anywhere in the suite.
-  const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
-    ...orgStore.getInitialState(),
-    id: ORG_ID,
-  });
-  const spaceSnapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
-    ...spaceStore.getInitialState(),
-    id: SPACE_ID,
-  });
-  const chosen = [
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_chat", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: options.overview ? { [`u_chat:${ORG_ID}`]: true } : {},
-    }),
-  ];
-  try {
-    return render(
-      <ChatAccessSummary conversation={"conversation" in options ? options.conversation : null} />,
-      {
-        queryClient: qc,
-      },
-    );
-  } finally {
-    orgSnapshot.mockRestore();
-    spaceSnapshot.mockRestore();
-    for (const stub of chosen) stub.mockRestore();
-  }
+  return renderInSpace(
+    <ChatAccessSummary conversation={"conversation" in options ? options.conversation : null} />,
+    {
+      queryClient: qc,
+      overview: options.overview ?? false,
+      orgId: ORG_ID,
+      spaceId: SPACE_ID,
+      userId: "u_chat",
+    },
+  );
 }
 
 describe("the chat access summary", () => {

@@ -23,7 +23,7 @@ import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useConversationTabs } from "./use-conversation-tabs";
-import { resolveRunAgentName } from "../../hooks/use-run-agent-name";
+import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { formatBytes } from "../../lib/format-bytes";
@@ -123,17 +123,16 @@ export function ConversationRuns({
   conversationId: string | null;
   active: boolean;
 }) {
-  const { t } = useTranslation(["chat", "agents"]);
+  const { t } = useTranslation("chat");
   const admitting = useAdmittingSpaces("runs");
   const canRead = admitting.length > 0;
   // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
   const scope = useListScope(true, canRead);
-  // Their agents are every space's too: named from the index spanning spaces, read while shown.
-  const { data: agents } = useAgents({ spanning: true, enabled: active && !!conversationId });
+  // Their agents are every space's too: read from the index spanning spaces, while shown.
+  const shown = active && !!conversationId;
+  const { data: agents } = useAgents({ spanning: true, enabled: shown });
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
-  const byPackageId = new Map(
-    (agents ?? []).map((agent) => [agent.id, agent.display_name ?? agent.id] as const),
-  );
+  const agentName = useRunAgentName({ spanning: true, enabled: shown });
   const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
   // A conversation belongs to the organization: the runs it launched, in every space.
   const query = $api.useQuery(
@@ -158,7 +157,7 @@ export function ConversationRuns({
         <RunRow
           key={run.id}
           run={run}
-          agentName={resolveRunAgentName(run, { byPackageId, t })}
+          agentName={agentName(run)}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
           dense
           // The list spans the spaces the reader reads runs in: each row names its own once
@@ -171,7 +170,7 @@ export function ConversationRuns({
   );
 }
 
-function ConversationFiles({
+export function ConversationFiles({
   conversationId,
   active,
   onSelect,

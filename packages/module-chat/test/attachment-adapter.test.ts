@@ -4,8 +4,9 @@
  * Composer attachment adapter — the space a file is uploaded into, and the message a failed
  * upload puts on the chip.
  *
- * The space is read when the file is added (`attachSpaceOf`): the upload names it, whatever is
- * decided afterwards, and a file added with none is refused before any upload.
+ * The space is read when the turn is sent: the conversation's limit or the space shown can change
+ * after a file is added, and the server accepts an upload only in a space the turn acts in. A file
+ * added while there is none is refused before any upload.
  *
  * The host uploader throws with a machine-readable `code` (RFC 9457 `type`
  * suffix). Two of those codes are actionable by the user and must survive into
@@ -33,7 +34,7 @@ async function sendRejectedWith(err: unknown) {
 }
 
 describe("chat attachment adapter — the space of an upload", () => {
-  it("uploads each file into the space read when it was added", async () => {
+  it("uploads into the space the conversation acts in when the turn is sent", async () => {
     const uploads: string[] = [];
     let space: string | null = "spc_a";
     const adapter = adapterOver(
@@ -43,35 +44,29 @@ describe("chat attachment adapter — the space of an upload", () => {
       },
       () => space,
     );
-    const first = await adapter.add({ file: NOTE() });
+    const pending = await adapter.add({ file: NOTE() });
+    // Limited to another space, or another space shown, before sending.
     space = "spc_b";
-    const second = await adapter.add({ file: NOTE() });
-    space = "spc_c";
-    const sent = await adapter.send(first);
-    await adapter.send(second);
-    expect(uploads).toEqual(["spc_a", "spc_b"]);
+    const sent = await adapter.send(pending);
+    expect(uploads).toEqual(["spc_b"]);
     expect(sent.content).toMatchObject([{ type: "file", data: "upload://upl_1" }]);
   });
 
-  it("keeps the pending file's destination when the adapter is recreated", async () => {
-    const pending = await adapterOver(() => Promise.reject()).add({ file: NOTE() });
-    const changed = adapterOver(
-      (_file, spaceId) => Promise.resolve(`upload://${spaceId}`),
-      () => "spc_b",
-    );
-    expect((await changed.send(pending)).content).toMatchObject([{ data: "upload://spc_a" }]);
-  });
-
-  it("refuses a file added with no space, before any upload", async () => {
+  it("refuses a file with no space, when added or when sent, before any upload", async () => {
     const uploads: string[] = [];
+    let space: string | null = null;
     const adapter = adapterOver(
       (_file, spaceId) => {
         uploads.push(spaceId);
         return Promise.resolve("upload://upl_1");
       },
-      () => null,
+      () => space,
     );
     await expect(adapter.add({ file: NOTE() })).rejects.toThrow("composer.attachUnavailable");
+    space = "spc_a";
+    const pending = await adapter.add({ file: NOTE() });
+    space = null;
+    await expect(adapter.send(pending)).rejects.toThrow("composer.attachUnavailable");
     expect(uploads).toEqual([]);
   });
 });

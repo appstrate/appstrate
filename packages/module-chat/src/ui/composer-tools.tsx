@@ -31,8 +31,7 @@ import {
   limitAvailability,
   useAttachTarget,
   useConversationScope,
-  useSpaceLabel,
-  useSpaceNode,
+  useSpaceName,
   type AttachUnavailableReason,
   type LimitUnavailableReason,
 } from "./conversation-scope.ts";
@@ -80,10 +79,7 @@ export function ComposerTools({
 }: ComposerToolsProps) {
   const { t, can } = useChatHost();
   const scope = useConversationScope();
-  // The origin's plain name, for the accessible names: the node below carries a tile the name
-  // does not. Without an origin, the sentence stays generic.
-  const spaceLabel = useSpaceLabel(scope.originSpaceId);
-  const spaceNode = useSpaceNode(scope.originSpaceId);
+  const origin = useSpaceName(scope.originSpaceId);
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
   const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
@@ -181,12 +177,18 @@ export function ComposerTools({
       {scope.restricted && (
         <RemovableChip
           icon={<MapPinIcon />}
-          removeLabel={t("composer.limit.undo", { name: spaceLabel })}
+          removeLabel={
+            origin
+              ? t("composer.limit.undo", { name: origin.label })
+              : t("composer.limit.undoGeneric")
+          }
           removeDisabled={scope.generating || scope.pending}
           onRemove={scope.lift}
           data-testid="composer-limit-chip"
         >
-          {sentenceWithNode(t, "composer.limitChip", spaceNode)}
+          {origin
+            ? sentenceWithNode(t, "composer.limitChip", origin.node)
+            : t("composer.limitChip.generic")}
         </RemovableChip>
       )}
       {showPicker && (
@@ -225,18 +227,17 @@ export function LimitMenuEntry() {
   const limit = limitAvailability(scope, actingSpaceIds);
   // The space a click limits to: the origin, or the one acting space.
   const named = limit.kind === "toggle" ? limit.spaceId : null;
-  const spaceLabel = useSpaceLabel(named);
-  const spaceNode = useSpaceNode(named);
+  const space = useSpaceName(named);
   return limit.kind === "toggle" ? (
     // The origin, or the one space the chat acts in: one click limits there.
     <DropdownMenuCheckboxItem
       checked={scope.restricted}
       disabled={scope.pending}
       onCheckedChange={(on) => (on ? scope.limitTo(limit.spaceId) : scope.lift())}
-      aria-label={t("composer.limit", { name: spaceLabel })}
+      aria-label={space ? t("composer.limit", { name: space.label }) : t("composer.limit.generic")}
       data-testid="composer-limit-item"
     >
-      {sentenceWithNode(t, "composer.limit", spaceNode)}
+      {space ? sentenceWithNode(t, "composer.limit", space.node) : t("composer.limit.generic")}
     </DropdownMenuCheckboxItem>
   ) : limit.kind === "choose" ? (
     // No origin and several acting spaces: the space picked becomes the origin.
@@ -282,10 +283,10 @@ function AttachButton() {
   const shownSpaceId = useChatTransport()?.spaceId ?? null;
   const { availability, pick } = useAttachTarget();
   const filePicker = useRef<HTMLButtonElement>(null);
-  const spaceLabel = useSpaceLabel(availability.kind === "attach" ? availability.spaceId : null);
+  const space = useSpaceName(availability.kind === "attach" ? availability.spaceId : null);
   const label =
-    availability.kind === "attach" && availability.spaceId !== shownSpaceId
-      ? t("composer.attachIn", { name: spaceLabel })
+    space && availability.kind === "attach" && availability.spaceId !== shownSpaceId
+      ? t("composer.attachIn", { name: space.label })
       : t("composer.attach");
   const unavailable = availability.kind === "unavailable";
   const button = (

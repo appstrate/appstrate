@@ -57,14 +57,14 @@ function harness(options: { descriptor?: typeof DESCRIPTOR | null; putStatus?: n
         init: {
           body: PostCall["body"];
           signal?: AbortSignal;
-          params?: { header?: { "X-Space-Id"?: string } };
+          headers?: { "X-Space-Id"?: string };
         },
       ) => {
         posts.push({
           path,
           body: init.body,
           signal: init.signal,
-          space: init.params?.header?.["X-Space-Id"],
+          space: init.headers?.["X-Space-Id"],
         });
         return { data: descriptor ?? undefined, error: undefined, response: new Response() };
       }) as never,

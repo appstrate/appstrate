@@ -4,9 +4,11 @@
  * What the chat assistant can do for the caller: their RBAC translated into the
  * assistant's acts (its MCP bearer carries the caller's grants in the spaces the
  * turn acts in, minus what the authoring switch turns off, never more). A verdict
- * says the act is held in some space of the turn, not in every one, and names those spaces. Not a gate (acts are re-checked
- * server-side), but a row must never claim what the route would refuse; pinned
- * to the routes' guards by `catalog-requirements.test.ts` (apps/api).
+ * says the act is held in some space of the turn, not in every one, and names those spaces.
+ * Not a gate (acts are re-checked server-side), but a row must never claim what the route would
+ * refuse; pinned to the routes' guards by `catalog-requirements.test.ts` (apps/api). These rows
+ * judge the turn's own spaces, where `useChatCan` answers for any acting space: they differ on
+ * purpose.
  */
 
 import {
@@ -134,7 +136,7 @@ export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCap
 }
 
 /** The standing the summary names: the headline role and the line under the verdicts. */
-export interface AccessStanding {
+interface AccessStanding {
   headline: string;
   line: {
     key: "access.roleLine" | "access.roleLineOrg" | "access.roleLineIn";
