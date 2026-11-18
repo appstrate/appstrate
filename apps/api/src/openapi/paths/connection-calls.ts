@@ -207,8 +207,9 @@ export const connectionCallsPaths = {
       tags: ["Integrations"],
       summary: "The credential proxy's calls made in the current space",
       description:
-        "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of " +
-        "`POST /api/integrations/{packageId}/discover`) made in the current " +
+        "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and " +
+        "`/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and " +
+        "every direct MCP operation toward an unauthenticated integration's server, made in the current " +
         "space, whatever the connection and whoever owns it: who used which connection, against " +
         "which host, with what outcome. One row per call, with or without a credential " +
         "(`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that " +
