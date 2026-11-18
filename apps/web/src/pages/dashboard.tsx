@@ -35,7 +35,7 @@ export function DashboardPage() {
 
   // A disabled query is not loading, so an unresolved permission set (or listing) must be.
   const isLoading = !ready || !known || runsLoading || agentsLoading || schedulesLoading;
-  const error = runsError || agentsError || running.error;
+  const error = runsError || agentsError;
 
   // The greeting is known before any read: only the body waits.
   if (isLoading)
@@ -83,7 +83,7 @@ export function DashboardPage() {
         agents: orderedAgents,
         runs,
         runTotal: runsData?.total ?? runs.length,
-        runningTotal: running.isEnabled ? running.data?.total : null,
+        runningTotal: running.data?.total ?? (running.isLoading ? undefined : null),
         schedules: schedules ?? [],
         agentName,
       }}
