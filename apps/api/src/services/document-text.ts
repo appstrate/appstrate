@@ -410,9 +410,14 @@ function readXlsx(files: Record<string, Uint8Array>, budget: TextBudget): { unit
       // Enough rows to fill the budget: the rest would be cut, so it is not read.
       if (rowChars > DOCUMENT_TEXT_MAX_CHARS) break;
       const cells: string[] = [];
+      // `r` is optional in SpreadsheetML: a cell without one sits right after the previous cell.
+      let nextColumn = 0;
       for (const cell of elements(row.body, "c")) {
-        const column = columnIndex(attribute(cell.attributes, "r") ?? "");
-        if (column < 0 || column >= SHEET_MAX_COLUMNS) continue;
+        const reference = attribute(cell.attributes, "r");
+        const declared = reference === undefined ? -1 : columnIndex(reference);
+        const column = declared >= 0 ? declared : nextColumn;
+        nextColumn = column + 1;
+        if (column >= SHEET_MAX_COLUMNS) continue;
         const type = attribute(cell.attributes, "t");
         const raw = [...elements(cell.body, "v")][0]?.body;
         let value = "";

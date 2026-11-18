@@ -499,6 +499,56 @@ describe("mcp resources/read (appfile://)", () => {
     expect(contents[0]!.text).toContain("Contrat signé");
   });
 
+  const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const workbook = (sheet: string, sharedStrings = "<sst></sst>") =>
+    zipSync({
+      "xl/workbook.xml": strToU8(
+        `<workbook><sheets><sheet name="Ventes" r:id="rId1"/></sheets></workbook>`,
+      ),
+      "xl/_rels/workbook.xml.rels": strToU8(
+        `<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`,
+      ),
+      "xl/sharedStrings.xml": strToU8(sharedStrings),
+      "xl/worksheets/sheet1.xml": strToU8(sheet),
+    });
+
+  it("returns the extracted text of an xlsx, sheet by sheet, cells without an r attribute included", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "ventes.xlsx",
+      XLSX_MIME,
+      workbook(
+        `<worksheet><sheetData>
+          <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>12.5</v></c></row>
+          <row><c t="s"><v>0</v></c><c><v>7</v></c></row>
+        </sheetData></worksheet>`,
+        `<sst><si><t>Stylo</t></si></sst>`,
+      ),
+    );
+    const { contents, blocks } = await readBoth(docId);
+    const text = contents[0]!.text as string;
+    expect(text).toContain("[Text extracted from ventes.xlsx");
+    expect(text).toContain("--- Sheet: Ventes ---\nStylo\t12.5\nStylo\t7");
+    expect(blocks[0]).toMatchObject({ type: "resource", resource: { text } });
+  });
+
+  it("says an empty spreadsheet has no text, not that it is a scanned PDF", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "vide.xlsx",
+      XLSX_MIME,
+      workbook(`<worksheet><sheetData><row r="1"/></sheetData></worksheet>`),
+    );
+    const { contents } = await readBoth(docId);
+    const note = metadataOf(contents).note as string;
+    expect(note).toMatch(/No extractable text: the spreadsheet/);
+    expect(note).not.toMatch(/scanned/);
+  });
+
   it("says a corrupt document could not be read", async () => {
     const runId = await seedRun(scope);
     const docId = await publishDoc(

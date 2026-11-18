@@ -89,6 +89,7 @@ import {
   DOCUMENT_SOURCE_MAX_BYTES,
   documentFormatOf,
   extractDocumentText,
+  type DocumentFormat,
 } from "../../services/document-text.ts";
 import { formatBytes } from "@appstrate/core/format";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
@@ -1639,6 +1640,20 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
  * other binary: base64 of one is never served), degraded per the caller's
  * {@link FileCapabilities}.
  */
+/** What a document with no text says, in terms of its kind: a scan is a PDF's way of having none. */
+function emptyDocumentNote(format: DocumentFormat): string {
+  if (format === "pdf") {
+    return "No extractable text: the document has no text layer (a scanned PDF, or images only). Its pages would have to be read as images; there is no OCR here.";
+  }
+  const kind =
+    format === "xlsx" || format === "ods"
+      ? "spreadsheet has no cell holding text or a number"
+      : format === "pptx" || format === "odp"
+        ? "presentation holds no text"
+        : "document holds no text";
+  return `No extractable text: the ${kind}.`;
+}
+
 function buildFileResourceReader(ctx: McpToolContext): {
   read: (uri: string) => Promise<ReadResourceResult>;
 } {
@@ -1762,7 +1777,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
           row,
           capabilities,
           extracted.status === "empty"
-            ? "No extractable text: the document has no text layer (a scanned PDF, or images only). Its pages would have to be read as images; there is no OCR here."
+            ? emptyDocumentNote(extracted.format)
             : extracted.status === "unsupported"
               ? `The document is over the ${formatBytes(DOCUMENT_SOURCE_MAX_BYTES)} limit for text extraction. Fetch it from the content_url.`
               : "The document could not be read (corrupt, encrypted or malformed).",

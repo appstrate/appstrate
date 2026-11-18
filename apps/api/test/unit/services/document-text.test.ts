@@ -93,6 +93,21 @@ describe("extractDocumentTextUncached", () => {
     expect(text).toContain("--- Sheet: Notes & co ---\nTRUE");
   });
 
+  it("reads an xlsx whose cells carry no `r` attribute, one after the other", async () => {
+    const result = await extractDocumentTextUncached(
+      zip({
+        "xl/workbook.xml": `<workbook><sheets><sheet name="S" r:id="rId1"/></sheets></workbook>`,
+        "xl/_rels/workbook.xml.rels": `<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`,
+        "xl/worksheets/sheet1.xml": `<worksheet><sheetData>
+          <row><c t="inlineStr"><is><t>a</t></is></c><c t="inlineStr"><is><t>b</t></is></c></row>
+          <row><c r="C2"><v>3</v></c><c><v>4</v></c></row>
+        </sheetData></worksheet>`,
+      }),
+      "xlsx",
+    );
+    expect((result as { text: string }).text).toContain("a\tb\n\t\t3\t4");
+  });
+
   it("reads a pptx in slide order, with speaker notes", async () => {
     const slide = (text: string) => `<p:sld><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:sld>`;
     const result = await extractDocumentTextUncached(
