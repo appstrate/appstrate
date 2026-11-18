@@ -18,6 +18,14 @@ export const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
  */
 export const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
+/**
+ * Ceiling on an image file's RAW bytes inlined as a base64 `blob` (an MCP
+ * `image` block for `read_file`). Larger than {@link RESOURCE_BLOB_MAX_BYTES}
+ * because a photo is rarely under 700 KiB and the model reads it, not a
+ * parser: the chat downscales it before any provider sees it.
+ */
+export const RESOURCE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
 /** Why a result carries a resource's metadata instead of its content. */
 export const RESOURCE_OVERSIZED_NOTE =
   "Content omitted — it exceeds the inline size limit (1 MiB text / 700 KiB binary).";

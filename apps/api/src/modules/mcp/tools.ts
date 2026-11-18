@@ -32,7 +32,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   notifyDetached,
-  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_IMAGE_MAX_BYTES,
   RESOURCE_OVERSIZED_NOTE,
   RESOURCE_TEXT_MAX_BYTES,
   type AppstrateRequestExtra,
@@ -81,8 +81,15 @@ import {
   getFileForActor,
   streamFileContent,
   projectFileMetadata,
+  MODEL_IMAGE_MIMES,
   type FileCapabilities,
 } from "../../services/files.ts";
+import {
+  DOCUMENT_SOURCE_MAX_BYTES,
+  documentFormatOf,
+  extractDocumentText,
+} from "../../services/document-text.ts";
+import { formatBytes } from "@appstrate/core/format";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
@@ -1553,8 +1560,11 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
     name: "read_file",
     description:
       "Read an appfile:// URI through the same file ACL and storage path as resources/read. " +
-      "Small text and binary files are returned as embedded MCP resources; oversized or " +
-      "non-downloadable files return capability-aware metadata.",
+      "Text files are returned as text; an image (png, jpeg, gif, webp) as an image the model " +
+      "can look at; a PDF, Word, Excel, PowerPoint or OpenDocument file as its extracted text, " +
+      "with page, sheet or slide markers (a scanned PDF has none: the result says so). Any other " +
+      "binary, an oversized file or one you may not download returns capability-aware metadata, " +
+      "never its bytes.",
     annotations: {
       title: "Read file",
       readOnlyHint: true,
@@ -1584,9 +1594,20 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
     try {
       const result = await readFile(uri);
       return {
-        content: result.contents.map((resource) => ({ type: "resource", resource })),
+        content: result.contents.flatMap((resource): CallToolResult["content"] =>
+          // An image is an MCP `image` block, the one binary shape a model can read, behind a
+          // text line naming the file: the pixels are the request's alone, the line is what a
+          // transcript keeps and a later turn can re-read. Every other content (text,
+          // metadata) stays an embedded resource.
+          "blob" in resource && resource.mimeType?.startsWith("image/")
+            ? [
+                { type: "text", text: `[image ${resource.mimeType} — ${resource.uri}]` },
+                { type: "image", data: resource.blob, mimeType: resource.mimeType },
+              ]
+            : [{ type: "resource", resource }],
+        ),
         isError: false,
-      } as CallToolResult;
+      } satisfies CallToolResult;
     } catch (err) {
       if (err instanceof ToolRefusal) return refusalResult(err.refusal);
       throw err;
@@ -1603,10 +1624,13 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
  * from storage (`streamFileContent`, so no presigned redirect to follow). A bad
  * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
  *
- * Returns, each under ~1 MB: `text` for a textual file up to
- * {@link RESOURCE_TEXT_MAX_BYTES}, base64 `blob` for another up to
- * {@link RESOURCE_BLOB_MAX_BYTES}, else metadata-only JSON (also when the caller
- * may not download it), degraded per the caller's {@link FileCapabilities}.
+ * Returns: `text` for a textual file up to {@link RESOURCE_TEXT_MAX_BYTES}; a
+ * base64 `blob` for an image a provider accepts up to
+ * {@link RESOURCE_IMAGE_MAX_BYTES}; the extracted `text` of a PDF/Office/ODF
+ * document (`services/document-text.ts`, bounded and cached by hash); else
+ * metadata-only JSON (also when the caller may not download it, and for every
+ * other binary: base64 of one is never served), degraded per the caller's
+ * {@link FileCapabilities}.
  */
 function buildFileResourceReader(ctx: McpToolContext): {
   read: (uri: string) => Promise<ReadResourceResult>;
@@ -1678,19 +1702,73 @@ function buildFileResourceReader(ctx: McpToolContext): {
       }
 
       // Downloadable → serve the bytes from storage directly (no 307 to follow).
-      if (isTextShapedMime(normalizeMime(row.mime)) && row.size <= RESOURCE_TEXT_MAX_BYTES) {
+      const mime = normalizeMime(row.mime);
+      const readBytes = async (): Promise<Uint8Array | null> => {
         const stream = await streamFileContent(row.storageKey);
-        if (stream) {
-          const text = await new Response(stream).text();
-          return { contents: [{ uri: canonicalUri, mimeType: row.mime, text }] };
+        return stream ? new Uint8Array(await new Response(stream).arrayBuffer()) : null;
+      };
+
+      if (isTextShapedMime(mime)) {
+        if (row.size <= RESOURCE_TEXT_MAX_BYTES) {
+          const stream = await streamFileContent(row.storageKey);
+          if (stream) {
+            const text = await new Response(stream).text();
+            return { contents: [{ uri: canonicalUri, mimeType: row.mime, text }] };
+          }
         }
-      } else if (row.size <= RESOURCE_BLOB_MAX_BYTES) {
-        const stream = await streamFileContent(row.storageKey);
-        if (stream) {
-          const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-          const blob = Buffer.from(bytes).toString("base64");
-          return { contents: [{ uri: canonicalUri, mimeType: row.mime, blob }] };
+      } else if (MODEL_IMAGE_MIMES.has(mime)) {
+        // The one binary a model reads as itself. Over the cap it is metadata like any oversized file.
+        if (row.size <= RESOURCE_IMAGE_MAX_BYTES) {
+          const bytes = await readBytes();
+          if (bytes) {
+            return {
+              contents: [
+                { uri: canonicalUri, mimeType: mime, blob: Buffer.from(bytes).toString("base64") },
+              ],
+            };
+          }
         }
+      } else if (documentFormatOf(mime, row.name)) {
+        // A PDF or Office file is read as the words it holds, bounded and cached by content hash.
+        const extracted = await extractDocumentText({
+          sha256: row.sha256,
+          mime,
+          name: row.name,
+          size: row.size,
+          read: readBytes,
+        });
+        if (extracted.status === "text") {
+          const body = `[Text extracted from ${row.name} (${row.mime})]\n\n${extracted.text}`;
+          return {
+            contents: [
+              {
+                uri: canonicalUri,
+                mimeType: "text/plain",
+                text: extracted.note ? `${body}\n\n[${extracted.note}]` : body,
+              },
+            ],
+          };
+        }
+        return metadataOnly(
+          row.id,
+          canonicalUri,
+          row,
+          capabilities,
+          extracted.status === "empty"
+            ? "No extractable text: the document has no text layer (a scanned PDF, or images only). Its pages would have to be read as images; there is no OCR here."
+            : extracted.status === "unsupported"
+              ? `The document is over the ${formatBytes(DOCUMENT_SOURCE_MAX_BYTES)} limit for text extraction. Fetch it from the content_url.`
+              : "The document could not be read (corrupt, encrypted or malformed).",
+        );
+      } else {
+        // Any other binary is never inlined as base64: a model cannot read it and it fills the context.
+        return metadataOnly(
+          row.id,
+          canonicalUri,
+          row,
+          capabilities,
+          "Binary content is not inlined: only images and documents (PDF, Word, Excel, PowerPoint, OpenDocument) are readable here.",
+        );
       }
 
       // Oversized (either kind), or the storage object went missing → metadata.

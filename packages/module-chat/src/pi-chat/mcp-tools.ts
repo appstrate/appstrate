@@ -52,7 +52,13 @@ const LIST_SKILLS_TOOL = "list_skills";
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
-  content: Array<{ type: "text"; text: string }>;
+  /**
+   * Text, and an image only for a model that accepts them (`mcpResultToPi`): the image's bytes
+   * are the model's alone, `ui-stream-mapper.ts` never lets them reach the persisted transcript.
+   */
+  content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  >;
   details: unknown;
   /**
    * Typed connect offers for the UI cards — one per connect URL the payload
@@ -94,9 +100,11 @@ export function toPiToolResult(payload: unknown, scope: OfferScope): PiToolResul
 }
 
 /**
- * Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). `scope` says
- * which part of the payload may carry a connect offer ({@link offerScopeOf}); a result the
- * platform marked relayed keeps the mark ({@link PiToolResult.relayed}).
+ * Adapt an MCP `CallToolResult` to Pi's `AgentToolResult`: every block as text, except an
+ * `image` block, which stays an image when the model accepts them (`modelSeesImages`) and is the
+ * text pointer `[image <mime>]` otherwise. `scope` says which part of the payload may carry a
+ * connect offer ({@link offerScopeOf}); a result the platform marked relayed keeps the mark
+ * ({@link PiToolResult.relayed}).
  */
 export function mcpResultToPi(
   result: {
@@ -105,6 +113,7 @@ export function mcpResultToPi(
     _meta?: unknown;
   },
   scope: OfferScope,
+  options: { modelSeesImages?: boolean } = {},
 ): PiToolResult {
   // One list per text block, merged below — a result may split a readiness
   // error across blocks, and each block's connect links must all reach the UI.
@@ -122,6 +131,9 @@ export function mcpResultToPi(
     // Pi tool results the LLM reads are text/image; render anything else as a
     // text pointer so the model still sees it (parity with the runtime forwarder).
     if (c.type === "image") {
+      if (options.modelSeesImages && typeof c.data === "string" && typeof c.mimeType === "string") {
+        return { type: "image" as const, data: c.data, mimeType: c.mimeType };
+      }
       return { type: "text" as const, text: `[image ${String(c.mimeType ?? "")}]` };
     }
     return { type: "text" as const, text: JSON.stringify(scope(c).redacted) };
@@ -229,6 +241,11 @@ type BuildPlatformMcpToolsOptions = {
   surfaceKey?: string;
   /** Registers `list_skills`: the `manual` skill mode, on a turn holding `skills:read`. */
   listsSkills?: boolean;
+  /**
+   * Whether the turn's model accepts images: a tool result's image reaches it as an image
+   * rather than a pointer. Omitted = text only.
+   */
+  modelSeesImages?: boolean;
   /**
    * The model the turn's INLINE runs launch on (the composer's opt-in): handed to the
    * launch client, never declared on the tool, so the model cannot set it.
@@ -373,11 +390,15 @@ export async function buildPlatformMcpTools(
           turnBudget: opts.turnBudget,
           ...(opts.inlineRunModel ? { inlineRunModel: opts.inlineRunModel } : {}),
         })
-      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization),
+      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization, {
+          modelSeesImages: opts.modelSeesImages === true,
+        }),
   );
   const extensionFactories = [
     ...toolFactories,
-    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization),
+    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization, {
+      modelSeesImages: opts.modelSeesImages === true,
+    }),
     ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
   ];
 
@@ -416,6 +437,7 @@ function makeForwardExtension(
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
   organization: TurnSpaces,
+  options: { modelSeesImages: boolean },
 ): ExtensionFactory {
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
@@ -451,7 +473,7 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        return withTurnBudgetNote(mcpResultToPi(result as never, scope), turnBudget);
+        return withTurnBudgetNote(mcpResultToPi(result as never, scope, options), turnBudget);
       },
     });
   };
@@ -471,6 +493,7 @@ function makeReadResourceExtension(
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
   organization: TurnSpaces,
+  options: { modelSeesImages: boolean },
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -515,10 +538,16 @@ function makeReadResourceExtension(
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
-        const content = result.contents.map((c) => ({
-          type: "text" as const,
-          text: inlineResourceContent(c),
-        }));
+        const content = result.contents.map((c): PiToolResult["content"][number] => {
+          // An image blob is the one binary a model reads as itself: an image block for a model
+          // that accepts them, else a pointer (never its base64 as text).
+          if ("blob" in c && typeof c.blob === "string" && c.mimeType?.startsWith("image/")) {
+            return options.modelSeesImages
+              ? { type: "image", data: c.blob, mimeType: c.mimeType }
+              : { type: "text", text: `[image ${c.mimeType} — ${c.uri}]` };
+          }
+          return { type: "text", text: inlineResourceContent(c) };
+        });
         return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
       },
     });

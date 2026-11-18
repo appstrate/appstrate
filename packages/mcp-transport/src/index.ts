@@ -453,6 +453,7 @@ export {
 // shared by the platform's file reads and the chat's `read_resource` tool.
 export {
   RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_IMAGE_MAX_BYTES,
   RESOURCE_OVERSIZED_NOTE,
   RESOURCE_TEXT_MAX_BYTES,
 } from "./resource-limits.ts";

@@ -445,9 +445,23 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
 function persistedToolOutput(result: unknown): unknown {
   if (result == null) return null;
   if (typeof result !== "object" || Array.isArray(result)) return result;
-  if (!("details" in result)) return result;
-  const { details: _details, ...rest } = result as Record<string, unknown>;
-  return rest;
+  // Key order is kept: the wire shape is the result's own, less `details`.
+  const output: Record<string, unknown> = { ...(result as Record<string, unknown>) };
+  delete output.details;
+  // An image block holds the pixels the model was shown: they belong to that request, not to the
+  // conversation. The transcript keeps a pointer (and the file's `appfile://` URI, which the
+  // tool result's text names), so no base64 is persisted, streamed or re-uploaded.
+  if (Array.isArray(output.content)) {
+    output.content = output.content.map((block: unknown) =>
+      block && typeof block === "object" && (block as { type?: unknown }).type === "image"
+        ? {
+            type: "text",
+            text: `[image ${String((block as { mimeType?: unknown }).mimeType ?? "")}]`,
+          }
+        : block,
+    );
+  }
+  return output;
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */

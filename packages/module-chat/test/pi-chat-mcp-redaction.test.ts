@@ -254,3 +254,31 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     expect(mcpResultToPi({ content: [] }, splitConnectPayload).relayed).toBeUndefined();
   });
 });
+
+describe("mcpResultToPi images", () => {
+  const image = { type: "image", data: "QkFTRTY0", mimeType: "image/png" };
+
+  it("keeps an image block as an image for a model that accepts them", () => {
+    const result = mcpResultToPi({ content: [image] }, splitConnectPayload, {
+      modelSeesImages: true,
+    });
+    expect(result.content).toEqual([image]);
+  });
+
+  it("renders it as a pointer for a text-only model, never its base64", () => {
+    const result = mcpResultToPi({ content: [image] }, splitConnectPayload);
+    expect(result.content).toEqual([{ type: "text", text: "[image image/png]" }]);
+    expect(JSON.stringify(result.content)).not.toContain("QkFTRTY0");
+  });
+
+  it("falls back to the pointer for a malformed image block", () => {
+    const result = mcpResultToPi(
+      { content: [{ type: "image", mimeType: "image/png" }] },
+      splitConnectPayload,
+      {
+        modelSeesImages: true,
+      },
+    );
+    expect(result.content).toEqual([{ type: "text", text: "[image image/png]" }]);
+  });
+});

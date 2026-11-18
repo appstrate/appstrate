@@ -48,6 +48,7 @@
     "nodemailer": "^10.5.0",
     "rate-limiter-flexible": "^11.4.0",
     "tldts": "^7.4.19",
+    "unpdf": "^2.2.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -30,7 +30,8 @@ import { seedApiKey, seedPackage, seedSpacePackage, seedSpace } from "../../help
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
-import { zipSync } from "fflate";
+import { strToU8, zipSync } from "fflate";
+import { pdfBytes } from "../../helpers/pdf.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
 
@@ -395,32 +396,126 @@ describe("mcp resources/read (appfile://)", () => {
     });
   });
 
-  it("inlines a small non-textual (binary) file as a base64 blob", async () => {
-    const runId = await seedRun(scope);
-    const raw = "\x00\x01\x02rawbytes";
-    const docId = await publishDoc(scope, runId, "blob.bin", "application/octet-stream", raw);
-
-    const { envelope } = await rpc(headers, {
+  /** The `resources/read` contents of a file, and the `read_file` content blocks of the same one. */
+  async function readBoth(docId: string) {
+    const resource = await rpc(headers, {
       jsonrpc: "2.0",
       id: 1,
       method: "resources/read",
       params: { uri: `appfile://${docId}` },
     });
-    const contents = (envelope.result?.contents as Array<Record<string, unknown>>) ?? [];
+    const tool = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "read_file", arguments: { uri: `appfile://${docId}` } },
+    });
+    return {
+      contents: (resource.envelope.result?.contents as Array<Record<string, unknown>>) ?? [],
+      blocks: (tool.envelope.result?.content as Array<Record<string, unknown>>) ?? [],
+    };
+  }
+
+  /** Metadata-only contents: the JSON the reader answers instead of bytes. */
+  function metadataOf(contents: Array<Record<string, unknown>>) {
     expect(contents).toHaveLength(1);
-    // A small binary downloadable doc now returns a base64 `blob` (not metadata):
-    // the read pulls the bytes from storage directly, so S3-presigned deployments
-    // no longer degrade to metadata-only.
-    expect(contents[0]!.mimeType).toBe("application/octet-stream");
-    expect(contents[0]!.text).toBeUndefined();
-    const decoded = Buffer.from(contents[0]!.blob as string, "base64");
-    expect(decoded).toEqual(Buffer.from(new TextEncoder().encode(raw)));
+    expect(contents[0]!.mimeType).toBe("application/json");
+    expect(contents[0]!.blob).toBeUndefined();
+    return JSON.parse(contents[0]!.text as string) as Record<string, unknown>;
+  }
+
+  it("never inlines an arbitrary binary as base64: metadata and a note", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "blob.bin",
+      "application/octet-stream",
+      "\x00\x01\x02rawbytes",
+    );
+    const { contents, blocks } = await readBoth(docId);
+    const meta = metadataOf(contents);
+    expect(meta).toMatchObject({ id: docId, downloadable: true });
+    expect(meta.note).toMatch(/not inlined/);
+    expect(JSON.stringify(blocks)).not.toContain(Buffer.from("rawbytes").toString("base64"));
+    expect(blocks.every((block) => block.type === "resource")).toBe(true);
   });
 
-  it("returns metadata only for a binary file over the 700 KiB blob limit", async () => {
+  it("serves an image as a blob, and read_file as an MCP image block", async () => {
     const runId = await seedRun(scope);
-    const big = "B".repeat(700 * 1024 + 16); // non-textual mime, over the blob ceiling
-    const docId = await publishDoc(scope, runId, "big.bin", "application/octet-stream", big);
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const docId = await publishDoc(scope, runId, "pixel.png", "image/png", png);
+    const { contents, blocks } = await readBoth(docId);
+    expect(contents[0]).toMatchObject({ mimeType: "image/png", blob: png.toString("base64") });
+    expect(blocks).toEqual([
+      { type: "text", text: `[image image/png — appfile://${docId}]` },
+      { type: "image", data: png.toString("base64"), mimeType: "image/png" },
+    ]);
+  });
+
+  it("returns an SVG as text, never as an image block (a provider rejects it)", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "logo.svg", "image/svg+xml", "<svg/>");
+    const { blocks } = await readBoth(docId);
+    expect(blocks[0]).toMatchObject({ type: "resource", resource: { text: "<svg/>" } });
+  });
+
+  it("returns the extracted text of a PDF, with page markers", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "rapport.pdf",
+      "application/pdf",
+      pdfBytes(["Premiere page", "Deuxieme page"]),
+    );
+    const { contents, blocks } = await readBoth(docId);
+    expect(contents[0]!.mimeType).toBe("text/plain");
+    expect(contents[0]!.blob).toBeUndefined();
+    const text = contents[0]!.text as string;
+    expect(text).toContain("[Text extracted from rapport.pdf (application/pdf)]");
+    expect(text).toContain("--- Page 1 ---\nPremiere page");
+    expect(text).toContain("--- Page 2 ---\nDeuxieme page");
+    expect(blocks[0]).toMatchObject({ type: "resource", resource: { text } });
+  });
+
+  it("says a scanned PDF has no extractable text, instead of returning its bytes", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "scan.pdf", "application/pdf", pdfBytes(["", ""]));
+    const { contents } = await readBoth(docId);
+    expect(metadataOf(contents).note).toMatch(/No extractable text/);
+  });
+
+  it("returns the extracted text of a docx, whatever generic MIME the browser sent", async () => {
+    const runId = await seedRun(scope);
+    const docx = zipSync({
+      "word/document.xml": strToU8("<w:p><w:r><w:t>Contrat signé</w:t></w:r></w:p>"),
+    });
+    const docId = await publishDoc(scope, runId, "contrat.docx", "application/octet-stream", docx);
+    const { contents } = await readBoth(docId);
+    expect(contents[0]!.text).toContain("Contrat signé");
+  });
+
+  it("says a corrupt document could not be read", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "broken.pdf",
+      "application/pdf",
+      "not a pdf at all",
+    );
+    const { contents } = await readBoth(docId);
+    expect(metadataOf(contents).note).toMatch(/could not be read/);
+  });
+
+  it("returns metadata only for an image over the 5 MiB inline limit", async () => {
+    const runId = await seedRun(scope);
+    const big = new Uint8Array(5 * 1024 * 1024 + 16); // an image over the inline ceiling
+    const docId = await publishDoc(scope, runId, "big.png", "image/png", big);
 
     const { envelope } = await rpc(
       headers,

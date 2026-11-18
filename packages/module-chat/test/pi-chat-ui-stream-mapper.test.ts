@@ -155,6 +155,30 @@ describe("PiChatUiStreamMapper", () => {
     expect("details" in output).toBe(false);
   });
 
+  it("persists an image tool result as a pointer: the pixels never reach the transcript", () => {
+    const { chunks } = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "call_img",
+        toolName: "read_file",
+        result: {
+          content: [
+            { type: "text", text: "[image image/png — appfile://file_1]" },
+            { type: "image", data: "QkFTRTY0", mimeType: "image/png" },
+          ],
+          details: {},
+        },
+        isError: false,
+      },
+    ]);
+    const output = (chunks[0] as { output: { content: unknown[] } }).output;
+    expect(output.content).toEqual([
+      { type: "text", text: "[image image/png — appfile://file_1]" },
+      { type: "text", text: "[image image/png]" },
+    ]);
+    expect(JSON.stringify(chunks)).not.toContain("QkFTRTY0");
+  });
+
   it("passes a non-object tool output through unchanged", () => {
     const { chunks } = run([
       {

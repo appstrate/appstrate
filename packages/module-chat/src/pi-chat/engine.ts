@@ -354,6 +354,8 @@ export function runPiChat(input: PiChatInput): Response {
           timed(
             buildMcpTools({
               ...platformMcp,
+              // The model's modalities are known before the SDK loads: the binding carries it.
+              modelSeesImages: modelBinding.model.input.includes("image"),
               writeChunk: write,
               signal: turnAbort.signal,
               // Budget seam: the turn deadline bounds every run_and_wait, and the
