@@ -55,8 +55,8 @@ import {
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
-import { createTurnPdfInput } from "./native-pdf.ts";
-import { fileDelivery } from "../file-input.ts";
+import { createFileInputProbe, createTurnPdfInput } from "./native-pdf.ts";
+import { fileDelivery, fileInputRefused } from "../file-input.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -242,6 +242,8 @@ export function runPiChat(input: PiChatInput): Response {
     // Every call records the space it was dispatched in, for the cards that show it later.
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
+  // Whether the request a failure answers carried a file: half of the file-refusal verdict.
+  const fileProbe = createFileInputProbe();
 
   const stream = createUIMessageStream({
     onError,
@@ -344,8 +346,10 @@ export function runPiChat(input: PiChatInput): Response {
         // MCP client it goes on to open — `finally` cannot close what was never
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
-        const delivery = fileDelivery(model);
-        const pdfInput = createTurnPdfInput(model);
+        const delivery = fileDelivery(model, {
+          refused: fileInputRefused(input.messages, input.presetId),
+        });
+        const pdfInput = createTurnPdfInput(model, delivery);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
@@ -534,6 +538,7 @@ export function runPiChat(input: PiChatInput): Response {
                 ...authExtensions,
                 ...generationExtensions,
                 pdfInput.extension,
+                fileProbe.extension,
               ],
               systemPrompt: system,
             }),
@@ -677,6 +682,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelId: input.presetId,
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
+          fileSent: fileProbe.sent(),
         });
         // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
@@ -744,6 +750,7 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
+            fileSent: fileProbe.sent(),
           });
           logger.error("Pi chat turn failed", {
             err: String(err),

@@ -124,7 +124,7 @@ describe("readPromptPdfs", () => {
     const read: string[] = [];
     const receipts = await readPromptPdfs(
       user("current", ...uris),
-      createTurnPdfInput({ api: "openai-responses" }),
+      createTurnPdfInput({ api: "openai-responses" }, { pdf: true, refused: false }),
       async (uri) => {
         read.push(uri);
         return { mime: "application/pdf", bytes: new TextEncoder().encode("%PDF-1.7") };

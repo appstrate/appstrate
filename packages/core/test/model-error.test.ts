@@ -279,6 +279,9 @@ describe("describeModelFailure", () => {
     expect(describeModelFailure(unknownCode)).not.toHaveProperty("reason");
     const inherited = '400 {"error":{"details":{"error_code":"toString"}}}';
     expect(describeModelFailure(inherited)).not.toHaveProperty("reason");
+    // Only the chat stamps a refused file, from what it sent: no provider text names it.
+    const named = '400 {"error":{"details":{"error_code":"file_input_refused"}}}';
+    expect(describeModelFailure(named)).not.toHaveProperty("reason");
   });
 
   it("names every category the retryable table knows", () => {

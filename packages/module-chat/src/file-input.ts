@@ -6,6 +6,7 @@
  * impossible; otherwise send, and the provider decides — the user chose the model.
  */
 
+import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import type { ModelInputModality } from "@appstrate/core/module";
 
 /**
@@ -36,7 +37,13 @@ export interface FileInputModel {
 export interface FileDelivery {
   image: boolean;
   pdf: boolean;
+  /** The model refused a file earlier in the conversation: it gets references only. */
+  refused: boolean;
 }
+
+/** The model-facing words for a file withheld because the model refused one earlier. */
+export const FILE_INPUT_REFUSED_NOTE =
+  "this model refused a file earlier in this conversation, so files reach it only as references: say so rather than guess the content";
 
 /** `true` = send, `false` = declared impossible, `null` = cannot tell (the API shape is hidden). */
 export function acceptsFileInput(model: FileInputModel, kind: FileInputKind): boolean | null {
@@ -44,10 +51,23 @@ export function acceptsFileInput(model: FileInputModel, kind: FileInputKind): bo
   return model.api ? isPdfWireApi(model.api) : null;
 }
 
-export function fileDelivery(model: FileInputModel): FileDelivery {
+/**
+ * Whether this preset refused a file in the thread (`file_input_refused` on a failed turn it
+ * answered). Sticky for the rest of the thread, every file kind; another preset is unaffected.
+ */
+export function fileInputRefused(messages: readonly unknown[], presetId: string): boolean {
+  return messages.some((message) => {
+    const turn = turnMetadataFromMessage(message);
+    return turn?.errorReason === "file_input_refused" && turn.modelId === presetId;
+  });
+}
+
+export function fileDelivery(model: FileInputModel, { refused = false } = {}): FileDelivery {
+  if (refused) return { image: false, pdf: false, refused };
   return {
     image: acceptsFileInput(model, "image") !== false,
     pdf: acceptsFileInput(model, "pdf") === true,
+    refused,
   };
 }
 

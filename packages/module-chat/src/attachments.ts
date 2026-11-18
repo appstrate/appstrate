@@ -22,7 +22,7 @@ import type { FileUIPart, UIMessage } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { formatBytes } from "@appstrate/core/format";
 import { isImageMime } from "@appstrate/core/mime";
-import type { FileDelivery } from "./file-input.ts";
+import { FILE_INPUT_REFUSED_NOTE, type FileDelivery } from "./file-input.ts";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -70,6 +70,7 @@ function imageNote(
   context: AttachmentContext | undefined,
 ): string {
   if (!context || !isImageMime(part.mediaType)) return "";
+  if (context.delivery.refused) return ` — ${FILE_INPUT_REFUSED_NOTE}`;
   if (!context.delivery.image) {
     return " — you cannot view images with this model: say so rather than guess its content";
   }

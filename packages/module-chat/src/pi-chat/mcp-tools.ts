@@ -46,7 +46,7 @@ import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
-import type { FileDelivery } from "../file-input.ts";
+import { FILE_INPUT_REFUSED_NOTE, type FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
@@ -663,6 +663,8 @@ async function liveResources(
       if (pdf.reference) content.push({ type: "text", text: pdf.reference });
     } else if (isRasterImageMime(mimeType) && opts.delivery?.image) {
       content.push({ type: "image", mimeType, data: blob });
+    } else if (isRasterImageMime(mimeType) && opts.delivery?.refused) {
+      note = `Image not sent: ${FILE_INPUT_REFUSED_NOTE}.`;
     } else {
       note = "This file format cannot be read by the current model.";
     }

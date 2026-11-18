@@ -13,6 +13,8 @@ const ADAPTER_ERROR_EVENT = "adapter_error";
 const RUN_ERROR_REASON_KEY: Record<ModelErrorReason, string> = {
   // Only a platform release clears it: the sentence offers no retry nor reconnection.
   runtime_version_too_old: "run.error.runtimeVersionTooOld",
+  // Stamped by the chat only; a run journal never carries it today.
+  file_input_refused: "run.error.fileInputRefused",
 };
 
 /**

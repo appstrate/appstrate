@@ -50,7 +50,8 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { getSelectedModelFileInput, subscribeModel } from "./model-store.ts";
+import { getSelectedModel, getSelectedModelFileInput, subscribeModel } from "./model-store.ts";
+import { fileInputRefused } from "../file-input.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
@@ -424,6 +425,21 @@ function ComposerAttachmentError() {
   );
 }
 
+/** The selected model refused a file earlier in this thread: the server now sends it references only. */
+function ComposerFileRefused() {
+  const { t } = useChatHost();
+  const selected = React.useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
+  const refused = useAuiState(
+    (s) => selected !== null && fileInputRefused(s.thread.messages.map(sourceMessage), selected),
+  );
+  if (!refused) return null;
+  return (
+    <p role="status" className="text-muted-foreground text-xs">
+      {t("composer.fileRefused")}
+    </p>
+  );
+}
+
 /** Sends everything queued as ONE user message, then empties the queue. */
 function sendQueued(aui: ReturnType<typeof useAui>, queue: MessageQueue) {
   const text = joinQueued(queue.getSnapshot().items);
@@ -584,6 +600,7 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
+      <ComposerFileRefused />
       <ComposerPrimitive.Input
         rows={1}
         autoFocus

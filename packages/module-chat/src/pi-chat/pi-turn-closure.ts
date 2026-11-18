@@ -26,6 +26,7 @@ import {
   type ChatMessageMetadata,
   type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
+import { getOverflowPatterns } from "@appstrate/runner-pi";
 import {
   classifyClientTurnError,
   clientTurnErrorMarker,
@@ -104,6 +105,31 @@ export function turnNoticeChunks(id: string, text: string): UIMessageChunk[] {
   ];
 }
 
+const OVERFLOW_PATTERNS = getOverflowPatterns();
+
+/**
+ * A turn failed on a refused file when its last provider request carried one, the provider
+ * called it an invalid request (any 4xx but auth, quota and throttling) and pi-ai's overflow
+ * patterns do not match it. Decided from what was sent, never from the refusal's wording.
+ */
+export function isFileInputRefusal(input: {
+  fileSent: boolean;
+  clientError: ClientTurnError;
+  errorText: string;
+}): boolean {
+  const text = input.errorText.trim();
+  return (
+    input.fileSent &&
+    input.clientError.category === "invalid_request" &&
+    !OVERFLOW_PATTERNS.some((pattern) => pattern.test(text))
+  );
+}
+
+function errorText(error: unknown): string {
+  if (typeof error === "string") return error;
+  return error instanceof Error ? error.message : "";
+}
+
 /** Build the persisted terminal metadata shared by every Pi exit path. */
 function buildPiTurnMetadata(input: {
   finishReason: ChatTurnFinishReason;
@@ -178,6 +204,8 @@ export function closePiTurn(input: {
   /** Its display name frozen at write time — never resolved back into a model. */
   modelLabel: string;
   requestId?: string;
+  /** The turn's last provider request carried an image or a file. */
+  fileSent?: boolean;
   newId?: () => string;
 }): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
@@ -186,8 +214,18 @@ export function closePiTurn(input: {
     abortReason: input.abortReason,
     finishReason: input.finishReason,
   });
-  const clientError =
+  const classified =
     input.error === undefined ? undefined : classifyClientTurnError(input.error, input.requestId);
+  const clientError =
+    classified &&
+    !classified.reason &&
+    isFileInputRefusal({
+      fileSent: input.fileSent === true,
+      clientError: classified,
+      errorText: errorText(input.error),
+    })
+      ? { ...classified, reason: "file_input_refused" as const }
+      : classified;
   const chunks: UIMessageChunk[] = [];
 
   if (!input.streamStarted) chunks.push({ type: "start", messageId: newId() });

@@ -5,7 +5,12 @@ import { CHAT_FINAL_STEP_SYSTEM_PROMPT } from "@appstrate/core/chat-turn-metadat
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { fileDelivery, type FileInputModel } from "../src/file-input.ts";
-import { createTurnPdfInput, type TurnPdfInput } from "../src/pi-chat/native-pdf.ts";
+import {
+  createFileInputProbe,
+  createTurnPdfInput,
+  payloadCarriesFile,
+  type TurnPdfInput,
+} from "../src/pi-chat/native-pdf.ts";
 
 type Payload = Record<string, unknown[]>;
 
@@ -27,8 +32,8 @@ const VISION = { api: "openai-responses", input: ["text", "image"] };
 
 /** The turn the engine builds for a model. */
 const turnFor = (model: FileInputModel & Parameters<typeof createTurnPdfInput>[0]) => {
-  const turn = createTurnPdfInput(model);
-  expect(turn.supported).toBe(fileDelivery(model).pdf);
+  const turn = createTurnPdfInput(model, fileDelivery(model));
+  expect(turn.unsupported === undefined).toBe(fileDelivery(model).pdf);
   return turn;
 };
 
@@ -82,7 +87,7 @@ it("caps cumulative file bytes before sending, including across function calls",
 
 it("reports an unsupported adapter without exposing the PDF as text", () => {
   const turn = turnFor({ api: "mistral-conversations", input: ["text", "image"] });
-  expect(turn.supported).toBe(false);
+  expect(turn.unsupported).toContain("does not accept PDF");
   const receipt = turn.add(pdf);
   expect(receipt.note).toContain("does not accept PDF");
   expect(receipt.note).not.toContain(pdf.data);
@@ -92,7 +97,7 @@ it("reports an unsupported adapter without exposing the PDF as text", () => {
 
 it("sends a PDF to a Responses model declared without image input: the provider decides", () => {
   const turn = turnFor({ api: "openai-responses", input: ["text"] });
-  expect(turn.supported).toBe(true);
+  expect(turn.unsupported).toBeUndefined();
   const receipt = turn.add(pdf);
   expect(transform(turn, [{ role: "user", content: receipt.reference }])).toEqual([
     { role: "user", content: [nativeFile] },
@@ -306,5 +311,72 @@ describe("openai-completions", () => {
     const wire = messages(turn, items);
     expect(wire).toHaveLength(items.length);
     items.forEach((item, i) => expect(wire[i]).toBe(item));
+  });
+});
+
+it("sends no PDF to a model that refused a file in the thread, and says why", () => {
+  const delivery = fileDelivery(VISION, { refused: true });
+  const turn = createTurnPdfInput(VISION, delivery);
+  expect(turn.unsupported).toContain("refused a file earlier in this conversation");
+  const receipt = turn.add(pdf);
+  expect(receipt.reference).toBeUndefined();
+  expect(receipt.note).toBe(turn.unsupported!);
+  const input = [{ role: "user", content: receipt.note }];
+  expect(transform(turn, input)).toEqual(input);
+});
+
+describe("payloadCarriesFile", () => {
+  const text = { type: "text", text: "hi" };
+  it("finds image and file parts in messages, tool results and Responses items", () => {
+    expect(payloadCarriesFile({ messages: [{ role: "user", content: [text] }] })).toBe(false);
+    expect(payloadCarriesFile({ messages: [{ role: "user", content: "plain" }] })).toBe(false);
+    for (const type of ["image", "document", "image_url", "file"]) {
+      expect(payloadCarriesFile({ messages: [{ role: "user", content: [text, { type }] }] })).toBe(
+        true,
+      );
+    }
+    expect(
+      payloadCarriesFile({
+        messages: [
+          { role: "user", content: [{ type: "tool_result", content: [{ type: "image" }] }] },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      payloadCarriesFile({ input: [{ role: "user", content: [{ type: "input_image" }] }] }),
+    ).toBe(true);
+    expect(
+      payloadCarriesFile({
+        input: [{ type: "function_call_output", output: [{ type: "input_file" }] }],
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores tool schemas and a tool call's own arguments", () => {
+    expect(
+      payloadCarriesFile({
+        tools: [{ type: "file" }],
+        messages: [
+          { role: "assistant", content: [{ type: "tool_use", input: { type: "image" } }] },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("the probe reports the latest request only", () => {
+    const probe = createFileInputProbe();
+    let hook!: (event: { payload: unknown }) => unknown;
+    probe.extension({
+      on(_event, callback) {
+        hook = callback as typeof hook;
+      },
+    } as ExtensionAPI);
+    expect(probe.sent()).toBe(false);
+    expect(hook({ payload: { messages: [{ role: "user", content: [{ type: "image" }] }] } })).toBe(
+      undefined,
+    );
+    expect(probe.sent()).toBe(true);
+    hook({ payload: { messages: [{ role: "user", content: [text] }] } });
+    expect(probe.sent()).toBe(false);
   });
 });

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { acceptsFileInput, fileDelivery, piInputModalities } from "../src/file-input.ts";
+import {
+  acceptsFileInput,
+  fileDelivery,
+  fileInputRefused,
+  piInputModalities,
+} from "../src/file-input.ts";
 
 describe("acceptsFileInput", () => {
   it("refuses an image only when the modalities are known and lack it", () => {
@@ -36,11 +41,54 @@ describe("fileDelivery", () => {
     expect(fileDelivery({ api: "openai-responses", input: null })).toEqual({
       image: true,
       pdf: true,
+      refused: false,
     });
     expect(fileDelivery({ api: "mistral-conversations", input: ["text"] })).toEqual({
       image: false,
       pdf: false,
+      refused: false,
     });
+  });
+
+  it("sends no file at all once the model refused one", () => {
+    expect(fileDelivery({ api: "openai-responses", input: null }, { refused: true })).toEqual({
+      image: false,
+      pdf: false,
+      refused: true,
+    });
+  });
+});
+
+describe("fileInputRefused", () => {
+  const failed = (modelId: string, errorReason?: string) => ({
+    role: "assistant",
+    metadata: {
+      appstrate: {
+        turn: {
+          finishReason: "error",
+          errorCategory: "invalid_request",
+          ...(errorReason ? { errorReason } : {}),
+          modelId,
+          stepCount: 1,
+          maxSteps: 16,
+          maxStepsReached: false,
+        },
+      },
+    },
+  });
+  const user = { role: "user", parts: [] };
+
+  it("holds for the preset that refused, for the rest of the thread", () => {
+    expect(
+      fileInputRefused([user, failed("preset-a", "file_input_refused"), user], "preset-a"),
+    ).toBe(true);
+  });
+
+  it("does not hold for another preset, nor without the marker", () => {
+    const thread = [user, failed("preset-a", "file_input_refused")];
+    expect(fileInputRefused(thread, "preset-b")).toBe(false);
+    expect(fileInputRefused([user, failed("preset-a")], "preset-a")).toBe(false);
+    expect(fileInputRefused([user], "preset-a")).toBe(false);
   });
 });
 

@@ -10,10 +10,12 @@
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { classifyClientTurnError } from "../src/turn-error.ts";
 import {
   ChatTurnDeadlineError,
   closePiTurn,
   isChatTurnDeadline,
+  isFileInputRefusal,
   resolveTurnClosure,
   turnDeadlineNoticeText,
   turnNoticeChunks,
@@ -188,6 +190,35 @@ describe("closePiTurn", () => {
       errorReason: "runtime_version_too_old",
     });
     expect(JSON.stringify(message)).not.toContain("2.1.280");
+  });
+
+  it("names a refused file, live and persisted, when the failed request carried one", async () => {
+    const closing = (fileSent: boolean) =>
+      closePiTurn({
+        error:
+          '400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"}}',
+        finishReason: "error",
+        streamStarted: false,
+        aborted: false,
+        abortReason: undefined,
+        stepCount: 1,
+        stepCapReached: false,
+        ...MODEL,
+        fileSent,
+        newId: () => "assistant-1",
+      });
+    const chunks = closing(true).chunks;
+    expect(chunks.find((chunk) => chunk.type === "error")).toEqual({
+      type: "error",
+      errorText: "appstrate:chat-turn-error:invalid_request+file_input_refused",
+    });
+    expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
+      errorCategory: "invalid_request",
+      errorRetryable: false,
+      errorReason: "file_input_refused",
+      modelId: MODEL.modelId,
+    });
+    expect(closing(false).clientError?.reason).toBeUndefined();
   });
 
   it("finishes a started prompt failure exactly once for reload persistence", async () => {
@@ -386,5 +417,39 @@ describe("the model a turn bound to", () => {
       modelLabel: "Claude Opus 5",
       errorCategory: "upstream_unavailable",
     });
+  });
+});
+
+describe("isFileInputRefusal", () => {
+  const verdict = (errorText: string, fileSent = true, status?: number) =>
+    isFileInputRefusal({
+      fileSent,
+      clientError: classifyClientTurnError(
+        status === undefined ? errorText : Object.assign(new Error(errorText), { status }),
+      ),
+      errorText,
+    });
+
+  it("holds for an invalid request that carried a file", () => {
+    expect(verdict("400 Invalid image data")).toBe(true);
+    // The llm-proxy's size refusal is a client request error too.
+    expect(verdict("400 Request body exceeds LLM_PROXY_LIMITS.max_request_bytes (10485760)")).toBe(
+      true,
+    );
+  });
+
+  it("does not hold without a file in the request", () => {
+    expect(verdict("400 Invalid image data", false)).toBe(false);
+  });
+
+  it("does not hold for a context overflow, even with a file", () => {
+    expect(verdict("413 Request body too large")).toBe(false);
+    expect(verdict("400 prompt is too long: 250000 tokens > 200000 maximum")).toBe(false);
+    expect(verdict("400 This model's maximum context length is 128000 tokens")).toBe(false);
+  });
+
+  it("does not hold for auth or throttling", () => {
+    expect(verdict("401 invalid x-api-key")).toBe(false);
+    expect(verdict("429 Too many requests")).toBe(false);
   });
 });

@@ -188,6 +188,9 @@ const PARK_GIVE_UP_MS = 3_000;
 
 /** When set, the provider stub refuses every completion with this status. Reset in `afterEach`. */
 let providerRefusal: number | null = null;
+/** The error body of that refusal. Reset in `afterEach`. */
+const AUTH_REFUSAL = { message: "Authentication Fails", type: "authentication_error" };
+let providerRefusalError = AUTH_REFUSAL;
 
 const server = Bun.serve({
   port: 0,
@@ -235,10 +238,7 @@ const server = Bun.serve({
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
       if (providerRefusal !== null) {
-        return Response.json(
-          { error: { message: "Authentication Fails", type: "authentication_error" } },
-          { status: providerRefusal },
-        );
+        return Response.json({ error: providerRefusalError }, { status: providerRefusal });
       }
       if (!providerPark) return openAiSse();
       const park = providerPark;
@@ -271,6 +271,7 @@ afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
   providerRefusal = null;
+  providerRefusalError = AUTH_REFUSAL;
   mcpSurface = EMPTY_SURFACE;
 });
 
@@ -321,6 +322,7 @@ async function runTurn(
     readAttachment?: PiChatInput["readAttachment"];
     surfaceKey?: string;
     requestId?: string;
+    presetId?: string;
   } = {},
 ) {
   const binding = createPiProxyModelBinding({
@@ -340,7 +342,7 @@ async function runTurn(
     const res = runPiChat({
       slot: slot!,
       modelBinding: binding,
-      presetId: "preset_live",
+      presetId: turn.presetId ?? "preset_live",
       modelLabel: LIVE_MODEL_LABEL,
       orgId: "org_live",
       userId: "user_live",
@@ -583,6 +585,62 @@ describe("runPiChat against a stub provider", () => {
       expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
     }
     expect(readAttachment).toHaveBeenCalledTimes(2);
+  }, 30_000);
+
+  it("stops sending files to a model that refused one, for that model only", async () => {
+    const messages = userTurn("Read this image");
+    messages[0]!.parts.push({
+      type: "file",
+      filename: "pixel.png",
+      mediaType: "image/png",
+      url: "appfile://file_live_image",
+    });
+    const bytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const readAttachment = mock(async () => ({ mime: "image/png", bytes }));
+    const model = { ...orgModel(), input: ["text", "image"] as OrgModel["input"] };
+
+    providerRefusal = 400;
+    providerRefusalError = { message: "Could not process image", type: "invalid_request_error" };
+    const refused = await recordingWarnAndError(() =>
+      runTurn(() => "refusal-bearer", undefined, undefined, { model, messages, readAttachment }),
+    );
+    expect(capture.bodies.at(-1)).toContain("data:image/png;base64,");
+    expect(refused.result.chunks.find((c) => c.type === "error")?.errorText).toBe(
+      "appstrate:chat-turn-error:invalid_request+file_input_refused",
+    );
+    const finish = refused.result.chunks.find((c) => c.type === "finish") as {
+      messageMetadata?: UIMessage["metadata"];
+    };
+    expect(finish.messageMetadata).toMatchObject({
+      appstrate: { turn: { errorReason: "file_input_refused", modelId: "preset_live" } },
+    });
+
+    providerRefusal = null;
+    const history: UIMessage[] = [
+      ...messages,
+      { id: "a1", role: "assistant", parts: [], metadata: finish.messageMetadata },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "Try again" }] },
+    ];
+    for (const [presetId, sent] of [
+      ["preset_live", false],
+      ["preset_other", true],
+    ] as const) {
+      capture.bodies.length = 0;
+      const { chunks } = await runTurn(() => "after-refusal", undefined, undefined, {
+        model,
+        messages: history,
+        readAttachment,
+        presetId,
+      });
+      const body = capture.bodies[0]!;
+      expect(body).toContain("appfile://file_live_image");
+      expect(body.includes("data:image/png;base64,")).toBe(sent);
+      expect(body.includes("refused a file earlier in this conversation")).toBe(!sent);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    }
   }, 30_000);
 
   it("sends an alias's public level as its backing's nearest", async () => {

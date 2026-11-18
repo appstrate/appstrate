@@ -341,6 +341,7 @@
   "run.error.modelRateLimited": "The model provider is rate limiting requests. Run again in a moment.",
   "run.error.model": "The model provider answered with an error ({{status}}): {{message}}",
   "run.error.runtimeVersionTooOld": "The provider refuses this model for the Appstrate runtime version in use with this subscription. The runtime must be updated by an Appstrate release. In the meantime, choose another model for the agent.",
+  "run.error.fileInputRefused": "The model provider refused a file attached to the request. Choose another model for the agent or remove the file.",
   "run.infoRunner": "Runner",
   "run.infoRunnerPlatform": "Platform",
   "run.infoRunnerRemote": "Remote",

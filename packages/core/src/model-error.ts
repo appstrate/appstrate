@@ -87,8 +87,13 @@ export const MODEL_ERROR_RETRYABLE_BY_CATEGORY: Record<ModelErrorCategory, boole
  *   credential). Only a platform release with a newer SDK clears it; neither a
  *   reconnection nor an identical retry does, and other models of the same
  *   credential keep working.
+ * - `file_input_refused`: the provider rejected, as an invalid request, a
+ *   request that carried a file (image or PDF), and not for its length. Only
+ *   the chat stamps it, from the request it sent rather than from the
+ *   provider's text, so {@link classifyModelError} never returns it. The chat
+ *   stops sending that model files for the rest of the conversation.
  */
-export const MODEL_ERROR_REASONS = ["runtime_version_too_old"] as const;
+export const MODEL_ERROR_REASONS = ["runtime_version_too_old", "file_input_refused"] as const;
 
 export type ModelErrorReason = (typeof MODEL_ERROR_REASONS)[number];
 

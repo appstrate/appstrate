@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `file_input_refused` in **`MODEL_ERROR_REASONS`** (`@appstrate/core/model-error`): a chat turn
+  whose provider refused, as an invalid request, a request carrying a file. Stamped by the chat
+  in `AppstrateTurnMetadata.errorReason`; `classifyModelError` never returns it. A reader with an
+  exhaustive `Record<ModelErrorReason, …>` needs an entry for it.
 - `FILE_NAME_META_KEY` (`@appstrate/core/file-uri`): the content `_meta` key under which an
   `appfile://` resource read names the stored file (`dev.appstrate/file_name`).
 - `PlatformServices.readChatAttachment` accepts a `ChatAttachmentRead` and returns `ChatAttachmentContent` for bounded image and PDF inputs under the caller's current file permissions. `isRasterImageMime` in `@appstrate/core/mime` identifies the inline raster formats used by the chat and file preview.

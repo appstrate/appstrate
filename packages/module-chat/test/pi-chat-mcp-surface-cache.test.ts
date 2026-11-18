@@ -222,6 +222,7 @@ function buildTurn(
   signal = new AbortController().signal,
   listsSkills = false,
   pdfInput?: ReturnType<typeof createTurnPdfInput>,
+  delivery = { image: true, pdf: true, refused: false },
 ) {
   return buildPlatformMcpTools({
     url: MCP_URL,
@@ -237,7 +238,7 @@ function buildTurn(
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
     listsSkills,
-    delivery: { image: true, pdf: true },
+    delivery,
     pdfInput,
   });
 }
@@ -539,7 +540,7 @@ describe("McpSurfaceCache", () => {
 
 describe("temporary connector files", () => {
   it("hands the PDF to the current tool call, streams a receipt, and ignores relayed resource blocks", async () => {
-    const pdf = createTurnPdfInput({ api: "openai-responses" });
+    const pdf = createTurnPdfInput({ api: "openai-responses" }, { pdf: true, refused: false });
     const added: string[] = [];
     const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, false, {
       ...pdf,
@@ -628,6 +629,26 @@ describe("read_resource", () => {
         expect(JSON.stringify(chunks)).toContain(uri);
         expect(JSON.stringify(chunks)).not.toContain(privateData);
       }
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("sends no image to a model that refused a file, and says why", async () => {
+    const turn = await buildTurn(mcpStub(), "alpha", undefined, undefined, false, undefined, {
+      image: false,
+      pdf: false,
+      refused: true,
+    });
+    try {
+      const read = register(turn.extensionFactories).find((tool) => tool.name === "read_resource")!;
+      const result = await read.execute("file-id", {
+        uri: SKILL.replace("SKILL.md", "sample.png"),
+      });
+      expect(result.content.some((block) => block.type === "image")).toBe(false);
+      expect(JSON.parse(result.content[0]!.text).note).toContain(
+        "refused a file earlier in this conversation",
+      );
     } finally {
       await turn.close();
     }

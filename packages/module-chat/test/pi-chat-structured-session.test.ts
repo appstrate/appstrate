@@ -403,7 +403,7 @@ describe("attachment images in the projected turn", () => {
   it("puts the prompt message's images on the prompt and the replayed ones on their own turn", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, {
       ...OPTIONS,
-      delivery: { image: true, pdf: false },
+      delivery: { image: true, pdf: false, refused: false },
       images: new Map([
         ["u1", new Map([["appfile://file_old", image]])],
         ["u2", new Map([["appfile://file_new", image]])],
@@ -421,7 +421,7 @@ describe("attachment images in the projected turn", () => {
   it("tells a model that sees images which pixels were left out", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, {
       ...OPTIONS,
-      delivery: { image: true, pdf: false },
+      delivery: { image: true, pdf: false, refused: false },
       images: new Map([["u2", new Map([["appfile://file_new", image]])]]),
     });
     const first = JSON.stringify(turn.history[0]);
@@ -433,6 +433,17 @@ describe("attachment images in the projected turn", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, OPTIONS);
     expect(turn.promptImages).toEqual([]);
     expect(turn.prompt).toContain("you cannot view images with this model");
+    expect(JSON.stringify(turn.history)).not.toContain('"type":"image"');
+  });
+
+  it("tells a model that refused a file it gets references only, and sends no image", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, {
+      ...OPTIONS,
+      delivery: { image: false, pdf: false, refused: true },
+    });
+    expect(turn.promptImages).toEqual([]);
+    expect(turn.prompt).toContain("this model refused a file earlier in this conversation");
+    expect(JSON.stringify(turn.history)).toContain("refused a file earlier in this conversation");
     expect(JSON.stringify(turn.history)).not.toContain('"type":"image"');
   });
 
