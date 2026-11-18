@@ -425,14 +425,15 @@ function ComposerAttachmentError() {
   );
 }
 
-const FILE_REFUSED_KEY = new Map<unknown, string>([
-  ["image", "imageRefused"],
-  ["pdf", "pdfRefused"],
+/** Literal keys, so the locale check sees them used. */
+const FILE_REFUSED_KEYS = new Map<unknown, { composer: string; turn: string }>([
+  ["image", { composer: "composer.imageRefused", turn: "turn.imageRefused" }],
+  ["pdf", { composer: "composer.pdfRefused", turn: "turn.pdfRefused" }],
 ]);
 /** Joined, not an array: the selectors reading it are `useSyncExternalStore` snapshots. */
-const refusedKeys = (kinds: readonly unknown[] = []) =>
+const refusedKinds = (kinds: readonly unknown[] = []) =>
   kinds
-    .flatMap((kind) => FILE_REFUSED_KEY.get(kind) ?? [])
+    .filter((kind) => FILE_REFUSED_KEYS.has(kind))
     .sort()
     .join(",");
 
@@ -440,17 +441,17 @@ const refusedKeys = (kinds: readonly unknown[] = []) =>
 function ComposerFileRefused() {
   const { t } = useChatHost();
   const selected = React.useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
-  const keys = useAuiState((s) =>
+  const kinds = useAuiState((s) =>
     selected === null
       ? ""
-      : refusedKeys(refusedFileKinds(s.thread.messages.map(sourceMessage), selected)),
+      : refusedKinds(refusedFileKinds(s.thread.messages.map(sourceMessage), selected)),
   );
-  if (!keys) return null;
+  if (!kinds) return null;
   return (
     <>
-      {keys.split(",").map((key) => (
-        <p key={key} role="status" className="text-muted-foreground text-xs">
-          {t(`composer.${key}`)}
+      {kinds.split(",").map((kind) => (
+        <p key={kind} role="status" className="text-muted-foreground text-xs">
+          {t(FILE_REFUSED_KEYS.get(kind)!.composer)}
         </p>
       ))}
     </>
@@ -778,20 +779,20 @@ function TurnModelBadge() {
 /** The model refused a file on this turn: the turn went on without it. */
 function TurnFileRefusedNotice() {
   const { t } = useChatHost();
-  const keys = useAuiState((s) =>
-    refusedKeys(turnMetadataFromMessage(sourceMessage(s.message))?.refusedFileKinds),
+  const kinds = useAuiState((s) =>
+    refusedKinds(turnMetadataFromMessage(sourceMessage(s.message))?.refusedFileKinds),
   );
-  if (!keys) return null;
+  if (!kinds) return null;
   return (
     <>
-      {keys.split(",").map((key) => (
+      {kinds.split(",").map((kind) => (
         <div
-          key={key}
+          key={kind}
           className="text-muted-foreground mt-3 flex items-center gap-2 text-xs"
           role="status"
         >
           <AlertTriangleIcon className="size-3.5 shrink-0" />
-          <span>{t(`turn.${key}`)}</span>
+          <span>{t(FILE_REFUSED_KEYS.get(kind)!.turn)}</span>
         </div>
       ))}
     </>
