@@ -2,7 +2,13 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- interactive-widget: on Chrome and Firefox for Android the on-screen keyboard shrinks the
+         layout viewport too (dvh, h-full and a sticky composer follow it) instead of covering the
+         page. Safari ignores it. Never add maximum-scale: it blocks the user's zoom. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
     <title>Appstrate</title>
     <script>
       // Key must match STORAGE_KEY in stores/theme-store.ts

@@ -441,7 +441,7 @@ function layoutRoute(layout: LayoutPath) {
 /** The one boot placeholder every gate renders, so a visitor sees a single uninterrupted spinner. */
 function BootScreen() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="flex min-h-dvh items-center justify-center">
       <Spinner />
     </div>
   );
@@ -472,8 +472,8 @@ function MainLayout({ search }: { search: string }) {
         <SidebarInset
           className={
             product === "chat"
-              ? "bg-canvas h-svh min-h-0 overflow-hidden"
-              : "bg-canvas h-svh overflow-y-auto"
+              ? "bg-canvas h-dvh min-h-0 overflow-hidden"
+              : "bg-canvas h-dvh overflow-y-auto"
           }
         >
           <ShellHeader />
