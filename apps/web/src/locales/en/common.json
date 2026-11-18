@@ -252,7 +252,6 @@
   "apiError.home_move_into_personal_space": "A package cannot be moved into a personal space: fork it to get a private copy.",
   "apiError.share_target_is_home": "This package already lives in that space.",
   "apiError.no_published_version": "This package has no published version.",
-  "apiError.version_not_found": "This version cannot be found.",
   "apiError.version_yanked": "This version was yanked: {{message}}",
   "apiError.not_an_agent": "This package is not an agent.",
   "apiError.invalid_draft_manifest": "The draft's manifest is invalid: {{message}}",
