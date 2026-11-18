@@ -46,6 +46,7 @@ import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
@@ -249,7 +250,8 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
-  modelSeesImages?: boolean;
+  /** Omitted = no file content beyond text (tests, callers without a turn). */
+  delivery?: FileDelivery;
   pdfInput?: TurnPdfInput;
 };
 
@@ -636,7 +638,7 @@ function makeListSkillsExtension(
 /** One projection for both MCP resource reads and embedded resources from governed tool calls. */
 async function liveResources(
   resources: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"],
-  opts: Pick<BuildPlatformMcpToolsOptions, "modelSeesImages" | "pdfInput">,
+  opts: Pick<BuildPlatformMcpToolsOptions, "delivery" | "pdfInput">,
   toolCallId: string,
 ) {
   const content: PiToolResult["content"] = [];
@@ -659,7 +661,7 @@ async function liveResources(
       );
       note = pdf.note;
       if (pdf.reference) content.push({ type: "text", text: pdf.reference });
-    } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
+    } else if (isRasterImageMime(mimeType) && opts.delivery?.image) {
       content.push({ type: "image", mimeType, data: blob });
     } else {
       note = "This file format cannot be read by the current model.";

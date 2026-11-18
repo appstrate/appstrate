@@ -24,6 +24,7 @@ import {
   type Model,
 } from "@appstrate/runner-pi";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { piInputModalities } from "../file-input.ts";
 import type { OrgModel } from "../llm.ts";
 
 interface PiChatModelBindingBase {
@@ -111,7 +112,7 @@ export function createPiProxyModelBinding(args: {
     reasoning:
       args.model.reasoning ??
       (support && support !== "unknown" ? support === "supported" : undefined),
-    input: args.model.input,
+    input: piInputModalities(args.model.input),
     cost: args.model.cost,
     contextWindow: args.model.contextWindow,
     maxTokens: args.model.maxTokens,
@@ -138,7 +139,7 @@ export function createPiOAuthModelBinding(
     piProvider: listed.pi_provider,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
-    input: model.input,
+    input: piInputModalities(model.input),
     cost: model.cost,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,

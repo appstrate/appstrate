@@ -486,7 +486,7 @@ describe("runPiChat against a stub provider", () => {
     30_000,
   );
 
-  it("sends real image pixels to a vision model and only the pointer to a text model", async () => {
+  it("sends real image pixels unless the model is declared text-only, unknown modalities included", async () => {
     const messages = userTurn("Read this image");
     messages[0]!.parts.push({
       type: "file",
@@ -499,19 +499,25 @@ describe("runPiChat against a stub provider", () => {
       "base64",
     );
     const readAttachment = mock(async () => ({ mime: "image/png", bytes }));
-    for (const vision of [true, false]) {
+    const cases: [OrgModel["input"], boolean][] = [
+      [["text", "image"], true],
+      [null, true],
+      [["text"], false],
+    ];
+    for (const [input, sent] of cases) {
       capture.bodies.length = 0;
       const { chunks } = await runTurn(() => "image-bearer", undefined, undefined, {
-        model: { ...orgModel(), input: vision ? ["text", "image"] : ["text"] },
+        model: { ...orgModel(), input },
         messages,
         readAttachment,
       });
       const body = capture.bodies[0]!;
       expect(body).toContain("appfile://file_live_image");
-      expect(body.includes("data:image/png;base64,")).toBe(vision);
+      expect(body.includes("data:image/png;base64,")).toBe(sent);
+      expect(body).not.toContain("image omitted");
       expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
     }
-    expect(readAttachment).toHaveBeenCalledTimes(1);
+    expect(readAttachment).toHaveBeenCalledTimes(2);
   }, 30_000);
 
   it("sends an alias's public level as its backing's nearest", async () => {

@@ -4,6 +4,7 @@ import { expect, it } from "bun:test";
 import { CHAT_FINAL_STEP_SYSTEM_PROMPT } from "@appstrate/core/chat-turn-metadata";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { fileDelivery, type FileInputModel } from "../src/file-input.ts";
 import { createTurnPdfInput, type TurnPdfInput } from "../src/pi-chat/native-pdf.ts";
 
 function transform(turn: TurnPdfInput, input: unknown[]) {
@@ -17,7 +18,10 @@ function transform(turn: TurnPdfInput, input: unknown[]) {
   return hook({ payload: { input } })?.input ?? input;
 }
 
-const VISION = { api: "openai-responses" as const, input: ["text", "image"] };
+const VISION = { api: "openai-responses", input: ["text", "image"] };
+
+/** The turn the engine builds for a model. */
+const turnFor = (model: FileInputModel) => createTurnPdfInput(fileDelivery(model).pdf);
 
 const pdf = { name: "contract.pdf", data: btoa("%PDF-1.7\ncontract") };
 const nativeFile = {
@@ -27,7 +31,7 @@ const nativeFile = {
 };
 
 it("keeps attached and tool-returned PDFs on their source through the tool-less closing prompt", () => {
-  const turn = createTurnPdfInput(VISION);
+  const turn = turnFor(VISION);
   const attachment = turn.add(pdf);
   const tool = turn.add(pdf, "call_1|fc_1");
   const text = (value: string) => ({ type: "input_text", text: value });
@@ -54,23 +58,21 @@ it("keeps attached and tool-returned PDFs on their source through the tool-less 
   expect(JSON.stringify(wire)).not.toContain(attachment.reference!);
   const unrelated = [historyPrompt, historyResult, closing];
   expect(transform(turn, unrelated)).toEqual(unrelated);
-  expect(transform(createTurnPdfInput(VISION), input)).toEqual(input);
+  expect(transform(turnFor(VISION), input)).toEqual(input);
 });
 
 it("caps cumulative file bytes before sending, including across function calls", () => {
-  const turn = createTurnPdfInput(VISION);
+  const turn = turnFor(VISION);
   const full = { ...pdf, data: Buffer.alloc(RESOURCE_BLOB_MAX_BYTES).toString("base64") };
   const receipt = turn.add(full, "first|item");
   expect(receipt.note).toContain(pdf.name);
   expect(turn.add(full, "first|item")).toBe(receipt);
   expect(turn.add(pdf, "second|item").note).toContain("size limit");
-  expect(createTurnPdfInput(VISION).add({ ...full, data: full.data + "AAAA" }).note).toContain(
-    "size limit",
-  );
+  expect(turnFor(VISION).add({ ...full, data: full.data + "AAAA" }).note).toContain("size limit");
 });
 
 it("reports an unsupported adapter without exposing the PDF as text", () => {
-  const turn = createTurnPdfInput({ api: "openai-completions", input: ["text", "image"] });
+  const turn = turnFor({ api: "openai-completions", input: ["text", "image"] });
   expect(turn.supported).toBe(false);
   const receipt = turn.add(pdf);
   expect(receipt.note).toContain("does not accept PDF");
@@ -79,14 +81,17 @@ it("reports an unsupported adapter without exposing the PDF as text", () => {
   expect(transform(turn, input)).toEqual(input);
 });
 
-it("has no PDF input on a model without vision, whatever its adapter", () => {
-  const turn = createTurnPdfInput({ api: "openai-responses", input: ["text"] });
-  expect(turn.supported).toBe(false);
-  expect(turn.add(pdf).note).toContain("does not accept PDF");
+it("sends a PDF to a Responses model declared without image input: the provider decides", () => {
+  const turn = turnFor({ api: "openai-responses", input: ["text"] });
+  expect(turn.supported).toBe(true);
+  const receipt = turn.add(pdf);
+  expect(transform(turn, [{ role: "user", content: receipt.reference }])).toEqual([
+    { role: "user", content: [nativeFile] },
+  ]);
 });
 
 it("attaches a PDF to its own call only, a grammar tool's output included, and drops a foreign reference", () => {
-  const turn = createTurnPdfInput(VISION);
+  const turn = turnFor(VISION);
   const mine = turn.add(pdf, "call_a|fc_a");
   const text = (value: string) => ({ type: "input_text", text: value });
   // Call B carries call A's reference: it is not B's file, and it never reaches the wire as text.

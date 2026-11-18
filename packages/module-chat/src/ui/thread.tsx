@@ -50,11 +50,7 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import {
-  getSelectedModelAcceptsImages,
-  getSelectedModelReadsPdf,
-  subscribeModel,
-} from "./model-store.ts";
+import { getSelectedModelFileInput, subscribeModel } from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
@@ -277,6 +273,9 @@ function PendingImage({ file, name }: { file: File; name: string }) {
   );
 }
 
+const selectedModelAcceptsImage = () => getSelectedModelFileInput("image");
+const selectedModelAcceptsPdf = () => getSelectedModelFileInput("pdf");
+
 /** A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both removable. */
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
@@ -285,17 +284,16 @@ function ComposerAttachmentChip() {
   const size = file?.size ?? 0;
   const { formatBytes, t } = useChatHost();
   const previewFile = file && isImageMime(file.type) ? file : undefined;
-  // A model known not to read images only gets the file's pointer: say so on the chip.
+  // A file the selected model is declared unable to take only gets its pointer: say so on the chip.
   const acceptsImages = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelAcceptsImages,
-    getSelectedModelAcceptsImages,
+    selectedModelAcceptsImage,
+    selectedModelAcceptsImage,
   );
-  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
   const readsPdf = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelReadsPdf,
-    getSelectedModelReadsPdf,
+    selectedModelAcceptsPdf,
+    selectedModelAcceptsPdf,
   );
   const imageNotice =
     previewFile && acceptsImages === false

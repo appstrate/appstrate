@@ -30,7 +30,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
-import { readsPdfNatively } from "../pdf-input.ts";
+import { acceptsFileInput, type FileInputKind } from "../file-input.ts";
 
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -176,26 +176,13 @@ function defaultCapabilities(): ModelGenerationCapabilities | undefined {
 }
 
 /**
- * Whether the selected model reads images: `false` when its catalog entry lists
- * its modalities and `image` is not one of them, `null` when they are not known
- * (a model alias hides them, and so does a catalog still loading) — the composer
- * warns on `false` only, never on a guess.
+ * Whether the selected model is sent a file of this kind ({@link acceptsFileInput}), `null` when no
+ * model is selected: the composer warns on `false` only, the server's own verdict.
  */
-export function getSelectedModelAcceptsImages(): boolean | null {
+export function getSelectedModelFileInput(kind: FileInputKind): boolean | null {
   const id = getSelectedModel();
-  const input = id === null ? undefined : inputModalities.get(id);
-  return input ? input.includes("image") : null;
-}
-
-/**
- * Whether the selected model reads a PDF ({@link readsPdfNatively}), `null` when its modalities or
- * its API shape are not known: the composer warns on `false` only.
- */
-export function getSelectedModelReadsPdf(): boolean | null {
-  const id = getSelectedModel();
-  const input = id === null ? undefined : inputModalities.get(id);
-  const api = id === null ? undefined : apiShapes.get(id);
-  return input && api ? readsPdfNatively({ api, input }) : null;
+  if (id === null) return null;
+  return acceptsFileInput({ api: apiShapes.get(id), input: inputModalities.get(id) }, kind);
 }
 
 export function subscribeGeneration(listener: () => void): () => void {

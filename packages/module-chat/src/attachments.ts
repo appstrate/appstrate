@@ -14,7 +14,7 @@
  * fetchable data URL): {@link messagesWithAttachmentsAsText} flattens each file
  * part into a compact, model-facing text line so the assistant can pass the
  * `appfile://` URI straight into a `run_and_wait` input file field. The pixels of
- * an image reach a vision model separately, as Pi image blocks next to that line
+ * an image reach the model separately, as Pi image blocks next to that line
  * (`pi-chat/attachment-inputs.ts`); the line stays so the URI is still chainable.
  */
 
@@ -22,6 +22,7 @@ import type { FileUIPart, UIMessage } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { formatBytes } from "@appstrate/core/format";
 import { isImageMime } from "@appstrate/core/mime";
+import type { FileDelivery } from "./file-input.ts";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -57,8 +58,8 @@ function attachmentTextBlock(part: FileUIPart, imageNote: string): string {
 /** What the pointer line of an image says about its pixels, so the model never guesses at them. */
 interface AttachmentContext {
   pdfReceipts?: ReadonlyMap<string, string>;
-  /** Whether the model of this turn accepts images at all. */
-  modelSeesImages: boolean;
+  /** What this turn sends the model. */
+  delivery: FileDelivery;
   /** The user messages' image parts whose pixels ride this request, by message id then URI. */
   sent: ReadonlyMap<string, ReadonlyMap<string, unknown>>;
 }
@@ -69,7 +70,7 @@ function imageNote(
   context: AttachmentContext | undefined,
 ): string {
   if (!context || !isImageMime(part.mediaType)) return "";
-  if (!context.modelSeesImages) {
+  if (!context.delivery.image) {
     return " — you cannot view images with this model: say so rather than guess its content";
   }
   return context.sent.get(message.id)?.has(part.url)

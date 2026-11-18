@@ -21,6 +21,7 @@ import type { AttachmentImages, PiImageContent } from "./attachment-inputs.ts";
 import { offerScopeOf, splitJsonText, type OfferScope } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
 import { PI_CHAT_CWD } from "./resource-loader.ts";
+import type { FileDelivery } from "../file-input.ts";
 
 export interface PiHistoryModel {
   api: Api;
@@ -47,8 +48,8 @@ export interface BuildStructuredPiTurnOptions {
    */
   images?: AttachmentImages;
   pdfReceipts?: ReadonlyMap<string, string>;
-  /** Whether the model accepts image input, for the wording of the pointer lines. */
-  modelSeesImages?: boolean;
+  /** What this turn sends the model, for the wording of the pointer lines. */
+  delivery?: FileDelivery;
 }
 
 interface StructuredPiTurn {
@@ -317,13 +318,13 @@ export function buildStructuredPiTurn(
     estimateTokens,
     baseTokens,
     images,
-    modelSeesImages = false,
+    delivery = { image: false, pdf: false },
     pdfReceipts,
   }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
   const sentImages: AttachmentImages = images ?? new Map();
   const messages = messagesWithAttachmentsAsText(input, {
-    modelSeesImages,
+    delivery,
     sent: sentImages,
     pdfReceipts,
   });

@@ -56,6 +56,7 @@ import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
+import { fileDelivery } from "../file-input.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -343,13 +344,13 @@ export function runPiChat(input: PiChatInput): Response {
         // MCP client it goes on to open — `finally` cannot close what was never
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
-        const pdfInput = createTurnPdfInput(model);
-        const modelSeesImages = model.input.includes("image");
+        const delivery = fileDelivery(model);
+        const pdfInput = createTurnPdfInput(delivery.pdf);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
               ...platformMcp,
-              modelSeesImages,
+              delivery,
               pdfInput,
               writeChunk: write,
               signal: turnAbort.signal,
@@ -432,13 +433,13 @@ export function runPiChat(input: PiChatInput): Response {
         const system = mcpInstructions ? `${input.system}\n\n${mcpInstructions}` : input.system;
 
         const projectionStartedAt = Date.now();
-        // A model that accepts images gets the pixels of the newest attachments,
-        // read from their stored files; one that does not keeps the
-        // pointer lines it always had.
+        // Unless the model is declared without image input, it gets the pixels of
+        // the newest attachments, read from their stored files; otherwise it
+        // keeps the pointer lines.
         const read = input.readAttachment;
         const signal = turnAbort.signal;
         const images =
-          modelSeesImages && read
+          delivery.image && read
             ? await untilAborted(
                 loadAttachmentImages(
                   input.messages,
@@ -461,7 +462,7 @@ export function runPiChat(input: PiChatInput): Response {
             estimateTokens,
             images,
             pdfReceipts,
-            modelSeesImages,
+            delivery,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
             // Still a floor, not a measurement: tool schemas and this turn's own
