@@ -4,7 +4,7 @@
  * MCP server on loopback (reached through the operator's `EGRESS_ALLOW_INTERNAL_HOSTS` opt-in),
  * called through the credential proxy with the caller's connection.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
@@ -16,7 +16,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
-import { journaledCalls } from "../../helpers/connection-calls.ts";
+import { drainJournal, journaledCalls } from "../../helpers/connection-calls.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -119,6 +119,9 @@ const sync = (ctx: TestContext, body?: unknown) =>
 
 describe("POST /api/integrations/{packageId}/discover", () => {
   let ctx: TestContext;
+
+  // A row written after the test would land in the next test's database.
+  afterEach(drainJournal);
 
   beforeEach(async () => {
     await truncateAll();
@@ -643,7 +646,10 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
   const unauthenticated = (url: string) =>
     remoteIntegrationManifest({ name: OPEN_ID, displayName: "Open", url });
 
-  const journaled = () => journaledCalls(OPEN_ID);
+  const journaled = () => journaledCalls(ctx, OPEN_ID);
+
+  // A row written after the test would land in the next test's database.
+  afterEach(drainJournal);
 
   const syncOpen = (caller: TestContext = ctx) =>
     getTestApp().request(`/api/integrations/${OPEN_ID}/discover`, {

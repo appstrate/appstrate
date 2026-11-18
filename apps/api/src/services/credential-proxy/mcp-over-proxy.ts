@@ -332,6 +332,8 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
     }
     const answered = result;
     const relayed = relayAnswer(result.body, {
+      request: init?.body,
+      headers: result.headers,
       bound: maxResponseBytes,
       truncated: () => answered.truncated === true,
       readFailure: (err) => bodyReadError(err, answered.redactedHost, answered.connectionId),
@@ -341,14 +343,46 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
   });
 }
 
+/** The id of the JSON-RPC request `body` carries, if it is one: a notification awaits none. */
+function awaitedResponseId(body: RequestInit["body"]): string | number | undefined {
+  if (typeof body !== "string") return undefined;
+  try {
+    const message: unknown = JSON.parse(body);
+    if (typeof message !== "object" || message === null || !("method" in message)) return undefined;
+    const id = (message as { id?: unknown }).id;
+    return typeof id === "string" || typeof id === "number" ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether an event stream's `data` carries the JSON-RPC response to request `id`. */
+function answersRequest(data: string, id: string | number): boolean {
+  try {
+    const message: unknown = JSON.parse(data);
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      ("result" in message || "error" in message) &&
+      (message as { id?: unknown }).id === id
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
- * An answer's body, relayed to the MCP client: past `bound` (or cut there, `truncated`), or
- * failing mid-read, it fails the operation with that failure and errors the stream. The SDK
- * swallows an event stream's error and would wait for its timeout; the operation answers at once.
+ * An answer's body, relayed to the MCP client. Past `bound` (or cut there, `truncated`) it fails
+ * the operation; failing mid-read, it fails it too while the response the request awaits has not
+ * arrived (a JSON body not ended, an event stream before the event answering its id), since the
+ * SDK swallows an event stream's error and would wait for its timeout. Once answered, or for a
+ * notification, a broken stream only errors itself: what it answered stands.
  */
 function relayAnswer(
   body: ReadableStream<Uint8Array> | null,
   opts: {
+    request: RequestInit["body"];
+    headers: Headers;
     bound: number;
     truncated?: () => boolean;
     readFailure: (err: unknown) => Error;
@@ -357,7 +391,27 @@ function relayAnswer(
 ): ReadableStream<Uint8Array> | null {
   if (!body) return null;
   const reader = body.getReader();
+  const awaited = awaitedResponseId(opts.request);
+  const eventStream = opts.headers.get("content-type")?.includes("text/event-stream") === true;
+  const decoder = new TextDecoder();
+  let answered = awaited === undefined;
+  let pending = "";
   let read = 0;
+  /** Scans the complete events of `chunk` for the response to the awaited id. */
+  const scan = (chunk: Uint8Array) => {
+    if (answered || !eventStream) return;
+    pending += decoder.decode(chunk, { stream: true });
+    const events = pending.split(/\r?\n\r?\n/);
+    pending = events.pop() ?? "";
+    for (const event of events) {
+      const data = event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).replace(/^ /, ""))
+        .join("\n");
+      if (data && answersRequest(data, awaited!)) answered = true;
+    }
+  };
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       const failWith = (err: Error) => {
@@ -369,6 +423,7 @@ function relayAnswer(
       try {
         chunk = await reader.read();
       } catch (err) {
+        if (answered) return controller.error(err);
         return failWith(opts.readFailure(err));
       }
       if (chunk.done) {
@@ -377,6 +432,7 @@ function relayAnswer(
       }
       read += chunk.value.byteLength;
       if (read > opts.bound) return failWith(new McpExchangeTooLargeError(opts.bound));
+      scan(chunk.value);
       controller.enqueue(chunk.value);
     },
     cancel: (reason) => reader.cancel(reason),
@@ -430,6 +486,8 @@ export function directMcpOperation(
     reached(null, String(res.status));
     // The journal keeps the status received: a body failing later is not journaled again.
     const relayed = relayAnswer(res.body, {
+      request: init?.body,
+      headers: res.headers,
       bound,
       readFailure: (err) => directFailure(err, target.origin),
       fail,

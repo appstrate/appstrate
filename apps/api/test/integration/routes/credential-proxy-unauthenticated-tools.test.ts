@@ -6,7 +6,7 @@
  * operator's `EGRESS_ALLOW_INTERNAL_HOSTS` opt-in) reached directly with nothing injected, each
  * operation journaled without a connection, and every refusal answered before any exchange.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { count, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, runs, spacePackages, spaces } from "@appstrate/db/schema";
@@ -16,7 +16,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { initProxyLimits } from "../../../src/services/proxy-limits.ts";
 import { _setRemoteToolTimeoutsForTesting } from "../../../src/services/credential-proxy/remote-tools.ts";
 import { withEnv as withTestEnv } from "../../helpers/env.ts";
-import { journaledCalls } from "../../helpers/connection-calls.ts";
+import { drainJournal, journaledCalls } from "../../helpers/connection-calls.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
@@ -178,7 +178,10 @@ describe("the typed tools of an unauthenticated remote integration", () => {
     expect(called.proxyStatus).toContain("error=destination_ip_prohibited");
   };
 
-  const journal = () => journaledCalls(ID);
+  const journal = () => journaledCalls(ctx, ID);
+
+  // A row written after the test would land in the next test's database.
+  afterEach(drainJournal);
 
   beforeEach(async () => {
     await truncateAll();
@@ -606,6 +609,29 @@ describe("the typed tools of an unauthenticated remote integration", () => {
       }
     });
   }
+
+  it("lets a call proceed when an answered exchange's event stream breaks after its result", async () => {
+    // The tool runs for 300 ms; `initialize`, answered in an event stream, is cut 50 ms later.
+    const slow = startFakeMcpServer({
+      tools: [{ name: "read_media_file", result: { content: [PNG_IMAGE_CONTENT] } }],
+      delayMs: 300,
+      delayedMethod: "tools/call",
+    });
+    const relay = startBreakingEventStreamRelay(slow.url, {
+      method: "initialize",
+      afterResult: true,
+    });
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(relay.url));
+      const called = await call({ name: "read_media_file" });
+      expect(called.status).toBe(200);
+      expect(called.body.result!.content).toEqual([PNG_IMAGE_CONTENT]);
+      expect(slow.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
+    } finally {
+      relay.stop();
+      slow.stop();
+    }
+  });
 
   it("answers at once when an event-stream answer breaks mid-read: 502 upstream_unreachable", async () => {
     const relay = startBreakingEventStreamRelay(server.url);
