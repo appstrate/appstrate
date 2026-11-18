@@ -468,6 +468,39 @@ export async function listActivePackages(
   );
 }
 
+/** Active skill placements and their non-yanked latest archive in one statement.
+ * Only shipped trees need the overlay here. An org draft is read under its draft lock.
+ */
+export async function listServedSkillPlacements(orgId: string, spaceIds: readonly string[]) {
+  if (!spaceIds.length) return [];
+  const query = db
+    .select({
+      id: packages.id,
+      spaceIds: activeSpaceIds(),
+      type: packages.type,
+      source: packages.source,
+      orgId: packages.orgId,
+      draftManifest: sql<unknown>`CASE WHEN ${packages.source} = 'system' THEN ${packages.draftManifest} END`,
+      draftContent: sql<
+        string | null
+      >`CASE WHEN ${packages.source} = 'system' THEN ${packages.draftContent} END`,
+      latest: {
+        version: packageVersions.version,
+        integrity: packageVersions.integrity,
+        yanked: packageVersions.yanked,
+      },
+    })
+    .from(packages)
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .leftJoin(packageVersions, eq(packageVersions.id, packageDistTags.versionId))
+    .$dynamic();
+  return activeInSpaces(query, orgId, spaceIds, "skill", [packageVersions.id]).orderBy(
+    ...packageListingOrder(),
+  );
+}
+
+export type ServedSkillPlacement = Awaited<ReturnType<typeof listServedSkillPlacements>>[number];
+
 // ---------------------------------------------------------------------------
 // Active-package hints — caller-context for the get_me payload
 // ---------------------------------------------------------------------------

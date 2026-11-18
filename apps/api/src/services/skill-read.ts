@@ -23,11 +23,14 @@ import {
 } from "./package-file-explorer.ts";
 import {
   readPackageSnapshot,
+  publishedFileValidator,
   resolvePackageFileValidator,
   type PackageFileSnapshot,
 } from "./package-files.ts";
 import { withPackageDraftLock } from "./package-locks.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
+
+import type { ServedSkillPlacement } from "./space-packages.ts";
 
 const SKILLS_READ = packagePermission("skill", "read");
 const CHAT_TURN = "chat:write";
@@ -87,13 +90,15 @@ interface SkillReadAccess {
 async function resolveSkillReadAccess(
   c: Context<AppEnv>,
   space: SkillReadSpace,
-  packageId: string,
+  target: string | ServedSkillPlacement,
   definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
+  const packageId = typeof target === "string" ? target : target.id;
   const served = claimedHere(c, space, packageId);
+  if (!served && !space.permissions.has(SKILLS_READ)) return null;
+  const pkg = typeof target === "string" ? await findFileExplorerPackage(space, target) : target;
+  if (pkg?.type !== "skill") return null;
   if (served) {
-    const pkg = await findFileExplorerPackage(space, packageId);
-    if (pkg?.type !== "skill") return null;
     if (pkg.source === "system") return definition === "draft" ? null : { pkg, spec: undefined };
     if (definition !== undefined && definition !== served.definition) return null;
     if (served.definition === "draft") {
@@ -101,19 +106,13 @@ async function resolveSkillReadAccess(
     }
     return served.version === null ? null : { pkg, spec: served.version };
   }
-  if (space.permissions.has(SKILLS_READ)) {
-    const pkg = await findFileExplorerPackage(space, packageId);
-    if (pkg?.type === "skill") {
-      const explicit =
-        definition === undefined
-          ? undefined
-          : definition === "draft"
-            ? VERSION_SELECTOR_DRAFT
-            : "latest";
-      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, explicit) };
-    }
-  }
-  return null;
+  const explicit =
+    definition === undefined
+      ? undefined
+      : definition === "draft"
+        ? VERSION_SELECTOR_DRAFT
+        : "latest";
+  return { pkg, spec: await resolveFileExplorerVersion(c, pkg, explicit) };
 }
 
 /**
@@ -175,13 +174,16 @@ export type SkillDefinitionSelector = "published" | "draft";
 export async function resolveSkillRead(
   c: Context<AppEnv>,
   space: SkillReadSpace,
-  packageId: string,
+  target: string | ServedSkillPlacement,
   definition?: SkillDefinitionSelector,
 ): Promise<SkillRead | null> {
-  const access = await resolveSkillReadAccess(c, space, packageId, definition);
+  const access = await resolveSkillReadAccess(c, space, target, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
-  const validator = await resolvePackageFileValidator(pkg, spec);
+  const validator =
+    spec === "latest" && typeof target !== "string" && target.latest
+      ? publishedFileValidator(target.latest)
+      : await resolvePackageFileValidator(pkg, spec);
   const served = servedDefinition(pkg, spec);
   return {
     packageId: pkg.id,

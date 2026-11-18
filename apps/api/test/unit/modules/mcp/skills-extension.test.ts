@@ -27,6 +27,7 @@ import type { SkillRead } from "../../../../src/services/skill-read.ts";
 const encode = (text: string) => new TextEncoder().encode(text);
 const sha256 = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const SPACE = "spc_1";
+const placed = (...ids: string[]) => ids.map((packageId) => ({ packageId, spaceId: SPACE }));
 
 describe("serveSkill", () => {
   const md = (name: string) =>
@@ -160,7 +161,7 @@ describe("skills/list, skills/get and resources/read", () => {
     const unservable: string[] = [];
     const ctx: ServedSkillsContext = {
       spaceIds: [SPACE],
-      listActiveSkillIds: async () => ["@acme/tone", "@acme/hidden"],
+      listActiveSkills: async () => placed("@acme/tone", "@acme/hidden"),
       readSkill: async (_spaceId, packageId, definition) => {
         if (packageId === "@acme/hidden") throw forbidden("no");
         return snapshot(packageId, definition);
@@ -214,9 +215,9 @@ describe("skills/list, skills/get and resources/read", () => {
   it("lists the drafts the caller may read at their @draft URIs, without a version", async () => {
     const definitions: string[] = [];
     const s = server({
-      listActiveSkillIds: async (_spaceId, definition) => {
+      listActiveSkills: async (definition) => {
         definitions.push(definition);
-        return ["@acme/tone", "@acme/hidden"];
+        return placed("@acme/tone", "@acme/hidden");
       },
     });
     const drafts = await s.list("draft");
@@ -244,9 +245,9 @@ describe("skills/list, skills/get and resources/read", () => {
   it("lists the drafts on skills/list when the request _meta names them, each with its lock_version", async () => {
     const definitions: string[] = [];
     const s = server({
-      listActiveSkillIds: async (_spaceId, definition) => {
+      listActiveSkills: async (definition) => {
         definitions.push(definition);
-        return ["@acme/tone"];
+        return placed("@acme/tone");
       },
     });
     const p = await pair(s);
@@ -285,7 +286,7 @@ describe("skills/list, skills/get and resources/read", () => {
           : packageId === "@acme/pinned"
             ? snapshot(packageId, "draft")
             : null,
-      listActiveSkillIds: async () => ["@acme/big", "@acme/pinned", "@acme/gone"],
+      listActiveSkills: async () => placed("@acme/big", "@acme/pinned", "@acme/gone"),
     });
     const p = await pair(s);
     try {
@@ -320,7 +321,10 @@ describe("skills/list, skills/get and resources/read", () => {
     const reads: string[] = [];
     const s = server({
       spaceIds: [SPACE, "spc_2"],
-      listActiveSkillIds: async (spaceId) => (spaceId === SPACE ? ["@acme/tone"] : ["@acme/voice"]),
+      listActiveSkills: async () => [
+        ...placed("@acme/tone"),
+        { spaceId: "spc_2", packageId: "@acme/voice" },
+      ],
       readSkill: async (spaceId, packageId, definition) => {
         reads.push(`${spaceId} ${packageId}`);
         return spaceId === "spc_2" && packageId === "@acme/tone"
@@ -382,7 +386,7 @@ describe("the served skill cache", () => {
     const fileReads: string[] = [];
     const server = buildSkillServer({
       spaceIds: [SPACE],
-      listActiveSkillIds: async () => ["@acme/tone"],
+      listActiveSkills: async () => placed("@acme/tone"),
       readSkill:
         readSkill ??
         (async (_spaceId, packageId, definition) => ({
@@ -427,6 +431,36 @@ describe("the served skill cache", () => {
     expect(fileReads).toEqual(["published"]);
   });
 
+  it("shares concurrent archive reads across spaces and retries a failed read", async () => {
+    let reads = 0;
+    const spaces = [SPACE, "spc_2"];
+    const ctx: ServedSkillsContext = {
+      cache: createServedSkillCache(1024),
+      spaceIds: spaces,
+      listActiveSkills: async () => spaces.map((spaceId) => ({ spaceId, packageId: "@acme/tone" })),
+      readSkill: async () => ({
+        packageId: "@acme/tone",
+        version: "1.0.0",
+        integrity: "sha256-a",
+        definition: "published",
+        readSnapshot: async () => {
+          if (++reads === 1) throw new Error("storage unavailable");
+          return { files: { "SKILL.md": skillMd }, lockVersion: null, snapshotId: "s" };
+        },
+      }),
+      logUnservable: () => {},
+    };
+    const server = buildSkillServer(ctx);
+    await expect(server.list("published")).rejects.toThrow("storage unavailable");
+    for (let i = 0; i < 2; i++) {
+      expect((await server.list("published")).map((entry) => entry.uri)).toEqual([
+        TONE,
+        TONE.replace(SPACE, "spc_2"),
+      ]);
+    }
+    expect(reads).toBe(2);
+  });
+
   it("reads again an archive published again under the same version", async () => {
     const cache = createServedSkillCache(1024 * 1024);
     const fileReads: string[] = [];
@@ -469,7 +503,7 @@ describe("the served skill cache", () => {
     expect(err).toMatchObject({ code: -32002 });
   });
 
-  it("evicts the least recently used skill past its byte budget, and keeps none larger than it", () => {
+  it("evicts the least recently used skill past its byte budget, and keeps none larger than it", async () => {
     const skill = (bytes: number): ServedSkill => ({
       name: "tone",
       frontmatter: { name: "tone", description: "d" },
@@ -477,16 +511,18 @@ describe("the served skill cache", () => {
       resources: [],
     });
     const cache = createServedSkillCache(10);
-    cache.set("a", skill(4));
-    cache.set("b", skill(4));
-    expect(cache.get("a")).toBeDefined();
-    cache.set("c", skill(4));
-    expect(cache.get("b")).toBeUndefined();
-    expect(cache.get("a")).toBeDefined();
-    expect(cache.get("c")).toBeDefined();
-    cache.set("big", skill(11));
-    expect(cache.get("big")).toBeUndefined();
-    expect(cache.get("a")).toBeDefined();
+    const reads: string[] = [];
+    const load = (key: string, bytes = 4) =>
+      cache.load(key, async () => {
+        reads.push(key);
+        return skill(bytes);
+      });
+    for (const key of ["a", "b", "a", "c", "a", "c"]) await load(key);
+    await load("big", 11);
+    await load("big", 11);
+    await load("a");
+    await load("b");
+    expect(reads).toEqual(["a", "b", "c", "big", "big", "b"]);
   });
 });
 
@@ -496,7 +532,7 @@ describe("a draft the chat turn injected that changed since", () => {
     const changed = conflict("injected_draft_changed", "The draft of '@acme/tone' changed.");
     const server = buildSkillServer({
       spaceIds: [SPACE],
-      listActiveSkillIds: async () => [],
+      listActiveSkills: async () => [],
       readSkill: async (_spaceId, packageId, definition) => ({
         packageId,
         version: null,
@@ -535,7 +571,7 @@ describe("a draft the chat turn injected that changed since", () => {
     const changed = conflict("injected_draft_changed", "The draft of '@acme/tone' changed.");
     const server = buildSkillServer({
       spaceIds: [SPACE],
-      listActiveSkillIds: async () => ["@acme/tone", "@acme/other"],
+      listActiveSkills: async () => placed("@acme/tone", "@acme/other"),
       readSkill: async (_spaceId, packageId, definition) => ({
         packageId,
         version: null,
@@ -575,7 +611,7 @@ describe("a read failure that is not an access refusal", () => {
   it("propagates as an error, never as a skill not found", async () => {
     const server = buildSkillServer({
       spaceIds: [SPACE],
-      listActiveSkillIds: async () => ["@acme/tone"],
+      listActiveSkills: async () => placed("@acme/tone"),
       readSkill: async () => {
         throw new Error("storage unreachable");
       },

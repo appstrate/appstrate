@@ -375,8 +375,16 @@ export async function resolvePackageFileValidator(
   const ver = await getVersionForDownload(pkg.id, version);
   if (!ver) throw notFound("Version not found");
 
+  return publishedFileValidator(ver);
+}
+
+export function publishedFileValidator(ver: {
+  version: string;
+  integrity: string;
+  yanked: boolean;
+}) {
   return {
-    kind: "version",
+    kind: "version" as const,
     snapshotId: `pv-${ver.integrity}`,
     yanked: ver.yanked,
     version: ver.version,
