@@ -30,7 +30,11 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
-import { readChatImage, resolveChatAttachment } from "../../../apps/api/src/services/files.ts";
+import {
+  createChatFileFromBytes,
+  readChatImage,
+  resolveChatAttachment,
+} from "../../../apps/api/src/services/files.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "../src/attachments.ts";
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
@@ -324,6 +328,84 @@ describe("chat attachments", () => {
       expect(await readChatImage(request("upload://upl_x"))).toBeNull();
       expect(await readChatImage(request("https://evil.example.com/a.png"))).toBeNull();
       expect(await readChatImage(request("appfile://not-a-file"))).toBeNull();
+    });
+  });
+  describe("createChatFileFromBytes (a connector import stored in the conversation)", () => {
+    const PNG = new Uint8Array(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+    const actor = () => ({ type: "user" as const, id: ctx.user.id });
+
+    it("anchors the file to the conversation, owner-readable, with the sniffed MIME", async () => {
+      const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
+      const row = await createChatFileFromBytes(scope, actor(), sessionId, {
+        name: "drive-image",
+        // Drive serves `application/octet-stream`: the bytes say it is a PNG.
+        mime: "application/octet-stream",
+        bytes: PNG,
+      });
+      expect(row).toMatchObject({
+        chatSessionId: sessionId,
+        runId: null,
+        purpose: "user_upload",
+        mime: "image/png",
+        size: PNG.byteLength,
+      });
+      // The same ACL as an upload: the owner reads it back as an attachment (and a vision model sees it).
+      const image = await readChatImage({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        uri: `appfile://${row.id}`,
+        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set<string>() }],
+        maxBytes: 4096,
+      });
+      expect(image?.mime).toBe("image/png");
+    });
+
+    it("counts against the org quota like an upload", async () => {
+      const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
+      const prev = process.env.ORG_STORAGE_QUOTA_BYTES;
+      process.env.ORG_STORAGE_QUOTA_BYTES = "1";
+      _resetCacheForTesting();
+      try {
+        await expect(
+          createChatFileFromBytes(scope, actor(), sessionId, {
+            name: "big.png",
+            mime: "image/png",
+            bytes: PNG,
+          }),
+        ).rejects.toMatchObject({ status: 403, code: "storage_limit_exceeded" });
+      } finally {
+        if (prev === undefined) delete process.env.ORG_STORAGE_QUOTA_BYTES;
+        else process.env.ORG_STORAGE_QUOTA_BYTES = prev;
+        _resetCacheForTesting();
+      }
+      expect((await db.select().from(files).where(eq(files.chatSessionId, sessionId))).length).toBe(
+        0,
+      );
+    });
+
+    it("refuses a conversation that is not the caller's", async () => {
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+      const foreign = await createSession(ctx.orgId, ctx.defaultSpaceId, other.id);
+      await expect(
+        createChatFileFromBytes(scope, actor(), foreign, {
+          name: "a.png",
+          mime: "image/png",
+          bytes: PNG,
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        createChatFileFromBytes(scope, actor(), "chs_missing", {
+          name: "a.png",
+          mime: "image/png",
+          bytes: PNG,
+        }),
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 });

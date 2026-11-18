@@ -818,6 +818,9 @@ export async function handleChatStream(
       injectedSkills,
       // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
+      // The conversation, so a file the turn imports (`save_as_file`) is anchored to it. Null on an
+      // ephemeral turn: with no conversation there is nothing to hold the file.
+      chatSessionId: meteringSessionId,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );

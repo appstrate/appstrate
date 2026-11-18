@@ -93,7 +93,8 @@ interface LoopbackClaims extends LoopbackIdentity {
   /**
    * Chat session this token's usage should be attributed to. Signed INTO the
    * claims so the llm-proxy reads it from a validated token, never a spoofable
-   * header. Absent on the MCP bearer and on ephemeral (unpersisted) turns.
+   * header. Absent on ephemeral (unpersisted) turns. On the MCP bearer it names the conversation
+   * a call may store a file in (`save_as_file`).
    */
   chatSessionId?: string | null;
   /** The skills the turn's prompt injected, as served; MCP bearer only (→ `skill://` reads). */
@@ -181,6 +182,8 @@ export function mintMcpLoopbackToken(
     permissions: readonly string[];
     viewAs?: unknown;
     injectedSkills?: InjectedSkills;
+    /** The conversation, for what a call stores in it (`save_as_file`). Absent on an ephemeral turn. */
+    chatSessionId?: string | null;
     /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
     spaceIds?: readonly string[];
   },

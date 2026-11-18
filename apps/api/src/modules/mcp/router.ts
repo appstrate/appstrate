@@ -351,6 +351,12 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
  * with that same credential, so a cookie session is offered neither of them;
  * the chat's server-minted MCP bearer is, like any MCP client's bearer.
  */
+/** The chat conversation the bearer was minted for (`authExtra`, set by the chat's loopback strategy). */
+function chatSessionIdOf(c: Context<AppEnv>): string | null {
+  const id = c.get("authExtra")?.chatSessionId;
+  return typeof id === "string" && id !== "" ? id : null;
+}
+
 function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
   return isBearerOnlyCaller(bearerCaller(c), "credential-proxy");
 }
@@ -685,6 +691,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       actor,
       scope,
       orgSpaces,
+      // Signed into the chat's own bearer; `authExtra` is the strategy's, never a header.
+      chatSessionId: chatSessionIdOf(c),
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)

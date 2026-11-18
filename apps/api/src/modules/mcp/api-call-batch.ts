@@ -12,6 +12,7 @@ import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+import { ApiError } from "@appstrate/core/api-errors";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
@@ -32,6 +33,26 @@ import {
 } from "./tool-results.ts";
 import type { Dispatch } from "./tools.ts";
 
+/** A response body stored as a conversation file (`save_as_file`), as the result names it. */
+export interface SavedFile {
+  uri: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** The space the file lives in: `read_file` names it on an organization-wide connection. */
+  space_id: string;
+}
+
+/**
+ * Stores one response body as a file of the conversation the call is made from, under the caller's
+ * ACL and the org's quota. Rejects with the platform's `ApiError` (quota, per-file cap).
+ */
+export type SaveFile = (file: {
+  name: string;
+  mime: string;
+  bytes: Uint8Array;
+}) => Promise<SavedFile>;
+
 /** Where and as whom a request is dispatched. */
 export interface DispatchContext {
   /** Origin the dispatched requests are addressed to. */
@@ -39,6 +60,11 @@ export interface DispatchContext {
   /** The caller's auth context, forwarded onto every dispatched request. */
   authHeaders: Headers;
   dispatch: Dispatch;
+  /**
+   * Stores a response body as a conversation file. Present only for a call made from a chat
+   * conversation: with no conversation to anchor it to, `save_as_file` is refused.
+   */
+  saveFile?: SaveFile;
 }
 
 /** What an integration tool's call comes back with, unless it refuses its arguments. */
@@ -79,6 +105,14 @@ const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024;
  * response limit.
  */
 export const MAX_RESULT_BYTES = 256 * 1024;
+/**
+ * Bytes one `save_as_file` response may weigh: the proxy cuts the body there, and a cut body is
+ * refused rather than stored (a truncated PDF opens as nothing). The per-file cap and the org's
+ * quota apply on top, as for an upload.
+ */
+export const SAVE_AS_FILE_MAX_BYTES = 20 * 1024 * 1024;
+/** Requests of one call that may save a file: each is held whole in memory until stored. */
+const MAX_SAVED_PER_CALL = 5;
 /** Characters kept of one projected response header. */
 const MAX_HEADER_VALUE_CHARS = 2048;
 
@@ -154,6 +188,25 @@ const requestSchema = z.strictObject({
       "Which of the tool's `connection_ids` to use. Required when the tool names several and its " +
         "integration also has connections of another auth.",
     ),
+  save_as_file: z
+    .boolean()
+    .optional()
+    .describe(
+      "Store a successful response body as a file of this conversation instead of returning it " +
+        "(a PDF, an image, any binary: only a conversation can hold one). The entry then carries " +
+        "`file: { uri, name, mime, size, space_id }` and no body; read it with `read_file`. Up to " +
+        `${SAVE_AS_FILE_MAX_BYTES / (1024 * 1024)} MiB, at most ${MAX_SAVED_PER_CALL} per call; ` +
+        "an error status still returns its text body.",
+    ),
+  file_name: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "With `save_as_file`: the file's name, with its extension (the upstream's own " +
+        "`Content-Disposition` name, else the end of the URL, is used when omitted).",
+    ),
 });
 
 /** The arguments of a `{ns}__api_call` tool: what the handler parses, and its `input_schema`. */
@@ -190,6 +243,8 @@ interface PreparedCall {
   method: string;
   headers: Headers;
   body?: Uint8Array<ArrayBuffer>;
+  /** Present when the response body is stored as a file instead of returned. */
+  save?: { name: string | undefined; target: string };
 }
 
 /**
@@ -207,6 +262,12 @@ type Outcome =
       truncated: boolean;
       /** The proxy's verdict on the connection's credential, on a relayed 401 it judged. */
       credential: CredentialStatus | null;
+      /** The upstream's `Content-Disposition`, kept to name a saved file. */
+      contentDisposition: string | null;
+      /** The body, stored as a conversation file: `bytes` is then empty. */
+      saved?: SavedFile;
+      /** A `save_as_file` body that was not stored, and why: the entry names it, no body. */
+      saveRefusal?: { code: string; detail: string };
     };
 
 /** Bytes, so `Request` derives no Content-Type from the body: the caller's is the only one. */
@@ -223,7 +284,13 @@ function prepareCall(
   ctx: DispatchContext,
   request: ApiCallRequest,
   index: number,
-  shared: { integrationId: string; sessionId: string; maxResponseBytes: number },
+  shared: {
+    integrationId: string;
+    sessionId: string;
+    maxResponseBytes: number;
+    /** Whether the call may store files, and how many requests of it already do. */
+    saves: { available: boolean; count: number };
+  },
 ): PreparedCall | Refusal {
   const at = (argument: string) => `arguments.requests[${index}].${argument}`;
   const invalid = (argument: string, error: string): Refusal => ({
@@ -231,6 +298,28 @@ function prepareCall(
     error,
     arguments: [argument],
   });
+
+  if (request.file_name !== undefined && !request.save_as_file) {
+    return invalid(at("file_name"), "file_name applies with save_as_file only.");
+  }
+  if (request.save_as_file) {
+    if (!shared.saves.available) {
+      return {
+        ...invalid(
+          at("save_as_file"),
+          "save_as_file is available from a chat conversation only: there is no conversation to hold the file.",
+        ),
+        hint: "Without it, a binary body is replaced by its size.",
+      };
+    }
+    shared.saves.count += 1;
+    if (shared.saves.count > MAX_SAVED_PER_CALL) {
+      return invalid(
+        at("save_as_file"),
+        `At most ${MAX_SAVED_PER_CALL} requests of one call may save a file.`,
+      );
+    }
+  }
 
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers ?? {})) {
@@ -270,7 +359,11 @@ function prepareCall(
     ["X-Connection-Id", request.connection_id, at("connection_id")],
     ["X-Session-Id", shared.sessionId, "arguments.session_id"],
     ["X-Substitute-Body", request.substitute_body ? "1" : undefined, at("substitute_body")],
-    ["X-Max-Response-Size", String(shared.maxResponseBytes), "arguments.max_response_bytes"],
+    [
+      "X-Max-Response-Size",
+      String(request.save_as_file ? SAVE_AS_FILE_MAX_BYTES : shared.maxResponseBytes),
+      "arguments.max_response_bytes",
+    ],
   ];
   for (const [header, value, argument] of controls) {
     if (value === undefined) continue;
@@ -281,7 +374,12 @@ function prepareCall(
       );
     }
   }
-  return { method: request.method, headers, ...(body ? { body } : {}) };
+  return {
+    method: request.method,
+    headers,
+    ...(body ? { body } : {}),
+    ...(request.save_as_file ? { save: { name: request.file_name, target: request.target } } : {}),
+  };
 }
 
 /** The proxy's own answer (an RFC 9457 problem), less the members that only restate it. */
@@ -322,7 +420,101 @@ async function dispatchCall(
     bytes: new Uint8Array(await response.arrayBuffer()),
     truncated: response.headers.get("x-truncated") === "true",
     credential: parseCredentialStatus(response.headers.get(CREDENTIAL_STATUS_HEADER)),
+    contentDisposition: response.headers.get("content-disposition"),
   };
+}
+
+/** Extensions for the types a connector commonly serves, for a name the upstream did not give. */
+const EXTENSION_BY_MIME: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "application/pdf": ".pdf",
+  "application/json": ".json",
+  "text/plain": ".txt",
+  "text/csv": ".csv",
+  "application/zip": ".zip",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+};
+
+/**
+ * The name of a saved file: the caller's, else the upstream's `Content-Disposition`, else the last
+ * path segment of the target, else a generic one; given the type's extension when it has none.
+ */
+export function savedFileName(
+  requested: string | undefined,
+  contentDisposition: string | null,
+  target: string,
+  mime: string,
+): string {
+  let name = requested;
+  if (!name && contentDisposition) {
+    const extended = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(contentDisposition)?.[1];
+    const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(contentDisposition)?.[1];
+    try {
+      name = extended ? decodeURIComponent(extended.trim()) : plain?.trim();
+    } catch {
+      name = plain?.trim();
+    }
+  }
+  if (!name) {
+    try {
+      const last = new URL(target.replace(/\{\{[^}]*\}\}/g, "x")).pathname
+        .split("/")
+        .filter(Boolean)
+        .pop();
+      name = last ? decodeURIComponent(last) : undefined;
+    } catch {
+      name = undefined;
+    }
+  }
+  // A path separator or control character has no place in a file name.
+  name = [...(name ?? "")]
+    .map((char) => (char === "/" || char === "\\" || char.charCodeAt(0) < 0x20 ? "_" : char))
+    .join("")
+    .replace(/^\.+/, "")
+    .slice(0, 200);
+  if (name === "") name = "imported-file";
+  return /\.[A-Za-z0-9]{1,8}$/.test(name) ? name : `${name}${EXTENSION_BY_MIME[mime] ?? ""}`;
+}
+
+/** Stores a `save_as_file` outcome's body, leaving the outcome the entry reports. */
+async function saveOutcome(
+  ctx: DispatchContext,
+  save: NonNullable<PreparedCall["save"]>,
+  outcome: Extract<Outcome, { status: number }>,
+): Promise<Outcome> {
+  // An error answer keeps its text body: the model reads why, nothing is stored.
+  if (outcome.status < 200 || outcome.status >= 300 || outcome.bytes.byteLength === 0) {
+    return outcome;
+  }
+  const refuse = (code: string, detail: string): Outcome => ({
+    ...outcome,
+    bytes: new Uint8Array(0),
+    saveRefusal: { code, detail },
+  });
+  if (outcome.truncated) {
+    return refuse(
+      "file_too_large",
+      `The response exceeds ${SAVE_AS_FILE_MAX_BYTES / (1024 * 1024)} MiB: nothing was stored.`,
+    );
+  }
+  const mime =
+    outcome.contentType.split(";")[0]!.trim().toLowerCase() || "application/octet-stream";
+  try {
+    const saved = await ctx.saveFile!({
+      name: savedFileName(save.name, outcome.contentDisposition, save.target, mime),
+      mime,
+      bytes: outcome.bytes,
+    });
+    return { ...outcome, bytes: new Uint8Array(0), saved };
+  } catch (err) {
+    if (err instanceof ApiError) return refuse(err.code, err.message);
+    throw err;
+  }
 }
 
 /** The bytes one code point takes inside a JSON string, as `JSON.stringify` writes it. */
@@ -391,13 +583,15 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
           : { code: "not_sent", detail: "Not sent: the batch reached its deadline first." },
       };
     }
-    if (outcome.status >= 400) failed += 1;
+    if (outcome.status >= 400 || outcome.saveRefusal) failed += 1;
     const entry = {
       index,
       status: outcome.status,
       headers: outcome.headers,
       ...(outcome.credential ? { credential: credentialMember(outcome.credential) } : {}),
     };
+    if (outcome.saved) return { ...entry, file: outcome.saved };
+    if (outcome.saveRefusal) return { ...entry, error: outcome.saveRefusal };
     const { bytes } = outcome;
     if (bytes.byteLength === 0) return entry;
     if (!isTextShapedContentType(outcome.contentType)) {
@@ -440,7 +634,9 @@ export const API_CALL_USAGE =
   "Returns `{ session_id, results }`, one entry per request, in order. An entry with `status` " +
   "is the upstream's own answer, whatever the status (a 401 there is the upstream refusing the " +
   "connection), with `headers` and a text `body`, cut at `max_response_bytes` " +
-  "(`truncated: true`); a non-text body is replaced by its size. A 401 entry with `credential` " +
+  "(`truncated: true`); a non-text body is replaced by its size, unless the request sets " +
+  "`save_as_file`, which stores a successful body as a file of the conversation (`file: { uri, " +
+  "name, mime, size, space_id }`, read with `read_file`). A 401 entry with `credential` " +
   "`{ status, cause, detail }` is one the platform failed to recover by refreshing the " +
   "credential: `in_use` (the credential stays in use; the 401 may be a permission refusal or " +
   "transient, and `failures`/`max_failures` count toward flagging the connection) or " +
@@ -488,7 +684,12 @@ export async function executeApiCall(
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
   const sessionId = args.session_id ?? crypto.randomUUID();
   const maxResponseBytes = args.max_response_bytes ?? DEFAULT_MAX_RESPONSE_BYTES;
-  const shared = { integrationId: tool.integration_package_id, sessionId, maxResponseBytes };
+  const shared = {
+    integrationId: tool.integration_package_id,
+    sessionId,
+    maxResponseBytes,
+    saves: { available: ctx.saveFile !== undefined, count: 0 },
+  };
   const connectionIds = tool.connection_ids;
 
   const calls: PreparedCall[] = [];
@@ -536,7 +737,10 @@ export async function executeApiCall(
     signal?.throwIfAborted();
     if (deadline.aborted) return { deadline: { sent: false } } satisfies Outcome;
     // One request failing below the proxy's own error handling must not lose the others.
-    return dispatchCall(ctx, prepared, bounded).catch((err: unknown): Outcome => {
+    const answered = dispatchCall(ctx, prepared, bounded).then((outcome) =>
+      prepared.save && "status" in outcome ? saveOutcome(ctx, prepared.save, outcome) : outcome,
+    );
+    return answered.catch((err: unknown): Outcome => {
       if (signal?.aborted) throw err;
       if (deadline.aborted) return { deadline: { sent: true } };
       logger.error("mcp: call_integration_tool dispatch failed", {

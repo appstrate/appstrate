@@ -81,6 +81,7 @@ import {
   getFileForActor,
   streamFileContent,
   projectFileMetadata,
+  createChatFileFromBytes,
   MODEL_IMAGE_MIMES,
   type FileCapabilities,
 } from "../../services/files.ts";
@@ -214,6 +215,12 @@ export interface McpToolContext {
   observe?: McpObserver;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
+  /**
+   * The chat conversation the call is made from, when the bearer carries one (the chat's own
+   * loopback bearer, signed). What lets an integration's `api_call` store a response as a file
+   * of that conversation (`save_as_file`); `null`/absent for every other client.
+   */
+  chatSessionId?: string | null;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -1988,6 +1995,25 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
           dispatch: ctx.dispatch,
           observe: (event) => emit(ctx, event),
           runs: surface.runs,
+          ...(ctx.chatSessionId
+            ? {
+                saveFile: async ({ name, mime, bytes }) => {
+                  const row = await createChatFileFromBytes(
+                    ctx.scope,
+                    ctx.actor,
+                    ctx.chatSessionId!,
+                    { name, mime, bytes },
+                  );
+                  return {
+                    uri: fileUri(row.id),
+                    name: row.name,
+                    mime: row.mime,
+                    size: row.size,
+                    space_id: ctx.scope.spaceId,
+                  };
+                },
+              }
+            : {}),
         })
       : []),
     buildGetMeTool(ctx, surface),

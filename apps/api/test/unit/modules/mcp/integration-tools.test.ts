@@ -22,6 +22,7 @@ import {
 import { MAX_LISTED_SCOPES } from "../../../../src/modules/mcp/integration-tool-catalog.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
+import { ApiError } from "@appstrate/core/api-errors";
 import {
   _setBatchDeadlineForTesting,
   executeApiCall,
@@ -1563,5 +1564,159 @@ describe("call_integration_tool — a batch's deadline", () => {
     expect(codes.slice(4)).toEqual(["not_sent", "not_sent"]);
     expect(calls).toHaveLength(4);
     expect(payload.note).toContain("deadline");
+  });
+});
+
+describe("call_integration_tool — save_as_file", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+
+  /** A call through `executeApiCall` with a stubbed store, as a chat conversation provides one. */
+  async function save(
+    requests: Record<string, unknown>[],
+    respond: Respond,
+    options: { saveFile?: "stub" | "none" | "rejecting" } = {},
+  ) {
+    const stored: { name: string; mime: string; bytes: Uint8Array }[] = [];
+    const calls: Request[] = [];
+    const mode = options.saveFile ?? "stub";
+    const ctx = {
+      origin: "https://test.local",
+      authHeaders: new Headers({ authorization: "Bearer tok" }),
+      dispatch: async (req: Request) => {
+        calls.push(req);
+        return respond(req);
+      },
+      ...(mode === "none"
+        ? {}
+        : {
+            saveFile: async (file: { name: string; mime: string; bytes: Uint8Array }) => {
+              if (mode === "rejecting") {
+                throw new ApiError({
+                  status: 403,
+                  code: "storage_limit_exceeded",
+                  title: "Storage limit exceeded",
+                  detail: "The organization's file storage is full.",
+                });
+              }
+              stored.push(file);
+              return {
+                uri: `appfile://file_${stored.length}`,
+                name: file.name,
+                mime: file.mime,
+                size: file.bytes.byteLength,
+                space_id: "spc_1",
+              };
+            },
+          }),
+    };
+    const outcome = await executeApiCall(
+      ctx,
+      {
+        name: TOOL,
+        integration_package_id: INTEGRATION,
+        connection_ids: [],
+        connection_required: false,
+      },
+      { requests: requests as never },
+      noExtra,
+      undefined,
+    );
+    return { outcome, stored, calls };
+  }
+
+  const pngResponse = () =>
+    relayed(PNG, {
+      headers: {
+        "content-type": "image/png",
+        "content-disposition": `attachment; filename="chart v2.png"`,
+      },
+    });
+
+  it("stores a binary body as a conversation file and returns its pointer, never the body", async () => {
+    const { outcome, stored, calls } = await save([get({ save_as_file: true })], pngResponse);
+    if ("code" in outcome) throw new Error("refused");
+    const [entry] = entries(parseResult(outcome.result));
+    expect(entry).toEqual({
+      index: 0,
+      status: 200,
+      headers: { "content-type": "image/png" },
+      file: {
+        uri: "appfile://file_1",
+        name: "chart v2.png",
+        mime: "image/png",
+        size: PNG.byteLength,
+        space_id: "spc_1",
+      },
+    });
+    expect(stored[0]!.bytes).toEqual(PNG);
+    // The proxy is asked for the file's size, not the text cap.
+    expect(calls[0]!.headers.get("x-max-response-size")).toBe(String(20 * 1024 * 1024));
+  });
+
+  it("names the file from file_name, else the upstream, else the URL, with the type's extension", async () => {
+    const named = await save([get({ save_as_file: true, file_name: "mine.png" })], pngResponse);
+    expect(named.stored[0]!.name).toBe("mine.png");
+
+    const fromUrl = await save(
+      [get({ save_as_file: true, target: "https://api.example.com/files/abc123" })],
+      () => relayed(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    expect(fromUrl.stored[0]!.name).toBe("abc123.png");
+  });
+
+  it("returns the text of an error answer and stores nothing", async () => {
+    const { outcome, stored } = await save([get({ save_as_file: true })], () =>
+      relayed('{"error":"gone"}', { status: 404, headers: { "content-type": "application/json" } }),
+    );
+    if ("code" in outcome) throw new Error("refused");
+    expect(entries(parseResult(outcome.result))[0]).toMatchObject({
+      status: 404,
+      body: { error: "gone" },
+    });
+    expect(stored).toHaveLength(0);
+  });
+
+  it("refuses to store a body the proxy cut: a truncated file opens as nothing", async () => {
+    const { outcome, stored } = await save([get({ save_as_file: true })], () =>
+      relayed(PNG, { headers: { "content-type": "image/png", "X-Truncated": "true" } }),
+    );
+    if ("code" in outcome) throw new Error("refused");
+    expect(entries(parseResult(outcome.result))[0]!.error).toMatchObject({
+      code: "file_too_large",
+    });
+    expect(stored).toHaveLength(0);
+  });
+
+  it("reports the platform's quota refusal as the entry's error", async () => {
+    const { outcome } = await save([get({ save_as_file: true })], pngResponse, {
+      saveFile: "rejecting",
+    });
+    if ("code" in outcome) throw new Error("refused");
+    expect(entries(parseResult(outcome.result))[0]!.error).toMatchObject({
+      code: "storage_limit_exceeded",
+    });
+  });
+
+  it("is refused outside a conversation, before anything is sent", async () => {
+    const { outcome, calls } = await save([get({ save_as_file: true })], pngResponse, {
+      saveFile: "none",
+    });
+    expect(outcome).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["arguments.requests[0].save_as_file"],
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses file_name without save_as_file, and more than five saves in one call", async () => {
+    const alone = await save([get({ file_name: "a.png" })], pngResponse);
+    expect(alone.outcome).toMatchObject({ code: "invalid_argument" });
+
+    const many = await save(
+      Array.from({ length: 6 }, () => get({ save_as_file: true })),
+      pngResponse,
+    );
+    expect(many.outcome).toMatchObject({ code: "invalid_argument" });
+    expect(many.calls).toHaveLength(0);
   });
 });

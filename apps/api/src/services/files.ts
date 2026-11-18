@@ -1389,6 +1389,81 @@ export async function resolveChatAttachment(
 }
 
 /**
+ * Store bytes the platform fetched on a conversation's behalf (a connector
+ * import: `save_as_file` on an integration's `api_call`) as a file of that
+ * conversation: the same container, ACL (the session owner alone reads it),
+ * org quota and per-file cap as a composer upload, so the file then follows
+ * every path an attachment does (`appfile://` in `read_file`, a run's input
+ * file field, the gallery). Purpose `user_upload`: the user brought it in.
+ *
+ * The caller has the whole body in memory already, bounded by `maxBytes`; the
+ * per-file cap (`FILE_MAX_BYTES`) is enforced as for any file, and the org quota
+ * re-checked under the org lock by {@link commitFileRow}. The stored MIME is the
+ * sniffed one when it contradicts the declared one — an upstream's
+ * `application/octet-stream` for a PNG must not hide the image from the model.
+ *
+ * @throws 404 when `chatSessionId` is not a conversation of `actor` in this org.
+ */
+export async function createChatFileFromBytes(
+  scope: SpaceScope,
+  actor: Actor,
+  chatSessionId: string,
+  input: { name: string; mime: string; bytes: Uint8Array },
+): Promise<FileRow> {
+  const env = getEnv();
+  if (actor.type !== "user") throw notFound("Conversation not found");
+  const [session] = await db
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, chatSessionId),
+        eq(chatSessions.orgId, scope.orgId),
+        eq(chatSessions.userId, actor.id),
+      ),
+    )
+    .limit(1);
+  if (!session) throw notFound("Conversation not found");
+
+  assertWithinFileCap(input.bytes.byteLength, env.FILE_MAX_BYTES);
+  await assertWithinFileLimits(scope.orgId, [input.bytes.byteLength]);
+
+  const fileId = prefixedId("file");
+  const storagePath = fileStoragePath(scope, fileId, input.name);
+  const digester = createHashingCounter({ perFileCap: env.FILE_MAX_BYTES });
+  let sniffedMime: string | undefined;
+  try {
+    const detection = await fileTypeStream(
+      new Blob([input.bytes as Uint8Array<ArrayBuffer>]).stream(),
+    );
+    await storageUploadStream(FILES_BUCKET, storagePath, detection.pipeThrough(digester.stream), {
+      exclusive: true,
+    });
+    sniffedMime = detection.fileType?.mime;
+  } catch (err) {
+    await dropFileObject(storagePath, "stream_error");
+    throw err;
+  }
+  const { bytes: byteCount, sha256 } = digester.result();
+  const committed = await commitFileRow({
+    scope,
+    fileId,
+    storagePath,
+    purpose: "user_upload",
+    runId: null,
+    chatSessionId,
+    packageId: null,
+    attribution: actorInsert(actor),
+    name: input.name,
+    mime: resolveAgentOutputMime(input.mime, sniffedMime),
+    byteCount,
+    sha256,
+    expiresAt: retentionExpiry(env.FILE_RETENTION_DAYS),
+  });
+  return committed.row;
+}
+
+/**
  * The image MIME types a model provider accepts as an image block (Anthropic,
  * OpenAI, Gemini all take these four). Anything else a user attaches (HEIC, SVG,
  * TIFF, BMP…) stays a pointer line: the platform has no converter, and sending
