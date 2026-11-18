@@ -36,7 +36,7 @@ import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection } from "./skills.ts";
-import type { UIMessage } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 
 /**
  * The slice of the Drizzle client the writers below use — satisfied by `db` and
@@ -336,6 +336,35 @@ async function upsertMessage(
     })
     .returning({ seq: chatMessages.seq });
   return { messageId, seq: row!.seq };
+}
+
+/**
+ * The file parts of the session's stored messages among `messageIds` that hold any, by message
+ * id: what an earlier turn of a conversation attached, as the server materialized it.
+ */
+export async function storedFileParts(
+  sessionId: string,
+  messageIds: readonly string[],
+): Promise<Map<string, FileUIPart[]>> {
+  if (!messageIds.length) return new Map();
+  const rows = await db
+    .select({ messageId: chatMessages.messageId, content: chatMessages.content })
+    .from(chatMessages)
+    .where(
+      and(
+        eq(chatMessages.sessionId, sessionId),
+        inArray(chatMessages.messageId, [...messageIds]),
+        sql`${chatMessages.content}->'parts' @> '[{"type":"file"}]'::jsonb`,
+      ),
+    );
+  return new Map(
+    rows.map((row) => [
+      row.messageId,
+      row.content.parts.filter(
+        (part): part is FileUIPart => (part as { type?: unknown }).type === "file",
+      ),
+    ]),
+  );
 }
 
 /**

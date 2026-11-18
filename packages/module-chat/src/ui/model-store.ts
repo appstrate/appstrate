@@ -30,6 +30,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
+import { readsPdfNatively } from "../pdf-input.ts";
 
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -40,6 +41,10 @@ let orgDefaultModelId: string | null = null;
 const listeners = new Set<() => void>();
 const generationListeners = new Set<() => void>();
 let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
+/** The input modalities each catalog model declares; an absent or `null` entry = not known. */
+let inputModalities = new Map<string, readonly string[]>();
+/** The API shape each catalog model is served on (`openai-responses`…); absent = not known. */
+let apiShapes = new Map<string, string>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
 let generationCache: ModelGenerationSettings = (() => {
@@ -139,8 +144,16 @@ export function setModelCatalog(
     is_default?: boolean;
     needs_reconnection?: boolean;
     generation?: ModelGenerationCapabilities | null;
+    input?: readonly string[] | null;
+    apiShape?: string | null;
   }>,
 ): void {
+  inputModalities = new Map(
+    models.flatMap((model) => (model.input ? [[model.id, model.input]] : [])),
+  );
+  apiShapes = new Map(
+    models.flatMap((model) => (model.apiShape ? [[model.id, model.apiShape] as const] : [])),
+  );
   generationCapabilities = new Map(
     models.flatMap((model) => (model.generation ? [[model.id, model.generation] as const] : [])),
   );
@@ -160,6 +173,29 @@ export function setModelCatalog(
 function defaultCapabilities(): ModelGenerationCapabilities | undefined {
   const id = defaultModel();
   return id === null ? undefined : generationCapabilities.get(id);
+}
+
+/**
+ * Whether the selected model reads images: `false` when its catalog entry lists
+ * its modalities and `image` is not one of them, `null` when they are not known
+ * (a model alias hides them, and so does a catalog still loading) — the composer
+ * warns on `false` only, never on a guess.
+ */
+export function getSelectedModelAcceptsImages(): boolean | null {
+  const id = getSelectedModel();
+  const input = id === null ? undefined : inputModalities.get(id);
+  return input ? input.includes("image") : null;
+}
+
+/**
+ * Whether the selected model reads a PDF ({@link readsPdfNatively}), `null` when its modalities or
+ * its API shape are not known: the composer warns on `false` only.
+ */
+export function getSelectedModelReadsPdf(): boolean | null {
+  const id = getSelectedModel();
+  const input = id === null ? undefined : inputModalities.get(id);
+  const api = id === null ? undefined : apiShapes.get(id);
+  return input && api ? readsPdfNatively({ api, input }) : null;
 }
 
 export function subscribeGeneration(listener: () => void): () => void {

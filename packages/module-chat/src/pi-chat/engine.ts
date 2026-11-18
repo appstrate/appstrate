@@ -54,6 +54,8 @@ import {
 } from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
+import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
+import { createTurnPdfInput } from "./native-pdf.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -78,6 +80,8 @@ export interface PiChatInput {
   requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
+  /** Read an explicitly attached file under this turn's file permissions and byte cap. */
+  readAttachment?: ReadAttachment;
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
@@ -339,10 +343,14 @@ export function runPiChat(input: PiChatInput): Response {
         // MCP client it goes on to open — `finally` cannot close what was never
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
+        const pdfInput = createTurnPdfInput(model);
+        const modelSeesImages = model.input.includes("image");
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
               ...platformMcp,
+              modelSeesImages,
+              pdfInput,
               writeChunk: write,
               signal: turnAbort.signal,
               // Budget seam: the turn deadline bounds every run_and_wait, and the
@@ -424,6 +432,24 @@ export function runPiChat(input: PiChatInput): Response {
         const system = mcpInstructions ? `${input.system}\n\n${mcpInstructions}` : input.system;
 
         const projectionStartedAt = Date.now();
+        // A model that accepts images gets the pixels of the newest attachments,
+        // read from their stored files; one that does not keeps the
+        // pointer lines it always had.
+        const read = input.readAttachment;
+        const signal = turnAbort.signal;
+        const images =
+          modelSeesImages && read
+            ? await untilAborted(
+                loadAttachmentImages(
+                  input.messages,
+                  (uri, maxBytes) => read(uri, { kind: "image", maxBytes, signal }),
+                  signal,
+                ),
+              )
+            : undefined;
+        const pdfReceipts = await untilAborted(
+          readPromptPdfs(input.messages.at(-1), pdfInput, read, signal),
+        );
         const projectedTurn = buildStructuredPiTurn(
           input.messages,
           {
@@ -433,6 +459,9 @@ export function runPiChat(input: PiChatInput): Response {
           },
           {
             estimateTokens,
+            images,
+            pdfReceipts,
+            modelSeesImages,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
             // Still a floor, not a measurement: tool schemas and this turn's own
@@ -503,6 +532,7 @@ export function runPiChat(input: PiChatInput): Response {
                 ...tools.extensionFactories,
                 ...authExtensions,
                 ...generationExtensions,
+                pdfInput.extension,
               ],
               systemPrompt: system,
             }),
@@ -525,6 +555,8 @@ export function runPiChat(input: PiChatInput): Response {
             settingsManager: SettingsManager.inMemory({
               compaction: derivePiCompactionSettings(piModel).compaction,
               thinkingBudgets,
+              // The chat only passes bounded, supported rasters. Do not decode them in the API.
+              images: { autoResize: false },
               // ONE retry: chat is interactive — a user watches blank "thinking"
               // dots for the whole retry window. One retry absorbs transient
               // blips; anything sturdier (quota 429s, auth failures) fails the
@@ -564,7 +596,12 @@ export function runPiChat(input: PiChatInput): Response {
             // is user prose, never a Pi command: the resource loader already
             // disables skills and prompt templates, and the chat extensions
             // register tools only — pin the invariant rather than depend on it.
-            typedSession.prompt(projectedTurn.prompt, { expandPromptTemplates: false }),
+            typedSession.prompt(projectedTurn.prompt, {
+              expandPromptTemplates: false,
+              ...(projectedTurn.promptImages.length > 0
+                ? { images: projectedTurn.promptImages }
+                : {}),
+            }),
           );
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model

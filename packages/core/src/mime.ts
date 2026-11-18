@@ -18,9 +18,12 @@
  * See `@appstrate/afps-shared/mime` for the full contract, including why
  * `application/octet-stream` is deliberately absent from the text set.
  *
- * {@link isImageMime} is the one primitive defined HERE rather than re-exported
- * — see its own note for why it does not belong in the shared module.
+ * Presentation predicates ({@link isImageMime}, {@link isRasterImageMime}) are
+ * defined here rather than in the shared module: they decide what the platform
+ * shows or sends to a model, not how a body is classified on the wire.
  */
+
+import { normalizeMime } from "@appstrate/afps-shared/mime";
 
 export {
   normalizeMime,
@@ -48,4 +51,16 @@ export {
  */
 export function isImageMime(mime: string | null | undefined): boolean {
   return !!mime?.startsWith("image/");
+}
+
+const RASTER_IMAGE_MIMES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/** Raster formats that the file preview and Pi can display inline without conversion. */
+export function isRasterImageMime(mime: string): boolean {
+  return RASTER_IMAGE_MIMES.has(normalizeMime(mime));
 }

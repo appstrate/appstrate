@@ -39,6 +39,7 @@ const orgModelOptionSchema = z.object({
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
+  input: z.array(z.string()).nullable().optional(),
   billed_to: z.enum(MODEL_PAYERS).nullable().optional(),
   binding: z.enum(MODEL_BINDINGS).optional(),
   credentialId: z.string().nullable().optional(),
@@ -76,6 +77,8 @@ export interface OrgModelOption {
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;
   generation?: ModelGenerationCapabilities | null;
+  /** Input modalities the model declares (`["text", "image"]`); `null`/absent = not known (aliases hide it). */
+  input?: string[] | null;
 }
 
 /** `GET /api/models`, whole: the cache entry the shell's `$api` models queries share. */

@@ -377,3 +377,85 @@ describe("structured Pi session reconstruction", () => {
     );
   });
 });
+
+describe("attachment images in the projected turn", () => {
+  const image = { type: "image" as const, data: "QUJD", mimeType: "image/png" };
+  const thread = (): UIMessage[] => [
+    {
+      id: "u1",
+      role: "user",
+      parts: [
+        { type: "text", text: "Voici un graphique" },
+        { type: "file", url: "appfile://file_old", mediaType: "image/png", filename: "old.png" },
+      ],
+    },
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "Je le vois." }] },
+    {
+      id: "u2",
+      role: "user",
+      parts: [
+        { type: "text", text: "Et celui-ci ?" },
+        { type: "file", url: "appfile://file_new", mediaType: "image/png", filename: "new.png" },
+      ],
+    },
+  ];
+
+  it("puts the prompt message's images on the prompt and the replayed ones on their own turn", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, {
+      ...OPTIONS,
+      modelSeesImages: true,
+      images: new Map([
+        ["u1", new Map([["appfile://file_old", image]])],
+        ["u2", new Map([["appfile://file_new", image]])],
+      ]),
+    });
+    expect(turn.promptImages).toEqual([image]);
+    const first = turn.history[0]!;
+    expect(first.role === "user" && Array.isArray(first.content) && first.content).toContainEqual(
+      image,
+    );
+    // The pointer line stays so the URI can still be chained into a run.
+    expect(turn.prompt).toContain("appfile://file_new");
+  });
+
+  it("tells a model that sees images which pixels were left out", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, {
+      ...OPTIONS,
+      modelSeesImages: true,
+      images: new Map([["u2", new Map([["appfile://file_new", image]])]]),
+    });
+    const first = JSON.stringify(turn.history[0]);
+    expect(first).toContain("pixels are not part of this request");
+    expect(turn.prompt).not.toContain("pixels are not part");
+  });
+
+  it("tells a model without image input it cannot view them, and sends no image", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, OPTIONS);
+    expect(turn.promptImages).toEqual([]);
+    expect(turn.prompt).toContain("you cannot view images with this model");
+    expect(JSON.stringify(turn.history)).not.toContain('"type":"image"');
+  });
+
+  it("leaves the pointer line of a non-image file untouched", () => {
+    const turn = buildStructuredPiTurn(
+      [
+        {
+          id: "u1",
+          role: "user",
+          parts: [
+            { type: "text", text: "Résume" },
+            {
+              type: "file",
+              url: "appfile://file_pdf",
+              mediaType: "application/pdf",
+              filename: "a.pdf",
+            },
+          ],
+        },
+      ],
+      MODEL,
+      OPTIONS,
+    );
+    expect(turn.prompt).toContain("[Attached file: a.pdf — appfile://file_pdf — application/pdf]");
+  });
+});

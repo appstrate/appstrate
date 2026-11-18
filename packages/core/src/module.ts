@@ -21,6 +21,8 @@ import type { ModelPayer } from "./model-payer.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
+  ChatAttachmentContent,
+  ChatAttachmentRead,
   ChatUsageRecord,
   ResolvedChatAttachment,
   ChatModelResolution,
@@ -1561,6 +1563,8 @@ export interface PlatformServices {
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /** Read a model attachment under the container ACL and the file grant. A miss or oversized file returns null. */
+  readChatAttachment(request: ChatAttachmentRead): Promise<ChatAttachmentContent | null>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (`chat_session_id = NULL`)

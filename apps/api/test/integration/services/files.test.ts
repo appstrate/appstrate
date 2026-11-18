@@ -55,6 +55,8 @@ import {
   setOrgFileStorageLimit,
   deleteFile,
   listFilesForActor,
+  readChatAttachment,
+  readStoredFileBytes,
   resolveChatAttachment,
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
@@ -1291,6 +1293,16 @@ describe("files service + routes", () => {
     });
   });
 
+  it("rejects storage objects whose actual size differs from the recorded file", async () => {
+    const run = await seedRunRow(scope, { userId: ctx.user.id });
+    const { row } = await publishStream(scope, run, "note.txt", "hello");
+    expect(await readStoredFileBytes(row)).toEqual(new TextEncoder().encode("hello"));
+    expect(await readStoredFileBytes({ ...row, size: row.size + 1 })).toBeNull();
+    await expect(readStoredFileBytes({ ...row, size: row.size - 1 })).rejects.toThrow(
+      "exceeds its recorded size",
+    );
+  });
+
   it("a chat attachment resolves as wide as the caller reads runs", async () => {
     // The gallery a chat user picks an `appfile://` from is filtered by
     // `runs:read-all`. The attach has to answer that same set, or an admin
@@ -1315,7 +1327,8 @@ describe("files service + routes", () => {
         userId: ctx.user.id,
         chatSessionId,
         uri: `appfile://${fileId}`,
-        spaces: [{ id: ctx.defaultSpaceId, permissions }],
+        // `files:read` is what lets a caller attach a stored file at all; the set under test widens it.
+        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set([...permissions, "files:read"]) }],
         beforeResolve: async () => {},
       });
 
@@ -1328,6 +1341,18 @@ describe("files service + routes", () => {
     // widens the set, it never gates ownership.
     expect((await attach(ownOutput.id, NO_GRANTS)).uri).toBe(`appfile://${ownOutput.id}`);
     expect((await attach(ownOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${ownOutput.id}`);
+
+    // Without `files:read` even the owner's own file is as absent as a missing one.
+    await expect(
+      resolveChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        chatSessionId,
+        uri: `appfile://${ownOutput.id}`,
+        spaces: [{ id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN }],
+        beforeResolve: async () => {},
+      }),
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   it("a conversation resolves the files of its runs across the listed spaces", async () => {
@@ -1409,7 +1434,7 @@ describe("files service + routes", () => {
     // Resolved in the other space, under its set: readable with the grant there, not without.
     const resolved = await attach(`appfile://${output.id}`, [
       here,
-      { id: other.id, permissions: READS_EVERY_RUN },
+      { id: other.id, permissions: new Set(["files:read", ...READS_EVERY_RUN]) },
     ]);
     expect(resolved).toMatchObject({ uri: `appfile://${output.id}`, spaceId: other.id });
     await expect(
@@ -1511,8 +1536,13 @@ describe("files service + routes", () => {
     // Refused by the ACL: a 404, and the space is recorded nowhere.
     await expect(attach(NO_GRANTS)).rejects.toMatchObject({ status: 404 });
     expect(announced).toEqual([]);
+    // Without `files:read`, the same refusal and nothing announced.
+    await expect(attach(READS_EVERY_RUN)).rejects.toMatchObject({ status: 404 });
+    expect(announced).toEqual([]);
     // Readable: announced once, then resolved.
-    expect((await attach(READS_EVERY_RUN)).spaceId).toBe(ctx.defaultSpaceId);
+    expect((await attach(new Set(["files:read", ...READS_EVERY_RUN]))).spaceId).toBe(
+      ctx.defaultSpaceId,
+    );
     expect(announced).toEqual([ctx.defaultSpaceId]);
   });
 
@@ -1521,7 +1551,8 @@ describe("files service + routes", () => {
     const creatorActor: Actor = { type: "user", id: creator.user.id };
     // The reader holds `runs:read-all` through `builder`; the run is the
     // creator's, so without it there would be nothing to degrade.
-    const readerHeaders = authHeaders(await memberContext(ctx, "member", "builder"));
+    const reader = await memberContext(ctx, "member", "builder");
+    const readerHeaders = authHeaders(reader);
 
     const runId = await seedRunRow(scope, { userId: creator.user.id });
     const up = await stageUpload(
@@ -1551,6 +1582,21 @@ describe("files service + routes", () => {
     expect(dto.previewable).toBe(false);
     expect(dto.preview_url).toBeNull();
     expect(dto.capabilities).toMatchObject({ metadata: false, download: false, preview: false });
+
+    // The chat may retain the same opaque reference, with no private filename or bytes.
+    const request = {
+      orgId: ctx.orgId,
+      userId: reader.user.id,
+      uri: `appfile://${upload.id}`,
+      spaces: [
+        { id: ctx.defaultSpaceId, permissions: new Set(["files:read", ...READS_EVERY_RUN]) },
+      ],
+      beforeResolve: async () => {},
+    };
+    expect(
+      await resolveChatAttachment({ ...request, chatSessionId: "unused-existing-reference" }),
+    ).toMatchObject({ name: dto.name, mime: dto.mime });
+    expect(await readChatAttachment({ ...request, kind: "image", maxBytes: 1024 })).toBeNull();
 
     // /content is refused outright.
     const content = await app.request(`/api/files/${upload.id}/content`, {
