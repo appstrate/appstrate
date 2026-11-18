@@ -94,24 +94,27 @@ export function AttachmentChip({
         onClick={activate}
         title={action.label}
         aria-label={action.label}
-        className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted/50`}
+        className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted/50 cursor-pointer`}
       >
         {content}
       </button>
     );
   }
+  // With a trailing control (size, remove), the same look: the whole chip answers to the hover and
+  // a click anywhere on it opens the file, except on `trailing`, which sits above the button's
+  // stretched hit area (`after:absolute after:inset-0`) and keeps its own click.
   return (
-    <div className={ATTACHMENT_CHIP_CLASS}>
+    <div className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted/50 relative`}>
       <button
         type="button"
         onClick={activate}
         title={action.label}
         aria-label={action.label}
-        className="text-foreground inline-flex min-w-0 items-center gap-1.5 text-xs hover:underline"
+        className="text-foreground inline-flex min-w-0 cursor-pointer items-center gap-1.5 text-xs after:absolute after:inset-0 after:content-['']"
       >
         {content}
       </button>
-      {trailing}
+      <span className="relative z-10 inline-flex shrink-0 items-center gap-1.5">{trailing}</span>
     </div>
   );
 }

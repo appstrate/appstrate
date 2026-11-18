@@ -47,7 +47,32 @@ describe("PendingAttachmentChip", () => {
         trailing={<button type="button">remove</button>}
       />,
     );
-    expect(html).toMatch(/aria-label="Aperçu de a"[^]*<\/button><button type="button">remove/);
+    // `trailing` is not inside the button, and sits in a wrapper above its stretched hit area.
+    expect(html).toMatch(
+      /aria-label="Aperçu de a"[^]*<\/button><span class="[^"]*z-10[^"]*"><button type="button">remove/,
+    );
+  });
+
+  it("answers to the hover as a whole chip, with the pointer cursor and no underline", () => {
+    const file = new File(["x"], "a.pdf", { type: "application/pdf" });
+    const withTrailing = renderToStaticMarkup(
+      <PendingAttachmentChip
+        name="a.pdf"
+        file={file}
+        preview={preview}
+        trailing={<button type="button">remove</button>}
+      />,
+    );
+    const alone = renderToStaticMarkup(
+      <AttachmentChip name="a.pdf" mime="application/pdf" action={preview} />,
+    );
+    for (const html of [withTrailing, alone]) {
+      expect(html).toContain("hover:bg-muted/50");
+      expect(html).toContain("cursor-pointer");
+      expect(html).not.toContain("hover:underline");
+    }
+    // A click anywhere on the chip opens the file: the button's hit area covers it.
+    expect(withTrailing).toContain("after:inset-0");
   });
 });
 

@@ -72,7 +72,7 @@ import {
   FileAttachment,
   PendingAttachmentChip,
 } from "./file-attachment.tsx";
-import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
+import { isImageMime } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
   flushDecision,
@@ -291,7 +291,7 @@ function ComposerAttachmentChip() {
         ? t("composer.pdfNotRead")
         : undefined;
   const preview =
-    openFile && file && localPreviewKind(file.type)
+    openFile && file
       ? {
           label: t("file.previewOf", { name: name || t("file.unnamed") }),
           onActivate: () => openFile({ local: file }),
