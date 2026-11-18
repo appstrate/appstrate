@@ -17,6 +17,7 @@ import type { UIMessage } from "ai";
 import type { ChatImageContent } from "@appstrate/core/chat-contract";
 import { loadPiCodingAgentSdk, type Message } from "@appstrate/runner-pi";
 import { logger } from "../logger.ts";
+import { isDecodable } from "./image-dimensions.ts";
 
 type UserContent = Extract<Message, { role: "user" }>["content"];
 /** A Pi image block, as a user turn carries it. */
@@ -46,9 +47,12 @@ export type ImageResizer = (
 
 /**
  * The one resizer every image bound for a provider goes through, an attachment or a tool result:
- * Pi's `resizeImage` (Photon, in a worker) at the limits above.
+ * Pi's `resizeImage` (Photon, in a worker) at the limits above, after a header check that refuses
+ * an image declaring more than 40 megapixels (or a header it cannot read).
  */
 export const resizeWithPi: ImageResizer = async (bytes, mime) => {
+  // Refused before Pi decodes it: the stored size says nothing about the decoded one.
+  if (!isDecodable(bytes)) return null;
   const sdk = await loadPiCodingAgentSdk();
   const resized = await sdk.resizeImage(bytes, mime, {
     maxWidth: ATTACHMENT_IMAGE_MAX_EDGE,
