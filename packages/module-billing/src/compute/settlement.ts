@@ -55,6 +55,30 @@ interface SettlementResult {
   seconds: number;
 }
 
+/**
+ * One increment per (org, month), not per run (a burst of short runs is one write), in a
+ * FIXED order: two replicas settling disjoint batches that touch the same orgs upsert the same
+ * counter rows, and doing so in opposite orders is a deadlock Postgres resolves by aborting
+ * one of them. Sorting makes every batch take the row locks in the same order.
+ */
+export function aggregateByOrgAndMonth(
+  claimed: readonly { orgId: string; periodStart: string; seconds: number }[],
+): { orgId: string; periodStart: string; seconds: number }[] {
+  const delta = new Map<string, { orgId: string; periodStart: string; seconds: number }>();
+  for (const row of claimed) {
+    if (row.seconds <= 0) continue;
+    const key = `${row.orgId}|${row.periodStart}`;
+    const entry = delta.get(key) ?? { orgId: row.orgId, periodStart: row.periodStart, seconds: 0 };
+    entry.seconds += row.seconds;
+    delta.set(key, entry);
+  }
+  return [...delta.values()].sort(
+    (a, b) =>
+      (a.orgId < b.orgId ? -1 : a.orgId > b.orgId ? 1 : 0) ||
+      (a.periodStart < b.periodStart ? -1 : 1),
+  );
+}
+
 /** Settle one batch: claim, count, advance — one transaction. Returns what it added. */
 async function settleBatch(
   tx: BillingTx,
@@ -77,18 +101,8 @@ async function settleBatch(
       periodStart: settledRuns.periodStart,
     });
 
-  // One upsert per (org, month), not per run: a burst of short runs is one write.
-  const delta = new Map<string, { orgId: string; periodStart: string; seconds: number }>();
-  for (const row of claimed) {
-    if (row.seconds <= 0) continue;
-    const key = `${row.orgId}|${row.periodStart}`;
-    const entry = delta.get(key) ?? { orgId: row.orgId, periodStart: row.periodStart, seconds: 0 };
-    entry.seconds += row.seconds;
-    delta.set(key, entry);
-  }
-
   const increments: ComputeIncrement[] = [];
-  for (const { orgId, periodStart, seconds } of delta.values()) {
+  for (const { orgId, periodStart, seconds } of aggregateByOrgAndMonth(claimed)) {
     const [row] = await tx
       .insert(computeUsage)
       .values({ orgId, periodStart, secondsUsed: seconds })
