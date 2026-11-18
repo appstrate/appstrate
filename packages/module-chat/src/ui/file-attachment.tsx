@@ -3,9 +3,9 @@
 /**
  * THE unified renderer for a chat-surfaced file attachment — shared by the
  * sent user-message attachments (`thread.tsx`, input) and the run-card output
- * files (`chat-run-progress-card.tsx`, output). An image renders as a small
- * square thumbnail; anything else renders as the attachment chip. The click
- * action (in-app preview vs. authenticated download) and its label come from
+ * files (`chat-run-progress-card.tsx`, output) — and by the composer's staged
+ * uploads: every chat file is the one attachment chip, an image's thumbnail or
+ * the file type's icon in its media square. The click action (in-app preview vs. authenticated download) and its label come from
  * `fileActivation`, so both surfaces behave identically.
  *
  * Every service this needs — the preview opener, the authenticated download, the
@@ -22,19 +22,29 @@ import { UNNAMED_FILE } from "./run-events.ts";
 import { useCanIn, useChatHost } from "./runtime-context.ts";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
-/** The chip: one 32px height (the toolbar's) whatever it carries — sent file, staged upload. */
+/** The chip: one 32px height (the toolbar's) whatever it carries — sent, produced or staged file. */
 const ATTACHMENT_CHIP_CLASS =
   "bg-background text-foreground inline-flex h-8 max-w-56 items-center gap-1.5 rounded-lg border pr-2 pl-1 text-xs";
 
 /** The chip's leading square: an image's thumbnail or the file type's icon. */
 const CHIP_MEDIA_CLASS = "size-6 shrink-0 rounded-md";
 
-/**
- * Square thumbnail style — the single standard for chat image previews of a
- * message (sent attachments, run-card files): a 64px cover-cropped square. A
- * staged upload shows its image inside the chip instead.
- */
-export const ATTACHMENT_IMAGE_CLASS = "size-16 shrink-0 rounded-lg border object-cover";
+/** The media square holding an image's own pixels, cover-cropped. */
+const CHIP_THUMBNAIL_CLASS = `${CHIP_MEDIA_CLASS} border object-cover`;
+
+/** The file type's icon in the media square — every non-image, and an image without a thumbnail. */
+function MimeMedia({ mime }: { mime?: string | null }) {
+  return (
+    <span className={`${CHIP_MEDIA_CLASS} bg-muted flex items-center justify-center`}>
+      <MimeIcon mime={mime ?? ""} className="text-muted-foreground size-3.5" />
+    </span>
+  );
+}
+
+/** An image's thumbnail in the media square, from a URL the caller holds (staged upload). */
+export function AttachmentThumbnail({ src }: { src: string }) {
+  return <img src={src} alt="" className={CHIP_THUMBNAIL_CLASS} />;
+}
 
 /**
  * THE attachment chip (shadcn AI Elements « inline attachment » anatomy): a
@@ -61,11 +71,7 @@ export function AttachmentChip({
 }) {
   const content = (
     <>
-      {media ?? (
-        <span className={`${CHIP_MEDIA_CLASS} bg-muted flex items-center justify-center`}>
-          <MimeIcon mime={mime ?? ""} className="text-muted-foreground size-3.5" />
-        </span>
-      )}
+      {media ?? <MimeMedia mime={mime} />}
       <span className="text-foreground truncate text-xs font-medium">{name || UNNAMED_FILE}</span>
     </>
   );
@@ -126,7 +132,7 @@ function LocalImageMedia({ file }: { file: File }) {
     },
     [file],
   );
-  return <img ref={attach} alt="" className={`${CHIP_MEDIA_CLASS} border object-cover`} />;
+  return <img ref={attach} alt="" className={CHIP_THUMBNAIL_CLASS} />;
 }
 
 /**
@@ -158,53 +164,25 @@ export function PendingAttachmentChip({
 }
 
 /**
- * Image branch: the host's authenticated thumbnail, falling back to the chip
- * while the fetch is in flight or on failure (src null). Kept as its own
- * component so the injected hook only runs for images (hooks can't be called
- * conditionally).
+ * A stored image's thumbnail in the media square: the host's authenticated
+ * preview, a skeleton of the square while it loads, the type's icon when there
+ * is none. Its own component so the injected hook only runs for images (hooks
+ * can't be called conditionally).
  */
-function FileImageThumbnail({
-  id,
-  name,
-  mime,
-  spaceId,
-  label,
-  onActivate,
-}: {
-  id: string;
-  name: string;
-  mime: string;
-  spaceId?: string;
-  label: string;
-  onActivate: () => void;
-}) {
+function StoredImageMedia({ id, mime, spaceId }: { id: string; mime: string; spaceId?: string }) {
   // Destructured out of the host bag, then called at this component's top level
   // — a stable, unconditional hook call position.
   const { useFileImageSrc } = useChatHost();
   const src = useFileImageSrc(id, spaceId);
-  // In flight: the thumbnail's box, so the message does not reflow when it lands.
-  if (src === undefined) return <Skeleton className="size-16 shrink-0 rounded-lg" />;
-  if (!src) return <AttachmentChip name={name} mime={mime} action={{ label, onActivate }} />;
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onActivate();
-      }}
-      title={label}
-      aria-label={label}
-    >
-      <img src={src} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />
-    </button>
-  );
+  if (src === undefined) return <Skeleton className={CHIP_MEDIA_CLASS} />;
+  if (!src) return <MimeMedia mime={mime} />;
+  return <AttachmentThumbnail src={src} />;
 }
 
 /**
- * The unified file attachment. An image renders as a clickable square
- * thumbnail; anything else renders as the clickable chip, its glyph the file
- * type's icon. Both open the same
- * activation (in-app preview when a host opener is present, else the host's
+ * The unified file attachment: the chip, an image's thumbnail (read in the
+ * file's space) or the type's icon leading. It opens the file's activation
+ * (in-app preview when a host opener is present, else the host's
  * authenticated download).
  */
 export function FileAttachment({
@@ -222,17 +200,16 @@ export function FileAttachment({
     return <AttachmentChip name={file.name} mime={file.mime} title={title} />;
   }
   const { onActivate, label } = fileActivation(file, opener, downloadFile, t);
-  if (file.mime && isImageMime(file.mime)) {
-    return (
-      <FileImageThumbnail
-        id={file.id}
-        name={file.name}
-        mime={file.mime}
-        spaceId={file.spaceId}
-        label={label}
-        onActivate={onActivate}
-      />
-    );
-  }
-  return <AttachmentChip name={file.name} mime={file.mime} action={{ label, onActivate }} />;
+  return (
+    <AttachmentChip
+      name={file.name}
+      mime={file.mime}
+      media={
+        file.mime && isImageMime(file.mime) ? (
+          <StoredImageMedia id={file.id} mime={file.mime} spaceId={file.spaceId} />
+        ) : undefined
+      }
+      action={{ label, onActivate }}
+    />
+  );
 }

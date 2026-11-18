@@ -63,9 +63,9 @@ import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
+  AttachmentThumbnail,
   FileAttachment,
   PendingAttachmentChip,
-  ATTACHMENT_IMAGE_CLASS,
 } from "./file-attachment.tsx";
 import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
@@ -328,12 +328,12 @@ function FileAttachmentPart({ filename, mimeType }: { filename?: string; mimeTyp
 // the attachments channel instead (`MessagePrimitive.Attachments`).
 
 /**
- * One sent attachment on a user message. An `appfile://` (server-persisted, or a
- * reloaded conversation) is interactive: image mime → thumbnail, else a
- * download chip. So is a just-sent optimistic `upload://` once the turn's stream
- * named the file it became. Before that instant, or for an unparseable URI, it
- * shows the local File as a thumbnail when it's an image still held by the
- * runtime, else an inert chip — the content route serves files only.
+ * One sent attachment on a user message, as the composer's chip. An `appfile://`
+ * (server-persisted, or a reloaded conversation) is interactive (preview or
+ * download). So is a just-sent optimistic `upload://` once the turn's stream
+ * named the file it became. Before that instant, or for an unparseable URI, the
+ * chip is inert, its media the staged local copy when it was an image — the
+ * content route serves files only.
  */
 function SentAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
@@ -353,13 +353,19 @@ function SentAttachmentChip() {
     // named yet: the staged-image cache still holds a local preview of the picked
     // file. Not interactive for that instant — there is no file id yet.
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
-    if (localSrc && isImageMime(contentType))
-      return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
-    return <AttachmentChip name={name} mime={contentType} />;
+    return (
+      <AttachmentChip
+        name={name}
+        mime={contentType}
+        media={
+          localSrc && isImageMime(contentType) ? <AttachmentThumbnail src={localSrc} /> : undefined
+        }
+      />
+    );
   }
 
-  // A resolved `appfile://` is interactive: the unified renderer shows an image
-  // thumbnail or a download/preview chip, resolving the opener-vs-download action.
+  // A resolved `appfile://` is interactive: the unified renderer's chip, resolving
+  // the opener-vs-download action.
   return (
     <FileAttachment
       file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
