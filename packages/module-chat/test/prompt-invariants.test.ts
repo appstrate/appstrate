@@ -113,7 +113,8 @@ describe("full persona invariants", () => {
     expect(FULL).toMatch(/call `read_file` first/);
     expect(FULL).toMatch(/answer directly from that content/);
     expect(FULL).toMatch(/do NOT launch a run merely to read or analyse it/);
-    expect(FULL).toMatch(/metadata only or binary\/blob data/);
+    expect(FULL).toContain("Use files already supplied to your model directly");
+    expect(FULL).toContain("metadata or a format the model cannot read");
     expect(FULL).toMatch(/When a run is justified.*`context_files`/s);
   });
 
@@ -450,6 +451,14 @@ describe("the integration tools", () => {
   const withTools = buildSystemPrompt(
     turnCapabilities((p) => PROXY.includes(p), [space(PROXY, true)]),
   );
+
+  it("explains temporary file reads and requires a reproducible source to retain an exact revision", () => {
+    expect(withTools).toContain("read_as_file: true");
+    expect(withTools).toContain("same strong ETag using If-Match");
+    expect(withTools).toContain("ask before saving another version");
+    expect(withTools).toContain("Use a run for Office formats");
+    expect(FULL).not.toContain("read_as_file: true");
+  });
 
   it("are offered only where a turn space holds `mcp:invoke` and a proxy grant and leaves the proxy open", () => {
     const offered = (turn: string[], spaces: ReturnType<typeof space>[]) =>

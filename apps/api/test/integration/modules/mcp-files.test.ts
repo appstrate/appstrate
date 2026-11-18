@@ -373,6 +373,40 @@ describe("mcp resources/read (appfile://)", () => {
     }
   });
 
+  it("requires the file-family grant to read bytes through either MCP entry point", async () => {
+    const docId = await publishDoc(
+      scope,
+      await seedRun(scope),
+      "report.txt",
+      "text/plain",
+      "private-report",
+    );
+    const uri = `appfile://${docId}`;
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["mcp:read", "mcp:invoke"],
+    });
+    const limited = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
+    const viaTool = await rpc(limited, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "read_file", arguments: { uri } },
+    });
+    expect(viaTool.envelope.result?.isError).toBe(true);
+    expect(JSON.stringify(viaTool.envelope)).toContain("not_granted");
+    const direct = await rpc(limited, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "resources/read",
+      params: { uri },
+    });
+    expect(direct.envelope.error?.message).toContain("files:read");
+    expect(JSON.stringify([direct.envelope, viaTool.envelope])).not.toContain("private-report");
+  });
+
   it("exposes the same file through the chat-callable read_file tool", async () => {
     const runId = await seedRun(scope);
     const docId = await publishDoc(scope, runId, "report.txt", "text/plain", "hello tool reader");

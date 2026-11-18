@@ -8,10 +8,10 @@
 
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { RESOURCE_BLOB_MAX_BYTES, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { isTextShapedContentType } from "@appstrate/core/mime";
+import { normalizeMime, isRasterImageMime, isTextShapedContentType } from "@appstrate/core/mime";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
@@ -170,6 +170,13 @@ export const apiCallSchema = z.strictObject({
     .describe(
       "The `session_id` of a previous result, to keep that call's upstream cookies. Omit to " +
         "start a session.",
+    ),
+  read_as_file: z
+    .boolean()
+    .optional()
+    .describe(
+      "Read one complete file from a single GET into this tool call. Supports PDF, images and text. " +
+        "No Appstrate file is created. Omit for ordinary API responses.",
     ),
   max_response_bytes: z
     .number()
@@ -430,6 +437,57 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
   return { results, failed, budgetSpent, deadlineReached };
 }
 
+/** Only a complete successful response can become a file. Never echo an upstream error body. */
+function projectFile(
+  outcome: Extract<Outcome, { bytes: Uint8Array }>,
+  sessionId: string,
+): ToolCallOutcome {
+  const { bytes, status, truncated } = outcome;
+  const mimeType = normalizeMime(outcome.contentType);
+  const etag = outcome.headers.etag;
+  const entry = {
+    index: 0,
+    status,
+    mime_type: mimeType,
+    bytes: bytes.byteLength,
+    // Only a strong entity-tag can reproduce this representation with If-Match (RFC 9110).
+    ...(etag && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(etag) ? { etag } : {}),
+    ...(outcome.credential ? { credential: credentialMember(outcome.credential) } : {}),
+  };
+  const report = (error?: string) =>
+    jsonResult(
+      {
+        session_id: sessionId,
+        results: [{ ...entry, ...(error ? { error: { code: error } } : {}) }],
+      },
+      !!error,
+    );
+  const refuse = (code: string) => ({ result: report(code), shownCount: 1 });
+  if (status < 200 || status >= 300) return refuse("upstream_file_unavailable");
+  if (status === 206 || truncated || bytes.byteLength > RESOURCE_BLOB_MAX_BYTES)
+    return refuse("incomplete_file");
+  if (!bytes.byteLength) return refuse("empty_file");
+  const text = isTextShapedContentType(mimeType);
+  if (!text && mimeType !== "application/pdf" && !isRasterImageMime(mimeType))
+    return refuse("unsupported_file_type");
+
+  // JSON escaping can cost six bytes per text byte; bound the serialized MCP result too.
+  const decoded = text
+    ? jsonTextHead(new TextDecoder().decode(bytes), MAX_RESULT_BYTES)
+    : undefined;
+  if (decoded?.cut) return refuse("incomplete_file");
+  const result = report();
+  result.content.push({
+    type: "resource",
+    resource: {
+      uri: `urn:uuid:${crypto.randomUUID()}`,
+      mimeType,
+      ...(decoded ? { text: decoded.text } : { blob: Buffer.from(bytes).toString("base64") }),
+    },
+  });
+  return { result, shownCount: 1 };
+}
+
 export const API_CALL_DESCRIPTION =
   "Calls the integration's API with a connection's credential injected by the platform, never " +
   `shown to you: one request or a batch of up to ${MAX_REQUESTS}.`;
@@ -458,7 +516,9 @@ export const API_CALL_USAGE =
   "`no_answer_before_deadline` (sent, and may have run: check before repeating a write). A " +
   "`detail` naming `X-Connection-Id` means " +
   "`connection_id`. The result is an error only when no request got a successful answer. Pass " +
-  "its `session_id` to a later call to keep the upstream's cookies.";
+  "its `session_id` to a later call to keep the upstream's cookies. For one file, send one GET " +
+  "with `read_as_file: true`. A complete supported response is embedded once as a resource; " +
+  "the result includes a strong ETag when available for a later conditional GET using If-Match.";
 
 export const API_CALL_INPUT_SCHEMA = z.toJSONSchema(apiCallSchema, { target: "draft-7" });
 
@@ -487,7 +547,16 @@ export async function executeApiCall(
   const { requests } = args;
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
   const sessionId = args.session_id ?? crypto.randomUUID();
-  const maxResponseBytes = args.max_response_bytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  if (args.read_as_file && (requests.length !== 1 || requests[0]?.method !== "GET")) {
+    return {
+      code: "invalid_argument",
+      error: "read_as_file requires exactly one GET.",
+      arguments: ["arguments.requests"],
+    };
+  }
+  const maxResponseBytes =
+    args.max_response_bytes ??
+    (args.read_as_file ? RESOURCE_BLOB_MAX_BYTES : DEFAULT_MAX_RESPONSE_BYTES);
   const shared = { integrationId: tool.integration_package_id, sessionId, maxResponseBytes };
   const connectionIds = tool.connection_ids;
 
@@ -547,6 +616,8 @@ export async function executeApiCall(
       };
     });
   });
+  const first = outcomes[0];
+  if (args.read_as_file && first && "bytes" in first) return projectFile(first, sessionId);
   const { results, failed, budgetSpent, deadlineReached } = projectOutcomes(outcomes);
   const notes = [
     ...(budgetSpent

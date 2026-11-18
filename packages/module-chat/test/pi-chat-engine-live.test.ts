@@ -77,6 +77,8 @@ let mcpInitGate: Promise<void> | null = null;
 interface StubSurface {
   instructions?: string;
   tools: unknown[];
+  /** Drive one actual provider tool call on the Responses wire and answer it via MCP. */
+  call?: { name: string; arguments: Record<string, unknown>; result: unknown };
 }
 const EMPTY_SURFACE: StubSurface = { tools: [] };
 let mcpSurface: StubSurface = EMPTY_SURFACE;
@@ -106,6 +108,7 @@ async function mcpResponse(req: Request): Promise<Response> {
     );
   }
   if (msg.method === "tools/list") return json({ tools: mcpSurface.tools });
+  if (msg.method === "tools/call" && mcpSurface.call) return json(mcpSurface.call.result);
   return json({});
 }
 
@@ -157,11 +160,37 @@ const server = Bun.serve({
     if (path.endsWith("/responses")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      const event = {
-        type: "response.completed",
-        response: { id: "resp_1", status: "completed", output: [] },
+      const call = capture.bodies.length === 1 ? mcpSurface.call : undefined;
+      const item = call && {
+        type: "function_call",
+        id: "fc_connector",
+        call_id: "call_connector",
+        name: call.name,
+        arguments: JSON.stringify(call.arguments),
       };
-      return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+      const events = [
+        ...(item
+          ? [
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { ...item, arguments: "" },
+              },
+              {
+                type: "response.function_call_arguments.delta",
+                item_id: item.id,
+                output_index: 0,
+                delta: item.arguments,
+              },
+              { type: "response.output_item.done", output_index: 0, item },
+            ]
+          : []),
+        {
+          type: "response.completed",
+          response: { id: "resp_1", status: "completed", output: item ? [item] : [] },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
         headers: { "content-type": "text/event-stream" },
       });
     }
@@ -377,6 +406,62 @@ describe("runPiChat against a stub provider", () => {
     expect(JSON.stringify(chunks)).not.toContain(data);
     expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
     expect(usage).toEqual([]);
+  }, 30_000);
+
+  it("sends a temporary connector PDF in the tool output of the next provider request and only its receipt on SSE", async () => {
+    capture.bodies.length = 0;
+    const name = "call_integration_tool";
+    const data = btoa("%PDF-1.7 connector-only file");
+    const args = {
+      tool: "crm__api_call",
+      arguments: {
+        read_as_file: true,
+        requests: [{ method: "GET", target: "https://example.test/contract" }],
+      },
+    };
+    mcpSurface = {
+      tools: [
+        {
+          name,
+          inputSchema: {
+            type: "object",
+            properties: { tool: { type: "string" }, arguments: { type: "object" } },
+          },
+        },
+      ],
+      call: {
+        name,
+        arguments: args,
+        result: {
+          content: [
+            { type: "text", text: '{"results":[{"status":200}]}' },
+            {
+              type: "resource",
+              resource: { uri: "urn:uuid:document", mimeType: "application/pdf", blob: data },
+            },
+          ],
+        },
+      },
+    };
+    const { chunks } = await runTurn(() => "tool-read", undefined, undefined, {
+      model: { ...orgModel(), apiShape: "openai-responses" },
+    });
+    expect(capture.bodies).toHaveLength(2);
+    expect(capture.bodies[0]).not.toContain(data);
+    const second = JSON.parse(capture.bodies[1]!);
+    const output = second.input.find(
+      (item: { type?: string }) => item.type === "function_call_output",
+    );
+    expect(output.call_id).toBe("call_connector");
+    expect(output.output).toContainEqual({
+      type: "input_file",
+      filename: "document.pdf",
+      file_data: `data:application/pdf;base64,${data}`,
+    });
+    expect(chunks.find((chunk) => chunk.type === "tool-input-available")?.input).toEqual(args);
+    const receipt = chunks.find((chunk) => chunk.type === "tool-output-available");
+    expect(JSON.stringify(receipt?.output)).toContain("application/pdf");
+    expect(JSON.stringify(chunks)).not.toContain(data);
   }, 30_000);
 
   it("sends real image pixels to a vision model and only the pointer to a text model", async () => {

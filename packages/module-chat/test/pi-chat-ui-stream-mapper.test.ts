@@ -155,6 +155,26 @@ describe("PiChatUiStreamMapper", () => {
     expect("details" in output).toBe(false);
   });
 
+  it("streams only the receipt for a temporary file, including when Pi reports a tool error", () => {
+    const receipt = { type: "text", text: "File read for this turn." };
+    const end = {
+      type: "tool_execution_end" as const,
+      toolCallId: "file-1",
+      toolName: "call_integration_tool",
+      result: {
+        content: [{ type: "text", text: "private file contents" }],
+        details: {},
+        persistedContent: [receipt],
+      },
+    };
+    expect(run([{ ...end, isError: false }]).chunks).toEqual([
+      { type: "tool-output-available", toolCallId: "file-1", output: { content: [receipt] } },
+    ]);
+    expect(run([{ ...end, isError: true }]).chunks).toEqual([
+      { type: "tool-output-error", toolCallId: "file-1", errorText: receipt.text },
+    ]);
+  });
+
   it("passes a non-object tool output through unchanged", () => {
     const { chunks } = run([
       {

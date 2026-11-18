@@ -32,7 +32,7 @@ import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import { getEnv } from "@appstrate/env";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { eq, like } from "drizzle-orm";
-import { integrationConnections, oauthResource, spaces } from "@appstrate/db/schema";
+import { files, integrationConnections, oauthResource, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -553,6 +553,42 @@ describe("mcp integration tools", () => {
       expect(upstreamCalls[0]!.headers.get("accept")).toBe("application/json");
       // The connection's credential, never the caller's MCP token.
       expect(upstreamAuth()).toEqual(["Bearer tok-mine"]);
+    });
+
+    it("reads a connector PDF without creating a file and checks current access on every GET", async () => {
+      const id = await connect(owner, "mine");
+      const bytes = "%PDF-1.7 transient contract";
+      mockUpstream(() => new Response(bytes, { headers: { "content-type": "application/pdf" } }));
+      const listFiles = () =>
+        db.select({ id: files.id }).from(files).where(eq(files.orgId, owner.orgId));
+      const original = await listFiles();
+      const read = () =>
+        mcp(caller, "tools/call", {
+          name: "call_integration_tool",
+          arguments: {
+            tool: TOOL,
+            arguments: { requests: [get("/contract.pdf")], read_as_file: true },
+          },
+        });
+      const first = await read();
+      expect(first.result?.isError).toBe(false);
+      expect(first.result?.content).toContainEqual({
+        type: "resource",
+        resource: {
+          uri: expect.stringMatching(/^urn:uuid:/),
+          mimeType: "application/pdf",
+          blob: btoa(bytes),
+        },
+      });
+      expect(upstreamAuth()).toEqual(["Bearer tok-mine"]);
+      expect(await listFiles()).toEqual(original);
+
+      await db.delete(integrationConnections).where(eq(integrationConnections.id, id));
+      const second = await read();
+      expect(second.result?.isError).toBe(true);
+      expect(JSON.stringify(second)).not.toContain(btoa(bytes));
+      expect(upstreamCalls).toHaveLength(1);
+      expect(await listFiles()).toEqual(original);
     });
 
     it("reports the refresh verdict of a 401 the platform could not recover as `credential`", async () => {
