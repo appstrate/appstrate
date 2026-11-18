@@ -5,7 +5,7 @@ import { payloadTooLarge } from "@appstrate/core/api-errors";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { createFileRefusal } from "../src/pi-chat/file-refusal.ts";
 
-const POINTER = "[file withheld: the model refused it]";
+const POINTER = "[image withheld: this model rejected it; any other file was delivered]";
 const text = { type: "text", text: "hi" };
 const image = { type: "image", source: { type: "base64", data: "AAAA" } };
 const pdf = { type: "document", source: { type: "base64", data: "BBBB" } };

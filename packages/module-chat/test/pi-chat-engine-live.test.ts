@@ -705,7 +705,9 @@ describe("runPiChat against a stub provider", () => {
     expect(capture.bodies).toHaveLength(2);
     expect(capture.bodies[0]).toContain("data:image/png;base64,");
     expect(capture.bodies[1]).not.toContain("data:image/png;base64,");
-    expect(capture.bodies[1]).toContain("[file withheld: the model refused it]");
+    expect(capture.bodies[1]).toContain(
+      "[image withheld: this model rejected it; any other file was delivered]",
+    );
     // Not the failed attempt's error: the turn went on and answered.
     expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
     expect(
@@ -790,7 +792,9 @@ describe("runPiChat against a stub provider", () => {
     expect(capture.bodies).toHaveLength(3);
     expect(capture.bodies[1]).toContain("data:image/png;base64,");
     expect(capture.bodies[2]).not.toContain("data:image/png;base64,");
-    expect(capture.bodies[2]).toContain("[file withheld: the model refused it]");
+    expect(capture.bodies[2]).toContain(
+      "[image withheld: this model rejected it; any other file was delivered]",
+    );
     expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
     expect(chunks.filter((chunk) => chunk.type === "tool-input-available")).toHaveLength(1);
     expect(finishMetadata(chunks)).toMatchObject({

@@ -25,7 +25,11 @@ const PART_KINDS = new Map<unknown, FileInputKind>([
   ["file", "pdf"],
 ]);
 
-const WITHHELD = "[file withheld: the model refused it]";
+/** Names the kind, so the model does not doubt the files of the other kind it did receive. */
+const WITHHELD: Record<FileInputKind, string> = {
+  image: "[image withheld: this model rejected it; any other file was delivered]",
+  pdf: "[PDF withheld: this model rejected it; any other file was delivered]",
+};
 
 const partKind = (value: object) => PART_KINDS.get((value as { type?: unknown }).type);
 
@@ -58,7 +62,7 @@ function withhold(value: unknown, kinds: ReadonlySet<FileInputKind>, textType: s
   if (kind) {
     if (!kinds.has(kind)) return value;
     const { cache_control } = value as { cache_control?: unknown };
-    return { type: textType, text: WITHHELD, ...(cache_control ? { cache_control } : {}) };
+    return { type: textType, text: WITHHELD[kind], ...(cache_control ? { cache_control } : {}) };
   }
   const item = value as Record<string, unknown>;
   return {
