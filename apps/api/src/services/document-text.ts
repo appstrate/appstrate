@@ -98,7 +98,12 @@ export type DocumentTextResult =
   /** The file is not a supported document, or is over {@link DOCUMENT_SOURCE_MAX_BYTES}. */
   | { status: "unsupported"; reason: "format" | "too_large" }
   /** The file claims a supported format but does not parse (corrupt, encrypted, a bomb). */
-  | { status: "failed"; format: DocumentFormat };
+  | { status: "failed"; format: DocumentFormat }
+  /**
+   * The reader was saturated (its queue full, or no slot within the wait): nothing was parsed, so
+   * this says nothing about the file and is never cached.
+   */
+  | { status: "busy"; format: DocumentFormat };
 
 /** The format of a file by MIME, else by extension; `null` when it is not a supported document. */
 export function documentFormatOf(mime: string, name?: string | null): DocumentFormat | null {
@@ -669,6 +674,11 @@ async function extract(
       : undefined;
     return { status: "text", text: budget.text, format, truncated, ...(note ? { note } : {}) };
   } catch (error) {
+    // Refused before a slot was granted: the load decided, not the file.
+    if (error instanceof GateError && error.reason !== "hold_timeout") {
+      logger.warn("document text extraction deferred", { format, reason: error.reason });
+      return { status: "busy", format };
+    }
     // Never log the content or the error text of a user's file: its format and kind of failure only.
     logger.warn("document text extraction failed", {
       format,
@@ -706,10 +716,16 @@ export async function extractDocumentText(input: {
   // A body that cannot be read (the storage object is momentarily gone) answers `undefined` from
   // the loader, which the cache answers but never stores: a transient miss must not read as
   // "corrupt" to every reader of the same content for the next ten minutes.
-  const extracted = await documentTextCache.get(`${input.sha256}:${format}`, async () => {
-    const bytes = await input.read();
-    return bytes ? extract(bytes, format, DOCUMENT_TEXT_MAX_CHARS) : undefined;
-  });
+  // A saturated reader is answered, never stored, for the same reason: it says nothing about the
+  // bytes. What happened once a slot was granted (a parse failure, a hang, a time cut) is theirs.
+  const extracted = await documentTextCache.get(
+    `${input.sha256}:${format}`,
+    async () => {
+      const bytes = await input.read();
+      return bytes ? extract(bytes, format, DOCUMENT_TEXT_MAX_CHARS) : undefined;
+    },
+    { store: (result) => result.status !== "busy" },
+  );
   return extracted ?? { status: "failed", format };
 }
 

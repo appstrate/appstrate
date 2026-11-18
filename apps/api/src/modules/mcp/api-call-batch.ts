@@ -51,6 +51,10 @@ export type SaveFile = (file: {
   name: string;
   mime: string;
   bytes: Uint8Array;
+  /** The integration whose connection answered the bytes. */
+  integrationId: string;
+  /** The proxy call's `Request-Id`, which its `connection_calls` row carries. */
+  proxyRequestId: string | null;
 }) => Promise<SavedFile>;
 
 /** Where and as whom a request is dispatched. */
@@ -244,7 +248,7 @@ interface PreparedCall {
   headers: Headers;
   body?: Uint8Array<ArrayBuffer>;
   /** Present when the response body is stored as a file instead of returned. */
-  save?: { name: string | undefined; target: string };
+  save?: { name: string | undefined; target: string; integrationId: string };
 }
 
 /**
@@ -264,6 +268,8 @@ type Outcome =
       credential: CredentialStatus | null;
       /** The upstream's `Content-Disposition`, kept to name a saved file. */
       contentDisposition: string | null;
+      /** The proxy call's own `Request-Id`, kept to record where a saved file came from. */
+      requestId: string | null;
       /** The body, stored as a conversation file: `bytes` is then empty. */
       saved?: SavedFile;
       /** A `save_as_file` body that was not stored, and why: the entry names it, no body. */
@@ -378,7 +384,15 @@ function prepareCall(
     method: request.method,
     headers,
     ...(body ? { body } : {}),
-    ...(request.save_as_file ? { save: { name: request.file_name, target: request.target } } : {}),
+    ...(request.save_as_file
+      ? {
+          save: {
+            name: request.file_name,
+            target: request.target,
+            integrationId: shared.integrationId,
+          },
+        }
+      : {}),
   };
 }
 
@@ -421,6 +435,7 @@ async function dispatchCall(
     truncated: response.headers.get("x-truncated") === "true",
     credential: parseCredentialStatus(response.headers.get(CREDENTIAL_STATUS_HEADER)),
     contentDisposition: response.headers.get("content-disposition"),
+    requestId: response.headers.get("request-id"),
   };
 }
 
@@ -509,6 +524,8 @@ async function saveOutcome(
       name: savedFileName(save.name, outcome.contentDisposition, save.target, mime),
       mime,
       bytes: outcome.bytes,
+      integrationId: save.integrationId,
+      proxyRequestId: outcome.requestId,
     });
     return { ...outcome, bytes: new Uint8Array(0), saved };
   } catch (err) {

@@ -27,6 +27,7 @@ import {
   _setBatchDeadlineForTesting,
   executeApiCall,
   savedFileName,
+  type SaveFile,
 } from "../../../../src/modules/mcp/api-call-batch.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
@@ -1577,7 +1578,7 @@ describe("call_integration_tool — save_as_file", () => {
     respond: Respond,
     options: { saveFile?: "stub" | "none" | "rejecting" } = {},
   ) {
-    const stored: { name: string; mime: string; bytes: Uint8Array }[] = [];
+    const stored: Parameters<SaveFile>[0][] = [];
     const calls: Request[] = [];
     const mode = options.saveFile ?? "stub";
     const ctx = {
@@ -1590,7 +1591,7 @@ describe("call_integration_tool — save_as_file", () => {
       ...(mode === "none"
         ? {}
         : {
-            saveFile: async (file: { name: string; mime: string; bytes: Uint8Array }) => {
+            saveFile: async (file: Parameters<SaveFile>[0]) => {
               if (mode === "rejecting") {
                 throw new ApiError({
                   status: 403,
@@ -1630,6 +1631,7 @@ describe("call_integration_tool — save_as_file", () => {
       headers: {
         "content-type": "image/png",
         "content-disposition": `attachment; filename="chart v2.png"`,
+        "request-id": "req_proxy_1",
       },
     });
 
@@ -1650,6 +1652,8 @@ describe("call_integration_tool — save_as_file", () => {
       },
     });
     expect(stored[0]!.bytes).toEqual(PNG);
+    // Where it came from, for the audit: the integration and the proxy call that answered it.
+    expect(stored[0]).toMatchObject({ integrationId: INTEGRATION, proxyRequestId: "req_proxy_1" });
     // The proxy is asked for the file's size, not the text cap.
     expect(calls[0]!.headers.get("x-max-response-size")).toBe(String(20 * 1024 * 1024));
   });

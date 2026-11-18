@@ -795,6 +795,12 @@ async function commitFileRow(params: {
    * first — same rationale as the byte cap.
    */
   runMaxFiles?: number;
+  /**
+   * Where bytes the platform fetched itself came from, recorded on the
+   * `file.created` audit row ({@link createChatFileFromBytes} only): what tells
+   * a connector import from a file a person brought in.
+   */
+  source?: FileImportSource;
 }): Promise<CommittedFileRow> {
   const { scope, fileId, storagePath, byteCount, attribution } = params;
   try {
@@ -895,7 +901,13 @@ async function commitFileRow(params: {
       action: "file.created",
       resourceType: "file",
       resourceId: fileId,
-      after: { name: params.name, size: byteCount, mime: params.mime, purpose: params.purpose },
+      after: {
+        name: params.name,
+        size: byteCount,
+        mime: params.mime,
+        purpose: params.purpose,
+        ...(params.source ? { source: params.source } : {}),
+      },
     });
     // One durable file committed (the sole commit seam — an agent-output
     // dedup replay never reaches here, so it is correctly not counted).
@@ -1369,7 +1381,10 @@ export async function resolveChatAttachment(
   // refuses in this space leaves no file behind).
   let row: Awaited<ReturnType<typeof createFileFromUpload>>;
   if ("fileId" in source) {
-    const resolved = await getFileForActor(scope, actor, source.fileId, space.permissions);
+    // Attaching a stored file reads it: without the grant it is as absent as a missing one.
+    const resolved = mayReadFileContent(space.permissions)
+      ? await getFileForActor(scope, actor, source.fileId, space.permissions)
+      : null;
     if (!resolved) throw notFound(`File '${source.fileId}' not found`);
     await request.beforeResolve(space.id);
     row = resolved.row;
@@ -1386,6 +1401,21 @@ export async function resolveChatAttachment(
     size: row.size,
     spaceId: space.id,
   };
+}
+
+/**
+ * The provenance of a file the platform fetched on a caller's behalf, as its
+ * `file.created` audit row records it. `proxyRequestId` is the `Request-Id` of
+ * the credential-proxy call that answered the bytes: the `connection_calls` row
+ * of that request names the connection used, so "which files were copied
+ * through this connection" is one join. No content, no URL: the target is on
+ * that row already, read on its template.
+ */
+export interface FileImportSource {
+  kind: "integration_import";
+  integrationId: string;
+  /** `null` only when the proxy's answer carried no `Request-Id`, which the pipeline always sets. */
+  proxyRequestId: string | null;
 }
 
 /**
@@ -1408,7 +1438,7 @@ export async function createChatFileFromBytes(
   scope: SpaceScope,
   actor: Actor,
   chatSessionId: string,
-  input: { name: string; mime: string; bytes: Uint8Array },
+  input: { name: string; mime: string; bytes: Uint8Array; source: FileImportSource },
 ): Promise<FileRow> {
   const env = getEnv();
   if (actor.type !== "user") throw notFound("Conversation not found");
@@ -1459,6 +1489,7 @@ export async function createChatFileFromBytes(
     byteCount,
     sha256,
     expiresAt: retentionExpiry(env.FILE_RETENTION_DAYS),
+    source: input.source,
   });
   return committed.row;
 }
@@ -1475,6 +1506,16 @@ export const MODEL_IMAGE_MIMES: ReadonlySet<string> = new Set([
   "image/gif",
   "image/webp",
 ]);
+
+/**
+ * Whether a caller may read stored file content in a space: the grant the REST
+ * content route guards with (`files:read`). The container ACL of
+ * {@link getFileForActor} says whose file it is, not whether this caller reads
+ * files at all, so every door that reads content outside that route asks this too.
+ */
+export function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
+  return permissions.has("files:read");
+}
 
 /**
  * The seam behind `PlatformServices.readChatImage`: the bytes of an attached
@@ -1495,7 +1536,8 @@ export async function readChatImage(request: ChatImageRequest): Promise<ChatImag
     .where(and(eq(files.id, fileId), eq(files.orgId, request.orgId)))
     .limit(1);
   const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
-  if (!space) return null;
+  // Re-asked at every turn: a grant withdrawn since the attach stops the pixels, the pointer stays.
+  if (!space || !mayReadFileContent(space.permissions)) return null;
 
   const resolved = await getFileForActor(
     { orgId: request.orgId, spaceId: space.id },

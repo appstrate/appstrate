@@ -11,7 +11,7 @@ import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { getFileForActor, streamFileContent } from "../../services/files.ts";
+import { getFileForActor, mayReadFileContent, streamFileContent } from "../../services/files.ts";
 import {
   bundleImportAuditRecords,
   handleImportBundle,
@@ -90,6 +90,14 @@ async function readPackageFileBytes(
     throw new ToolRefusal({
       code: "invalid_argument",
       error: `Not a file URI: ${uri}`,
+      arguments: ["file_uri"],
+    });
+  }
+  // Validating or importing an archive reads its bytes: the content route's own grant.
+  if (!mayReadFileContent(ctx.permissions)) {
+    throw new ToolRefusal({
+      code: "not_granted",
+      error: "Your role does not allow reading files (files:read).",
       arguments: ["file_uri"],
     });
   }

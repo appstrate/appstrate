@@ -211,6 +211,24 @@ describe("extractDocumentText (cached by sha256)", () => {
     });
   });
 
+  it("answers a saturated PDF reader as `busy` and does not cache it: the next read gets the text", async () => {
+    const bytes = pdf(["busy"]);
+    const input = (sha256: string) => ({
+      sha256,
+      mime: "application/pdf",
+      name: "a.pdf",
+      size: bytes.byteLength,
+      read: async () => bytes,
+    });
+    // 2 slots + 8 waiters: an eleventh read arriving together is refused before any slot frees.
+    const hashes = Array.from({ length: 11 }, () => `hash-${crypto.randomUUID()}`);
+    const results = await Promise.all(hashes.map((sha) => extractDocumentText(input(sha))));
+    const busy = results.findIndex((result) => result.status === "busy");
+    expect(busy).toBeGreaterThanOrEqual(0);
+    expect(results[busy]).toEqual({ status: "busy", format: "pdf" });
+    expect(await extractDocumentText(input(hashes[busy]!))).toMatchObject({ status: "text" });
+  });
+
   it("does not open a file over the source cap, nor a format it does not read", async () => {
     const read = async () => {
       throw new Error("must not be read");

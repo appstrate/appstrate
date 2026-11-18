@@ -613,6 +613,29 @@ describe("mcp resources/read (appfile://)", () => {
     expect(envelope.error!.message).toContain("not found");
   });
 
+  it("refuses a caller without `files:read`, whose file it is notwithstanding", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "report.txt", "text/plain", "hello mcp reader");
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["mcp:read", "mcp:invoke"],
+    });
+    const { envelope } = await rpc(
+      { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId },
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "resources/read",
+        params: { uri: `appfile://${docId}` },
+      },
+    );
+    // The content route's own grant: the owner's file is not read without it.
+    expect(envelope.error).toMatchObject({ code: -32602 });
+    expect(envelope.result).toBeUndefined();
+  });
+
   it("errors on a malformed file URI", async () => {
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
@@ -834,6 +857,40 @@ describe("mcp file-backed package workflow", () => {
     expect(result.data).toMatchObject({ valid: false, importable: false });
     expect(String(result.data.error)).toContain("main.js");
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  it("refuses to read the archive of a caller without `files:read`", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "invalid.afps",
+      "application/zip",
+      packageArchive(false),
+    );
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["mcp:read", "mcp:invoke"],
+    });
+    const { envelope } = await rpc(
+      { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId },
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "validate_package_file",
+          arguments: { file_uri: `appfile://${docId}` },
+        },
+      },
+    );
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    // Refused before the bytes are read: no validation verdict comes back.
+    expect(result.data).toMatchObject({ code: "not_granted" });
+    expect(result.data.valid).toBeUndefined();
   });
 
   it("reports a skill whose SKILL.md declares no description", async () => {

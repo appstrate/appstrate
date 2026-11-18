@@ -79,6 +79,7 @@ import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
+  mayReadFileContent,
   streamFileContent,
   projectFileMetadata,
   createChatFileFromBytes,
@@ -1702,6 +1703,13 @@ function buildFileResourceReader(ctx: McpToolContext): {
         });
       }
 
+      // The grant the REST content route guards with: the container ACL below says whose file it
+      // is, not whether this caller may read files at all.
+      if (!mayReadFileContent(ctx.permissions)) {
+        throw new ToolRefusal(
+          notGrantedRefusal(getCatalog().operations.get("getFileContent")!, ctx),
+        );
+      }
       const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
       if (!resolved) {
         throw new ToolRefusal({
@@ -1783,7 +1791,9 @@ function buildFileResourceReader(ctx: McpToolContext): {
             ? emptyDocumentNote(extracted.format)
             : extracted.status === "unsupported"
               ? `The document is over the ${formatBytes(DOCUMENT_SOURCE_MAX_BYTES)} limit for text extraction. Fetch it from the content_url.`
-              : "The document could not be read (corrupt, encrypted or malformed).",
+              : extracted.status === "busy"
+                ? "The document reader is busy: no text was extracted. Try read_file again in a moment."
+                : "The document could not be read (corrupt, encrypted or malformed).",
         );
       } else {
         // Any other binary is never inlined as base64: a model cannot read it and it fills the context.
@@ -1814,7 +1824,7 @@ export const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 /**
  * `resources/read` for `appfile://` URIs: a refusal is a JSON-RPC error here, as
  * the resource protocol has no tool-result channel. A file that does not
- * resolve is `-32002`; a malformed URI is `-32602`. No `list()`: files surface
+ * resolve is `-32002`; a malformed URI, or a caller without `files:read`, is `-32602`. No `list()`: files surface
  * only via `resource_link`, so `resources/list` is empty.
  */
 export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
@@ -2015,7 +2025,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
           runs: surface.runs,
           ...(ctx.chatSessionId
             ? {
-                saveFile: async ({ name, mime, bytes }) => {
+                saveFile: async ({ name, mime, bytes, integrationId, proxyRequestId }) => {
                   // Bounded per turn as well as per call: a turn reads third-party content.
                   const refund = chargeTurnImport(
                     ctx.chatTurnId ?? ctx.chatSessionId!,
@@ -2025,7 +2035,12 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
                     ctx.scope,
                     ctx.actor,
                     ctx.chatSessionId!,
-                    { name, mime, bytes },
+                    {
+                      name,
+                      mime,
+                      bytes,
+                      source: { kind: "integration_import", integrationId, proxyRequestId },
+                    },
                   ).catch((error: unknown) => {
                     refund();
                     throw error;

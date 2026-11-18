@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { files, uploads, chatSessions, chatMessages } from "@appstrate/db/schema";
+import { auditEvents, files, uploads, chatSessions, chatMessages } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { _resetCacheForTesting } from "@appstrate/env";
 import type { UIMessage } from "ai";
@@ -286,11 +286,16 @@ describe("chat attachments", () => {
       return resolved.uri;
     }
 
-    const request = (uri: string, over: { userId?: string; maxBytes?: number } = {}) => ({
+    const request = (
+      uri: string,
+      over: { userId?: string; maxBytes?: number; permissions?: string[] } = {},
+    ) => ({
       orgId: ctx.orgId,
       userId: over.userId ?? ctx.user.id,
       uri,
-      spaces: [{ id: ctx.defaultSpaceId, permissions: new Set<string>() }],
+      spaces: [
+        { id: ctx.defaultSpaceId, permissions: new Set(over.permissions ?? ["files:read"]) },
+      ],
       maxBytes: over.maxBytes ?? 4096,
     });
 
@@ -324,6 +329,13 @@ describe("chat attachments", () => {
       expect(await readChatImage({ ...request(uri), spaces: [] })).toBeNull();
     });
 
+    it("is null once `files:read` is withdrawn, re-asked at every read (between two turns)", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      expect(await readChatImage(request(uri))).not.toBeNull();
+      // Same owner, same file, same space: only the grant changed since the attach.
+      expect(await readChatImage(request(uri, { permissions: ["chat:write"] }))).toBeNull();
+    });
+
     it("is null for a malformed or non-appfile URI", async () => {
       expect(await readChatImage(request("upload://upl_x"))).toBeNull();
       expect(await readChatImage(request("https://evil.example.com/a.png"))).toBeNull();
@@ -338,6 +350,11 @@ describe("chat attachments", () => {
       ),
     );
     const actor = () => ({ type: "user" as const, id: ctx.user.id });
+    const SOURCE = {
+      kind: "integration_import" as const,
+      integrationId: "@appstrate/google-drive",
+      proxyRequestId: "req_proxy_1",
+    };
 
     it("anchors the file to the conversation, owner-readable, with the sniffed MIME", async () => {
       const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
@@ -346,6 +363,7 @@ describe("chat attachments", () => {
         // Drive serves `application/octet-stream`: the bytes say it is a PNG.
         mime: "application/octet-stream",
         bytes: PNG,
+        source: SOURCE,
       });
       expect(row).toMatchObject({
         chatSessionId: sessionId,
@@ -359,10 +377,16 @@ describe("chat attachments", () => {
         orgId: ctx.orgId,
         userId: ctx.user.id,
         uri: `appfile://${row.id}`,
-        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set<string>() }],
+        spaces: [{ id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) }],
         maxBytes: 4096,
       });
       expect(image?.mime).toBe("image/png");
+      // The audit tells the import from an upload: the integration and the proxy call it came from.
+      const [created] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(and(eq(auditEvents.action, "file.created"), eq(auditEvents.resourceId, row.id)));
+      expect(created?.after).toMatchObject({ purpose: "user_upload", source: SOURCE });
     });
 
     it("counts against the org quota like an upload", async () => {
@@ -376,6 +400,7 @@ describe("chat attachments", () => {
             name: "big.png",
             mime: "image/png",
             bytes: PNG,
+            source: SOURCE,
           }),
         ).rejects.toMatchObject({ status: 403, code: "storage_limit_exceeded" });
       } finally {
@@ -397,6 +422,7 @@ describe("chat attachments", () => {
           name: "a.png",
           mime: "image/png",
           bytes: PNG,
+          source: SOURCE,
         }),
       ).rejects.toMatchObject({ status: 404 });
       await expect(
@@ -404,6 +430,7 @@ describe("chat attachments", () => {
           name: "a.png",
           mime: "image/png",
           bytes: PNG,
+          source: SOURCE,
         }),
       ).rejects.toMatchObject({ status: 404 });
     });
