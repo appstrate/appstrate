@@ -191,7 +191,6 @@ function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown
 
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
 
-/** Read back a launch, replay or cancellation in the space that authorized it. */
 /** One `file.consumed` per input file, attributed like `run.triggered`, in one insert. */
 function recordFilesConsumed(c: Context<AppEnv>, runId: string, consumed: ConsumedFile[]) {
   return recordAuditsFromContext(
@@ -205,6 +204,7 @@ function recordFilesConsumed(c: Context<AppEnv>, runId: string, consumed: Consum
   );
 }
 
+/** Read back a launch, replay or cancellation in the space that authorized it. */
 function readRunInRequestSpace(
   c: Context<AppEnv>,
   id: string,

@@ -183,7 +183,9 @@ export const files = pgTable(
  * means run B can consume `appfile://file_x` produced by run A. When A's runs
  * are deleted, the delete service-path consults these links — a file still
  * consumed by a live run outside the deleted set is DETACHED (container NULLed,
- * see `files`) instead of cascade-deleted, so B's rerun still resolves it.
+ * see `files`) instead of cascade-deleted, so B's rerun still resolves it. Only
+ * a consumer in the file's own space protects it: a run of another space keeps
+ * no claim (`protectingLink`, `apps/api/src/services/files.ts`).
  *
  * Both FKs cascade: the link dies with the file (`fileId`) or with the
  * consuming run (`consumerRunId`). The row is pure derived state — losing it

@@ -1335,7 +1335,7 @@ export async function resolveChatAttachment(
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
     const attached = await resolveStoredChatFile(request, fileId);
     if (!attached) throw notFound(`File '${fileId}' not found`);
-    await touchIfTurnSpace(request, attached.row);
+    await touchFileSpace(request, attached.row);
     row = { ...attached.row, ...projectFileMetadata(attached.row, attached.capabilities) };
   } else {
     const uploadId = parseUploadUri(request.uri);
@@ -1450,17 +1450,13 @@ async function resolveStoredChatFile(
   });
 }
 
-/** A conversation's own file touches no space; any other touches its space when the turn acts there. */
-async function touchIfTurnSpace(
-  request: Pick<ChatAttachmentRequest, "spaces" | "beforeResolve"> & {
-    chatSessionId: string | null;
-  },
+/** Touch a resolved file's space, one of the turn's; the conversation's own file touches none. */
+async function touchFileSpace(
+  request: Pick<ChatAttachmentRequest, "beforeResolve"> & { chatSessionId: string | null },
   file: Pick<FileRow, "spaceId" | "chatSessionId">,
 ): Promise<void> {
   if (request.chatSessionId !== null && file.chatSessionId === request.chatSessionId) return;
-  if (request.spaces.some((space) => space.id === file.spaceId)) {
-    await request.beforeResolve(file.spaceId);
-  }
+  await request.beforeResolve(file.spaceId);
 }
 
 export async function readChatAttachment(
@@ -1473,7 +1469,7 @@ export async function readChatAttachment(
   if (!resolved?.capabilities.download) return null;
   const file = resolved.row;
   if (previewKind(file.mime) !== request.kind || file.size > request.maxBytes) return null;
-  await touchIfTurnSpace(request, file);
+  await touchFileSpace(request, file);
   const bytes = await readStoredFileBytes(file, request.signal);
   return bytes ? { bytes, mime: normalizeMime(file.mime) } : null;
 }
@@ -1754,8 +1750,8 @@ const protectingLink = and(eq(runs.id, fileLinks.consumerRunId), eq(runs.spaceId
 
 /**
  * Container-teardown for a deleted run set, chat-session set, or end-user: decide,
- * per contained file, whether to DETACH it (a live consumer outside the
- * deleted set still references it — the "durable & chainable" promise) or DELETE
+ * per contained file, whether to DETACH it (a live consumer of the file's own space,
+ * outside the deleted set, still references it — `protectingLink`) or DELETE
  * it (nothing else needs it). Replaces the blind FK cascade for these
  * user-driven delete paths so a consumed doc survives its producer's deletion,
  * and an unconsumed one frees its bytes + storage object.
@@ -1763,9 +1759,9 @@ const protectingLink = and(eq(runs.id, fileLinks.consumerRunId), eq(runs.spaceId
  *  - PROTECTED (run variant): a `file_links` row whose `consumer_run_id` is
  *    NOT in the deleted set — a live run still consumes it → detach (`run_id =
  *    NULL`); bytes, counter, and id untouched.
- *  - PROTECTED (chat variant): ANY link at all — the consumer is always a run,
+ *  - PROTECTED (chat variant): any protecting link — the consumer is always a run,
  *    never the chat session itself → detach (`chat_session_id = NULL`).
- *  - PROTECTED (end-user variant): ANY link at all — runs SURVIVE an end-user
+ *  - PROTECTED (end-user variant): any protecting link — runs SURVIVE an end-user
  *    deletion (`runs.end_user_id` is SET NULL), so every link is by definition
  *    a live consumer → detach (`end_user_id = NULL`, dropping only the
  *    attribution the deleted principal carried).

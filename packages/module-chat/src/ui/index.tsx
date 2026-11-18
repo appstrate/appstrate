@@ -630,16 +630,22 @@ function ConversationInner({
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
-  const { t, personalSpaceId } = useChatHost();
+  const { t, personalSpaceId, previewing } = useChatHost();
   const scope = useConversationScope();
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
   const getPersonalSpaceId = useLatest(personalSpaceId);
+  const getPreviewing = useLatest(previewing);
   const attachments = useMemo(
     () =>
-      createChatAttachmentAdapter({ upload: uploadFile, t, personalSpaceId: getPersonalSpaceId }),
-    [uploadFile, t, getPersonalSpaceId],
+      createChatAttachmentAdapter({
+        upload: uploadFile,
+        t,
+        personalSpaceId: getPersonalSpaceId,
+        previewing: getPreviewing,
+      }),
+    [uploadFile, t, getPersonalSpaceId, getPreviewing],
   );
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.

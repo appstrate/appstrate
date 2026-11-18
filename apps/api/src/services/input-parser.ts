@@ -625,8 +625,8 @@ export async function parseRequestInput(
 
     // Every resolved `appfile://` input ref is a consumption link (D1): the run
     // is brand-new, so it is never any of these docs' own container. Persisted as
-    // `file_links` atomically with `createRun`, protecting the doc from its
-    // producer's deletion. The ACL check below still gates the run itself.
+    // `file_links` atomically with `createRun`; a link of the file's own space
+    // protects it from deletion. The ACL check below still gates the run itself.
     consumedFileIds = fileRefs.map(({ id }) => id);
 
     // Decode inline data: URIs up front — the per-file cap is enforced inside

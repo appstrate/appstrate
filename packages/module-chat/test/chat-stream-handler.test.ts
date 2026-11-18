@@ -976,6 +976,10 @@ describe("handleChatStream", () => {
         signal,
       }),
     ).toBeNull();
+    // Nor does it exempt the conversation's file from its space's checks.
+    expect(await ephemeralCalls[0]!.platformMcp!.organization.spaceOfUri(earlier.uri)).toBe(
+      personal.id,
+    );
 
     // `read_resource` neither refuses nor touches a space for a file the conversation holds; a
     // file of a space outside the turn's still names it, and is refused there.

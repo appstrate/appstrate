@@ -465,7 +465,7 @@ export async function handleChatStream(
       },
       spaceOfUri: async (uri) => {
         const fileId = parseFileUri(uri);
-        return fileId ? fileSpaceId(orgId, fileId, sessionId) : parseSkillUri(uri)?.spaceId;
+        return fileId ? fileSpaceId(orgId, fileId, meteringSessionId) : parseSkillUri(uri)?.spaceId;
       },
     };
     return {

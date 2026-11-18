@@ -44,7 +44,7 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
-import { FILE_NAME_META_KEY } from "@appstrate/core/file-uri";
+import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
@@ -426,6 +426,39 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/** Every `appfile://` URI in a call's arguments, at any depth. */
+function fileUrisIn(value: unknown, found: string[] = []): string[] {
+  if (isFileUri(value)) found.push(value);
+  else if (Array.isArray(value)) for (const item of value) fileUrisIn(item, found);
+  else if (value && typeof value === "object") {
+    for (const item of Object.values(value)) fileUrisIn(item, found);
+  }
+  return found;
+}
+
+/**
+ * Admit a call: the spaces it names and those of the resources it names (a conversation's own
+ * file names none) must all be the turn's, and are recorded before it is dispatched. Returns
+ * the refusal of the first that is not, having recorded nothing.
+ */
+async function admitCall(
+  organization: TurnSpaces,
+  named: readonly string[],
+  uris: readonly string[],
+): Promise<ReturnType<typeof spaceIdRefusal>> {
+  const spaces = new Set(named);
+  for (const uri of uris) {
+    const space = await organization.spaceOfUri(uri);
+    if (space) spaces.add(space);
+  }
+  for (const space of spaces) {
+    const refusal = spaceIdRefusal(organization.spaces, space);
+    if (refusal) return refusal;
+  }
+  for (const space of spaces) await organization.touch(space);
+  return undefined;
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -445,18 +478,17 @@ function makeForwardExtension(
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
-        // The call names its space: refused like `run_and_wait`'s when it is outside the turn's
-        // spaces, else recorded before it is made.
         const spaceId = dispatchSpace(args);
-        if (spaceId !== undefined) {
-          const refusal = spaceIdRefusal(organization.spaces, spaceId);
-          if (refusal) {
-            return withTurnBudgetNote(
-              toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
-              turnBudget,
-            );
-          }
-          await organization.touch(spaceId);
+        const refusal = await admitCall(
+          organization,
+          spaceId === undefined ? [] : [spaceId],
+          fileUrisIn(args),
+        );
+        if (refusal) {
+          return withTurnBudgetNote(
+            toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
+            turnBudget,
+          );
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
@@ -542,22 +574,12 @@ function makeReadResourceExtension(
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
-        // A resource of a space the conversation reads from touches it; one of a space outside the
-        // turn's is refused like a call naming it (the forward tool's structured refusal), unread
-        // and unrecorded.
-        const resourceSpace = await organization.spaceOfUri(uri);
-        if (resourceSpace) {
-          const refusal = spaceIdRefusal(organization.spaces, resourceSpace);
-          if (refusal) {
-            return withTurnBudgetNote(
-              toPiToolResult(
-                { ...refusal },
-                offerScopeOf(READ_RESOURCE_TOOL, { arguments: params }),
-              ),
-              turnBudget,
-            );
-          }
-          await organization.touch(resourceSpace);
+        const refusal = await admitCall(organization, [], [uri]);
+        if (refusal) {
+          return withTurnBudgetNote(
+            toPiToolResult({ ...refusal }, offerScopeOf(READ_RESOURCE_TOOL, { arguments: params })),
+            turnBudget,
+          );
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
@@ -688,9 +710,9 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
 }
 
 /**
- * The space a `run_and_wait` names, with the other arguments, after
- * recording it on the session; or the refusal the server gives any space-acting tool
- * (`spaceIdRefusal`): the space is never defaulted.
+ * The space a `run_and_wait` names, with the other arguments, after recording it and the
+ * spaces of its input files on the session; or the refusal the server gives any space-acting
+ * tool (`spaceIdRefusal`): the space is never defaulted.
  */
 async function namedSpace(
   params: unknown,
@@ -699,11 +721,11 @@ async function namedSpace(
   { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
 > {
   const { space_id: named, ...args } = (params as Record<string, unknown> | null) ?? {};
-  const refusal = spaceIdRefusal(organization.spaces, named);
+  const refusal =
+    spaceIdRefusal(organization.spaces, named) ??
+    (await admitCall(organization, [named as string], fileUrisIn(args)));
   if (refusal) return { refusal: { ...refusal } };
-  const spaceId = named as string;
-  await organization.touch(spaceId);
-  return { spaceId, args };
+  return { spaceId: named as string, args };
 }
 
 /**

@@ -76,6 +76,10 @@ test("a drop in « Tous les espaces » stages the file in the personal space", a
 
     const page = await context.newPage();
     await page.goto("/chat");
+    await page.getByTitle("Modèle et génération").click();
+    await page.getByRole("option", { name: new RegExp(modelId) }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTitle("Modèle et génération")).toHaveText(modelId);
     const message = page.getByPlaceholder("Message Appstrate…");
     await expect(message).toBeVisible();
     // The attach button is usable at once: no space to choose.

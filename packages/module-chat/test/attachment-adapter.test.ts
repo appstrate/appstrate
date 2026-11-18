@@ -21,9 +21,13 @@ import type { UploadFile } from "../src/ui/runtime-context.ts";
 
 const NOTE = () => new File(["hello"], "note.txt", { type: "text/plain" });
 
-function adapterOver(upload: UploadFile, personalSpaceId: () => string | null = () => "spc_me") {
+function adapterOver(
+  upload: UploadFile,
+  personalSpaceId: () => string | null = () => "spc_me",
+  previewing: () => boolean = () => false,
+) {
   // The translator echoes the KEY the adapter picked.
-  return createChatAttachmentAdapter({ upload, t: (key) => key, personalSpaceId });
+  return createChatAttachmentAdapter({ upload, t: (key) => key, personalSpaceId, previewing });
 }
 
 /** An uploader recording the space of each upload. */
@@ -73,6 +77,17 @@ describe("chat attachment adapter — the space of an upload", () => {
     space = null;
     await expect(adapter.send(pending)).rejects.toThrow("composer.attachUnavailable");
     expect(uploads).toEqual([]);
+  });
+});
+
+describe("chat attachment adapter — no personal space", () => {
+  it("says a role preview has none for good, which is what a dropped file is told", async () => {
+    const adapter = adapterOver(
+      recordingUpload().upload,
+      () => null,
+      () => true,
+    );
+    await expect(adapter.add({ file: NOTE() })).rejects.toThrow("composer.attachPreview");
   });
 });
 

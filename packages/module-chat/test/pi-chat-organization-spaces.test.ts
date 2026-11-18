@@ -85,6 +85,13 @@ function transcript() {
               },
             },
             {
+              name: "read_file",
+              inputSchema: {
+                type: "object",
+                properties: { uri: { type: "string" }, space_id: spaceId },
+              },
+            },
+            {
               name: "invoke_operation",
               inputSchema: {
                 type: "object",
@@ -128,7 +135,11 @@ function organizationOf(events: string[]): TurnSpaces {
     touch: async (spaceId) => {
       events.push(`touch ${spaceId}`);
     },
-    spaceOfUri: async (uri) => uri.match(/^skill:\/\/(spc_[a-z]+)\//)?.[1],
+    // A file id names its space here (`file_beta…` → `spc_beta`); `file_own…` is a file the
+    // conversation holds, which names none.
+    spaceOfUri: async (uri) =>
+      uri.match(/^skill:\/\/(spc_[a-z]+)\//)?.[1] ??
+      uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1]?.replace(/^/, "spc_"),
   };
 }
 
@@ -277,6 +288,58 @@ describe("the conversation's forwarded tools and resources", () => {
         accepted: SPACES.map((space) => space.id),
       });
       expect(transport.events).toEqual([]);
+    } finally {
+      await built.close();
+    }
+  });
+});
+
+describe("the files a call names", () => {
+  it("records the space of each file before dispatching, wherever it sits in the arguments", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      // An unlimited conversation over Alpha and Beta reads a Beta file from Alpha.
+      await tool("read_file").execute("c1", {
+        uri: "appfile://file_beta0001",
+        space_id: "spc_alpha",
+      });
+      expect(transport.events).toEqual(["touch spc_alpha", "touch spc_beta", "tools/call"]);
+
+      // A run in Alpha with a Beta input, nested in its arguments.
+      transport.events.length = 0;
+      await tool("run_and_wait").execute("c2", {
+        kind: "agent",
+        scope: "@acme",
+        name: "demo",
+        space_id: "spc_alpha",
+        input: { own: "appfile://file_own00001", docs: [{ ref: "appfile://file_beta0002" }] },
+      });
+      expect(transport.events.slice(0, 3)).toEqual(["touch spc_alpha", "touch spc_beta", "launch"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("refuses a file of a space outside the turn's, recording nothing; the conversation's own file names none", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      for (const [name, args] of [
+        ["read_file", { uri: "appfile://file_gamma001", space_id: "spc_alpha" }],
+        ["read_resource", { uri: "appfile://file_gamma001" }],
+        [
+          "run_and_wait",
+          { kind: "inline", space_id: "spc_alpha", context_files: ["appfile://file_gamma001"] },
+        ],
+      ] as const) {
+        const refused = JSON.parse(text(await tool(name).execute("c1", args)));
+        expect(refused).toMatchObject({ code: "unknown_space" });
+      }
+      expect(transport.events).toEqual([]);
+
+      await tool("read_file").execute("c2", { uri: "appfile://file_own00001" });
+      expect(transport.events).toEqual(["tools/call"]);
     } finally {
       await built.close();
     }

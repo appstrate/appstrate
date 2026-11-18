@@ -599,10 +599,10 @@ interface CreateRunParams {
   actor: Actor | null;
   input: Record<string, unknown> | null;
   /**
-   * Existing durable files referenced by the run input. These rows are
-   * locked, revalidated in the org (each lives in its own space), and linked to the new run inside the
-   * same transaction as the run INSERT. This closes the resolve/create race:
-   * either every input file is protected by a link, or no run is created.
+   * Existing durable files referenced by the run input, locked, revalidated in
+   * the org (each in its own space) and linked to the new run in the run
+   * INSERT's transaction: either every input file is linked, or no run is
+   * created. A link protects a file of the run's own space only.
    */
   consumedFileIds?: string[];
   scheduleId?: string;

@@ -97,7 +97,7 @@ An `appfile://` is **durable and chainable**: an `agent_output` from run A can b
 - **Protected → detach.** A file a live consumer outside the deleted set still needs (run variant: a `file_links` row whose `consumer_run_id` is not in the deleted run set; chat variant: _any_ link at all — a chat session is never itself a consumer; in both, a consumer of the file's own space) is **detached**: its container is NULLed, but id, bytes, counter, and storage object are untouched. A rerun of the surviving consumer still resolves the same `appfile://` URI.
 - **Unprotected → delete.** Nothing else references it: the row is deleted, the org byte counter decremented, and a durable storage-deletion job enqueued in one transaction.
 
-Explicit `DELETE /api/files/:id` uses the same row lock and refuses a linked file with `409 file_in_use`. Retention GC likewise skips linked expired files; once their consumer links disappear, a later sweep can reclaim them.
+Explicit `DELETE /api/files/:id` uses the same row lock and refuses a file linked by a consumer of its own space with `409 file_in_use`. Retention GC likewise skips expired files so linked; once their consumer links disappear, a later sweep can reclaim them.
 
 Because the delete branch decrements the counter and durably queues the object purge, these two paths produce **no orphan objects and no counter drift**. The teardown runs in its own transaction, separate from the container delete: a crash between the two is idempotent (a re-attempt finds the files already handled and finishes the runs/session delete).
 

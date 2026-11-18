@@ -163,7 +163,7 @@ export async function createSession(input: {
 export async function fileSpaceId(
   orgId: string,
   fileId: string,
-  chatSessionId: string | undefined,
+  chatSessionId: string | null,
 ): Promise<string | undefined> {
   const [row] = await db
     .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })

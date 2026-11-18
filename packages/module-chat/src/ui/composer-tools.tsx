@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
@@ -287,7 +288,7 @@ function AttachButton() {
   if (personalSpaceId !== null) {
     return <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>;
   }
-  const reason = t(previewing ? "composer.attachPreview" : "composer.attachUnavailable");
+  const reason = t(attachUnavailableKey(previewing));
   return (
     <Tooltip>
       <TooltipTrigger asChild>

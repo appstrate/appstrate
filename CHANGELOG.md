@@ -165,8 +165,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   there, including the launcher's personal space; a credential bound to one space reaches no
   other. Each consumed file is recorded as `file.consumed`. Only a consumer run of the file's own
   space keeps it from deletion; a rerun of a run whose input was deleted answers `404`. The MCP
-  `read_file`, `resources/read` and package-file tools follow the same rule, and a space-pinned
-  MCP endpoint reads files of its space alone.
+  `read_file`, `resources/read` and package-file tools follow the same rule (a caller without
+  `files:read` there gets `not_found`, no longer `not_granted`). The space-pinned MCP endpoint
+  (`/api/mcp/o/{org}/s/{space}`) now confines every direct tool of the request to its space, not
+  only its dispatched operations: file reads, package authorisation and placement included, so a
+  package homed in another space is out of its reach there.
 
 - **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
   the chat goes to « Mon espace » from every screen, private to you, and adds no space to the
