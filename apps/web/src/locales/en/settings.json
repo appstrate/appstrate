@@ -637,7 +637,7 @@
   "billing.creditsCount": "{{used}} / {{quota}} credits",
   "billing.compute": "Compute minutes",
   "billing.computeCount": "{{used}} / {{included}} minutes",
-  "billing.computeReset": "Resets on {{date}}",
+  "billing.computeReset": "Resets on {{date}} (00:00 UTC)",
   "billing.computeConcurrency": "Up to {{count}} concurrent runs",
   "billing.computeWarningTitle": "{{percent}}% of your compute minutes are used",
   "billing.computeWarningDescription": "Once the {{included}} minutes run out, no run can start until {{date}}. Runs already started finish.",

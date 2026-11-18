@@ -638,7 +638,7 @@
   "billing.creditsCount": "{{used}} / {{quota}} crédits",
   "billing.compute": "Minutes de calcul",
   "billing.computeCount": "{{used}} / {{included}} minutes",
-  "billing.computeReset": "Remise à zéro le {{date}}",
+  "billing.computeReset": "Remise à zéro le {{date}} (00:00 UTC)",
   "billing.computeConcurrency": "{{count}} exécutions simultanées au plus",
   "billing.computeWarningTitle": "{{percent}} % de vos minutes de calcul sont utilisées",
   "billing.computeWarningDescription": "Une fois les {{included}} minutes épuisées, plus aucune exécution ne pourra démarrer avant le {{date}}. Les exécutions en cours vont à leur terme.",
