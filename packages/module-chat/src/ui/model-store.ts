@@ -45,6 +45,8 @@ let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
 let inputModalities = new Map<string, readonly string[]>();
 /** The API shape each catalog model is served on (`openai-responses`…); absent = not known. */
 let apiShapes = new Map<string, string>();
+/** The name each catalog model is shown under; an absent entry = not known. */
+let modelLabels = new Map<string, string>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
 let generationCache: ModelGenerationSettings = (() => {
@@ -146,8 +148,16 @@ export function setModelCatalog(
     generation?: ModelGenerationCapabilities | null;
     input?: readonly string[] | null;
     apiShape?: string | null;
+    label?: string | null;
+    modelId?: string | null;
   }>,
 ): void {
+  modelLabels = new Map(
+    models.flatMap((model) => {
+      const label = model.label ?? model.modelId;
+      return label ? [[model.id, label] as const] : [];
+    }),
+  );
   inputModalities = new Map(
     models.flatMap((model) => (model.input ? [[model.id, model.input]] : [])),
   );
@@ -173,6 +183,12 @@ export function setModelCatalog(
 function defaultCapabilities(): ModelGenerationCapabilities | undefined {
   const id = defaultModel();
   return id === null ? undefined : generationCapabilities.get(id);
+}
+
+/** The name of the selected model, as the picker shows it; `null` while the catalog is unknown. */
+export function getSelectedModelLabel(): string | null {
+  const id = getSelectedModel();
+  return id === null ? null : (modelLabels.get(id) ?? null);
 }
 
 /**
