@@ -22,7 +22,7 @@ import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 const ORGANIZATION: TurnSpaces = {
   spaces: [{ id: "spc_1", name: "One", role: "admin" }],
   touch: async () => {},
-  spaceOfUri: async () => undefined,
+  fileSpaces: async () => new Map(),
 };
 
 const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_metering";

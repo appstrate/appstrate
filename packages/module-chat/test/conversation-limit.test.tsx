@@ -30,6 +30,7 @@ import {
   ChatHostProvider,
   ChatTransportProvider,
   type SpaceChoiceMenu,
+  type AttachUnavailable,
 } from "../src/ui/runtime-context.ts";
 import {
   sessionQueryKey,
@@ -485,8 +486,15 @@ describe("the composer's limit entry", () => {
 
 describe("the composer's attach button", () => {
   /** In « Tous les espaces » with several acting spaces: the destination is never asked. */
-  function render(personalSpaceId: string | null, previewing = false) {
-    const host = testHost({ actingSpaceIds: ["spc_a", "spc_b"], personalSpaceId, previewing });
+  function render(
+    personalSpaceId: string | null,
+    attachUnavailable: AttachUnavailable = "loading",
+  ) {
+    const host = testHost({
+      actingSpaceIds: ["spc_a", "spc_b"],
+      personalSpaceId,
+      attachUnavailable,
+    });
     const transport = transportOf(() => ({}), null);
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
@@ -521,7 +529,7 @@ describe("the composer's attach button", () => {
   });
 
   it("says a role preview has no personal space, rather than loading", () => {
-    const out = render(null, true);
+    const out = render(null, "preview");
     expect(out).toContain("composer.attachPreview");
     expect(out).not.toContain("composer.attachUnavailable");
   });

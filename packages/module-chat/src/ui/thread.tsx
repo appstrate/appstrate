@@ -111,6 +111,7 @@ export function Thread({
   };
   const onDrop = (event: React.DragEvent) => {
     cancelFileDrag(event);
+    // One file is enough to get the refusal that says why; the rest would only repeat it.
     const file = event.dataTransfer.files[0];
     if (file && canWrite && personalSpaceId === null) {
       aui

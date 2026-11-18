@@ -126,20 +126,27 @@ function transcript() {
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
-  return { fetch: fetchImpl, events, launches, polls, toolCalls };
+  const lookups: string[][] = [];
+  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups };
 }
 
-function organizationOf(events: string[]): TurnSpaces {
+function organizationOf({ events, lookups }: ReturnType<typeof transcript>): TurnSpaces {
   return {
     spaces: SPACES,
     touch: async (spaceId) => {
       events.push(`touch ${spaceId}`);
     },
     // A file id names its space here (`file_beta…` → `spc_beta`); `file_own…` is a file the
-    // conversation holds, which names none.
-    spaceOfUri: async (uri) =>
-      uri.match(/^skill:\/\/(spc_[a-z]+)\//)?.[1] ??
-      uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1]?.replace(/^/, "spc_"),
+    // conversation holds, which names none. Each lookup is kept: one per call.
+    fileSpaces: async (uris) => {
+      lookups.push([...uris]);
+      return new Map(
+        uris.flatMap((uri) => {
+          const space = uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1];
+          return space ? [[uri, `spc_${space}`] as const] : [];
+        }),
+      );
+    },
   };
 }
 
@@ -147,7 +154,7 @@ async function tools(transport: ReturnType<typeof transcript>) {
   const built = await buildPlatformMcpTools({
     url: platformMcpUrl(ORIGIN, "org_1"),
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-    organization: organizationOf(transport.events),
+    organization: organizationOf(transport),
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
@@ -295,7 +302,7 @@ describe("the conversation's forwarded tools and resources", () => {
 });
 
 describe("the files a call names", () => {
-  it("records the space of each file before dispatching, wherever it sits in the arguments", async () => {
+  it("records the space of each file a cross-space reader names, after one lookup", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
@@ -303,43 +310,71 @@ describe("the files a call names", () => {
       await tool("read_file").execute("c1", {
         uri: "appfile://file_beta0001",
         space_id: "spc_alpha",
+        again: ["appfile://file_beta0001", { deep: "appfile://file_own00001" }],
       });
       expect(transport.events).toEqual(["touch spc_alpha", "touch spc_beta", "tools/call"]);
+      expect(transport.lookups).toEqual([["appfile://file_beta0001", "appfile://file_own00001"]]);
+    } finally {
+      await built.close();
+    }
+  });
 
-      // A run in Alpha with a Beta input, nested in its arguments.
+  it("refuses, as missing and recording nothing, a file a dispatched call cannot reach in its space", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const calls = [
+        // Pinned to Alpha: a Beta input would only 404 there.
+        [
+          "run_and_wait",
+          {
+            kind: "agent",
+            name: "demo",
+            space_id: "spc_alpha",
+            input: { doc: "appfile://file_beta0002" },
+          },
+        ],
+        [
+          "invoke_operation",
+          { operation_id: "x", space_id: "spc_alpha", body: { f: "appfile://file_beta0002" } },
+        ],
+        // Outside the turn's spaces, for any tool: no space id is named.
+        ["read_file", { uri: "appfile://file_gamma001", space_id: "spc_alpha" }],
+        ["read_resource", { uri: "appfile://file_gamma001" }],
+      ] as const;
+      for (const [name, args] of calls) {
+        const text_ = text(await tool(name).execute("c1", args));
+        expect(JSON.parse(text_)).toMatchObject({ code: "not_found" });
+        expect(text_).not.toMatch(/spc_(beta|gamma)/);
+      }
+      expect(transport.events).toEqual([]);
+
+      // Its own space's file and the conversation's own file pass, recording the named space.
       transport.events.length = 0;
       await tool("run_and_wait").execute("c2", {
         kind: "agent",
         scope: "@acme",
         name: "demo",
         space_id: "spc_alpha",
-        input: { own: "appfile://file_own00001", docs: [{ ref: "appfile://file_beta0002" }] },
+        input: { a: "appfile://file_alpha001", own: "appfile://file_own00001" },
       });
-      expect(transport.events.slice(0, 3)).toEqual(["touch spc_alpha", "touch spc_beta", "launch"]);
+      expect(transport.events.slice(0, 2)).toEqual(["touch spc_alpha", "launch"]);
     } finally {
       await built.close();
     }
   });
 
-  it("refuses a file of a space outside the turn's, recording nothing; the conversation's own file names none", async () => {
+  it("refuses arguments nested past the bound, cleanly", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      for (const [name, args] of [
-        ["read_file", { uri: "appfile://file_gamma001", space_id: "spc_alpha" }],
-        ["read_resource", { uri: "appfile://file_gamma001" }],
-        [
-          "run_and_wait",
-          { kind: "inline", space_id: "spc_alpha", context_files: ["appfile://file_gamma001"] },
-        ],
-      ] as const) {
-        const refused = JSON.parse(text(await tool(name).execute("c1", args)));
-        expect(refused).toMatchObject({ code: "unknown_space" });
-      }
+      let nested: unknown = "appfile://file_beta0001";
+      for (let level = 0; level < 100_000; level++) nested = [nested];
+      const refused = JSON.parse(
+        text(await tool("read_file").execute("c1", { uri: nested, space_id: "spc_alpha" })),
+      );
+      expect(refused).toMatchObject({ code: "invalid_argument" });
       expect(transport.events).toEqual([]);
-
-      await tool("read_file").execute("c2", { uri: "appfile://file_own00001" });
-      expect(transport.events).toEqual(["tools/call"]);
     } finally {
       await built.close();
     }

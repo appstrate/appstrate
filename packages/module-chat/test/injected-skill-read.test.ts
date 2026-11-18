@@ -301,9 +301,10 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
         "x-org-id": owner.orgId,
       },
       organization: {
-        spaces: [],
+        // The skills live in the default space: the turn's, which a `skill://` read names.
+        spaces: [{ id: owner.defaultSpaceId, name: "Default", role: "admin" }],
         touch: async () => {},
-        spaceOfUri: async () => undefined,
+        fileSpaces: async () => new Map(),
       },
       writeChunk: () => {},
       signal: new AbortController().signal,

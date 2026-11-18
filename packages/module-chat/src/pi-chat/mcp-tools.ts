@@ -23,7 +23,11 @@
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
-import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
+import {
+  parseSkillUri,
+  parseSkillUriPackage,
+  SKILL_DEFINITION_META_KEY,
+} from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
   RESOURCE_BLOB_MAX_BYTES,
@@ -208,8 +212,11 @@ export interface TurnSpaces {
    * be recorded.
    */
   touch(spaceId: string): Promise<void>;
-  /** The space a `skill://` or `appfile://` URI belongs to, when it names one. */
-  spaceOfUri(uri: string): Promise<string | undefined>;
+  /**
+   * The space of each `appfile://` of `uris` that exists, in one read; a file the conversation
+   * holds is left out (it is reached through its container, not a space).
+   */
+  fileSpaces(uris: readonly string[]): Promise<ReadonlyMap<string, string>>;
 }
 
 type BuildPlatformMcpToolsOptions = {
@@ -426,34 +433,59 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** Every `appfile://` URI in a call's arguments, at any depth. */
-function fileUrisIn(value: unknown, found: string[] = []): string[] {
-  if (isFileUri(value)) found.push(value);
-  else if (Array.isArray(value)) for (const item of value) fileUrisIn(item, found);
+/** How deep {@link fileUrisIn} walks a call's arguments; deeper is refused. */
+const MAX_ARGUMENT_DEPTH = 32;
+
+/** The distinct `appfile://` URIs in a call's arguments; null past {@link MAX_ARGUMENT_DEPTH}. */
+function fileUrisIn(value: unknown, found = new Set<string>(), depth = 0): Set<string> | null {
+  if (depth > MAX_ARGUMENT_DEPTH) return null;
+  if (isFileUri(value)) found.add(value);
   else if (value && typeof value === "object") {
-    for (const item of Object.values(value)) fileUrisIn(item, found);
+    for (const item of Object.values(value)) {
+      if (!fileUrisIn(item, found, depth + 1)) return null;
+    }
   }
   return found;
 }
 
+/** The tools that read a file in its own space, whichever space the call names. */
+const CROSS_SPACE_FILE_TOOLS = new Set([
+  "read_file",
+  "validate_package_file",
+  "import_package_file",
+]);
+
+type CallRefusal = Record<string, unknown>;
+
 /**
- * Admit a call: the spaces it names and those of the resources it names (a conversation's own
- * file names none) must all be the turn's, and are recorded before it is dispatched. Returns
- * the refusal of the first that is not, having recorded nothing.
+ * Admit a call: the spaces it names must be the turn's, and so must the spaces of the files it
+ * names (a conversation's own file names none). A call `pinned` to its named space (it is
+ * dispatched there) reaches no file of another space. A file refused here answers what a
+ * missing one does, naming no space. Everything is checked before anything is recorded.
  */
 async function admitCall(
   organization: TurnSpaces,
-  named: readonly string[],
-  uris: readonly string[],
-): Promise<ReturnType<typeof spaceIdRefusal>> {
-  const spaces = new Set(named);
-  for (const uri of uris) {
-    const space = await organization.spaceOfUri(uri);
-    if (space) spaces.add(space);
-  }
-  for (const space of spaces) {
+  call: { named: readonly string[]; args: unknown; pinned: boolean },
+): Promise<CallRefusal | undefined> {
+  for (const space of call.named) {
     const refusal = spaceIdRefusal(organization.spaces, space);
-    if (refusal) return refusal;
+    if (refusal) return { ...refusal };
+  }
+  const uris = fileUrisIn(call.args);
+  if (!uris) {
+    return {
+      code: "invalid_argument",
+      error: `Arguments nest deeper than ${MAX_ARGUMENT_DEPTH} levels.`,
+    };
+  }
+  const fileSpaces = await organization.fileSpaces([...uris]);
+  const spaces = new Set(call.named);
+  for (const [uri, space] of fileSpaces) {
+    const reachable = call.pinned
+      ? call.named.includes(space)
+      : organization.spaces.some((turnSpace) => turnSpace.id === space);
+    if (!reachable) return { code: "not_found", error: `File not found: ${uri}` };
+    spaces.add(space);
   }
   for (const space of spaces) await organization.touch(space);
   return undefined;
@@ -479,14 +511,14 @@ function makeForwardExtension(
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
         const spaceId = dispatchSpace(args);
-        const refusal = await admitCall(
-          organization,
-          spaceId === undefined ? [] : [spaceId],
-          fileUrisIn(args),
-        );
+        const refusal = await admitCall(organization, {
+          named: spaceId === undefined ? [] : [spaceId],
+          args,
+          pinned: !CROSS_SPACE_FILE_TOOLS.has(toolName),
+        });
         if (refusal) {
           return withTurnBudgetNote(
-            toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
+            toPiToolResult(refusal, offerScopeOf(toolName, { arguments: args })),
             turnBudget,
           );
         }
@@ -574,10 +606,17 @@ function makeReadResourceExtension(
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
-        const refusal = await admitCall(organization, [], [uri]);
+        // A skill's URI names its space; a file's is looked up.
+        const skillSpace = parseSkillUri(uri)?.spaceId;
+        const refusal = await admitCall(
+          organization,
+          skillSpace
+            ? { named: [skillSpace], args: undefined, pinned: false }
+            : { named: [], args: uri, pinned: false },
+        );
         if (refusal) {
           return withTurnBudgetNote(
-            toPiToolResult({ ...refusal }, offerScopeOf(READ_RESOURCE_TOOL, { arguments: params })),
+            toPiToolResult(refusal, offerScopeOf(READ_RESOURCE_TOOL, { arguments: params })),
             turnBudget,
           );
         }
@@ -721,10 +760,11 @@ async function namedSpace(
   { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
 > {
   const { space_id: named, ...args } = (params as Record<string, unknown> | null) ?? {};
-  const refusal =
-    spaceIdRefusal(organization.spaces, named) ??
-    (await admitCall(organization, [named as string], fileUrisIn(args)));
-  if (refusal) return { refusal: { ...refusal } };
+  const missing = spaceIdRefusal(organization.spaces, named);
+  if (missing) return { refusal: { ...missing } };
+  // Dispatched in the named space: an input file of another space would only 404 there.
+  const refusal = await admitCall(organization, { named: [named as string], args, pinned: true });
+  if (refusal) return { refusal };
   return { spaceId: named as string, args };
 }
 

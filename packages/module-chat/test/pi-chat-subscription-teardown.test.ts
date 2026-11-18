@@ -38,7 +38,7 @@ import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 const ORGANIZATION: TurnSpaces = {
   spaces: [{ id: "spc_1", name: "One", role: "admin" }],
   touch: async () => {},
-  spaceOfUri: async () => undefined,
+  fileSpaces: async () => new Map(),
 };
 
 /** Nothing listens here — every hop must go through the injected transport. */

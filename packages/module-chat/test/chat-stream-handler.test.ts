@@ -966,6 +966,7 @@ describe("handleChatStream", () => {
         reachableSpace({ id: personal.id, personal: true, permissions: ["files:read"] }),
       ],
       messageId: "",
+      parts: [text("Et ça ?"), image(`upload://${await stage()}`)],
     });
     expect(ephemeral.status).toBe(200);
     await collectUiChunks(ephemeral);
@@ -976,14 +977,19 @@ describe("handleChatStream", () => {
         signal,
       }),
     ).toBeNull();
-    // Nor does it exempt the conversation's file from its space's checks.
-    expect(await ephemeralCalls[0]!.platformMcp!.organization.spaceOfUri(earlier.uri)).toBe(
-      personal.id,
+    // Nor does it exempt the conversation's file from its space's checks, nor hold an upload.
+    expect(await ephemeralCalls[0]!.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(
+      new Map([[earlier.uri, personal.id]]),
     );
+    const heldNow = await db
+      .select({ id: files.id })
+      .from(files)
+      .where(eq(files.chatSessionId, sessionId));
+    expect(heldNow).toHaveLength(2);
 
     // `read_resource` neither refuses nor touches a space for a file the conversation holds; a
     // file of a space outside the turn's still names it, and is refused there.
-    expect(await input.platformMcp!.organization.spaceOfUri(earlier.uri)).toBeUndefined();
+    expect(await input.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(new Map());
     const run = await seedRun({ ...personalScope, userId: ctx.user.id });
     const { row: output } = await createFileFromStream(
       personalScope,
@@ -992,9 +998,9 @@ describe("handleChatStream", () => {
       null,
       { name: "out.txt", mime: "text/plain", body: new Blob(["x"]).stream() },
     );
-    expect(await input.platformMcp!.organization.spaceOfUri(`appfile://${output.id}`)).toBe(
-      personal.id,
-    );
+    expect(
+      await input.platformMcp!.organization.fileSpaces([`appfile://${output.id}`, earlier.uri]),
+    ).toEqual(new Map([[`appfile://${output.id}`, personal.id]]));
   });
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {
@@ -2195,11 +2201,10 @@ describe("handleChatStream", () => {
         }
         expect(await touched(sessionId)).toEqual([spaceB]);
 
-        expect(await organization.spaceOfUri(`skill://${spaceB}/acme/tone/tone/SKILL.md`)).toBe(
-          spaceB,
-        );
-        expect(await organization.spaceOfUri("appfile://file_missing00")).toBeUndefined();
-        expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
+        // Only files are looked up, in one read: a missing one, or no file at all, has no space.
+        expect(
+          await organization.fileSpaces(["appfile://file_missing00", "https://example.com"]),
+        ).toEqual(new Map());
       });
 
       it("places an existing file in its space, which `read_resource` refuses outside the turn's", async () => {
@@ -2218,7 +2223,9 @@ describe("handleChatStream", () => {
         });
         const organization = await organizationOf(mintSessionId());
         // Gamma is reached but outside the acting set: the space `read_resource` checks.
-        expect(await organization.spaceOfUri(`appfile://${fileId}`)).toBe(spaceC);
+        expect(await organization.fileSpaces([`appfile://${fileId}`])).toEqual(
+          new Map([[`appfile://${fileId}`, spaceC]]),
+        );
         expect(spaceIdRefusal(organization.spaces, spaceC)).toMatchObject({
           code: "unknown_space",
         });

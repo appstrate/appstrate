@@ -44,7 +44,7 @@ const ANSWER = "Bonjour le monde";
 const LIVE_ORGANIZATION: TurnSpaces = {
   spaces: [{ id: "spc_live", name: "Live", role: "admin" }],
   touch: async () => {},
-  spaceOfUri: async () => undefined,
+  fileSpaces: async () => new Map(),
 };
 /** Distinct from the preset id, so a label defaulted to the id is caught. */
 const LIVE_MODEL_LABEL = "Live Preset (display)";

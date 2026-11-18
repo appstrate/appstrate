@@ -176,7 +176,19 @@ describe("run inputs across spaces", () => {
 
   it("the launcher's personal space file feeds a run in a team space", async () => {
     const uri = await chatUpload(ctx.user.id, `chs_${crypto.randomUUID()}`);
-    await launchedRunId(await launch(authHeaders(ctx), teamB, [uri]));
+    const runId = await launchedRunId(await launch(authHeaders(ctx), teamB, [uri]));
+    // The team space's audit does not carry the personal space's id.
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "file.consumed"),
+          eq(auditEvents.resourceId, uri.replace("appfile://", "")),
+        ),
+      );
+    expect(audit).toMatchObject({ spaceId: teamB, after: { runId } });
+    expect(audit!.after).not.toHaveProperty("fileSpaceId");
   });
 
   it("refuses a file of a space where the caller lacks files:read, as a missing one", async () => {

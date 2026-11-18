@@ -95,7 +95,7 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
     organization: {
       spaces: caller.spaces,
       touch: async () => {},
-      spaceOfUri: async () => undefined,
+      fileSpaces: async () => new Map(),
     },
     writeChunk: () => {},
     signal: new AbortController().signal,

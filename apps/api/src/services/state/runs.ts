@@ -10,6 +10,7 @@ import {
   asc,
   desc,
   isNull,
+  isNotNull,
   inArray,
   count,
   gte,
@@ -36,6 +37,7 @@ import {
   files,
   fileLinks,
   chatSessions,
+  spaces,
   type PricingStatus,
   type InferenceRoute,
 } from "@appstrate/db/schema";
@@ -695,6 +697,8 @@ interface CreateRunParams {
 export interface ConsumedFile {
   id: string;
   spaceId: string;
+  /** Its space is someone's personal space, whose id a team space's audit must not carry. */
+  personal: boolean;
 }
 
 /** Create the run with its consumption links; returns the files it consumes. */
@@ -758,7 +762,20 @@ export async function createRun(
         .from(files)
         .where(and(inArray(files.id, consumedFileIds), eq(files.orgId, scope.orgId)))
         .for("update");
-      consumed = available;
+      const personal = new Set(
+        (
+          await tx
+            .select({ id: spaces.id })
+            .from(spaces)
+            .where(
+              and(
+                inArray(spaces.id, [...new Set(available.map((file) => file.spaceId))]),
+                isNotNull(spaces.ownerUserId),
+              ),
+            )
+        ).map((space) => space.id),
+      );
+      consumed = available.map((file) => ({ ...file, personal: personal.has(file.spaceId) }));
       if (available.length !== consumedFileIds.length) {
         throw conflict(
           "file_unavailable",

@@ -229,7 +229,7 @@ function buildTurn(
     organization: {
       spaces: [{ id: "spc_1", name: "One", role: "owner" }],
       touch: async () => {},
-      spaceOfUri: async () => undefined,
+      fileSpaces: async () => new Map(),
     },
     writeChunk: () => {},
     signal,

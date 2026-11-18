@@ -111,9 +111,10 @@ export function ChatModulePage() {
   const canIn = useRowSpaceGrants();
   const actingSpaceIds = useChatActingSpaceIds();
   // Every file attached from the computer goes to the caller's own personal space.
-  const personalSpaceId = useOwnPersonalSpaceId();
+  const { spaceId: personalSpaceId, failed: spacesFailed } = useOwnPersonalSpaceId();
   // A role preview holds no personal space: attaching is unavailable for good, not loading.
   const previewing = useViewAs() !== null;
+  const attachUnavailable = previewing ? "preview" : spacesFailed ? "error" : "loading";
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -209,7 +210,7 @@ export function ChatModulePage() {
               canIn={canIn}
               actingSpaceIds={actingSpaceIds}
               personalSpaceId={personalSpaceId}
-              previewing={previewing}
+              attachUnavailable={attachUnavailable}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}

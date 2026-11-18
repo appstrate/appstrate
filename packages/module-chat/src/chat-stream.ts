@@ -25,7 +25,6 @@ import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors"
 import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
@@ -51,7 +50,7 @@ export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import {
   ensureSession,
-  fileSpaceId,
+  fileSpaceIds,
   type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
@@ -310,10 +309,9 @@ export async function handleChatStream(
   const sessionId = body.id;
   let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
-  // Session id to stamp on this turn's `llm_usage` row. Only set when the row
-  // for that session is (or will be) persisted this turn — the same condition
-  // that runs `ensureSession` below — so the ledger's `chat_session_id` FK is
-  // always satisfiable. Ephemeral turns record un-attributed usage (null).
+  // The turn's conversation: the session it persists to (null for an ephemeral turn), and the
+  // ONE id its usage, uploads, file reads, touches and bearer claim use, so a turn always
+  // reaches what it attached. A client id without a message persists nothing.
   const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
   const turnStart = Date.now();
@@ -457,15 +455,21 @@ export async function handleChatStream(
     const organization: TurnSpaces = {
       spaces,
       touch: async (touchedSpaceId) => {
-        if (!sessionId || !lastMessage?.id) return;
+        if (!meteringSessionId) return;
         await touchSessionSpace(
-          { id: sessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
+          { id: meteringSessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
           touchedSpaceId,
         );
       },
-      spaceOfUri: async (uri) => {
-        const fileId = parseFileUri(uri);
-        return fileId ? fileSpaceId(orgId, fileId, meteringSessionId) : parseSkillUri(uri)?.spaceId;
+      fileSpaces: async (uris) => {
+        const ids = new Map(
+          uris.flatMap((uri) => {
+            const id = parseFileUri(uri);
+            return id ? [[id, uri] as const] : [];
+          }),
+        );
+        const spaceOf = await fileSpaceIds(orgId, [...ids.keys()], meteringSessionId);
+        return new Map([...spaceOf].map(([id, spaceId]) => [ids.get(id)!, spaceId]));
       },
     };
     return {
@@ -718,14 +722,14 @@ export async function handleChatStream(
   const attachmentReach = grantsOf(reachable);
   // What the browser's optimistic `upload://` parts became, for the stream to tell it.
   let uploadResolutions: UIMessageChunk | null = null;
-  if (sessionId && lastMessage) {
+  if (meteringSessionId && lastMessage) {
     const sent = lastMessage;
     try {
       lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
         return deps.resolveChatAttachment({
           orgId,
           userId: user.id,
-          chatSessionId: sessionId,
+          chatSessionId: meteringSessionId,
           uri,
           spaces: attachmentSpaces,
           reach: attachmentReach,

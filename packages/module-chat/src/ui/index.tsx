@@ -194,8 +194,8 @@ export interface ChatPageProps {
   actingSpaceIds: ChatHost["actingSpaceIds"];
   /** The caller's personal space, `null` until known (see `ChatHost`). */
   personalSpaceId: ChatHost["personalSpaceId"];
-  /** A role preview is on (see `ChatHost`). */
-  previewing: ChatHost["previewing"];
+  /** Why there is no personal space (see `ChatHost`). */
+  attachUnavailable: ChatHost["attachUnavailable"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -231,7 +231,7 @@ export function ChatPage({
   canIn,
   actingSpaceIds,
   personalSpaceId,
-  previewing,
+  attachUnavailable,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -341,7 +341,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       personalSpaceId,
-      previewing,
+      attachUnavailable,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -361,7 +361,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       personalSpaceId,
-      previewing,
+      attachUnavailable,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -630,22 +630,22 @@ function ConversationInner({
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
-  const { t, personalSpaceId, previewing } = useChatHost();
+  const { t, personalSpaceId, attachUnavailable } = useChatHost();
   const scope = useConversationScope();
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
   const getPersonalSpaceId = useLatest(personalSpaceId);
-  const getPreviewing = useLatest(previewing);
+  const getAttachUnavailable = useLatest(attachUnavailable);
   const attachments = useMemo(
     () =>
       createChatAttachmentAdapter({
         upload: uploadFile,
         t,
         personalSpaceId: getPersonalSpaceId,
-        previewing: getPreviewing,
+        unavailable: getAttachUnavailable,
       }),
-    [uploadFile, t, getPersonalSpaceId, getPreviewing],
+    [uploadFile, t, getPersonalSpaceId, getAttachUnavailable],
   );
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.

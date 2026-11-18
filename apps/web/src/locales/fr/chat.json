@@ -196,6 +196,7 @@
   "composer.limitChip": "Limitée à {{name}}",
   "composer.limitChip.generic": "Limitée à un espace",
   "composer.attachUnavailable": "Votre espace personnel n’est pas encore chargé : réessayez dans un instant.",
+  "composer.attachError": "Impossible de charger votre espace personnel : rechargez la page pour joindre des fichiers.",
   "composer.attachPreview": "Aperçu d’un rôle : vous n’avez pas d’espace personnel, la jonction de fichiers est indisponible.",
   "composer.dropzone": "Déposez vos fichiers pour les joindre",
   "context.show": "Afficher le contexte",

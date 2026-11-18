@@ -26,10 +26,13 @@ export function useSpaces(enabled = true) {
   });
 }
 
-/** The caller's personal space id (« Mon espace »); `null` until the listing answers, or when they have none (a role preview). */
-export function useOwnPersonalSpaceId(): string | null {
-  const { data: spaces } = useSpaces();
-  return spaces?.find(isOwnPersonalSpace)?.id ?? null;
+/**
+ * The caller's personal space id (« Mon espace »): `null` until the listing answers, when it
+ * failed (`failed`), or when they have none (a role preview).
+ */
+export function useOwnPersonalSpaceId(): { spaceId: string | null; failed: boolean } {
+  const { data: spaces, isError } = useSpaces();
+  return { spaceId: spaces?.find(isOwnPersonalSpace)?.id ?? null, failed: isError };
 }
 
 /** The listed spaces among `spaceIds`, in order; the ones the listing does not know are left out. */

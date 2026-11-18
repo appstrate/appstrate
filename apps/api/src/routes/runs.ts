@@ -199,7 +199,8 @@ function recordFilesConsumed(c: Context<AppEnv>, runId: string, consumed: Consum
       action: "file.consumed",
       resourceType: "file",
       resourceId: file.id,
-      after: { runId, fileSpaceId: file.spaceId },
+      // A personal space's id is the owner's alone; a team space's audit names it for no one.
+      after: file.personal ? { runId } : { runId, fileSpaceId: file.spaceId },
     })),
   );
 }

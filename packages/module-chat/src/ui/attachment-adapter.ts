@@ -26,7 +26,7 @@
 
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
-import type { ChatTranslate, UploadFile } from "./runtime-context.ts";
+import type { AttachUnavailable, ChatTranslate, UploadFile } from "./runtime-context.ts";
 import { stageComposerFile } from "./upload.ts";
 
 /**
@@ -44,9 +44,15 @@ function uploadFailureKey(err: unknown): string {
   return "upload.failed";
 }
 
-/** Why nothing can be attached: a role preview has no personal space for good, else it is loading. */
-export function attachUnavailableKey(previewing: boolean): string {
-  return previewing ? "composer.attachPreview" : "composer.attachUnavailable";
+const ATTACH_UNAVAILABLE_KEY: Record<AttachUnavailable, string> = {
+  loading: "composer.attachUnavailable",
+  error: "composer.attachError",
+  preview: "composer.attachPreview",
+};
+
+/** The message saying why nothing can be attached. */
+export function attachUnavailableKey(reason: AttachUnavailable): string {
+  return ATTACH_UNAVAILABLE_KEY[reason];
 }
 
 export function createChatAttachmentAdapter(deps: {
@@ -54,10 +60,10 @@ export function createChatAttachmentAdapter(deps: {
   t: ChatTranslate;
   /** The caller's personal space, where every file goes; `null` while not known. */
   personalSpaceId: () => string | null;
-  /** A role preview is on (the reason a missing personal space is final). */
-  previewing: () => boolean;
+  /** Why a missing personal space is missing. */
+  unavailable: () => AttachUnavailable;
 }): AttachmentAdapter {
-  const { upload, t, personalSpaceId, previewing } = deps;
+  const { upload, t, personalSpaceId, unavailable } = deps;
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
@@ -68,7 +74,7 @@ export function createChatAttachmentAdapter(deps: {
     add({ file }): Promise<PendingAttachment> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
       if (personalSpaceId() === null) {
-        return Promise.reject(new Error(t(attachUnavailableKey(previewing()))));
+        return Promise.reject(new Error(t(attachUnavailableKey(unavailable()))));
       }
       return Promise.resolve({
         id: crypto.randomUUID(),
@@ -82,7 +88,7 @@ export function createChatAttachmentAdapter(deps: {
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
       const spaceId = personalSpaceId();
-      if (spaceId === null) throw new Error(t(attachUnavailableKey(previewing())));
+      if (spaceId === null) throw new Error(t(attachUnavailableKey(unavailable())));
       let uri: string;
       try {
         uri = await stageComposerFile(upload, attachment.file, spaceId);

@@ -272,7 +272,7 @@ function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
 
 /** The attach button opens the native picker: files always go to the caller's personal space. */
 function AttachButton() {
-  const { t, personalSpaceId, previewing } = useChatHost();
+  const { t, personalSpaceId, attachUnavailable } = useChatHost();
   const button = (
     <Button
       type="button"
@@ -288,7 +288,7 @@ function AttachButton() {
   if (personalSpaceId !== null) {
     return <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>;
   }
-  const reason = t(attachUnavailableKey(previewing));
+  const reason = t(attachUnavailableKey(attachUnavailable));
   return (
     <Tooltip>
       <TooltipTrigger asChild>

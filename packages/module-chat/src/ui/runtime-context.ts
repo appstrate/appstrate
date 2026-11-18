@@ -204,8 +204,8 @@ export interface ChatHost {
    * is staged, `null` until the host's listing has answered: attaching waits for it.
    */
   personalSpaceId: string | null;
-  /** A role preview is on: the caller has no personal space, so attaching is unavailable for good. */
-  previewing: boolean;
+  /** Why `personalSpaceId` is null: still loading, the listing failed, or a role preview (no personal space for good). */
+  attachUnavailable: AttachUnavailable;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
@@ -243,6 +243,9 @@ export interface ChatHost {
   /** The host's menu of spaces, the one every « … in which space? » entry of the app opens. */
   SpaceChoiceMenu: SpaceChoiceMenu;
 }
+
+/** Why nothing can be attached (see `ChatHost.attachUnavailable`). */
+export type AttachUnavailable = "loading" | "error" | "preview";
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */
 export function actsIn(

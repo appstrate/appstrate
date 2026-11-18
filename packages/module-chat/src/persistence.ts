@@ -156,21 +156,24 @@ export async function createSession(input: {
 }
 
 /**
- * The space a read of a file touches: the space it belongs to, or undefined when `orgId` holds
- * no such file or when the conversation `chatSessionId` holds it — such a file (a chat upload, in
- * the personal space) is reached through its container, not through a space of the turn.
+ * The space each of `fileIds` belongs to, in one read: ids `orgId` does not hold, and those the
+ * conversation `chatSessionId` holds (reached through their container), are left out.
  */
-export async function fileSpaceId(
+export async function fileSpaceIds(
   orgId: string,
-  fileId: string,
+  fileIds: readonly string[],
   chatSessionId: string | null,
-): Promise<string | undefined> {
-  const [row] = await db
-    .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })
+): Promise<Map<string, string>> {
+  if (fileIds.length === 0) return new Map();
+  const rows = await db
+    .select({ id: files.id, spaceId: files.spaceId, chatSessionId: files.chatSessionId })
     .from(files)
-    .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
-    .limit(1);
-  return row && (!chatSessionId || row.chatSessionId !== chatSessionId) ? row.spaceId : undefined;
+    .where(and(inArray(files.id, [...fileIds]), eq(files.orgId, orgId)));
+  return new Map(
+    rows.flatMap((row) =>
+      chatSessionId && row.chatSessionId === chatSessionId ? [] : [[row.id, row.spaceId] as const],
+    ),
+  );
 }
 
 /** What a turn takes from the conversation row: its skill selection, origin space and limit. */

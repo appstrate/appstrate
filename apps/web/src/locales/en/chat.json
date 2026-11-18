@@ -196,6 +196,7 @@
   "composer.limitChip": "Limited to {{name}}",
   "composer.limitChip.generic": "Limited to one space",
   "composer.attachUnavailable": "Your personal space is not loaded yet: try again in a moment.",
+  "composer.attachError": "Your personal space could not be loaded: reload the page to attach files.",
   "composer.attachPreview": "Role preview: you have no personal space, so attaching files is unavailable.",
   "composer.dropzone": "Drop your files to attach them",
   "context.show": "Show context",
