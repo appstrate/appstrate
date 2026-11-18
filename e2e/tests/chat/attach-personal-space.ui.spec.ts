@@ -106,7 +106,7 @@ test("a drop under a role preview says why nothing is attached", async ({
     await page.goto("/chat");
     await expect(page.getByPlaceholder("Message Appstrate…")).toBeVisible();
     await dropFile(page, page.getByTestId("chat-dropzone"), "depose.txt");
-    await expect(page.getByText(/Aperçu d’un rôle/)).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: /Aperçu d’un rôle/ })).toBeVisible();
   } finally {
     await context.close();
   }
