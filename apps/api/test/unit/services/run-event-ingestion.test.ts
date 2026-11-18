@@ -44,6 +44,7 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
     sinkClosedAt: null,
     lastEventSequence: 0,
     startedAt: new Date(),
+    runningAt: null,
     versionRef: "draft",
     modelSource: null,
     modelCredentialId: null,

@@ -569,6 +569,7 @@ column runs.run_number integer
 column runs.run_origin run_origin not null default 'platform'::run_origin
 column runs.runner_kind text
 column runs.runner_name text
+column runs.running_at timestamp with time zone
 column runs.schedule_id text
 column runs.sink_closed_at timestamp with time zone
 column runs.sink_expires_at timestamp with time zone
