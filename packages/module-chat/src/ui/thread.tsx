@@ -50,6 +50,11 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
+import {
+  getSelectedModelAcceptsImages,
+  getSelectedModelReadsPdf,
+  subscribeModel,
+} from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import {
   resolvedUploadsSnapshot,
@@ -267,6 +272,24 @@ function ComposerAttachmentChip() {
   const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, openFile, t } = useChatHost();
+  // A model known not to read images only gets the file's pointer: say so under the chip.
+  const acceptsImages = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelAcceptsImages,
+    getSelectedModelAcceptsImages,
+  );
+  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
+  const readsPdf = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelReadsPdf,
+    getSelectedModelReadsPdf,
+  );
+  const notice =
+    file && isImageMime(file.type) && acceptsImages === false
+      ? t("composer.imageNotSeen")
+      : file?.type === "application/pdf" && readsPdf === false
+        ? t("composer.pdfNotRead")
+        : undefined;
   const preview =
     openFile && file && localPreviewKind(file.type)
       ? {
@@ -275,7 +298,10 @@ function ComposerAttachmentChip() {
         }
       : null;
   return (
-    <AttachmentPrimitive.Root className="inline-flex min-w-0 flex-col items-start gap-1">
+    <AttachmentPrimitive.Root
+      className="inline-flex min-w-0 flex-col items-start gap-1"
+      title={notice}
+    >
       <PendingAttachmentChip
         name={name}
         file={file}
@@ -297,6 +323,11 @@ function ComposerAttachmentChip() {
           </>
         }
       />
+      {notice && (
+        <span role="status" className="text-muted-foreground max-w-56 text-xs">
+          {notice}
+        </span>
+      )}
       {status.type === "incomplete" && status.reason === "error" && status.message && (
         <span role="alert" className="text-destructive text-xs">
           <span className="sr-only">{name}. </span>

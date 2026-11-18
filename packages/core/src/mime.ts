@@ -18,8 +18,10 @@
  * See `@appstrate/afps-shared/mime` for the full contract, including why
  * `application/octet-stream` is deliberately absent from the text set.
  *
- * {@link isImageMime} is the one primitive defined HERE rather than re-exported
- * — see its own note for why it does not belong in the shared module.
+ * Presentation predicates ({@link isImageMime}, {@link isRasterImageMime},
+ * {@link previewKind}, {@link localPreviewKind}) are defined here rather than
+ * in the shared module: they decide what the platform shows or sends to a
+ * model, not how a body is classified on the wire.
  */
 
 import { normalizeMime } from "@appstrate/afps-shared/mime";
@@ -53,6 +55,28 @@ export function isImageMime(mime: string | null | undefined): boolean {
 }
 
 /**
+ * Raster image mimes: the formats the file preview serves inline byte-for-byte
+ * and Pi can display without conversion. Deliberately EXCLUDES `image/svg+xml`:
+ * an SVG is ACTIVE content (it can embed `<script>` and event handlers and runs
+ * in the embedding context), so it is not inert like a raster image. Routing it
+ * safely would mean serving it through the full HTML-style CSP +
+ * `sandbox="allow-scripts"` hardening — extra machinery for a rare case — so
+ * instead SVG is simply not previewable (still downloadable). See
+ * docs/architecture/FILES.md → "Preview kinds".
+ */
+const RASTER_IMAGE_MIMES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/** Raster formats that the file preview and Pi can display inline without conversion. */
+export function isRasterImageMime(mime: string): boolean {
+  return RASTER_IMAGE_MIMES.has(normalizeMime(mime));
+}
+
+/**
  * The four ways a file can be previewed in-browser (or null for "not
  * previewable"). Drives BOTH the DTO's `preview_kind`/`previewable` derivation
  * AND the preview route's serving branch — a single source of truth, so the set
@@ -61,22 +85,6 @@ export function isImageMime(mime: string | null | undefined): boolean {
  * the same question of a file not yet sent ({@link localPreviewKind}).
  */
 export type PreviewKind = "html" | "image" | "pdf" | "text";
-
-/**
- * Image mimes served inline, byte-for-byte. Deliberately EXCLUDES
- * `image/svg+xml`: an SVG is ACTIVE content (it can embed `<script>` and event
- * handlers and runs in the embedding context), so it is not inert like a raster
- * image. Routing it safely would mean serving it through the full HTML-style
- * CSP + `sandbox="allow-scripts"` hardening — extra machinery for a rare case —
- * so instead SVG is simply not previewable (still downloadable). See
- * docs/architecture/FILES.md → "Preview kinds".
- */
-const PREVIEW_IMAGE_MIMES: ReadonlySet<string> = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-]);
 
 /**
  * Text-family mimes previewed as PLAINTEXT. A conservative allowlist, NOT a
@@ -101,7 +109,7 @@ export function previewKind(mime: string): PreviewKind | null {
   const base = normalizeMime(mime);
   if (base === "text/html") return "html";
   if (base === "application/pdf") return "pdf";
-  if (PREVIEW_IMAGE_MIMES.has(base)) return "image";
+  if (isRasterImageMime(base)) return "image";
   if (PREVIEW_TEXT_MIMES.has(base)) return "text";
   return null;
 }

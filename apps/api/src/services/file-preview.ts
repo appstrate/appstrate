@@ -28,7 +28,7 @@
  */
 
 import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
-import { normalizeMime } from "./mime-policy.ts";
+import { normalizeMime } from "@appstrate/core/mime";
 
 /** Preview capability lifetime — deliberately short (a render link, not a session). */
 export const PREVIEW_TOKEN_TTL_SECONDS = 300;

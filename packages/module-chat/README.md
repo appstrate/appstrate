@@ -24,6 +24,10 @@ AI SDK comme protocole de fil (c'est le contrat que consomme assistant-ui) :
 - **Persistance** : **autoritative côté serveur**. `POST /api/orgs/:orgId/chat` est l'unique écrivain de messages : il écrit le tour utilisateur AVANT l'inférence et le tour assistant quand le flux se finalise (`src/persistence.ts`), le drain de persistance tournant indépendamment de la connexion client (`src/finalize-stream.ts`) — quitter la conversation en pleine génération ne perd plus rien. Il n'existe **aucune route d'écriture de message côté client** : les routes `/api/orgs/:orgId/chat/sessions/*` ne font que du CRUD de session et de la LECTURE d'historique. La session est identifiée par l'id que le client frappe (`mintSessionId`) et transmet dans le corps du tour ; la ligne est créée à la volée (`ensureSession`) — pas de header dédié.
 - **Front** : assistant-ui (`useChat` + `DefaultChatTransport` d'AI SDK, enveloppés par `useAISDKRuntime`), thread porté du satellite (markdown, cartes de tools, branching, édition/régénération), liste de sessions (`thread-list`) et sélecteur de modèle (`model-select`). L'adaptateur d'historique est en LECTURE seule.
 
+## Lecture des fichiers
+
+Le [guide utilisateur](../../docs/site/using-appstrate/chat.mdx) décrit la consultation temporaire et la conservation d’une version via un run. Les formes MCP, les limites et les droits d’accès figurent dans [l’architecture des fichiers](../../docs/architecture/FILES.md#mcp-exposure).
+
 ## Limitations connues (hors périmètre)
 
 Le module est fonctionnel et autonome ; les points ci-dessous sont des extensions

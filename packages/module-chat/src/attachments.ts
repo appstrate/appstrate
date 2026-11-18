@@ -13,13 +13,16 @@
  * The model never sees raw file parts (an `upload://`/`appfile://` URL is not a
  * fetchable data URL): {@link messagesWithAttachmentsAsText} flattens each file
  * part into a compact, model-facing text line so the assistant can pass the
- * `appfile://` URI straight into a `run_and_wait` input file field.
+ * `appfile://` URI straight into a `run_and_wait` input file field. The pixels of
+ * an image reach a vision model separately, as Pi image blocks next to that line
+ * (`pi-chat/attachment-inputs.ts`); the line stays so the URI is still chainable.
  */
 
 import type { FileUIPart, UIMessage, UIMessageChunk } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { parseFileUri, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { formatBytes } from "@appstrate/core/format";
+import { isImageMime } from "@appstrate/core/mime";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -43,13 +46,36 @@ function partSize(part: FileUIPart): number | null {
  * `[Attached file: rapport.pdf — appfile://file_abc123 — application/pdf, 2.3 MB]`.
  * Size is included when the materialized part carries it.
  */
-function attachmentTextBlock(part: FileUIPart): string {
+function attachmentTextBlock(part: FileUIPart, imageNote: string): string {
   // Same nameless-file fallback the chips render, so the line the model reads
   // names the attachment exactly as the user sees it named.
   const name = part.filename ?? UNNAMED_FILE;
   const size = partSize(part);
   const sizeSuffix = size !== null ? `, ${formatBytes(size)}` : "";
-  return `[Attached file: ${name} — ${part.url} — ${part.mediaType}${sizeSuffix}]`;
+  return `[Attached file: ${name} — ${part.url} — ${part.mediaType}${sizeSuffix}${imageNote}]`;
+}
+
+/** What the pointer line of an image says about its pixels, so the model never guesses at them. */
+interface AttachmentContext {
+  pdfReceipts?: ReadonlyMap<string, string>;
+  /** Whether the model of this turn accepts images at all. */
+  modelSeesImages: boolean;
+  /** The user messages' image parts whose pixels ride this request, by message id then URI. */
+  sent: ReadonlyMap<string, ReadonlyMap<string, unknown>>;
+}
+
+function imageNote(
+  message: UIMessage,
+  part: FileUIPart,
+  context: AttachmentContext | undefined,
+): string {
+  if (!context || !isImageMime(part.mediaType)) return "";
+  if (!context.modelSeesImages) {
+    return " — you cannot view images with this model: say so rather than guess its content";
+  }
+  return context.sent.get(message.id)?.has(part.url)
+    ? ""
+    : " — its pixels are not part of this request (too old, too large or an unsupported format): say so rather than guess its content";
 }
 
 /**
@@ -58,14 +84,29 @@ function attachmentTextBlock(part: FileUIPart): string {
  * text it can act on. Messages without file parts are returned unchanged (no
  * copy). Used when projecting the thread into the engine's transcript so the model-facing serialization lives in one place.
  */
-export function messagesWithAttachmentsAsText(messages: UIMessage[]): UIMessage[] {
+export function messagesWithAttachmentsAsText(
+  messages: UIMessage[],
+  context?: AttachmentContext,
+): UIMessage[] {
   return messages.map((message) => {
     const parts = message.parts;
-    if (!parts?.some(isFileUIPart)) return message;
+    if (message.role !== "user" || !parts?.some(isFileUIPart)) return message;
     return {
       ...message,
       parts: parts.map((part) =>
-        isFileUIPart(part) ? { type: "text" as const, text: attachmentTextBlock(part) } : part,
+        isFileUIPart(part)
+          ? {
+              type: "text" as const,
+              text: [
+                attachmentTextBlock(part, imageNote(message, part, context)),
+                message === messages[messages.length - 1] && part.mediaType === "application/pdf"
+                  ? context?.pdfReceipts?.get(part.url)
+                  : undefined,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            }
+          : part,
       ),
     };
   });
@@ -147,4 +188,31 @@ export function uploadResolutionsChunk(
   });
   if (resolutions.length === 0) return null;
   return { type: UPLOAD_RESOLUTIONS_PART, data: resolutions, transient: true };
+}
+
+/**
+ * The thread with the file parts of each message before the last replaced by its stored
+ * row's (`stored`, by message id), where the message held its first file part. The browser
+ * submits the history it holds, whose file parts can still name the `upload://` it sent
+ * (only the stored row was rewritten to `appfile://`), or anything else: the stored row is
+ * the one source of an earlier message's files.
+ */
+export function withStoredHistoryFiles(
+  messages: UIMessage[],
+  stored: ReadonlyMap<string, FileUIPart[]>,
+): UIMessage[] {
+  return messages.map((message, index) => {
+    if (index === messages.length - 1) return message;
+    const files = stored.get(message.id) ?? [];
+    const parts = message.parts ?? [];
+    if (!files.length && !parts.some((part) => part.type === "file")) return message;
+    let placed = false;
+    const rebuilt = parts.flatMap<UIMessage["parts"][number]>((part) => {
+      if (part.type !== "file") return [part];
+      if (placed) return [];
+      placed = true;
+      return files;
+    });
+    return { ...message, parts: placed ? rebuilt : [...rebuilt, ...files] };
+  });
 }

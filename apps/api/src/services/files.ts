@@ -69,8 +69,13 @@ import {
   storageLimitExceeded,
   fileCountExceeded,
 } from "../lib/errors.ts";
-import { resolveAgentOutputMime } from "./mime-policy.ts";
-import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
+import { normalizeMime, resolveAgentOutputMime } from "./mime-policy.ts";
+import type {
+  ChatAttachmentRequest,
+  ChatAttachmentRead,
+  ChatAttachmentContent,
+  ResolvedChatAttachment,
+} from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, parseUploadUri } from "./uploads.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import {
@@ -1317,66 +1322,123 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
 export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
 ): Promise<ResolvedChatAttachment> {
-  const actor: Actor = { type: "user", id: request.userId };
-  let source: { fileId: string } | { uploadId: string };
+  let row: FileRow;
   if (isFileUri(request.uri)) {
     const fileId = parseFileUri(request.uri);
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
-    source = { fileId };
+    const attached = await resolveStoredChatFile(request, fileId);
+    if (!attached) throw notFound(`File '${fileId}' not found`);
+    await request.beforeResolve(attached.row.spaceId);
+    row = { ...attached.row, ...projectFileMetadata(attached.row, attached.capabilities) };
   } else {
     const uploadId = parseUploadUri(request.uri);
-    if (!uploadId) {
-      throw invalidRequest(`Attachment URI must be an 'upload://' or 'appfile://' URI`);
-    }
-    source = { uploadId };
-  }
-
-  // The attachment resolves in the space it belongs to, which must be one the
-  // caller may attach in: a file or upload of any other space is as absent as a
-  // missing one.
-  const [owner] =
-    "fileId" in source
-      ? await db
-          .select({ spaceId: files.spaceId })
-          .from(files)
-          .where(and(eq(files.id, source.fileId), eq(files.orgId, request.orgId)))
-          .limit(1)
-      : await db
-          .select({ spaceId: uploads.spaceId })
-          .from(uploads)
-          .where(and(eq(uploads.id, source.uploadId), eq(uploads.orgId, request.orgId)))
-          .limit(1);
-  const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
-  if (!space) {
-    throw notFound(
-      "fileId" in source
-        ? `File '${source.fileId}' not found`
-        : `Upload '${source.uploadId}' not found`,
+    if (!uploadId)
+      throw invalidRequest("Attachment URI must be an 'upload://' or 'appfile://' URI");
+    const [owner] = await db
+      .select({ spaceId: uploads.spaceId })
+      .from(uploads)
+      .where(and(eq(uploads.id, uploadId), eq(uploads.orgId, request.orgId)))
+      .limit(1);
+    const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
+    if (!space) throw notFound(`Upload '${uploadId}' not found`);
+    // Touch before materialization so a refused space creates no durable file.
+    await request.beforeResolve(space.id);
+    row = await createFileFromUpload(
+      { orgId: request.orgId, spaceId: space.id },
+      { type: "user", id: request.userId },
+      uploadId,
+      { chatSessionId: request.chatSessionId },
     );
-  }
-  const scope: SpaceScope = { orgId: request.orgId, spaceId: space.id };
-  // `beforeResolve` records the space as touched: only once the attachment is readable (a
-  // refused file touches nothing), and before an upload is materialized (a caller the chat
-  // refuses in this space leaves no file behind).
-  let row: Awaited<ReturnType<typeof createFileFromUpload>>;
-  if ("fileId" in source) {
-    const resolved = await getFileForActor(scope, actor, source.fileId, space.permissions);
-    if (!resolved) throw notFound(`File '${source.fileId}' not found`);
-    await request.beforeResolve(space.id);
-    row = resolved.row;
-  } else {
-    await request.beforeResolve(space.id);
-    row = await createFileFromUpload(scope, actor, source.uploadId, {
-      chatSessionId: request.chatSessionId,
-    });
   }
   return {
     uri: fileUri(row.id),
     name: row.name,
     mime: row.mime,
     size: row.size,
-    spaceId: space.id,
+    spaceId: row.spaceId,
   };
+}
+
+/** The grant every read of a stored file's content asks, whatever the door (REST guards it in middleware). */
+export const FILE_CONTENT_GRANT = "files:read";
+
+/**
+ * Whether a caller may read stored file content in a space. The container ACL of
+ * {@link getFileForActor} says whose file it is, not whether this caller reads files at all, so
+ * every door that reads content outside the REST content route asks this first.
+ */
+export function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
+  return permissions.has(FILE_CONTENT_GRANT);
+}
+
+/** Attaching and reading a stored file use the same space grant and container ACL as the file gallery. */
+async function resolveStoredChatFile(
+  request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces">,
+  fileId: string,
+): Promise<ResolvedFile | null> {
+  const spaces = request.spaces.filter((space) => mayReadFileContent(space.permissions));
+  if (!spaces.length) return null;
+  const [owner] = await db
+    .select({ spaceId: files.spaceId })
+    .from(files)
+    .where(
+      and(
+        eq(files.orgId, request.orgId),
+        eq(files.id, fileId),
+        inArray(
+          files.spaceId,
+          spaces.map((s) => s.id),
+        ),
+      ),
+    )
+    .limit(1);
+  const space = spaces.find((s) => s.id === owner?.spaceId);
+  if (!space) return null;
+  return getFileForActor(
+    { orgId: request.orgId, spaceId: space.id },
+    { type: "user", id: request.userId },
+    fileId,
+    space.permissions,
+  );
+}
+
+export async function readChatAttachment(
+  request: ChatAttachmentRead,
+): Promise<ChatAttachmentContent | null> {
+  const fileId = parseFileUri(request.uri);
+  if (!fileId || !Number.isSafeInteger(request.maxBytes) || request.maxBytes <= 0) return null;
+  request.signal?.throwIfAborted();
+  const resolved = await resolveStoredChatFile(request, fileId);
+  if (!resolved?.capabilities.download) return null;
+  const file = resolved.row;
+  if (previewKind(file.mime) !== request.kind || file.size > request.maxBytes) return null;
+  await request.beforeResolve(file.spaceId);
+  const bytes = await readStoredFileBytes(file, request.signal);
+  return bytes ? { bytes, mime: normalizeMime(file.mime) } : null;
+}
+
+/** After the caller checks its byte cap, enforce the recorded size as storage streams the object. */
+export async function readStoredFileBytes(
+  file: Pick<FileRow, "size" | "storageKey">,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  const stream = await streamFileContent(file.storageKey);
+  if (!stream) return null;
+  // A short or oversized storage object must never be sent or allocate past the verified row size.
+  const bytes = new Uint8Array(file.size);
+  let written = 0;
+  await stream.pipeTo(
+    new WritableStream<Uint8Array>({
+      write(chunk) {
+        if (chunk.length > bytes.length - written)
+          throw new Error("Stored file exceeds its recorded size");
+        bytes.set(chunk, written);
+        written += chunk.length;
+      },
+    }),
+    { signal },
+  );
+  return written === bytes.length ? bytes : null;
 }
 
 // ---------------------------------------------------------------------------
