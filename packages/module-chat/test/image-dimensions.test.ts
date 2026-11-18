@@ -125,6 +125,51 @@ describe("imageDimensions", () => {
   });
 });
 
+describe("a GIF's frames", () => {
+  /** Screen header, then one frame whose own descriptor declares `frame` (and no colour table, one empty LZW block). */
+  const withFrame = (screen: [number, number], frame: [number, number]) =>
+    new Uint8Array([
+      ...ascii("GIF89a"),
+      ...le16(screen[0]),
+      ...le16(screen[1]),
+      0,
+      0,
+      0,
+      // A graphic control extension, to be skipped.
+      0x21,
+      0xf9,
+      4,
+      0,
+      0,
+      0,
+      0,
+      0,
+      // Image descriptor: separator, left, top, width, height, flags.
+      0x2c,
+      0,
+      0,
+      0,
+      0,
+      ...le16(frame[0]),
+      ...le16(frame[1]),
+      0,
+      // LZW minimum code size, one empty sub-block terminator.
+      2,
+      0,
+      0x3b,
+    ]);
+
+  it("answers the largest of the logical screen and the frames", () => {
+    expect(imageDimensions(withFrame([10, 10], [30, 5]))).toEqual({ width: 30, height: 5 });
+    expect(imageDimensions(withFrame([10, 10], [8, 8]))).toEqual({ width: 10, height: 10 });
+  });
+
+  it("refuses a GIF whose frame exceeds the cap though its screen is tiny", () => {
+    expect(isDecodable(withFrame([1, 1], [30_000, 30_000]))).toBe(false);
+    expect(isDecodable(withFrame([10, 10], [10, 10]))).toBe(true);
+  });
+});
+
 describe("isDecodable", () => {
   it("accepts an ordinary photo and refuses one over 40 megapixels or one it cannot read", () => {
     expect(isDecodable(jpegHeader(6000, 4000))).toBe(true);

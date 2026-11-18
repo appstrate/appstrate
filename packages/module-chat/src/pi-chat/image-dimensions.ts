@@ -29,9 +29,45 @@ function png(b: Uint8Array): Size | null {
   return { width: u32be(b, 16), height: u32be(b, 20) };
 }
 
+/** Frames of a GIF whose descriptor is read: a longer animation is judged on these. */
+const GIF_MAX_FRAMES = 64;
+
+/**
+ * A GIF declares its size twice: the logical screen in the header, and each frame in its own image
+ * descriptor, which may exceed the screen. A decoder allocates for the frames, so the answer is the
+ * largest of the screen and of the first frames, walked block by block.
+ */
 function gif(b: Uint8Array): Size | null {
-  if (b.length < 10 || ascii(b, 0, 3) !== "GIF") return null;
-  return { width: u16le(b, 6), height: u16le(b, 8) };
+  if (b.length < 13 || ascii(b, 0, 3) !== "GIF") return null;
+  let largest: Size = { width: u16le(b, 6), height: u16le(b, 8) };
+  const consider = (width: number, height: number) => {
+    if (width * height > largest.width * largest.height) largest = { width, height };
+  };
+  // Global colour table, when the packed flags say there is one.
+  let at = 13 + ((b[10]! & 0x80) !== 0 ? 3 * 2 ** ((b[10]! & 7) + 1) : 0);
+  const skipSubBlocks = (from: number): number => {
+    let position = from;
+    while (position < b.length && b[position] !== 0) position += 1 + b[position]!;
+    return position + 1;
+  };
+  for (let frames = 0; at < b.length && frames < GIF_MAX_FRAMES;) {
+    const block = b[at]!;
+    if (block === 0x3b) break;
+    if (block === 0x21) {
+      at = skipSubBlocks(at + 2);
+    } else if (block === 0x2c) {
+      if (at + 10 > b.length) break;
+      consider(u16le(b, at + 5), u16le(b, at + 7));
+      frames += 1;
+      const flags = b[at + 9]!;
+      at += 10 + ((flags & 0x80) !== 0 ? 3 * 2 ** ((flags & 7) + 1) : 0);
+      // LZW minimum code size, then the data sub-blocks.
+      at = skipSubBlocks(at + 1);
+    } else {
+      break;
+    }
+  }
+  return largest;
 }
 
 /** Start-of-frame markers, which carry the size: SOF0 to SOF15 but DHT (C4), JPG (C8) and DAC (CC). */
