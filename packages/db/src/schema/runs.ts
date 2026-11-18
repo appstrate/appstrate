@@ -402,6 +402,12 @@ export const runs = pgTable(
       .where(
         sql`${table.bootDeadlineAt} IS NOT NULL AND ${table.sinkClosedAt} IS NULL AND ${table.lastEventSequence} = 0`,
       ),
+    // Terminal-run cursor read (`PlatformServices.runs.listTerminal`): a metering
+    // module sweeps finished runs by `(completed_at, id)`. Partial — a run that
+    // has not finished carries no `completed_at` and is never read this way.
+    index("idx_runs_completed_at")
+      .on(table.completedAt, table.id)
+      .where(sql`${table.completedAt} IS NOT NULL`),
     // Tenant-integrity FK for the launching conversation. The live migration
     // uses PostgreSQL's column-list `SET NULL (chat_session_id)` so deleting a
     // session detaches the run without trying to null the NOT-NULL org_id.

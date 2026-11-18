@@ -1388,6 +1388,31 @@ export interface LlmUsageLedgerRow {
 }
 
 /**
+ * One finished run, as {@link PlatformServices.runs.listTerminal} projects it — the read a
+ * metering consumer settles a run's compute time from. OSS-neutral: the facts of the run,
+ * never a price or an entitlement.
+ */
+export interface TerminalRunRow {
+  id: string;
+  orgId: string;
+  /**
+   * Whose process executed the run: `"platform"` ran in a sandbox the platform operates,
+   * `"remote"` on a host the caller supplied (the platform only orchestrated it).
+   */
+  runOrigin: "platform" | "remote";
+  status: TerminalRunStatus;
+  /**
+   * The run's recorded duration in milliseconds — the figure `GET /api/runs/{id}` serves as
+   * `duration`. It starts when the run leaves the queue (the `pending` to `running` flip, or
+   * the runner's own loop start), never at the creation of the row, so waiting for a slot is
+   * not in it. `null` only when the run recorded none.
+   */
+  durationMs: number | null;
+  /** When the run became terminal — the cursor column. */
+  completedAt: Date;
+}
+
+/**
  * Audit `before` / `after` payload with camelCase top-level keys (CASING_CONVENTIONS 4m):
  * a raw snake_case body, or a `Record<string, unknown>` that could hide one, does not compile.
  */
@@ -1517,6 +1542,25 @@ export interface PlatformServices {
      * mirror, or sit above ids that were skipped.
      */
     settledFrontier(): Promise<number>;
+  };
+  /**
+   * Cursor read of FINISHED runs, ordered by `(completedAt, id)` ASC. A metering consumer
+   * that settles compute time per run sweeps it with a `(completedAt, id)` watermark
+   * instead of a cross-module SQL join into `runs`.
+   *
+   * `after` is exclusive: the rows strictly past that `(completedAt, id)` pair. Omitted, the
+   * read starts at the oldest finished run. `limit` defaults to 500, capped at 1000.
+   *
+   * A run's `completedAt` is stamped by the process that finalizes it, BEFORE the
+   * transaction that closes it commits, so a row can become visible BELOW a watermark a
+   * consumer already advanced. A consumer must therefore re-read a bounded window below its
+   * watermark and de-duplicate by run id; this service answers whatever is committed.
+   */
+  runs: {
+    listTerminal(args: {
+      after?: { completedAt: Date; id: string };
+      limit?: number;
+    }): Promise<TerminalRunRow[]>;
   };
   /**
    * In-process dispatch into the fully-wired platform Hono app — the same

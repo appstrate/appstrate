@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`TerminalRunRow`, `PlatformServices.runs.listTerminal`** (`@appstrate/core/module`): a finished
+  run (`id`, `orgId`, `runOrigin`, `status`, `durationMs`, `completedAt`) and the cursor read of
+  them, ordered by `(completedAt, id)` with an exclusive `after` keyset. A metering module settles a
+  run's compute time from it without a SQL join into `runs`. A consumer must re-read a bounded
+  window below its watermark: `completedAt` is stamped before the closing transaction commits.
 - **`AppstrateTurnContext`, `AppstrateTurnMetadata.context`** (`@appstrate/core/chat-turn-metadata`,
   #2318): the context of a chat turn's last settled model call (`tokens`), the window the engine
   ran against (`window`), its compaction threshold (`compactAt`) and whether the engine
