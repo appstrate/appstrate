@@ -11,6 +11,7 @@ import {
   periodStartOf,
   quotaStanding,
 } from "../../src/compute/period.ts";
+import { aggregateByOrgAndMonth } from "../../src/compute/settlement.ts";
 
 describe("billableSeconds", () => {
   it("counts a 40 second run as 40 seconds", () => {
@@ -76,5 +77,34 @@ describe("quotaStanding", () => {
 
   it("caps the share at 100 when the soft cap let consumption overshoot", () => {
     expect(quotaStanding(90_000, 1000)).toMatchObject({ percent: 100, exhausted: true });
+  });
+});
+
+describe("aggregateByOrgAndMonth", () => {
+  it("adds one increment per org and month, ignoring runs worth nothing", () => {
+    expect(
+      aggregateByOrgAndMonth([
+        { orgId: "b", periodStart: "2026-11-01", seconds: 10 },
+        { orgId: "b", periodStart: "2026-11-01", seconds: 5 },
+        { orgId: "b", periodStart: "2026-11-01", seconds: 0 },
+        { orgId: "a", periodStart: "2026-11-01", seconds: 1 },
+      ]),
+    ).toEqual([
+      { orgId: "a", periodStart: "2026-11-01", seconds: 1 },
+      { orgId: "b", periodStart: "2026-11-01", seconds: 15 },
+    ]);
+  });
+
+  it("orders increments by org then month whatever the order of the runs, so two replicas lock counter rows in the same order", () => {
+    const forward = [
+      { orgId: "x", periodStart: "2026-11-01", seconds: 1 },
+      { orgId: "y", periodStart: "2026-11-01", seconds: 1 },
+      { orgId: "x", periodStart: "2026-10-01", seconds: 1 },
+    ];
+    const reversed = [...forward].reverse();
+    const keys = (rows: typeof forward) =>
+      aggregateByOrgAndMonth(rows).map((r) => `${r.orgId}|${r.periodStart}`);
+    expect(keys(forward)).toEqual(["x|2026-10-01", "x|2026-11-01", "y|2026-11-01"]);
+    expect(keys(reversed)).toEqual(keys(forward));
   });
 });
