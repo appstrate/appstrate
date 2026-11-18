@@ -35,9 +35,9 @@ function PlanCard({
   return (
     <button
       className={cn(
-        // h-56, not h-52: the fixed height has to hold price + credits +
+        // h-60: the fixed height has to hold price + credits + compute minutes +
         // storage without the entitlement lines wrapping into the description.
-        "relative flex h-56 flex-col items-start rounded-lg border p-5 text-left transition-colors",
+        "relative flex h-60 flex-col items-start rounded-lg border p-5 text-left transition-colors",
         isCurrent
           ? "border-primary bg-primary/5"
           : isUpgrade
@@ -72,6 +72,13 @@ function PlanCard({
             count: plan.credit_quota.toLocaleString(),
           })}
         </span>
+        {plan.included_compute_minutes !== null && (
+          <span className="text-muted-foreground text-xs">
+            {t("onboarding.planCompute", {
+              count: plan.included_compute_minutes.toLocaleString(),
+            })}
+          </span>
+        )}
         {/* Storage entitlement — the plan's other metered resource. */}
         <span className="text-muted-foreground text-xs">
           {t("onboarding.planStorage", { size: formatBytes(plan.file_storage_bytes) })}

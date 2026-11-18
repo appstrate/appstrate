@@ -37,13 +37,23 @@ function render(plans: BillingPlanDetail[]): string {
 describe("PlanGrid storage entitlement", () => {
   it("prices storage under the credits of every plan", () => {
     const html = render([
-      { id: "free", name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: GIB },
+      {
+        id: "free",
+        name: "Free",
+        price: 0,
+        credit_quota: 5000,
+        file_storage_bytes: GIB,
+        included_compute_minutes: 1000,
+        max_concurrent_runs: 3,
+      },
       {
         id: "pro",
         name: "Pro",
         price: 99,
         credit_quota: 80_000,
         file_storage_bytes: 100 * GIB,
+        included_compute_minutes: null,
+        max_concurrent_runs: null,
       },
     ]);
 
@@ -53,7 +63,15 @@ describe("PlanGrid storage entitlement", () => {
 
   it("still prices a zero entitlement rather than treating it as absent", () => {
     const html = render([
-      { id: "free", name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: 0 },
+      {
+        id: "free",
+        name: "Free",
+        price: 0,
+        credit_quota: 5000,
+        file_storage_bytes: 0,
+        included_compute_minutes: null,
+        max_concurrent_runs: null,
+      },
     ]);
 
     expect(html).toContain("0 o de stockage");
