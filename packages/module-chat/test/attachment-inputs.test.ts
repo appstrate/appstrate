@@ -48,6 +48,24 @@ describe("loadAttachmentImages", () => {
     });
   });
 
+  it("expires an image after three subsequent user messages even if all are text only", async () => {
+    const image = user("image", "appfile://file_chart");
+    const reply: UIMessage = {
+      id: "reply",
+      role: "assistant",
+      parts: [{ type: "text", text: "OK" }],
+    };
+    const messages = [image, reply, user("text1"), user("text2")];
+    const reads: string[] = [];
+    const read = async (uri: string) => {
+      reads.push(uri);
+      return pixel;
+    };
+    expect((await loadAttachmentImages(messages, read, signal)).has(image.id)).toBe(true);
+    expect((await loadAttachmentImages([...messages, user("text3")], read, signal)).size).toBe(0);
+    expect(reads).toEqual(["appfile://file_chart"]);
+  });
+
   it("bounds reads per message and shares a byte budget across replay and the current request", async () => {
     const messages = Array.from({ length: 5 }, (_, i) =>
       user(String(i), ...Array.from({ length: 6 }, (_, j) => `appfile://file_${i}_${j}`)),

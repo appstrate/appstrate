@@ -12,8 +12,8 @@ type UserContent = Extract<Message, { role: "user" }>["content"];
 export type PiImageContent = Extract<Exclude<UserContent, string>[number], { type: "image" }>;
 export type AttachmentImages = ReadonlyMap<string, ReadonlyMap<string, PiImageContent>>;
 
-/** Limit storage reads on long histories even when most or all files are unavailable. */
-const IMAGE_TURNS = 3;
+/** Images are eligible in the newest three user messages, including the current prompt. */
+const RECENT_USER_MESSAGES = 3;
 const FILES_PER_KIND_PER_MESSAGE = 4;
 
 /** Rebuild recent image inputs from their ACL-checked files, newest turn first. */
@@ -27,18 +27,17 @@ export async function loadAttachmentImages(
   let turns = 0;
   for (
     let index = messages.length - 1;
-    index >= 0 && turns < IMAGE_TURNS && remaining >= 4;
+    index >= 0 && turns < RECENT_USER_MESSAGES && remaining >= 4;
     index--
   ) {
     const message = messages[index]!;
     if (message.role !== "user") continue;
+    turns++;
     const uris = new Set(
       message.parts.flatMap((part) =>
         part.type === "file" && isRasterImageMime(part.mediaType) ? [part.url] : [],
       ),
     );
-    if (!uris.size) continue;
-    turns++;
     const images = new Map<string, PiImageContent>();
     for (const uri of [...uris].slice(0, FILES_PER_KIND_PER_MESSAGE)) {
       signal.throwIfAborted();
