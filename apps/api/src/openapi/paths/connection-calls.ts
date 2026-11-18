@@ -10,9 +10,9 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 const connectionCallSchema = {
   type: "object",
   description:
-    "One call the credential proxy made with a connection's credential. The journal outlives what " +
-    "it describes: every id is a plain value and may name a connection, space, run, key or " +
-    "principal that no longer exists.",
+    "One call the credential proxy made outside a run or for a remote run, with or without a " +
+    "connection's credential. The journal outlives what it describes: every id is a plain value " +
+    "and may name a connection, space, run, key or principal that no longer exists.",
   required: [
     "id",
     "createdAt",
@@ -36,12 +36,20 @@ const connectionCallSchema = {
     id: { type: "integer", description: "Monotonic row id; the pagination cursor." },
     createdAt: { type: "string", format: "date-time" },
     spaceId: { type: "string", description: "The space the call was made in." },
-    connection_id: { type: "string", format: "uuid" },
+    connection_id: {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "The connection the call used; null when the integration binds none (unauthenticated, " +
+        "AFPS §7.2), and then `owner_type` and `owner_id` are null too.",
+    },
     integration_package_id: { type: "string", description: "The integration (`@scope/name`)." },
     owner_type: {
       type: ["string", "null"],
       enum: ["user", "end_user", null],
-      description: "The connection's owner when the call was made; null when it was gone by then.",
+      description:
+        "The connection's owner when the call was made; null when it was gone by then, or when " +
+        "the call used no connection.",
     },
     owner_id: { type: ["string", "null"] },
     actor_type: {
@@ -202,8 +210,8 @@ export const connectionCallsPaths = {
         "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of " +
         "`POST /api/integrations/{packageId}/discover`) made in the current " +
         "space, whatever the connection and whoever owns it: who used which connection, against " +
-        "which host, with what outcome. One row per call that may have sent a " +
-        "credential, successful or not. Requires `integrations:configure`, the permission that " +
+        "which host, with what outcome. One row per call, with or without a credential " +
+        "(`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that " +
         "governs which credential the space resolves to; it is session-only, so no API key " +
         "reads this journal. Calls made in another space are never listed, including those made " +
         "with a connection shared into both. " +

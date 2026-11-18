@@ -31513,7 +31513,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One call the credential proxy made with a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
+                        "description": "One call the credential proxy made outside a run or for a remote run, with or without a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
                         "required": [
                           "id",
                           "createdAt",
@@ -31547,8 +31547,9 @@
                             "description": "The space the call was made in."
                           },
                           "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
+                            "type": ["string", "null"],
+                            "format": "uuid",
+                            "description": "The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too."
                           },
                           "integration_package_id": {
                             "type": "string",
@@ -31557,7 +31558,7 @@
                           "owner_type": {
                             "type": ["string", "null"],
                             "enum": ["user", "end_user", null],
-                            "description": "The connection's owner when the call was made; null when it was gone by then."
+                            "description": "The connection's owner when the call was made; null when it was gone by then, or when the call used no connection."
                           },
                           "owner_id": {
                             "type": ["string", "null"]
@@ -31638,7 +31639,7 @@
         "operationId": "listConnectionCalls",
         "tags": ["Integrations"],
         "summary": "The credential proxy's calls made in the current space",
-        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
+        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call, with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -31744,7 +31745,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One call the credential proxy made with a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
+                        "description": "One call the credential proxy made outside a run or for a remote run, with or without a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
                         "required": [
                           "id",
                           "createdAt",
@@ -31778,8 +31779,9 @@
                             "description": "The space the call was made in."
                           },
                           "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
+                            "type": ["string", "null"],
+                            "format": "uuid",
+                            "description": "The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too."
                           },
                           "integration_package_id": {
                             "type": "string",
@@ -31788,7 +31790,7 @@
                           "owner_type": {
                             "type": ["string", "null"],
                             "enum": ["user", "end_user", null],
-                            "description": "The connection's owner when the call was made; null when it was gone by then."
+                            "description": "The connection's owner when the call was made; null when it was gone by then, or when the call used no connection."
                           },
                           "owner_id": {
                             "type": ["string", "null"]

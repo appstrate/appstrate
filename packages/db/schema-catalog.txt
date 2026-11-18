@@ -80,7 +80,7 @@ column connection_calls.actor_id text not null
 column connection_calls.actor_type text not null
 column connection_calls.api_key_id text
 column connection_calls.auth_method text not null
-column connection_calls.connection_id uuid not null
+column connection_calls.connection_id uuid
 column connection_calls.created_at timestamp with time zone not null default now()
 column connection_calls.duration_ms integer not null
 column connection_calls.host text not null

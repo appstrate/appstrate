@@ -1442,7 +1442,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call, with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -13501,12 +13501,15 @@ export interface operations {
                             createdAt: string;
                             /** @description The space the call was made in. */
                             spaceId: string;
-                            /** Format: uuid */
-                            connection_id: string;
+                            /**
+                             * Format: uuid
+                             * @description The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too.
+                             */
+                            connection_id: string | null;
                             /** @description The integration (`@scope/name`). */
                             integration_package_id: string;
                             /**
-                             * @description The connection's owner when the call was made; null when it was gone by then.
+                             * @description The connection's owner when the call was made; null when it was gone by then, or when the call used no connection.
                              * @enum {string|null}
                              */
                             owner_type: "user" | "end_user" | null;
@@ -17088,12 +17091,15 @@ export interface operations {
                             createdAt: string;
                             /** @description The space the call was made in. */
                             spaceId: string;
-                            /** Format: uuid */
-                            connection_id: string;
+                            /**
+                             * Format: uuid
+                             * @description The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too.
+                             */
+                            connection_id: string | null;
                             /** @description The integration (`@scope/name`). */
                             integration_package_id: string;
                             /**
-                             * @description The connection's owner when the call was made; null when it was gone by then.
+                             * @description The connection's owner when the call was made; null when it was gone by then, or when the call used no connection.
                              * @enum {string|null}
                              */
                             owner_type: "user" | "end_user" | null;

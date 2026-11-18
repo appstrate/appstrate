@@ -13,17 +13,19 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Journal of the credential proxy's calls: one row per call that may have sent a connection's
- * credential, whatever its outcome. Written by `recordConnectionCall`
+ * Journal of the credential proxy's calls outside a run and for remote runs (`X-Run-Id`): one row
+ * per call or MCP operation that reached an upstream, with or without a credential, whatever its
+ * outcome. Written by `recordConnectionCall`
  * (`apps/api/src/services/credential-proxy/call-journal.ts`), best-effort like `recordAudit`.
  *
  * No foreign keys, on any column, for the reason `audit_events` states: the journal outlives the
  * organization, space, connection, run, key and principal it names, so every id here is a plain
  * value that may name a row that no longer exists.
  *
- * `owner_type` / `owner_id` are the connection's owner when the call was made (`user` /
- * `end_user`), NULL when the connection was gone by then. `actor_type` / `actor_id` are who acted,
- * `api_key_id` the key they acted through, if any.
+ * `connection_id` is NULL when the integration binds no connection (unauthenticated, AFPS §7.2),
+ * and `owner_*` with it. `owner_type` / `owner_id` are the connection's owner when the call was
+ * made (`user` / `end_user`), NULL when the connection was gone by then. `actor_type` /
+ * `actor_id` are who acted, `api_key_id` the key they acted through, if any.
  *
  * `host` comes from the target as the caller wrote it, before substitution: a `{{field}}`
  * placeholder is stored as written, so the row never holds a decrypted credential value. `outcome`
@@ -36,7 +38,7 @@ export const connectionCalls = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     orgId: uuid("org_id").notNull(),
     spaceId: text("space_id").notNull(),
-    connectionId: uuid("connection_id").notNull(),
+    connectionId: uuid("connection_id"),
     integrationId: text("integration_id").notNull(),
     ownerType: text("owner_type"),
     ownerId: text("owner_id"),
