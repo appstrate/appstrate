@@ -57,6 +57,15 @@ export function ownsRun(
   return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
 }
 
+/** Whether a caller holding `permissions` in a run's space reads that loaded run. */
+export function readsRun(
+  permissions: ReadonlySet<string>,
+  actor: Actor,
+  row: { userId: string | null; endUserId: string | null },
+): boolean {
+  return canReadEveryRun(permissions) || ownsRun(actor, row);
+}
+
 /**
  * WHERE fragment for the runs this principal launched — the narrow half of
  * {@link runVisibilityFilter}, and on its own what `GET /api/runs?user=me`

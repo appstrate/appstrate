@@ -228,15 +228,17 @@ const fileListQueryParameters = [
   },
 ];
 
-/** The page both galleries answer. */
 /** How a read by id reaches a file: the rule of run inputs and the MCP file tools. */
 const FILE_BY_ID_REACH =
   "The file is resolved in its own space, which may differ from `X-Space-Id`: the caller " +
-  "needs `files:read` there, as its credential reaches that space. A session reaches every " +
-  "space where it holds a role; an API key, an end-user or a token issued for one space " +
-  "reaches only that space; a chat turn's credential also reaches its own conversation's " +
+  "needs `files:read` there, as its credential reaches that space, else the answer is the 404 " +
+  "of a missing file. A session, an MCP instance token and an OAuth delegate with an " +
+  "organization audience reach every space where the user holds a role; an API key, an " +
+  "end-user, a token issued for one space and a request through the space-pinned MCP endpoint " +
+  "reach only that space; a chat turn's credential also reaches its own conversation's " +
   "uploads. A credential whose scopes omit `files:read` is refused (403).";
 
+/** The page both galleries answer. */
 const fileListResponses = {
   "200": {
     description: "A page of files.",
@@ -334,7 +336,8 @@ export const filesPaths = {
         "with the `files:delete` permission (owner/admin), or the file's own creator on a " +
         "credential that admits `files:delete` — an API key or token whose scopes omit it " +
         "does not inherit its creator's files. " +
-        "A file referenced by a run cannot be deleted until those consumer runs are removed.",
+        "A file referenced by a run cannot be deleted until those consumer runs are removed. " +
+        "Unlike a read, `X-Space-Id` must name the file's own space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -379,7 +382,8 @@ export const filesPaths = {
         "`files:delete` — an API key or token whose scopes omit it does not inherit its " +
         "creator's files. Idempotent — keeping an " +
         "already-permanent file is a no-op that returns 200 with the unchanged file. " +
-        "An id the caller cannot read returns 404.",
+        "An id the caller cannot read returns 404. Unlike a read, `X-Space-Id` must name the " +
+        "file's own space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

@@ -58,6 +58,8 @@ import {
   readChatAttachment,
   readStoredFileBytes,
   resolveChatAttachment,
+  resolveFilesAcrossSpaces,
+  grantInList,
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
@@ -1414,6 +1416,38 @@ describe("files service + routes", () => {
         )
       ).data,
     ).toEqual([]);
+  });
+
+  it("resolves several files in one pass, asking each space's grant once", async () => {
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    const otherScope = { orgId: ctx.orgId, spaceId: other.id };
+    const ids: string[] = [];
+    for (const target of [scope, scope, otherScope, otherScope]) {
+      const runId = await seedRunRow(target, { userId: ctx.user.id });
+      ids.push(
+        (await publishStream(target, runId, "f.txt", "x", { userId: ctx.user.id, endUserId: null }))
+          .row.id,
+      );
+    }
+    const asked: string[] = [];
+    const grantIn = grantInList([
+      [ctx.defaultSpaceId, new Set(["files:read"])],
+      [other.id, new Set<string>()],
+    ]);
+    const resolved = await resolveFilesAcrossSpaces(
+      ctx.orgId,
+      userActor,
+      [...ids, ids[0]!, "file_missing00", "not-an-id"],
+      {
+        grantIn: (spaceId) => {
+          asked.push(spaceId);
+          return grantIn(spaceId);
+        },
+      },
+    );
+    // The default space's two files; the other space holds no `files:read`.
+    expect(resolved.map((file) => file.row.id).sort()).toEqual([ids[0]!, ids[1]!].sort());
+    expect(asked.sort()).toEqual([ctx.defaultSpaceId, other.id].sort());
   });
 
   it("a chat attachment resolves in the space its file belongs to, under the caller's set there", async () => {

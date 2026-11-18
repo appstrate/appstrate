@@ -92,11 +92,12 @@ export async function respondFileList(
 
 /** The file the path names, in its own space under the request's reach (`requestFileAccess`). */
 function resolveFileById(c: Context<AppEnv>) {
+  const { orgId, spaceId } = getSpaceScope(c);
   return resolveFileAcrossSpaces(
-    getSpaceScope(c).orgId,
+    orgId,
     getActor(c),
     c.req.param("id")!,
-    requestFileAccess(c, getSpaceScope(c).spaceId),
+    requestFileAccess(c, spaceId),
     fileLifecycleCeiling(c),
   );
 }

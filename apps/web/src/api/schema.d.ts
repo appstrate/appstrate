@@ -1298,14 +1298,14 @@ export interface paths {
         };
         /**
          * Get file metadata
-         * @description Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space. A session reaches every space where it holds a role; an API key, an end-user or a token issued for one space reaches only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). On top of it access is inherited from the file's container, so an id the caller cannot read returns 404.
+         * @description Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space, else the answer is the 404 of a missing file. A session, an MCP instance token and an OAuth delegate with an organization audience reach every space where the user holds a role; an API key, an end-user, a token issued for one space and a request through the space-pinned MCP endpoint reach only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). On top of it access is inherited from the file's container, so an id the caller cannot read returns 404.
          */
         get: operations["getFile"];
         put?: never;
         post?: never;
         /**
          * Delete a file
-         * @description Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file referenced by a run cannot be deleted until those consumer runs are removed.
+         * @description Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file referenced by a run cannot be deleted until those consumer runs are removed. Unlike a read, `X-Space-Id` must name the file's own space.
          */
         delete: operations["deleteFile"];
         options?: never;
@@ -1322,7 +1322,7 @@ export interface paths {
         };
         /**
          * Download file content
-         * @description Download the file bytes with `Content-Disposition: attachment`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space. A session reaches every space where it holds a role; an API key, an end-user or a token issued for one space reaches only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         * @description Download the file bytes with `Content-Disposition: attachment`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space, else the answer is the 404 of a missing file. A session, an MCP instance token and an OAuth delegate with an organization audience reach every space where the user holds a role; an API key, an end-user, a token issued for one space and a request through the space-pinned MCP endpoint reach only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).
          */
         get: operations["getFileContent"];
         put?: never;
@@ -1344,7 +1344,7 @@ export interface paths {
         put?: never;
         /**
          * Keep a file (clear its expiry)
-         * @description Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.
+         * @description Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404. Unlike a read, `X-Space-Id` must name the file's own space.
          */
         post: operations["keepFile"];
         delete?: never;

@@ -349,6 +349,27 @@ describe("run inputs across spaces", () => {
     expect(await listed(authHeaders(colleague))).toEqual([]);
   });
 
+  it("a run's file list names no input of a run the caller may not read", async () => {
+    // The colleague reads their own output in A, and their own runs only in B.
+    const colleague = await memberContext(ctx, "member");
+    for (const spaceId of [ctx.defaultSpaceId, teamB]) {
+      await seedSpaceGrant({
+        orgId: ctx.orgId,
+        spaceId,
+        userId: colleague.user.id,
+        permissions: ["runs:read", "files:read"],
+      });
+    }
+    const theirs = await runOutput(ctx.defaultSpaceId, colleague.user.id);
+    // The author (reading every run of A) gives it to a run of theirs in B.
+    const runId = await launchedRunId(await launch(authHeaders(ctx), teamB, [theirs]));
+    const res = await app.request(`/api/files?runId=${runId}`, {
+      headers: { ...authHeaders(colleague), "X-Space-Id": teamB },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+  });
+
   it("a team run keeps no claim on a personal upload: it dies with its conversation", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
     const uri = await chatUpload(ctx.user.id, sessionId);

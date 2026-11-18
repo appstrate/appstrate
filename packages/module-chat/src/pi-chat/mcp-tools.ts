@@ -438,13 +438,21 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 /** How deep {@link fileUrisIn} walks a call's arguments; deeper is refused. */
 const MAX_ARGUMENT_DEPTH = 32;
 
-/** The distinct `appfile://` URIs in a call's arguments; null past {@link MAX_ARGUMENT_DEPTH}. */
-function fileUrisIn(value: unknown, found = new Set<string>(), depth = 0): Set<string> | null {
-  if (depth > MAX_ARGUMENT_DEPTH) return null;
-  if (isFileUri(value)) found.add(value);
-  else if (value && typeof value === "object") {
-    for (const item of Object.values(value)) {
-      if (!fileUrisIn(item, found, depth + 1)) return null;
+/**
+ * The distinct `appfile://` URIs in a call's arguments, each with the dotted path of the argument
+ * that first holds it; null past {@link MAX_ARGUMENT_DEPTH}.
+ */
+function fileUrisIn(
+  value: unknown,
+  found = new Map<string, string>(),
+  path: readonly string[] = [],
+): Map<string, string> | null {
+  if (path.length > MAX_ARGUMENT_DEPTH) return null;
+  if (isFileUri(value)) {
+    if (!found.has(value)) found.set(value, path.join("."));
+  } else if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (!fileUrisIn(item, found, [...path, key])) return null;
     }
   }
   return found;
@@ -461,10 +469,12 @@ type CallRefusal = Record<string, unknown>;
 
 /**
  * Admit a call: the spaces it names must be the turn's, and each file it names must be the
- * conversation's own or live in a turn space where the caller reads files. A call `pinned` to
- * its named space (it is dispatched there) reaches no file of another space. A missing file and
- * a refused one get the same answer, naming no space. Everything is checked before anything is
- * recorded.
+ * conversation's own or live in a turn space where the caller holds `files:read`. A call `pinned`
+ * to its named space (it is dispatched there) reaches no file of another space. Everything is
+ * checked before anything is recorded. A missing file and one refused here get the platform's
+ * answer for a file it refuses (`not_found` naming the URI and its argument, never a space), so a
+ * file the platform then refuses by its container ACL, in a turn space the caller reads files
+ * in (and which is recorded: the caller acts there), answers the same.
  */
 async function admitCall(
   organization: TurnSpaces,
@@ -481,9 +491,9 @@ async function admitCall(
       error: `Arguments nest deeper than ${MAX_ARGUMENT_DEPTH} levels.`,
     };
   }
-  const fileSpaces = await organization.fileSpaces([...uris]);
+  const fileSpaces = await organization.fileSpaces([...uris.keys()]);
   const spaces = new Set(call.named);
-  for (const uri of uris) {
+  for (const [uri, argument] of uris) {
     const space = fileSpaces.get(uri);
     if (space === null) continue;
     const reachable =
@@ -492,7 +502,9 @@ async function admitCall(
       organization.spaces.some(
         (turnSpace) => turnSpace.id === space && turnSpace.permissions.includes("files:read"),
       );
-    if (!reachable) return { code: "not_found", error: `File not found: ${uri}` };
+    if (!reachable) {
+      return { code: "not_found", error: `File not found: ${uri}`, arguments: [argument] };
+    }
     spaces.add(space);
   }
   for (const space of spaces) await organization.touch(space);
@@ -525,8 +537,12 @@ function makeForwardExtension(
           pinned: !CROSS_SPACE_FILE_TOOLS.has(toolName),
         });
         if (refusal) {
+          // Rendered as the platform renders its own refusals (`refusalResult`).
           return withTurnBudgetNote(
-            toPiToolResult(refusal, offerScopeOf(toolName, { arguments: args })),
+            mcpResultToPi(
+              { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] },
+              offerScopeOf(toolName, { arguments: args }),
+            ),
             turnBudget,
           );
         }
@@ -620,7 +636,7 @@ function makeReadResourceExtension(
           organization,
           skillSpace
             ? { named: [skillSpace], args: undefined, pinned: false }
-            : { named: [], args: uri, pinned: false },
+            : { named: [], args: { uri }, pinned: false },
         );
         if (refusal) {
           return withTurnBudgetNote(

@@ -17,6 +17,7 @@ import {
   spaceArgumentRefusal,
   type OrgWideSpaces,
 } from "../../../apps/api/src/modules/mcp/spaces.ts";
+import { refusalResult } from "../../../apps/api/src/modules/mcp/tool-results.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -379,15 +380,32 @@ describe("the files a call names", () => {
       const [missing, outside, unreadable] = await Promise.all(
         ["file_nowhere1", "file_gamma003", "file_delta003"].map((id) => answer(`appfile://${id}`)),
       );
-      const shape = (answered: string, id: string) => answered.replace(id, "<id>");
-      expect(JSON.parse(missing)).toEqual({
-        code: "not_found",
-        error: "File not found: appfile://file_nowhere1",
-      });
-      expect(shape(outside, "file_gamma003")).toBe(shape(missing, "file_nowhere1"));
-      expect(shape(unreadable, "file_delta003")).toBe(shape(missing, "file_nowhere1"));
+      // Byte for byte what `read_file` answers for a file the platform refuses (container ACL).
+      const platform = (id: string) =>
+        (
+          refusalResult({
+            code: "not_found",
+            error: `File not found: appfile://${id}`,
+            arguments: ["uri"],
+          }).content[0] as { text: string }
+        ).text;
+      expect(missing).toBe(platform("file_nowhere1"));
+      expect(outside).toBe(platform("file_gamma003"));
+      expect(unreadable).toBe(platform("file_delta003"));
       expect(transport.events).toEqual([]);
       expect(transport.toolCalls).toEqual([]);
+
+      // A nested file names the argument holding it.
+      const nested = JSON.parse(
+        text(
+          await tool("invoke_operation").execute("c2", {
+            operation_id: "x",
+            space_id: "spc_alpha",
+            body: { files: ["appfile://file_alpha001", "appfile://file_nowhere1"] },
+          }),
+        ),
+      );
+      expect(nested.arguments).toEqual(["body.files.1"]);
     } finally {
       await built.close();
     }
