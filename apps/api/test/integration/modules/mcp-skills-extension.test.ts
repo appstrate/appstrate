@@ -315,7 +315,7 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
     const endpoint = "/api/packages/skills/served";
     const incomplete = await rest(ownerHeaders(), endpoint);
     expect(incomplete.status).toBe(422);
-    expect((await incomplete.json()).code).toBe("version_artifact_unavailable");
+    expect(await incomplete.json()).toMatchObject({ code: "version_artifact_unavailable" });
     expect((await call(ownerHeaders(), "skills/list", {})).error).toBeDefined();
     await storage.uploadFile(AGENT_PACKAGES_BUCKET, key, new Uint8Array(bytes!));
     const recovered = await rest(ownerHeaders(), endpoint);
@@ -340,7 +340,7 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
     for (const path of [endpoint, archivePath(uri)]) {
       const res = await rest(ownerHeaders(), path);
       expect(res.status).toBe(422);
-      expect((await res.json()).code).toBe("version_artifact_unavailable");
+      expect(await res.json()).toMatchObject({ code: "version_artifact_unavailable" });
     }
     expect((await call(ownerHeaders(), "skills/list", {})).error).toBeDefined();
     await storage.uploadFile(PACKAGE_ITEMS_BUCKET, key, new Uint8Array(bytes!));
