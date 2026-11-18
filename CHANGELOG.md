@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Client upgrade from beta.68
+
+Chat now belongs to the organization. Substitute the organization ID in these routes, keeping the same HTTP verb and session ID. Existing conversations migrate with `restricted=false`. Clients that need to limit a conversation to one accessible origin space can set `restricted: true` and `spaceId` on the session.
+
+| Operation                       | beta.68                                      | beta.69                                                   |
+| ------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| POST turn                       | `/api/chat`                                  | `/api/orgs/{orgId}/chat`                                  |
+| GET, POST sessions              | `/api/chat/sessions`                         | `/api/orgs/{orgId}/chat/sessions`                         |
+| GET, PATCH, DELETE session      | `/api/chat/sessions/{id}`                    | `/api/orgs/{orgId}/chat/sessions/{id}`                    |
+| PUT read, POST stop, GET stream | `/api/chat/sessions/{id}/{read,stop,stream}` | `/api/orgs/{orgId}/chat/sessions/{id}/{read,stop,stream}` |
+| GET enforced skills             | `/api/chat/enforced-skills`                  | Removed. Remove this request when opening a conversation. |
+
+The run, schedule, notification, file and agent-persistence list handlers validate their query parameters, including the corresponding organization-wide reads. Undeclared keys now return HTTP 400. Send only the parameters declared for that operation in the assembled OpenAPI spec. For example, filter the file gallery with `runId` and schedules with `packageId`.
+
+If an active skill archive becomes unavailable, the served skill catalogue returns an error. Retry the sync after restoring the archive. A successful listing still removes genuinely withdrawn skills from managed CLI directories.
+
 ### Operators
 
 - **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
@@ -200,9 +216,8 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   - System packages `@appstrate/ssh` and `@appstrate/github-git` 1.1.0 carry
     their servers; the `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp`
     packages are removed.
-  - The `package_type` Postgres enum keeps its `mcp-server` label for now
-    (Postgres cannot drop a value in place); application code never produces
-    it.
+  - Drizzle migration `0106` rebuilds the PostgreSQL `package_type` enum and removes
+    its `mcp-server` label. Run operator script `0054` before applying the DDL.
 
 - **The integrations page lists every integration in one list with a Source
   column and filter** (API, remote MCP, local MCP). On an instance running
