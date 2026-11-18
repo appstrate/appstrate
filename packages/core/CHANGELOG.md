@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ChatImageRequest`, `ChatImageContent`, `PlatformServices.readChatImage`**
+  (`@appstrate/core/chat-contract`, `@appstrate/core/module`, #2268): the pixels of an attached
+  `appfile://` image for a chat turn whose model accepts images. `ChatImageRequest` carries the
+  org, the session owner, the URI, the spaces the file may resolve in (each with the caller's
+  permission set there) and a byte cap; `readChatImage` answers a `ChatImageContent`
+  (`{ mime, data, size }`, base64 of the stored bytes) or `null` for anything that cannot be sent
+  (missing, not readable under the container ACL, not a png/jpeg/gif/webp, over the cap). **A module
+  providing `PlatformServices` must now supply `readChatImage`**: the member is required.
+
 - **`InlineRunModel`, `RunAndWaitClientOptions.inlineRunModel`** (`@appstrate/core/run-and-wait-client`, #2262):
   `{ modelId, generation? }`, written into an inline launch body as `modelId` / `generation`. A
   caller option, never a `run_and_wait` argument, so the model driving the tool cannot choose
