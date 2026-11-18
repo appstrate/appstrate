@@ -903,6 +903,13 @@ becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
+On a phone a thumb replaces the pointer: **a control is 40 to 44 px tall below `md`** (24 px is the
+WCAG 2.2 AA floor, not a goal; a row of the drawer is `max-md:h-11`, an icon button `max-md:size-10`,
+a tiny control keeps its look and gains an invisible `before:` touch area), and **nothing is
+reachable only by hover**: an action that appears on `:hover` shows without it below `md`
+(`md:opacity-0 md:group-hover:opacity-100`, as `SidebarMenuAction` does) or lives in a menu a tap
+opens.
+
 ## Checklist before handing UI work over
 
 - [ ] Uses the pattern of this file for each need; a new pattern added here.
