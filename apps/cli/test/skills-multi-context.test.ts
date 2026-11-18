@@ -65,7 +65,7 @@ function installSpaces(
   fixtures: SkillFixture[],
   memberships: Record<string, string[]>,
   options: {
-    failingSpace?: string;
+    failingList?: { spaceId: string; status: 422 | 503 };
     duplicateNames?: boolean;
     seen?: string[];
     reachable?: string[];
@@ -116,8 +116,16 @@ function installSpaces(
     const refusal = refuse(spaceId);
     if (refusal) return refusal;
     if (url.pathname === "/api/packages/skills/served") {
-      if (spaceId === options.failingSpace)
-        return Response.json({ message: "Unavailable" }, { status: 503 });
+      if (options.failingList?.spaceId === spaceId)
+        return Response.json(
+          options.failingList.status === 422
+            ? {
+                code: "version_artifact_unavailable",
+                detail: "Published skill has no readable archive",
+              }
+            : { message: "Unavailable" },
+          { status: options.failingList.status },
+        );
       // The space's list holds the skills attributed to it, at their URIs in it.
       const listed = (await (await serve(input, init)).json()) as { data: { uri: string }[] };
       return Response.json({
@@ -195,26 +203,42 @@ describe("multi-space skill distribution regressions", () => {
     expect((await getProfile("default"))?.spaceId).toBe("spc_active");
   });
 
-  it("preserves the full installation and ledger if any selected space listing fails", async () => {
-    const fixtures = [{ id: "@acme/retained", skillMd: skillMd("retained") }];
-    installSpaces(fixtures, { spc_active: ["@acme/retained"] });
-    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
-    const before = await snapshot(pluginRoot());
-    const ledger = await readFile(getStatePath(), "utf8");
-    installSpaces(fixtures, { spc_active: [], spc_library: [] }, { failingSpace: "spc_library" });
-    const { io, stdout } = createMemoryIO();
+  it.each([422, 503] as const)(
+    "preserves files and ledger when a selected catalogue returns %i",
+    async (status) => {
+      const fixtures = [
+        {
+          id: "@acme/retained",
+          skillMd: skillMd("retained"),
+          extraFiles: { "references/guide.md": "Keep the installed guide" },
+        },
+      ];
+      installSpaces(fixtures, { spc_active: ["@acme/retained"] });
+      await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+      const before = await snapshot(pluginRoot());
+      expect(before["skills/retained/references/guide.md"]).toBe("Keep the installed guide");
+      const ledger = await readFile(getStatePath(), "utf8");
+      installSpaces(
+        fixtures,
+        { spc_active: [], spc_library: [] },
+        {
+          failingList: { spaceId: "spc_library", status },
+        },
+      );
+      const { io, stdout } = createMemoryIO();
 
-    await expect(
-      codeSyncCommand(
-        { target: ["claude-plugin"], space: ["spc_active", "spc_library"], printPath: true },
-        io,
-      ),
-    ).rejects.toBeInstanceOf(CommandExit);
+      await expect(
+        codeSyncCommand(
+          { target: ["claude-plugin"], space: ["spc_active", "spc_library"], printPath: true },
+          io,
+        ),
+      ).rejects.toBeInstanceOf(CommandExit);
 
-    expect(stdout()).toBe("");
-    expect(await snapshot(pluginRoot())).toEqual(before);
-    expect(await readFile(getStatePath(), "utf8")).toBe(ledger);
-  });
+      expect(stdout()).toBe("");
+      expect(await snapshot(pluginRoot())).toEqual(before);
+      expect(await readFile(getStatePath(), "utf8")).toBe(ledger);
+    },
+  );
 
   it("removes only exclusive skills when a configured space is removed", async () => {
     const server = installSpaces(

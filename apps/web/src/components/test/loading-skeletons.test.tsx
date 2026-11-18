@@ -104,11 +104,11 @@ describe("loading skeletons", () => {
     expect(html).toContain("mt-1 w-56");
   });
 
-  it("holds a reader's read-only note, not a composer and its suggestions, in the chat", () => {
+  it("holds a reader's read-only note, not a composer, in the chat", () => {
     // No permission loaded: the reader's shape.
     const html = render(<ChatPanelSkeleton />);
     expect(html).toContain("h-[46px]");
-    expect(html).not.toContain("h-[38px]");
+    expect(html).not.toContain("h-[30px]");
   });
 
   it("uses the module's exact conversation wait for the route fallback", () => {

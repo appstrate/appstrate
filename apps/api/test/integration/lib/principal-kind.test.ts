@@ -158,7 +158,7 @@ describe("a chat loopback bearer is the person, wherever a gate asks", () => {
       expect(unclaimed).not.toContain(GRANT);
       expect(unclaimed).toContain("spaces:read");
 
-      // Advertising is not enforcing: above is `listedOrgIdentityForCaller`,
+      // Advertising is not enforcing: above is `listCallerOrganizations`,
       // below is the `permissions` set the pipeline wrote, and both must agree.
       // `/registry` is org-only and reads the in-memory registry, so only the
       // permission moves its status.

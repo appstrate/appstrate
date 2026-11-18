@@ -44,24 +44,46 @@ export function ConversationSkeleton({
         </div>
       ) : (
         <div aria-hidden className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-4 pb-4">
-          <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-            <div className="text-muted-foreground flex min-h-9 items-center py-1 text-sm">
-              {placeholder}
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <Skeleton className="size-8 rounded-full" />
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-7 w-32 rounded-md" />
-                <Skeleton className="size-8 rounded-lg" />
-              </div>
-            </div>
-          </div>
+          <ComposerSkeleton placeholder={placeholder} />
           {/* `Disclaimer`, the writer's line under the composer. */}
           <div className="flex h-4 justify-center">
             <Skeleton className="h-3 w-64" />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The writer's `Composer` (`thread.tsx`), inert: the `min-h-9` input line over the tool row —
+ * `ComposerTools` on the left (attach, settings), the model picker's 30px trigger and send on the
+ * right. Shared by every chat wait, the conversation's and the welcome screen's.
+ */
+export function ComposerSkeleton({
+  placeholder,
+  limited = false,
+}: {
+  placeholder: ReactNode;
+  /** The limit chip is drawn: a new conversation started in a selected space is limited to it. */
+  limited?: boolean;
+}) {
+  return (
+    <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+      <div className="text-muted-foreground flex min-h-9 items-center py-1 text-sm">
+        {placeholder}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Skeleton className="size-8 rounded-lg" />
+          <Skeleton className="size-8 rounded-lg" />
+          {limited && <Skeleton className="h-7 w-44 rounded-full" />}
+        </div>
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-[30px] w-32 rounded-md" />
+          <Skeleton className="size-8 rounded-lg" />
+        </div>
+      </div>
     </div>
   );
 }

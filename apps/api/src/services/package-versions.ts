@@ -375,15 +375,11 @@ export interface VersionDetail {
 export async function getVersionDetail(
   packageId: string,
   versionSpec: string,
-  /**
-   * `forExecution`: the version will run — apply the AFPS signature policy to its
-   * bytes. `executor`: read the catalog inside the caller's transaction.
-   */
-  opts: { forExecution?: boolean; executor?: DbOrTx } = {},
+  executor: DbOrTx = db,
 ): Promise<VersionDetail | null> {
-  const row = await getVersionRow(packageId, versionSpec, opts.executor);
+  const row = await getVersionRow(packageId, versionSpec, executor);
   if (!row) return null;
-  return { ...row, content: await readVersionArchive(packageId, row.version, opts) };
+  return { ...row, content: await readVersionArchive(packageId, row.version) };
 }
 
 /** A version's catalog row — {@link getVersionDetail} without reading its archive. */
@@ -431,13 +427,14 @@ export async function getVersionRow(
 export async function readVersionArchive(
   packageId: string,
   version: string,
-  /** The version will run: apply the AFPS signature policy to its bytes. */
-  opts: { forExecution?: boolean } = {},
+  /** For execution the caller pins the stored bytes to the resolved row and applies the signature policy. */
+  execution?: { integrity: string },
 ): Promise<Record<string, Uint8Array> | null> {
-  const download = opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
   let zipBuffer: Buffer | null;
   try {
-    zipBuffer = await download(packageId, version);
+    zipBuffer = execution
+      ? await downloadVersionZipForExecution(packageId, version, execution.integrity)
+      : await downloadVersionZip(packageId, version);
   } catch (err) {
     throw toBundleApiError(err) ?? err;
   }
@@ -539,7 +536,7 @@ export async function loadPublishedDefinition(
   spec: string,
   executor?: DbOrTx,
 ): Promise<PublishedDefinition | null> {
-  const detail = await getVersionDetail(packageId, spec, { executor });
+  const detail = await getVersionDetail(packageId, spec, executor);
   if (!detail) return null;
   const m = asRecord(detail.manifest);
   const { entry } = requirePublishedArchive(type, packageId, detail);

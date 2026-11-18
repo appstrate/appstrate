@@ -408,6 +408,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       Icon: ZapIcon,
       labelKey: "tool.op.other",
     };
+    const spaceId = callSpaceOf(props);
     const created =
       phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
     return (
@@ -421,9 +422,11 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
-        spaceId={callSpaceOf(props)}
+        spaceId={spaceId}
         footer={
-          created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
+          created ? (
+            <CreatedPackageLink created={created} toolCallId={props.toolCallId} spaceId={spaceId} />
+          ) : null
         }
       />
     );
@@ -440,11 +443,13 @@ const announcedPackageWrites = new Set<string>();
 function CreatedPackageLink({
   created,
   toolCallId,
+  spaceId,
 }: {
   created: CreatedPackage;
   toolCallId: string;
+  spaceId: string | undefined;
 }) {
-  const { t, onPackagesChanged } = useChatHost();
+  const { t, onPackagesChanged, linkInSpace } = useChatHost();
   React.useEffect(() => {
     if (announcedPackageWrites.has(toolCallId)) return;
     announcedPackageWrites.add(toolCallId);
@@ -452,7 +457,7 @@ function CreatedPackageLink({
   }, [toolCallId, onPackagesChanged]);
   return (
     <a
-      href={packagePageHref(created)}
+      href={linkInSpace(packagePageHref(created), spaceId)}
       className="text-primary hover:bg-muted/50 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
     >
       <ArrowUpRightIcon className="size-3.5 shrink-0" />
@@ -466,6 +471,7 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
   toolName: "import_package_file",
   render: (props: AnyToolProps) => {
     const phase = deriveToolPhase(props);
+    const spaceId = callSpaceOf(props);
     const created =
       phase === "success" ? packageCreatedByImport(unwrapMcpResult(props.result)) : null;
     return (
@@ -479,9 +485,11 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
-        spaceId={callSpaceOf(props)}
+        spaceId={spaceId}
         footer={
-          created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
+          created ? (
+            <CreatedPackageLink created={created} toolCallId={props.toolCallId} spaceId={spaceId} />
+          ) : null
         }
       />
     );

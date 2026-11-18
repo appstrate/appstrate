@@ -233,6 +233,7 @@ const SERVED_SKILLS_DESCRIPTION =
   "Requires `skills:read` in that space. Rate-limited to 50 requests/minute.";
 
 const servedSkillErrors = {
+  "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
   "400": { $ref: "#/components/responses/ValidationError" },
   "401": { $ref: "#/components/responses/Unauthorized" },
   "403": { $ref: "#/components/responses/Forbidden" },

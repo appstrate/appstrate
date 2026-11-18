@@ -15,11 +15,10 @@
  * opt-in via `version=draft` only).
  */
 
-import { asRecord } from "@appstrate/core/safe-json";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageDistTags, packages, runs } from "@appstrate/db/schema";
+import { packages, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -34,14 +33,12 @@ import {
   seedSpacePackage,
   seedPackage,
   seedPackageShare,
-  seedPackageVersion,
   seedPublishedVersion,
   seedRun,
   seedSpace,
   seedSpaceMember,
   seedSchedule,
 } from "../../helpers/seed.ts";
-import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import {
   createFakeOrchestrator,
@@ -619,24 +616,15 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, DRIFTED);
 
-    const version = await seedPackageVersion({
-      packageId: DRIFTED,
-      version: "1.0.0",
+    await seedPublishedVersion(DRIFTED, "1.0.0", {
       manifest: {
         name: DRIFTED,
         version: "1.0.0",
         type: "agent",
         dependencies: { skills: { [DEP_X]: "^2.0.0" } },
       },
+      content: "Published prompt.",
     });
-    await uploadPackageZip(
-      DRIFTED,
-      "1.0.0",
-      buildMinimalZip(asRecord(version.manifest), "Published prompt.", "prompt.md"),
-    );
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: DRIFTED, tag: "latest", versionId: version.id });
   });
 
   async function runDrifted(version?: string) {
