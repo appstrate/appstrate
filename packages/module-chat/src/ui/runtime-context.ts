@@ -200,12 +200,10 @@ export interface ChatHost {
    */
   actingSpaceIds: readonly string[] | null;
   /**
-   * The caller's personal space (« Mon espace »), where every file attached from their computer
-   * is staged, `null` until the host's listing has answered: attaching waits for it.
+   * Where a file attached from the computer goes: the caller's personal space (« Mon espace »),
+   * or why there is none yet (the listing is loading or failed, or a role preview holds none).
    */
-  personalSpaceId: string | null;
-  /** Why `personalSpaceId` is null: still loading, the listing failed, or a role preview (no personal space for good). */
-  attachUnavailable: AttachUnavailable;
+  attachTarget: AttachTarget;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
@@ -244,8 +242,11 @@ export interface ChatHost {
   SpaceChoiceMenu: SpaceChoiceMenu;
 }
 
-/** Why nothing can be attached (see `ChatHost.attachUnavailable`). */
+/** Why nothing can be attached: still loading, the listing failed, or a role preview (no personal space for good). */
 export type AttachUnavailable = "loading" | "error" | "preview";
+
+/** See `ChatHost.attachTarget`. */
+export type AttachTarget = { spaceId: string } | { unavailable: AttachUnavailable };
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */
 export function actsIn(

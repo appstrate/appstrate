@@ -28,7 +28,7 @@ export function useSpaces(enabled = true) {
 
 /**
  * The caller's personal space id (« Mon espace »): `null` until the listing answers, when it
- * failed (`failed`), or when they have none (a role preview).
+ * failed (`failed`), or when they have none (a role preview lists none, whatever role is previewed).
  */
 export function useOwnPersonalSpaceId(): { spaceId: string | null; failed: boolean } {
   const { data: spaces, isError } = useSpaces();

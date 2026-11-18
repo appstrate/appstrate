@@ -18,7 +18,7 @@ import {
 } from "./run-context-builder.ts";
 import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
-import { createRun, appendRunLog, type ConsumedFile } from "./state/runs.ts";
+import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { requireBoundModel, resolveModelCascade } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -360,12 +360,9 @@ export async function freezeRunSpawnDependencies(params: {
  * Throws `ApiError` on validation / preflight failures (model not configured,
  * rate limit, concurrency, beforeUsage hook rejection) so the HTTP error handler
  * can surface RFC 9457 problem details directly. Background callers (scheduler)
- * catch `ApiError` to translate into their own failure semantics. Resolves with
- * the input files the run consumes, once its row exists.
+ * catch `ApiError` to translate into their own failure semantics.
  */
-export async function prepareAndExecuteRun(
-  params: RunPipelineParams,
-): Promise<{ consumedFiles: ConsumedFile[] }> {
+export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<void> {
   // Before anything is written: refused until the boot's run-capacity phase is
   // done (see `assertRunCapacityReady`).
   assertRunCapacityReady();
@@ -610,56 +607,53 @@ export async function prepareAndExecuteRun(
   // --- Step 5: Create run record (with sink state) ---
   const agentDenorm = extractRunAgentDenorm(agent);
   const createStart = Date.now();
-  const consumedFiles = await runWithSpan(
-    "appstrate.run.create",
-    { attributes: spanAttributes },
-    () =>
-      createRun(
-        { orgId, spaceId },
-        {
-          id: runId,
-          packageId: agent.id,
-          actor,
-          input: input ?? null,
-          scheduleId,
-          versionLabel: versionLabel ?? undefined,
-          versionRef,
-          proxyLabel: proxyLabel ?? undefined,
-          modelLabel,
-          modelSource,
-          modelId: plan.llmConfig.aliasId,
-          inferenceRoute: inferenceRouteOf(plan.llmConfig),
-          // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
-          // the run row so the runner's ledger row (whose cost the container
-          // computes) can be classified without trusting the container.
-          modelCost,
-          generationConfig,
-          generationConfigOverride: params.generationConfigOverride ?? null,
-          apiKeyId,
-          agentScope: agentDenorm.scope,
-          agentName: agentDenorm.name,
-          dependencyOverrides: params.dependencyOverrides ?? null,
-          runOrigin: "platform",
-          sinkSecretEncrypted: encrypt(sinkCredentials.secret),
-          sinkExpiresAt: new Date(sinkCredentials.expiresAt),
-          connectionOverrides:
-            params.launchOverrides?.source === "run_override" ? params.launchOverrides.ids : null,
-          resolvedConnections,
-          integrationsUnbound,
-          resolvedIntegrationVersions,
-          runnerName: params.runnerName ?? null,
-          runnerKind: params.runnerKind ?? null,
-          // Model aliases: the run DTO (`state/runs.ts`)
-          // emits `modelCredentialId` to any dashboard user who can read the run,
-          // and a credential id cross-references — via GET /api/model-provider-
-          // credentials → its provider and endpoint — straight to the backing.
-          // Drop it for aliases; the operator audit trail already recorded the
-          // create. Non-aliased runs keep it for the connections/credentials panel.
-          modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
-          payerUserId: plan.llmConfig.payerUserId ?? null,
-          consumedFileIds: params.consumedFileIds,
-        },
-      ),
+  await runWithSpan("appstrate.run.create", { attributes: spanAttributes }, () =>
+    createRun(
+      { orgId, spaceId },
+      {
+        id: runId,
+        packageId: agent.id,
+        actor,
+        input: input ?? null,
+        scheduleId,
+        versionLabel: versionLabel ?? undefined,
+        versionRef,
+        proxyLabel: proxyLabel ?? undefined,
+        modelLabel,
+        modelSource,
+        modelId: plan.llmConfig.aliasId,
+        inferenceRoute: inferenceRouteOf(plan.llmConfig),
+        // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
+        // the run row so the runner's ledger row (whose cost the container
+        // computes) can be classified without trusting the container.
+        modelCost,
+        generationConfig,
+        generationConfigOverride: params.generationConfigOverride ?? null,
+        apiKeyId,
+        agentScope: agentDenorm.scope,
+        agentName: agentDenorm.name,
+        dependencyOverrides: params.dependencyOverrides ?? null,
+        runOrigin: "platform",
+        sinkSecretEncrypted: encrypt(sinkCredentials.secret),
+        sinkExpiresAt: new Date(sinkCredentials.expiresAt),
+        connectionOverrides:
+          params.launchOverrides?.source === "run_override" ? params.launchOverrides.ids : null,
+        resolvedConnections,
+        integrationsUnbound,
+        resolvedIntegrationVersions,
+        runnerName: params.runnerName ?? null,
+        runnerKind: params.runnerKind ?? null,
+        // Model aliases: the run DTO (`state/runs.ts`)
+        // emits `modelCredentialId` to any dashboard user who can read the run,
+        // and a credential id cross-references — via GET /api/model-provider-
+        // credentials → its provider and endpoint — straight to the backing.
+        // Drop it for aliases; the operator audit trail already recorded the
+        // create. Non-aliased runs keep it for the connections/credentials panel.
+        modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
+        payerUserId: plan.llmConfig.payerUserId ?? null,
+        consumedFileIds: params.consumedFileIds,
+      },
+    ),
   );
   const createMs = Date.now() - createStart;
 
@@ -749,5 +743,4 @@ export async function prepareAndExecuteRun(
       error: getErrorMessage(err),
     });
   });
-  return { consumedFiles };
 }

@@ -10,7 +10,6 @@ import {
   asc,
   desc,
   isNull,
-  isNotNull,
   inArray,
   count,
   gte,
@@ -37,7 +36,6 @@ import {
   files,
   fileLinks,
   chatSessions,
-  spaces,
   type PricingStatus,
   type InferenceRoute,
 } from "@appstrate/db/schema";
@@ -693,21 +691,8 @@ interface CreateRunParams {
   payerUserId?: string | null;
 }
 
-/** An input file a run consumes, and the space it lives in (the run's or another). */
-export interface ConsumedFile {
-  id: string;
-  spaceId: string;
-  /** Its space is someone's personal space, whose id a team space's audit must not carry. */
-  personal: boolean;
-}
-
-/** Create the run with its consumption links; returns the files it consumes. */
-export async function createRun(
-  scope: SpaceScope,
-  params: CreateRunParams,
-): Promise<ConsumedFile[]> {
+export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
   const { id, packageId, actor, input } = params;
-  let consumed: ConsumedFile[] = [];
 
   await db.transaction(async (tx) => {
     // FIRST statement, before any row lock: the per-org admission key is the
@@ -756,26 +741,12 @@ export async function createRun(
     const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
     if (consumedFileIds.length > 0) {
       // Org-scoped, not space-scoped: an input resolves in its file's own space
-      // (`resolveFileAcrossSpaces`), which may be another than the run's.
+      // (`resolveFilesAcrossSpaces`), which may be another than the run's.
       const available = await tx
-        .select({ id: files.id, spaceId: files.spaceId })
+        .select({ id: files.id })
         .from(files)
         .where(and(inArray(files.id, consumedFileIds), eq(files.orgId, scope.orgId)))
         .for("update");
-      const personal = new Set(
-        (
-          await tx
-            .select({ id: spaces.id })
-            .from(spaces)
-            .where(
-              and(
-                inArray(spaces.id, [...new Set(available.map((file) => file.spaceId))]),
-                isNotNull(spaces.ownerUserId),
-              ),
-            )
-        ).map((space) => space.id),
-      );
-      consumed = available.map((file) => ({ ...file, personal: personal.has(file.spaceId) }));
       if (available.length !== consumedFileIds.length) {
         throw conflict(
           "file_unavailable",
@@ -875,8 +846,6 @@ export async function createRun(
         .onConflictDoNothing();
     }
   });
-
-  return consumed;
 }
 
 /**

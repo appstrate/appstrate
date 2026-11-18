@@ -979,7 +979,7 @@ describe("handleChatStream", () => {
     ).toBeNull();
     // Nor does it exempt the conversation's file from its space's checks, nor hold an upload.
     expect(await ephemeralCalls[0]!.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(
-      new Map([[earlier.uri, personal.id]]),
+      new Set([personal.id]),
     );
     const heldNow = await db
       .select({ id: files.id })
@@ -987,11 +987,8 @@ describe("handleChatStream", () => {
       .where(eq(files.chatSessionId, sessionId));
     expect(heldNow).toHaveLength(2);
 
-    // `read_resource` neither refuses nor touches a space for a file the conversation holds; a
-    // file of a space outside the turn's still names it, and is refused there.
-    expect(await input.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(
-      new Map([[earlier.uri, null]]),
-    );
+    // A file the conversation holds names no space; another file of the same space names it.
+    expect(await input.platformMcp!.organization.fileSpaces([earlier.uri])).toEqual(new Set());
     const run = await seedRun({ ...personalScope, userId: ctx.user.id });
     const { row: output } = await createFileFromStream(
       personalScope,
@@ -1002,12 +999,7 @@ describe("handleChatStream", () => {
     );
     expect(
       await input.platformMcp!.organization.fileSpaces([`appfile://${output.id}`, earlier.uri]),
-    ).toEqual(
-      new Map([
-        [`appfile://${output.id}`, personal.id],
-        [earlier.uri, null],
-      ]),
-    );
+    ).toEqual(new Set([personal.id]));
   });
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {
@@ -2211,10 +2203,10 @@ describe("handleChatStream", () => {
         // Only files are looked up, in one read: a missing one, or no file at all, has no space.
         expect(
           await organization.fileSpaces(["appfile://file_missing00", "https://example.com"]),
-        ).toEqual(new Map());
+        ).toEqual(new Set());
       });
 
-      it("places an existing file in its space, which `read_resource` refuses outside the turn's", async () => {
+      it("places an existing file in its space, even one outside the turn's, which no call records", async () => {
         const fileId = "file_gammareport0";
         await db.insert(files).values({
           id: fileId,
@@ -2229,10 +2221,8 @@ describe("handleChatStream", () => {
           sha256: "deadbeef",
         });
         const organization = await organizationOf(mintSessionId());
-        // Gamma is reached but outside the acting set: the space `read_resource` checks.
-        expect(await organization.fileSpaces([`appfile://${fileId}`])).toEqual(
-          new Map([[`appfile://${fileId}`, spaceC]]),
-        );
+        // Gamma is reached but outside the acting set.
+        expect(await organization.fileSpaces([`appfile://${fileId}`])).toEqual(new Set([spaceC]));
         expect(spaceIdRefusal(organization.spaces, spaceC)).toMatchObject({
           code: "unknown_space",
         });

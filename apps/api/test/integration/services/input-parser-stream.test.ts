@@ -85,22 +85,25 @@ function fakeCtx(ctx: {
         ? ctx.orgId
         : key === "spaceId"
           ? ctx.spaceId
-          : key === "endUser"
-            ? ctx.endUser
-            : key === "user"
-              ? user
-              : key === "permissions"
-                ? // Run inputs read file content, which asks `files:read` in the file's space.
-                  new Set(["files:read", ...(ctx.permissions ?? [])])
-                : key === "orgRole"
-                  ? ctx.orgRole
-                  : undefined,
+          : key === "space"
+            ? { id: ctx.spaceId }
+            : key === "endUser"
+              ? ctx.endUser
+              : key === "user"
+                ? user
+                : key === "permissions"
+                  ? ctx.permissions
+                  : key === "orgRole"
+                    ? ctx.orgRole
+                    : undefined,
     set: () => {},
   } as unknown as Context;
 }
 
 /** A caller that reads every run in the space (space `admin`/`builder`). */
-const READS_EVERY_RUN: ReadonlySet<string> = new Set(["runs:read-all"]);
+/** Run inputs read file content: `files:read` in the file's space. */
+const READS_FILES: ReadonlySet<string> = new Set(["files:read"]);
+const READS_EVERY_RUN: ReadonlySet<string> = new Set(["files:read", "runs:read-all"]);
 
 /**
  * Insert a minimal prior-run row the rerun_from path can resolve. `userId` is
@@ -288,7 +291,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
     const newRunId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
-        fakeCtx({ ...scope, user: { id: memberB.id } }),
+        fakeCtx({ ...scope, user: { id: memberB.id }, permissions: READS_FILES }),
         { input: { doc: `appfile://${docA.id}` } },
         newRunId,
         fileSchema,
@@ -311,7 +314,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id }, permissions: READS_FILES }),
       { input: { doc: `appfile://${docA.id}` } },
       newRunId,
       fileSchema,
@@ -412,7 +415,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // A new run references it by appfile:// — resolved into the new workspace.
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id }, permissions: READS_FILES }),
       { input: { doc: `appfile://${doc.id}` } },
       newRunId,
       fileSchema,
@@ -433,6 +436,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
           orgId: other.orgId,
           spaceId: other.defaultSpaceId,
           user: { id: other.user.id },
+          permissions: READS_FILES,
         }),
         { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
@@ -443,7 +447,12 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // Cross-space: same org, foreign space id → 404.
     await expect(
       parseRequestInput(
-        fakeCtx({ orgId: ctx.orgId, spaceId: "spc_not_this_one", user: { id: ctx.user.id } }),
+        fakeCtx({
+          orgId: ctx.orgId,
+          spaceId: "spc_not_this_one",
+          user: { id: ctx.user.id },
+          permissions: READS_FILES,
+        }),
         { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -679,7 +688,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       .where(eq(spaceRoles.id, role.id));
     const result = await rerun();
     expect(result.uploadedFiles).toHaveLength(1);
-    expect(result.consumedFileIds).toEqual([row.id]);
+    expect(result.consumedFiles).toEqual([{ id: row.id, spaceId: row.spaceId }]);
   });
 });
 
@@ -730,7 +739,7 @@ describe("parseRequestInput — colliding file names (workspace-name hardening)"
 
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: actor.id } }),
+      fakeCtx({ ...scope, user: { id: actor.id }, permissions: READS_FILES }),
       { input: { docs: [`upload://${uploadId}`, `appfile://${doc.id}`, inlineUri] } },
       runId,
       arrayFileSchema,

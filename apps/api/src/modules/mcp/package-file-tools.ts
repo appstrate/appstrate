@@ -28,8 +28,8 @@ interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
   actor: Actor;
   scope: SpaceScope;
-  /** How the archive's file id reaches the file's own space (`requestFileAccess`). */
-  fileAccess: FileAccess;
+  /** How the archive's file id reaches the file's own space (`requestFileAccess`), read on use. */
+  fileAccess: () => Promise<FileAccess>;
   /**
    * Package-level authorisation for the bundle about to be read. Required:
    * the preflight and the import both hand it every package they found,
@@ -104,7 +104,7 @@ async function readPackageFileBytes(
     ctx.scope.orgId,
     ctx.actor,
     fileId,
-    ctx.fileAccess,
+    await ctx.fileAccess(),
   );
   if (!resolved) {
     throw new ToolRefusal({

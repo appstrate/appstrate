@@ -53,7 +53,7 @@ import {
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
 import {
-  resolveFileAcrossSpaces,
+  resolveFilesAcrossSpaces,
   streamFileContent,
   assertWithinFileLimits,
   type PendingUploadMaterialization,
@@ -107,13 +107,14 @@ export interface ParsedInput {
    */
   pendingFiles?: PendingUploadMaterialization[];
   /**
-   * The `appfile://` ids this run consumes as input (D1 chaining protection).
-   * Passed into `createRun`, which locks and revalidates every file before
+   * The `appfile://` files this run consumes as input, once each, with their
+   * own space (D1 chaining protection, and the `file.consumed` audit). Their
+   * ids go to `createRun`, which locks and revalidates every file before
    * inserting the run and its `file_links` rows in one transaction. Every
    * resolved `appfile://` input ref qualifies: a brand-new run is never a
    * doc's own container. Undefined when the run consumes no files.
    */
-  consumedFileIds?: string[];
+  consumedFiles?: { id: string; spaceId: string }[];
 }
 
 /**
@@ -594,7 +595,7 @@ export async function parseRequestInput(
   });
   let uploadedFiles: FileReference[] = [];
   let pendingFiles: PendingUploadMaterialization[] = [];
-  let consumedFileIds: string[] = [];
+  let consumedFiles: { id: string; spaceId: string }[] = [];
 
   if (inputSchema) {
     const refs = collectFileRefs(inputSchema, input);
@@ -622,12 +623,6 @@ export async function parseRequestInput(
         if (!id) throw invalidRequest(`Invalid file URI '${ref.uri}'`, ref.fieldName);
         return { ref, id };
       });
-
-    // Every resolved `appfile://` input ref is a consumption link (D1): the run
-    // is brand-new, so it is never any of these docs' own container. Persisted as
-    // `file_links` atomically with `createRun`; a link of the file's own space
-    // protects it from deletion. The ACL check below still gates the run itself.
-    consumedFileIds = fileRefs.map(({ id }) => id);
 
     // Decode inline data: URIs up front — the per-file cap is enforced inside
     // parseDataUri (pre-decode on the base64 length, post-decode on the bytes),
@@ -678,26 +673,36 @@ export async function parseRequestInput(
         const actor = getActor(c);
 
         // In the file's own space, as the credential reaches it; refused = missing (404).
-        const fileAccess = requestFileAccess(c, spaceId);
-        const resolvedDocs =
-          fileRefs.length > 0
-            ? await Promise.all(
-                fileRefs.map(async ({ ref, id }) => {
-                  const doc = await resolveFileAcrossSpaces(orgId, actor, id, fileAccess);
-                  // Cross-actor ACL (S2): the container ACL is the outer gate
-                  // and narrows a run-contained output to the runs the caller
-                  // may read (`runs:read-all`, else its own); the `download`
-                  // capability adds the per-file rule on top — a `user_upload`
-                  // is creator-only content, so a member must not deliver
-                  // another member's private upload into their own run.
-                  // `download` is always true for an `agent_output` — chainable
-                  // within the container the outer gate already granted (D6) —
-                  // and true for an upload only for its creator.
-                  if (!doc || !doc.capabilities.download) throw notFound(`File '${id}' not found`);
-                  return { ref, doc: doc.row };
-                }),
+        // Cross-actor ACL (S2): the container ACL is the outer gate and narrows a
+        // run-contained output to the runs the caller may read (`runs:read-all`, else
+        // its own); the `download` capability adds the per-file rule on top — a
+        // `user_upload` is creator-only content, so a member must not deliver another
+        // member's private upload into their own run. `download` is always true for an
+        // `agent_output` — chainable within the container the outer gate already
+        // granted (D6) — and true for an upload only for its creator.
+        const readable = new Map(
+          (fileRefs.length > 0
+            ? await resolveFilesAcrossSpaces(
+                orgId,
+                actor,
+                fileRefs.map(({ id }) => id),
+                await requestFileAccess(c),
               )
-            : [];
+            : []
+          ).map((doc) => [doc.row.id, doc]),
+        );
+        const resolvedDocs = fileRefs.map(({ ref, id }) => {
+          const doc = readable.get(id);
+          if (!doc?.capabilities.download) throw notFound(`File '${id}' not found`);
+          return { ref, doc: doc.row };
+        });
+        // Each one is a consumption link (D1): the run is brand-new, so it is never
+        // any of these docs' own container. Persisted as `file_links` atomically with
+        // `createRun`; a link of the file's own space protects it from deletion.
+        consumedFiles = [...readable.values()].map(({ row }) => ({
+          id: row.id,
+          spaceId: row.spaceId,
+        }));
 
         // Bound the total input-file payload on DECLARED sizes BEFORE
         // streaming any bytes. Files are delivered to the agent out-of-band
@@ -999,7 +1004,7 @@ export async function parseRequestInput(
     input: normalizedInput,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
-    consumedFileIds: consumedFileIds.length > 0 ? consumedFileIds : undefined,
+    consumedFiles: consumedFiles.length > 0 ? consumedFiles : undefined,
     // `?? undefined` normalises the inline surface's nullable form (`null` ==
     // "no override") onto the one representation every consumer reads.
     modelIdOverride: body.modelId ?? undefined,

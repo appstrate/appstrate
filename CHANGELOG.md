@@ -157,28 +157,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **BREAKING: run inputs read a file under `files:read` in the file's own space** (#2287). An
-  `appfile://` input (`input`, `context_files`, `rerun_from`) now requires `files:read` in the
-  space the file lives in, also when it is the run's own space: a custom role, API key or OAuth
-  client holding `agents:run` without `files:read` gets a `404` where it used to launch. In
-  exchange a run may take a file from another space its credential reaches with `files:read`
-  there, including the launcher's personal space; a credential bound to one space reaches no
-  other. Each consumed file is recorded as `file.consumed`. Only a consumer run of the file's own
-  space keeps it from deletion; a rerun of a run whose input was deleted answers `404`. The MCP
-  `read_file`, `resources/read` and package-file tools follow the same rule (a caller without
-  `files:read` there gets `not_found`, no longer `not_granted`). The space-pinned MCP endpoint
-  (`/api/mcp/o/{org}/s/{space}`) now confines every direct tool of the request to its space, not
-  only its dispatched operations: file reads, package authorisation and placement included, so a
-  package homed in another space is out of its reach there. `GET /api/files/{id}` and
-  `GET /api/files/{id}/content` follow the same rule: the file is resolved in its own space, which
-  may differ from `X-Space-Id`, so the `content_url` an MCP read returns for a large file works
-  with the credential that read it. A caller without `files:read` in the space it entered, but
-  holding it in the file's, now reads the file; one without it in the file's space gets `404`
-  instead of `403`, and that refusal is no longer reported as a permission denial: it is the
-  silent 404 of a missing file, which confirms no file exists (a credential whose scopes omit
-  `files:read` still gets `403`). A run's file list (`GET /api/files?runId=`) shows each consumed
-  input under the same rule, to a caller who may read the run, so a team run's input from its
-  launcher's personal space is listed for the launcher and nobody else.
+- **BREAKING: a file named by id is read in its own space, under `files:read` there** (#2287).
+  The space may differ from the request's; the credential decides which spaces it reaches (a
+  session every space where you hold a role, an API key or a token issued for one space that
+  space alone). A refusal is indistinguishable from a missing file (`404`).
+  - Run inputs (`input`, `context_files`, `rerun_from`): an `appfile://` needs `files:read` in
+    its space, the run's own included, so a custom role, API key or OAuth client holding
+    `agents:run` without `files:read` gets a `404` where it used to launch. A run may take a
+    file of another space it reaches, your personal space included. Each consumed file is
+    audited as `file.consumed`. Only a run of the file's own space keeps it from deletion; a
+    rerun of a run whose input was deleted answers `404`.
+  - MCP file tools (`read_file`, `resources/read`, `validate_package_file`,
+    `import_package_file`): a file you cannot read there answers `not_found`, no longer
+    `not_granted`. `invoke_operation` answers as the REST route does.
+  - REST by id and lists: `GET /api/files/{id}`, `/content`, `DELETE` and `POST …/keep` act on
+    the file in its own space, `files:delete` judged there, so the capabilities a read returns
+    are what delete and keep do, from any `X-Space-Id`. A credential whose scopes omit
+    `files:read` still gets `403`. A run's file list (`GET /api/files?runId=`) shows its
+    inputs only to a caller who reads the run, each under the same rule.
+  - Space-pinned MCP endpoint (`/api/mcp/o/{org}/s/{space}`): every tool of the request, its
+    dispatched operations included, reaches that space only (file reads, package authorisation
+    and placement), so a package homed in another space is out of reach there.
 
 - **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
   the chat goes to « Mon espace » from every screen, private to you, and adds no space to the

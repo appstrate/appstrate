@@ -596,12 +596,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // the caller's reach is then that space only, for the lists spanning spaces
     // and for the package home authority alike.
     // On the organization-wide endpoint, a credential bound to a set of spaces acts in ONE
-    // space per request, so its read reaches the entered space alone.
+    // space per request, so its reads spanning spaces reach the entered space alone; a file
+    // named by id answers to the credential, as through REST.
     authHeaders.set("x-space-id", scope.spaceId);
     const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
-      : (request) => dispatchInProcess(request, scope.spaceId);
+      : (request) =>
+          dispatchInProcess(request, { spaceId: scope.spaceId, endpoint: orgSpaces === undefined });
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.
@@ -687,7 +689,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       observe,
       actor,
       scope,
-      fileAccess: requestFileAccess(c, scope.spaceId),
+      fileAccess: () => requestFileAccess(c),
       orgSpaces,
     };
     const surface = orgSpaces

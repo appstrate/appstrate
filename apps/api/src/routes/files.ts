@@ -15,16 +15,16 @@
  *      the narrowest possible scope set (even `scopes: []`, which
  *      `validateScopes` accepts) could list and download every
  *      `agent_output` of the space. The list asks it in the entered space;
- *      a read by id asks it in the FILE's space (`resolveFileAcrossSpaces`,
- *      the rule of every door reading a file by id), behind a ceiling guard.
+ *      every door by id asks it in the FILE's space (`resolveFileAcrossSpaces`,
+ *      the rule of every door naming a file by id).
  *   2. The per-file container ACL (`getFileForActor` /
  *      `getFileCapabilities`) — "may this ACTOR touch THIS file",
  *      inherited from the run read-ACL or the chat-session owner. The
  *      end-user guard lives there.
  *
- * DELETE/keep deliberately stay ungated at layer 1: they are authorized by
- * `capabilities.delete` / `capabilities.keep`, which grant the file's own
- * creator (an end-user cleaning up its own upload holds no org permission).
+ * DELETE/keep act on the file a read by id resolves, authorized by
+ * `capabilities.delete` / `capabilities.keep` there (`files:delete` in the
+ * file's space, or its creator), so they do what a GET's capabilities say.
  */
 
 import { Hono, type Context } from "hono";
@@ -35,12 +35,7 @@ import { requireCeiling, requirePermission } from "../middleware/require-permiss
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { requestFileAccess } from "../lib/file-access.ts";
-import {
-  callerPermissions,
-  callerSpaceGrant,
-  fileLifecycleCeiling,
-  type SpaceGrant,
-} from "../lib/permissions.ts";
+import { callerSpaceGrant, fileLifecycleCeiling, type SpaceGrant } from "../lib/permissions.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
@@ -49,7 +44,6 @@ import { createDownloadUrl } from "@appstrate/db/storage";
 import { attachmentDisposition } from "@appstrate/core/naming";
 import { previewKind } from "@appstrate/core/mime";
 import {
-  getFileForActor,
   resolveFileAcrossSpaces,
   listFilesForActor,
   deleteFile,
@@ -59,7 +53,6 @@ import {
   loadFileForPreview,
   getFileCapabilities,
   parseStorageKey,
-  type FileAccess,
 } from "../services/files.ts";
 import { parseListFilesQuery } from "../lib/list-query.ts";
 import {
@@ -71,35 +64,28 @@ import {
   PREVIEW_MAX_BYTES,
 } from "../services/file-preview.ts";
 
-/**
- * The gallery list over `grants`: `GET /api/files` and `GET /api/orgs/{orgId}/files`. A run's
- * inputs resolve in their own spaces under `fileAccess` (the request's, in a space it entered).
- */
-export async function respondFileList(
-  c: Context<AppEnv>,
-  orgId: string,
-  grants: SpaceGrant[],
-  fileAccess?: FileAccess,
-) {
+/** The gallery list over `grants`: `GET /api/files` and `GET /api/orgs/{orgId}/files`. */
+export async function respondFileList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
   const filters = parseListFilesQuery(c);
   return c.json(
     await listFilesForActor(orgId, grants, getActor(c), filters, {
       ...fileLifecycleCeiling(c),
-      ...(fileAccess ? { fileAccess } : {}),
+      fileAccess: await requestFileAccess(c),
     }),
   );
 }
 
 /** The file the path names, in its own space under the request's reach (`requestFileAccess`). */
-function resolveFileById(c: Context<AppEnv>) {
-  const { orgId, spaceId } = getSpaceScope(c);
-  return resolveFileAcrossSpaces(
-    orgId,
+async function resolveFileById(c: Context<AppEnv>) {
+  const resolved = await resolveFileAcrossSpaces(
+    getSpaceScope(c).orgId,
     getActor(c),
     c.req.param("id")!,
-    requestFileAccess(c, spaceId),
+    await requestFileAccess(c),
     fileLifecycleCeiling(c),
   );
+  if (!resolved) throw notFound("File not found");
+  return resolved;
 }
 
 export function createFilesRouter() {
@@ -107,22 +93,16 @@ export function createFilesRouter() {
 
   // GET /api/files — gallery list.
   router.get("/files", rateLimit(120), requirePermission("files", "read"), (c) =>
-    respondFileList(
-      c,
-      getSpaceScope(c).orgId,
-      [callerSpaceGrant(c)],
-      requestFileAccess(c, getSpaceScope(c).spaceId),
-    ),
+    respondFileList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
   );
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
-  // A file read by id (here and `/content`) resolves in its own space, as the MCP
-  // `read_file` that hands out its `content_url` does.
+  // Every door by id resolves the file in its own space, as the MCP `read_file`
+  // that hands out its `content_url` does.
   router.get("/files/:id", rateLimit(120), requireCeiling("files", "read"), async (c) => {
     const actor = getActor(c);
     const resolved = await resolveFileById(c);
-    if (!resolved) throw notFound("File not found");
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   });
 
@@ -132,7 +112,6 @@ export function createFilesRouter() {
   // proxy-stream. Content-Disposition: attachment.
   router.get("/files/:id/content", rateLimit(120), requireCeiling("files", "read"), async (c) => {
     const resolved = await resolveFileById(c);
-    if (!resolved) throw notFound("File not found");
     if (!resolved.capabilities.download) {
       throw forbidden("This file is not downloadable by the current actor");
     }
@@ -181,16 +160,7 @@ export function createFilesRouter() {
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.
   router.delete("/files/:id", rateLimit(60), async (c) => {
-    const scope = getSpaceScope(c);
-    const actor = getActor(c);
-    const resolved = await getFileForActor(
-      scope,
-      actor,
-      c.req.param("id")!,
-      callerPermissions(c),
-      fileLifecycleCeiling(c),
-    );
-    if (!resolved) throw notFound("File not found");
+    const resolved = await resolveFileById(c);
     const { row } = resolved;
 
     if (!resolved.capabilities.delete) {
@@ -200,11 +170,12 @@ export function createFilesRouter() {
       );
     }
 
-    await deleteFile(scope, row.id);
+    await deleteFile({ orgId: row.orgId, spaceId: row.spaceId }, row.id);
     await recordAuditFromContext(c, {
       action: "file.deleted",
       resourceType: "file",
       resourceId: row.id,
+      spaceIdOverride: row.spaceId,
       before: { name: row.name, size: row.size, mime: row.mime, purpose: row.purpose },
     });
     return c.body(null, 204);
@@ -216,16 +187,7 @@ export function createFilesRouter() {
   // own creator). Idempotent — pinning an already-permanent file is a no-op
   // that returns 200 with the (unchanged) file. Returns the updated DTO.
   router.post("/files/:id/keep", rateLimit(60), async (c) => {
-    const scope = getSpaceScope(c);
-    const actor = getActor(c);
-    const resolved = await getFileForActor(
-      scope,
-      actor,
-      c.req.param("id")!,
-      callerPermissions(c),
-      fileLifecycleCeiling(c),
-    );
-    if (!resolved) throw notFound("File not found");
+    const resolved = await resolveFileById(c);
     const { row } = resolved;
 
     if (!resolved.capabilities.keep) {
@@ -236,7 +198,7 @@ export function createFilesRouter() {
     }
 
     const wasExpiring = row.expiresAt !== null;
-    const updated = await clearFileExpiry(scope, row.id);
+    const updated = await clearFileExpiry({ orgId: row.orgId, spaceId: row.spaceId }, row.id);
     // Only audit an actual change (a no-op pin of an already-permanent file
     // writes no audit event).
     if (wasExpiring) {
@@ -244,11 +206,12 @@ export function createFilesRouter() {
         action: "file.kept",
         resourceType: "file",
         resourceId: row.id,
+        spaceIdOverride: row.spaceId,
         before: { expiresAt: row.expiresAt?.toISOString() ?? null },
         after: { expiresAt: null },
       });
     }
-    return c.json(toFileDto(updated, actor, resolved.capabilities));
+    return c.json(toFileDto(updated, getActor(c), resolved.capabilities));
   });
 
   return router;

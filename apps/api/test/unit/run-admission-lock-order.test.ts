@@ -68,7 +68,10 @@ function assertOrder(body: string, label: string, first: string, second: string)
 
 describe("run-admission lock order", () => {
   it("createRun takes the per-org admission key before locking input files", () => {
-    const body = functionBody("services/state/runs.ts", "export async function createRun(");
+    const body = functionBody(
+      "services/state/runs.ts",
+      "export async function createRun(scope: SpaceScope, params: CreateRunParams)",
+    );
     // `enforceOrgConcurrencyCap` is where the advisory key is acquired;
     // `.from(files)` … `.for("update")` is the input-file row lock.
     assertOrder(body, "createRun", "enforceOrgConcurrencyCap(tx, scope)", ".from(files)");
@@ -76,7 +79,10 @@ describe("run-admission lock order", () => {
   });
 
   it("createRun takes the per-org admission key before the per-package run_number key", () => {
-    const body = functionBody("services/state/runs.ts", "export async function createRun(");
+    const body = functionBody(
+      "services/state/runs.ts",
+      "export async function createRun(scope: SpaceScope, params: CreateRunParams)",
+    );
     assertOrder(
       body,
       "createRun",

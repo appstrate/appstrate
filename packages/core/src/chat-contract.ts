@@ -78,8 +78,8 @@ export type ChatModelResolution =
   | { subscription: true; model: SubscriptionChatModel };
 
 /**
- * A chat composer file attachment to resolve to a durable file. The chat
- * module has no DB access, so it hands these plain fields across `ctx.services`
+ * A chat composer file attachment to resolve to a durable file. The chat module
+ * does not resolve files itself: it hands these plain fields across `ctx.services`
  * and the platform builds the scope/actor + materializes/validates server-side.
  */
 export interface ChatAttachmentRequest {
@@ -133,12 +133,12 @@ export interface ResolvedChatAttachment {
   spaceId: string;
 }
 
-/** Read bytes for one model input under the current turn's file ACL. */
-export interface ChatAttachmentRead extends Pick<
-  ChatAttachmentRequest,
-  "orgId" | "userId" | "uri" | "spaces" | "reach" | "beforeResolve"
-> {
-  /** The conversation reading, whose own files resolve through it; null on an unpersisted turn. */
+/**
+ * Read bytes for one model input under the current turn's file ACL. Unlike a materialization, a
+ * read needs no conversation: `chatSessionId` is null on an unpersisted turn, whose reads reach
+ * no conversation's files.
+ */
+export interface ChatAttachmentRead extends Omit<ChatAttachmentRequest, "chatSessionId"> {
   chatSessionId: string | null;
   kind: "image" | "pdf";
   signal?: AbortSignal;

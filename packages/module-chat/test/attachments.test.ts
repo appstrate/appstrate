@@ -85,18 +85,23 @@ function fileMessage(id: string, uri: string, name: string, mime = "text/plain")
   } as UIMessage;
 }
 
-/** Bind the platform seam to a (user, session) — mirrors the chat-stream call. */
-function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, sessionId: string) {
+/**
+ * Bind the platform seam to a (user, session) — mirrors the chat-stream call: the turn acts in a
+ * team space, and the personal space the uploads are staged in is only reached.
+ */
+function resolverFor(
+  scope: { orgId: string; spaceId: string; teamSpaceId: string },
+  userId: string,
+  sessionId: string,
+) {
   return (uri: string) =>
     resolveChatAttachment({
       orgId: scope.orgId,
       userId,
       chatSessionId: sessionId,
       uri,
-      // These cases materialize the session owner's own uploads; the container
-      // ACL never widens, so the narrowest set is the honest one to hand it.
-      spaces: [{ id: scope.spaceId, permissions: new Set() }],
-      // The personal space they are staged in is reached.
+      // The container ACL never widens: the narrowest set is the honest one.
+      spaces: [{ id: scope.teamSpaceId, permissions: new Set() }],
       reach: [{ id: scope.spaceId, permissions: new Set() }],
       beforeResolve: async () => {},
     });
@@ -104,7 +109,7 @@ function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, 
 
 describe("chat attachments", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; spaceId: string };
+  let scope: { orgId: string; spaceId: string; teamSpaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
@@ -112,7 +117,7 @@ describe("chat attachments", () => {
     ctx = await createTestContext({ orgSlug: "chatattach" });
     // The composer stages every attachment in the caller's personal space.
     const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
-    scope = { orgId: ctx.orgId, spaceId: personal.id };
+    scope = { orgId: ctx.orgId, spaceId: personal.id, teamSpaceId: ctx.defaultSpaceId };
   });
 
   it("materializes an upload:// part into a session-scoped file and rewrites it to appfile://", async () => {

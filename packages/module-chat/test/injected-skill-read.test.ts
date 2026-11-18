@@ -35,6 +35,7 @@ import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { createHash } from "node:crypto";
 import { unzipArtifact } from "@appstrate/core/zip";
 import { reachableSpace } from "./reachable-space.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -300,12 +301,10 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
         })}`,
         "x-org-id": owner.orgId,
       },
-      organization: {
-        // The skills live in the default space: the turn's, which a `skill://` read names.
-        spaces: [{ id: owner.defaultSpaceId, name: "Default", role: "admin", permissions: [] }],
-        touch: async () => {},
-        fileSpaces: async () => new Map(),
-      },
+      // The skills live in the default space: the turn's, which a `skill://` read names.
+      organization: inertTurnSpaces([
+        { id: owner.defaultSpaceId, name: "Default", role: "admin", permissions: [] },
+      ]),
       writeChunk: () => {},
       signal: new AbortController().signal,
       turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },

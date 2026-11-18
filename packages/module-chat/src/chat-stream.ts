@@ -309,10 +309,9 @@ export async function handleChatStream(
   const sessionId = body.id;
   let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
-  // The turn's conversation: the session it persists to (null for an ephemeral turn), and the
-  // ONE id its usage, uploads, file reads, touches and bearer claim use, so a turn always
-  // reaches what it attached. A client id without a message persists nothing.
-  const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
+  // The session the turn persists to, null for an ephemeral turn: every use of the
+  // conversation's id below takes this one, so a turn reaches what it attached.
+  const chatSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
   const turnStart = Date.now();
 
@@ -404,7 +403,7 @@ export async function handleChatStream(
       // The session id rides the SIGNED loopback claims (not a header) so the
       // llm-proxy can attribute a proxy-routed turn's usage to the chat session
       // without trusting anything spoofable.
-      { chatSessionId: meteringSessionId },
+      { chatSessionId },
     );
   const inferenceHeaders: Record<string, string> = {
     Authorization: `Bearer ${mintInferenceAuth()}`,
@@ -447,30 +446,24 @@ export async function handleChatStream(
     // only a `manual` turn lists the spaces' skills on the user's request.
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
-    // before the act (see `touchSessionSpace`; the origin space is touched by definition).
-    // The tools refuse a space outside the set — unknown, unreachable, or reached without one
-    // of the grants — before they record: nothing is recorded and the call is not made. Skills
-    // are procedures, not data: injecting one touches no space; only a call or a
-    // `read_resource` naming a space does.
+    // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names
+    // before the call, refused outside the set; the space of a file a call names once the
+    // platform served it. Skills are procedures, not data: injecting one touches no space.
     const organization: TurnSpaces = {
       spaces,
       touch: async (touchedSpaceId) => {
-        if (!meteringSessionId) return;
+        if (!chatSessionId) return;
         await touchSessionSpace(
-          { id: meteringSessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
+          { id: chatSessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
           touchedSpaceId,
         );
       },
-      fileSpaces: async (uris) => {
-        const ids = new Map(
-          uris.flatMap((uri) => {
-            const id = parseFileUri(uri);
-            return id ? [[id, uri] as const] : [];
-          }),
-        );
-        const spaceOf = await fileSpaceIds(orgId, [...ids.keys()], meteringSessionId);
-        return new Map([...spaceOf].map(([id, spaceId]) => [ids.get(id)!, spaceId]));
-      },
+      fileSpaces: (uris) =>
+        fileSpaceIds(
+          orgId,
+          uris.flatMap((uri) => parseFileUri(uri) ?? []),
+          chatSessionId,
+        ),
     };
     return {
       skills: conv.selection,
@@ -619,7 +612,7 @@ export async function handleChatStream(
   const rejection = await deps.checkUsageAllowed({
     orgId,
     presetId: chosen.id,
-    sessionId: meteringSessionId,
+    sessionId: chatSessionId,
     userId: user.id,
   });
   if (rejection) {
@@ -722,14 +715,14 @@ export async function handleChatStream(
   const attachmentReach = grantsOf(reachable);
   // What the browser's optimistic `upload://` parts became, for the stream to tell it.
   let uploadResolutions: UIMessageChunk | null = null;
-  if (meteringSessionId && lastMessage) {
+  if (chatSessionId && lastMessage) {
     const sent = lastMessage;
     try {
       lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
         return deps.resolveChatAttachment({
           orgId,
           userId: user.id,
-          chatSessionId: meteringSessionId,
+          chatSessionId,
           uri,
           spaces: attachmentSpaces,
           reach: attachmentReach,
@@ -843,7 +836,7 @@ export async function handleChatStream(
       // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
       // The conversation issuing its requests: a run it launches may take its own files.
-      chatSessionId: meteringSessionId,
+      chatSessionId,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -864,7 +857,7 @@ export async function handleChatStream(
         modelLabel: chosen.label ?? chosen.modelId,
         orgId,
         userId: user.id,
-        chatSessionId: meteringSessionId,
+        chatSessionId,
         requestId,
         messages,
         ...(uploadResolutions ? { leadingChunks: [uploadResolutions] } : {}),
@@ -875,7 +868,7 @@ export async function handleChatStream(
             uri,
             spaces: attachmentSpaces,
             reach: attachmentReach,
-            chatSessionId: meteringSessionId,
+            chatSessionId,
             beforeResolve: organization.touch,
             ...options,
           }),

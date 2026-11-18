@@ -14,8 +14,8 @@ export interface SpaceGrant {
  * May this caller flip an activation of this TYPE in THIS space, with no package in
  * hand (anything holding a package row reads the served `activation` verdict instead)?
  * Mirrors the server: the activation grant, or owning the space (RBAC spec §3.6,
- * `gateSpacePackageWrite`). A personal space is reached by its owner alone, so
- * `isOwnPersonalSpace` is "mine".
+ * `gateSpacePackageWrite`). A personal space is reached by its owner alone, so owning
+ * the space (`isOwnPersonalSpace`) is simply being its caller.
  */
 export function maySetPackageActive(
   space: SpaceGrant | undefined,

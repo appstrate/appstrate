@@ -30,7 +30,7 @@ import {
   ChatHostProvider,
   ChatTransportProvider,
   type SpaceChoiceMenu,
-  type AttachUnavailable,
+  type AttachTarget,
 } from "../src/ui/runtime-context.ts";
 import {
   sessionQueryKey,
@@ -486,15 +486,8 @@ describe("the composer's limit entry", () => {
 
 describe("the composer's attach button", () => {
   /** In « Tous les espaces » with several acting spaces: the destination is never asked. */
-  function render(
-    personalSpaceId: string | null,
-    attachUnavailable: AttachUnavailable = "loading",
-  ) {
-    const host = testHost({
-      actingSpaceIds: ["spc_a", "spc_b"],
-      personalSpaceId,
-      attachUnavailable,
-    });
+  function render(attachTarget: AttachTarget) {
+    const host = testHost({ actingSpaceIds: ["spc_a", "spc_b"], attachTarget });
     const transport = transportOf(() => ({}), null);
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
@@ -516,20 +509,20 @@ describe("the composer's attach button", () => {
   }
 
   it("opens the picker directly in a multi-space view, with no space question", () => {
-    const out = render("spc_me");
+    const out = render({ spaceId: "spc_me" });
     expect(out).toMatch(/<button[^>]*aria-label="composer.attach"/);
     expect(out).not.toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
     expect(out).not.toContain("composer.attach.choose");
   });
 
   it("is disabled with its reason until the personal space is known", () => {
-    const out = render(null);
+    const out = render({ unavailable: "loading" });
     expect(out).toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
     expect(out).toContain("composer.attachUnavailable");
   });
 
   it("says a role preview has no personal space, rather than loading", () => {
-    const out = render(null, "preview");
+    const out = render({ unavailable: "preview" });
     expect(out).toContain("composer.attachPreview");
     expect(out).not.toContain("composer.attachUnavailable");
   });

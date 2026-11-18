@@ -64,20 +64,28 @@ export function isInternalDispatch(headers: Headers): boolean {
 }
 
 /**
- * The `c.env` key of an in-process dispatch confined to one space (the space-pinned MCP endpoint).
- * Only `dispatchInProcess` passes an env holding it, so it cannot be forged; read by
- * `callerReachableSpaces` alone, it bounds everything built on the caller's reach.
+ * The `c.env` key of an in-process dispatch confined to one space. Only `dispatchInProcess` passes
+ * an env holding it, so it cannot be forged; read by `callerReachableSpaces` alone.
  */
 const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
 
-/** The `app.fetch` env of a dispatch confined to `spaceId`. */
-export function dispatchSpacePinEnv(spaceId: string): Record<symbol, string> {
-  return { [DISPATCH_SPACE_PIN]: spaceId };
+/**
+ * A dispatch's space. `endpoint`: the space-pinned MCP endpoint confines the whole request to it,
+ * reads by id included; otherwise a credential bound to a set of spaces acts in that one space per
+ * request, which bounds the reads spanning spaces, not a file named by id.
+ */
+export interface DispatchSpacePin {
+  spaceId: string;
+  endpoint: boolean;
+}
+
+/** The `app.fetch` env of a dispatch confined to `pin`. */
+export function dispatchSpacePinEnv(pin: DispatchSpacePin): Record<symbol, DispatchSpacePin> {
+  return { [DISPATCH_SPACE_PIN]: pin };
 }
 
 /** The space this request is a dispatch confined to, if it is one. */
-export function dispatchSpacePin(c: Context): string | undefined {
+export function dispatchSpacePin(c: Context): DispatchSpacePin | undefined {
   const env = c.env as Record<symbol, unknown> | undefined;
-  const pin = env?.[DISPATCH_SPACE_PIN];
-  return typeof pin === "string" ? pin : undefined;
+  return env?.[DISPATCH_SPACE_PIN] as DispatchSpacePin | undefined;
 }

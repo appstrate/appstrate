@@ -55,27 +55,6 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     const chip = page.getByTestId("composer-limit-chip");
     await expect(chip).toHaveCount(0);
 
-    // The attach button asks no space question: it opens the picker at once.
-    const choosing = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "Joindre des fichiers", exact: true }).click();
-    await (
-      await choosing
-    ).setFiles([
-      { name: "beta.txt", mimeType: "text/plain", buffer: Buffer.from("Beta") },
-      {
-        name: "beta.png",
-        mimeType: "image/png",
-        buffer: Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNJkAAAAASUVORK5CYII=",
-          "base64",
-        ),
-      },
-    ]);
-    await expect(page.getByText("beta.txt", { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Aperçu de beta.png", exact: true }),
-    ).toBeVisible();
-
     // Settings › « Limiter à un espace » › the acting spaces.
     await page.getByTestId("composer-settings-trigger").click();
     const limit = page.getByTestId("composer-limit-item");
@@ -98,8 +77,6 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     expect(response.request().postDataJSON()).toEqual({ spaceId: alpha.id, restricted: true });
     expect(response.status()).toBe(204);
     await expect(chip).toBeVisible();
-    // Limiting the conversation changes nothing for the attachments already picked.
-    await expect(page.getByText("beta.txt", { exact: true })).toBeVisible();
   } finally {
     await context.close();
   }

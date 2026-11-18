@@ -27,6 +27,7 @@ import {
   platformMcpSurfaceKey,
 } from "../src/pi-chat/mcp-surface-cache.ts";
 import { reachableSpace } from "./reachable-space.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const ORIGIN = "http://127.0.0.1:1";
 const MCP_URL = `${ORIGIN}/api/mcp/o/org_1?renders_cards=true`;
@@ -226,12 +227,8 @@ function buildTurn(
   return buildPlatformMcpTools({
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-surface": surface },
-    organization: {
-      spaces: [{ id: "spc_1", name: "One", role: "owner", permissions: [] }],
-      touch: async () => {},
-      // Every file named here is the conversation's own.
-      fileSpaces: async (uris) => new Map(uris.map((uri) => [uri, null])),
-    },
+    // Every file named here is the conversation's own: it names no space.
+    organization: inertTurnSpaces([{ id: "spc_1", name: "One", role: "owner", permissions: [] }]),
     writeChunk: () => {},
     signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },

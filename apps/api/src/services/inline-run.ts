@@ -23,7 +23,6 @@ import { logger } from "../lib/logger.ts";
 import type { InlineRunPreflightResult } from "./inline-run-preflight.ts";
 import { collectMountedFileIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
-import type { ConsumedFile } from "./state/runs.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { fileUri, extractFileIdsFromText, isFileUri, parseFileUri } from "@appstrate/core/file-uri";
@@ -288,7 +287,7 @@ interface ContextFilesInjection {
  * there is exactly one place that knows the field shape.
  *
  * Declaring the field is all the work: from here the URIs travel the NORMAL
- * file-ref path (`collectFileRefs` → `getFileForActor` ACL → byte/count caps
+ * file-ref path (`collectFileRefs` → `resolveFilesAcrossSpaces` ACL → byte/count caps
  * → stream into the run-workspace storage prefix `{runId}/files/` →
  * `file_links`), and the platform prompt announces them like any other input
  * file. Nothing is mounted by a side path, so nothing can be mounted
@@ -380,7 +379,7 @@ export async function triggerInlineRun(params: {
   apiKeyId?: string;
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
-}): Promise<{ runId: string; packageId: string; consumedFiles: ConsumedFile[] }> {
+}): Promise<{ runId: string; packageId: string }> {
   // Before the shadow package below: nothing may be written while run capacity is starting.
   assertRunCapacityReady();
   const { orgId, spaceId, actor, payerUserId, runId, preflight, parsed, apiKeyId, traceparent } =
@@ -412,9 +411,8 @@ export async function triggerInlineRun(params: {
   const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt);
 
   // ----- Fire the pipeline. -----
-  let consumedFiles: ConsumedFile[];
   try {
-    ({ consumedFiles } = await prepareAndExecuteRun({
+    await prepareAndExecuteRun({
       runId,
       agent: shadowAgent,
       orgId,
@@ -428,7 +426,7 @@ export async function triggerInlineRun(params: {
       // run row exists (input already rewritten to `appfile://` ids).
       pendingFiles: parsed.pendingFiles,
       // `appfile://` inputs to protect via `file_links` (chaining).
-      consumedFileIds: parsed.consumedFileIds,
+      consumedFileIds: parsed.consumedFiles?.map((file) => file.id),
       modelId: modelIdOverride,
       generationConfigOverride: parsed.generationConfigOverride ?? null,
       proxyId: proxyIdOverride,
@@ -439,13 +437,13 @@ export async function triggerInlineRun(params: {
       // The preflight's own memo, already seeded with the PINNED integration
       // manifests — the pipeline must not resolve them a second time.
       manifestCache: preflight.manifestCache,
-    }));
+    });
   } catch (err) {
     await deleteOrphanShadowPackage(shadowId);
     throw err;
   }
 
-  return { runId, packageId: shadowId, consumedFiles };
+  return { runId, packageId: shadowId };
 }
 
 /**

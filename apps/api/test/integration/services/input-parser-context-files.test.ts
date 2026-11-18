@@ -37,12 +37,14 @@ function fakeCtx(scope: Scope, userId: string): Context {
         ? scope.orgId
         : key === "spaceId"
           ? scope.spaceId
-          : key === "user"
-            ? { id: userId }
-            : key === "permissions"
-              ? // Run inputs read file content, which asks `files:read` in the file's space.
-                new Set(["files:read"])
-              : undefined,
+          : key === "space"
+            ? { id: scope.spaceId }
+            : key === "user"
+              ? { id: userId }
+              : key === "permissions"
+                ? // Run inputs read file content, which asks `files:read` in the file's space.
+                  new Set(["files:read"])
+                : undefined,
     set: () => {},
   } as unknown as Context;
 }
@@ -137,7 +139,7 @@ describe("parseRequestInput — reserved context-files field", () => {
 
     // Chained: every file is registered for a `file_links` row, which
     // `createRun` writes in the same transaction as the run.
-    expect(parsed.consumedFileIds!.sort()).toEqual([jsonId, mdId].sort());
+    expect(parsed.consumedFiles!.map((file) => file.id).sort()).toEqual([jsonId, mdId].sort());
 
     // The URIs are persisted on the run input under the reserved field.
     expect(parsed.input![CONTEXT_FILES_FIELD]).toEqual([fileUri(jsonId), fileUri(mdId)]);
@@ -200,7 +202,7 @@ describe("parseRequestInput — reserved context-files field", () => {
       expect(await new Response(stream!).text()).toBe(expected);
     }
 
-    expect(parsed.consumedFileIds!.sort()).toEqual([...ids].sort());
+    expect(parsed.consumedFiles!.map((file) => file.id).sort()).toEqual([...ids].sort());
   });
 
   it("refuses a file from another space (container ACL preserved)", async () => {

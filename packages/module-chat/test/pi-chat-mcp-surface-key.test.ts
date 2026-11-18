@@ -38,6 +38,7 @@ import { db } from "@appstrate/db/client";
 import { spaces } from "@appstrate/db/schema";
 import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
 import { reachableSpace } from "./reachable-space.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -92,11 +93,7 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
       Authorization: `Bearer ${token}`,
       "x-org-id": caller.ctx.orgId,
     },
-    organization: {
-      spaces: caller.spaces,
-      touch: async () => {},
-      fileSpaces: async () => new Map(),
-    },
+    organization: inertTurnSpaces(caller.spaces),
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },

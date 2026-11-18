@@ -14,7 +14,7 @@ import {
   RUN_LOG_LEVELS,
 } from "../services/state/runs.ts";
 import { resolveAgentRunVersion, versionRefOf } from "../services/agent-version-resolver.ts";
-import { parseRequestInput } from "../services/input-parser.ts";
+import { parseRequestInput, type ParsedInput } from "../services/input-parser.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -67,7 +67,6 @@ import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { withoutConnectOffers } from "../services/connect/preflight-connect-offer.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext, recordAuditsFromContext } from "../services/audit.ts";
-import type { ConsumedFile } from "../services/state/runs.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { parseGlobalRunListQuery, parseRunListFilters } from "../lib/run-list-filters.ts";
@@ -192,15 +191,14 @@ function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
 
 /** One `file.consumed` per input file, attributed like `run.triggered`, in one insert. */
-function recordFilesConsumed(c: Context<AppEnv>, runId: string, consumed: ConsumedFile[]) {
+function recordFilesConsumed(c: Context<AppEnv>, runId: string, parsed: ParsedInput) {
   return recordAuditsFromContext(
     c,
-    consumed.map((file) => ({
+    (parsed.consumedFiles ?? []).map((file) => ({
       action: "file.consumed",
       resourceType: "file",
       resourceId: file.id,
-      // A personal space's id is the owner's alone; a team space's audit names it for no one.
-      after: file.personal ? { runId } : { runId, fileSpaceId: file.spaceId },
+      after: { runId, fileSpaceId: file.spaceId },
     })),
   );
 }
@@ -360,7 +358,7 @@ export function createRunsRouter() {
           input: parsedInput,
           uploadedFiles,
           pendingFiles,
-          consumedFileIds,
+          consumedFiles,
           modelIdOverride,
           generationConfigOverride,
           proxyIdOverride,
@@ -419,7 +417,7 @@ export function createRunsRouter() {
         });
 
         const runner = await resolveRunnerContext(c);
-        const { consumedFiles } = await prepareAndExecuteRun({
+        await prepareAndExecuteRun({
           runId,
           agent: effectiveAgent,
           orgId,
@@ -436,7 +434,7 @@ export function createRunsRouter() {
           // the run row exists (input already rewritten to `appfile://` ids).
           pendingFiles,
           // `appfile://` inputs to protect via `file_links` (chaining).
-          consumedFileIds,
+          consumedFileIds: consumedFiles?.map((file) => file.id),
           modelId: modelIdOverride ?? packageSettings.modelId,
           generationConfig: packageSettings.generationConfig,
           generationConfigOverride: generationConfigOverride ?? null,
@@ -464,7 +462,7 @@ export function createRunsRouter() {
             origin: "platform",
           },
         });
-        await recordFilesConsumed(c, runId, consumedFiles);
+        await recordFilesConsumed(c, runId, inputResult);
 
         // 201 + the bare created run resource — same DTO and serializer as
         // GET /runs/:id — so callers see the full launched state (resolved
@@ -726,7 +724,7 @@ export function createRunsRouter() {
       // synthesis must happen HERE: `parseRequestInput` below reads the input
       // schema off `preflight.manifest`, so the field has to be declared before
       // it walks the input. Everything after this block is the ordinary file
-      // path — ACL (`getFileForActor`), byte + count caps, streaming into
+      // path — ACL (`resolveFilesAcrossSpaces`), byte + count caps, streaming into
       // `files/`, `file_links` — and the platform prompt announces the
       // mounted files exactly as it does for an uploaded file.
       assertContextFilesFieldAvailable(preflight.manifest, body.input);
@@ -763,7 +761,7 @@ export function createRunsRouter() {
           { injectedInput: inputPatch },
         );
 
-        const { packageId, consumedFiles } = await triggerInlineRun({
+        const { packageId } = await triggerInlineRun({
           orgId,
           spaceId,
           actor,
@@ -783,7 +781,7 @@ export function createRunsRouter() {
           resourceId: runId,
           after: { packageId, origin: "inline" },
         });
-        await recordFilesConsumed(c, runId, consumedFiles);
+        await recordFilesConsumed(c, runId, parsed);
 
         // 201 + the bare created run resource — same DTO and serializer
         // as GET /runs/:id, same status code as the sibling trigger

@@ -234,10 +234,9 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
       ceiling: undefined,
       actor: { type: "user", id: ctx.user.id },
       scope,
-      fileAccess: {
-        grantIn: async (spaceId) =>
-          spaceId === scope.spaceId ? new Set(["files:read"]) : undefined,
-      },
+      fileAccess: async () => ({
+        grants: [{ spaceId: scope.spaceId, permissions: new Set(["files:read"]) }],
+      }),
       // Never reached: this test drives `resources/read`, not the bundle tools.
       authorizeBundle: async () => {},
       placeRootAs: async () => null,

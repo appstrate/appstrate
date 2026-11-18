@@ -111,6 +111,5 @@ export function assertRunVisible(
   c: Context<AppEnv>,
   row: { userId: string | null; endUserId: string | null },
 ): void {
-  if (canReadEveryRun(callerPermissions(c))) return;
-  if (!ownsRun(getActor(c), row)) throw notFound("Run not found");
+  if (!readsRun(callerPermissions(c), getActor(c), row)) throw notFound("Run not found");
 }

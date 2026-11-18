@@ -11,6 +11,10 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 export const ORG_READ_REACH =
   "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.";
 
+/** How every door naming a file by id (reads, delete, keep, run inputs) reaches it. */
+export const FILE_BY_ID_REACH =
+  "The file resolves in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, in a space its credential reaches (the credential matrix is in `docs/architecture/SPACES.md`), and a chat turn's credential also reaches its own conversation's uploads. Anything else is indistinguishable from a missing file (404).";
+
 /** The `packageId` filter of a list (runs, schedules): `rows` names what it returns, `empty` its empty answer. */
 export function packageIdFilterParameter(rows: string, empty: "page" | "list") {
   return {

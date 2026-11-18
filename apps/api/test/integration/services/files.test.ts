@@ -59,7 +59,6 @@ import {
   readStoredFileBytes,
   resolveChatAttachment,
   resolveFilesAcrossSpaces,
-  grantInList,
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
@@ -527,8 +526,12 @@ describe("files service + routes", () => {
     });
 
     const runId = await seedRunRow(scope, { input: { a: { b: [`appfile://${docA.id}`] } } });
-    const page = await listFilesIn(scope, userActor, { runId }, new Set(["files:read"]));
+    const readsOwnRuns = new Set(["runs:read", "files:read"]);
+    const page = await listFilesIn(scope, userActor, { runId }, readsOwnRuns);
     expect(page.data.map((d) => d.id)).toContain(docA.id);
+    // Its launcher without `runs:read` no longer reads the run, nor its inputs.
+    const withoutRuns = await listFilesIn(scope, userActor, { runId }, new Set(["files:read"]));
+    expect(withoutRuns.data.map((d) => d.id)).not.toContain(docA.id);
     // Without `files:read` in its space, an input is as absent as a missing one.
     expect((await listFilesIn(scope, userActor, { runId }, NO_GRANTS)).data).toEqual([]);
   });
@@ -1395,7 +1398,13 @@ describe("files service + routes", () => {
     const ids = async (listed: typeof grants) =>
       new Set(
         (
-          await listFilesForActor(ctx.orgId, listed, userActor, { contextChatSessionId: sessionId })
+          await listFilesForActor(
+            ctx.orgId,
+            listed,
+            userActor,
+            { contextChatSessionId: sessionId },
+            { fileAccess: { grants: listed } },
+          )
         ).data.map((file) => file.id),
       );
     expect(await ids(grants)).toEqual(new Set([first.id, second.id, crossed.id]));
@@ -1413,12 +1422,13 @@ describe("files service + routes", () => {
           grants,
           { type: "user", id: stranger.id },
           { contextChatSessionId: sessionId },
+          { fileAccess: { grants } },
         )
       ).data,
     ).toEqual([]);
   });
 
-  it("resolves several files in one pass, asking each space's grant once", async () => {
+  it("resolves several files in one pass, each in its own space", async () => {
     const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
     const otherScope = { orgId: ctx.orgId, spaceId: other.id };
     const ids: string[] = [];
@@ -1429,25 +1439,19 @@ describe("files service + routes", () => {
           .row.id,
       );
     }
-    const asked: string[] = [];
-    const grantIn = grantInList([
-      [ctx.defaultSpaceId, new Set(["files:read"])],
-      [other.id, new Set<string>()],
-    ]);
     const resolved = await resolveFilesAcrossSpaces(
       ctx.orgId,
       userActor,
       [...ids, ids[0]!, "file_missing00", "not-an-id"],
       {
-        grantIn: (spaceId) => {
-          asked.push(spaceId);
-          return grantIn(spaceId);
-        },
+        grants: [
+          { spaceId: ctx.defaultSpaceId, permissions: new Set(["files:read"]) },
+          { spaceId: other.id, permissions: new Set<string>() },
+        ],
       },
     );
-    // The default space's two files; the other space holds no `files:read`.
+    // The default space's two files, once each; the other space holds no `files:read`.
     expect(resolved.map((file) => file.row.id).sort()).toEqual([ids[0]!, ids[1]!].sort());
-    expect(asked.sort()).toEqual([ctx.defaultSpaceId, other.id].sort());
   });
 
   it("a chat attachment resolves in the space its file belongs to, under the caller's set there", async () => {
@@ -1671,10 +1675,8 @@ describe("files service + routes", () => {
       });
 
     expect((await read(ctx.user.id, chatSessionId))?.bytes).toEqual(png);
-    // Under the caller's set in the file's space: without `files:read` there, nothing.
-    expect(
-      await read(ctx.user.id, chatSessionId, [{ id: personal.id, permissions: new Set() }]),
-    ).toBeNull();
+    // Only while the turn reaches the caller's personal space (a role preview's reach does not).
+    expect(await read(ctx.user.id, chatSessionId, [])).toBeNull();
     // Another conversation of the same user does not hold it, and its spaces do not include it.
     expect(await read(ctx.user.id, otherSessionId)).toBeNull();
     expect(await read(ctx.user.id, null)).toBeNull();

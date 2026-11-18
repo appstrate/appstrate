@@ -272,23 +272,33 @@ function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
 
 /** The attach button opens the native picker: files always go to the caller's personal space. */
 function AttachButton() {
-  const { t, personalSpaceId, attachUnavailable } = useChatHost();
+  const { t, attachTarget } = useChatHost();
+  const label = t("composer.attach");
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      disabled={personalSpaceId === null}
+      disabled={"unavailable" in attachTarget}
       className={ICON_BUTTON}
-      aria-label={t("composer.attach")}
+      aria-label={label}
     >
       <PaperclipIcon />
     </Button>
   );
-  if (personalSpaceId !== null) {
-    return <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>;
+  if ("spaceId" in attachTarget) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-64 text-xs">
+          {t("composer.attachHint")}
+        </TooltipContent>
+      </Tooltip>
+    );
   }
-  const reason = t(attachUnavailableKey(attachUnavailable));
+  const reason = t(attachUnavailableKey(attachTarget.unavailable));
   return (
     <Tooltip>
       <TooltipTrigger asChild>

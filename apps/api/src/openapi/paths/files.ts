@@ -2,7 +2,7 @@
 
 import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { ORG_READ_REACH } from "../parameters.ts";
+import { FILE_BY_ID_REACH, ORG_READ_REACH } from "../parameters.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`, `runId`,
@@ -180,7 +180,8 @@ const fileListQueryParameters = [
     in: "query",
     required: false,
     schema: { type: "string" },
-    description: "Filter to files anchored to this run.",
+    description:
+      "Filter to the files of this run: those it produced, plus, for a caller who reads the run, the inputs it consumed, each resolved as a file read by id.",
   },
   {
     name: "packageId",
@@ -227,16 +228,6 @@ const fileListQueryParameters = [
     description: "Page size (1–100, default 20).",
   },
 ];
-
-/** How a read by id reaches a file: the rule of run inputs and the MCP file tools. */
-const FILE_BY_ID_REACH =
-  "The file is resolved in its own space, which may differ from `X-Space-Id`: the caller " +
-  "needs `files:read` there, as its credential reaches that space, else the answer is the 404 " +
-  "of a missing file. A session, an MCP instance token and an OAuth delegate with an " +
-  "organization audience reach every space where the user holds a role; an API key, an " +
-  "end-user, a token issued for one space and a request through the space-pinned MCP endpoint " +
-  "reach only that space; a chat turn's credential also reaches its own conversation's " +
-  "uploads. A credential whose scopes omit `files:read` is refused (403).";
 
 /** The page both galleries answer. */
 const fileListResponses = {
@@ -309,8 +300,8 @@ export const filesPaths = {
         "Fetch a file's metadata, including the derived `downloadable` flag and — for a " +
         "previewable file — a freshly minted `preview_url`. " +
         FILE_BY_ID_REACH +
-        " On top of it access is inherited from the file's container, so an id the caller " +
-        "cannot read returns 404.",
+        " On top of it access is inherited from the file's container. A credential whose " +
+        "scopes omit `files:read` is refused (403).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -332,12 +323,13 @@ export const filesPaths = {
       tags: ["Files"],
       summary: "Delete a file",
       description:
-        "Delete a file (storage object + row) and release its quota. Allowed for a caller " +
-        "with the `files:delete` permission (owner/admin), or the file's own creator on a " +
-        "credential that admits `files:delete` — an API key or token whose scopes omit it " +
-        "does not inherit its creator's files. " +
-        "A file referenced by a run cannot be deleted until those consumer runs are removed. " +
-        "Unlike a read, `X-Space-Id` must name the file's own space.",
+        "Delete a file (storage object + row) and release its quota. " +
+        FILE_BY_ID_REACH +
+        " Allowed with the `files:delete` permission in the file's space, or for the file's " +
+        "own creator on a credential that admits `files:delete` — an API key or token whose " +
+        "scopes omit it does not inherit its creator's files. A file consumed by a run of its " +
+        "own space cannot be deleted until those runs are removed; a run of another space " +
+        "keeps no claim on it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -351,7 +343,7 @@ export const filesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         ...pipelineResponses,
         "409": {
-          description: "File is still referenced by one or more consumer runs.",
+          description: "File is still consumed by one or more runs of its own space.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -378,12 +370,11 @@ export const filesPaths = {
       description:
         "Pin a file so it is never swept by the retention GC: clears its `expires_at` " +
         "(sets it to null / permanent). Allowed for a caller with the `files:delete` " +
-        "permission (owner/admin), or the file's own creator on a credential that admits " +
+        "permission in the file's space, or the file's own creator on a credential that admits " +
         "`files:delete` — an API key or token whose scopes omit it does not inherit its " +
         "creator's files. Idempotent — keeping an " +
         "already-permanent file is a no-op that returns 200 with the unchanged file. " +
-        "An id the caller cannot read returns 404. Unlike a read, `X-Space-Id` must name the " +
-        "file's own space.",
+        FILE_BY_ID_REACH,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -411,7 +402,7 @@ export const filesPaths = {
       description:
         "Download the file bytes with `Content-Disposition: attachment`. " +
         FILE_BY_ID_REACH +
-        " When object storage supports it (S3 with a public " +
+        " A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public " +
         "endpoint), responds `307` with a short-lived presigned `Location`; otherwise " +
         "proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag " +
         "— a user upload is served only to its creator (403 otherwise).",

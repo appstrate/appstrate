@@ -20,6 +20,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 /** Nothing listens here — see the file header. */
 const ORIGIN = "http://127.0.0.1:1";
@@ -141,11 +142,7 @@ function buildTurn(
     ...extra,
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-    organization: {
-      spaces: [{ id: "spc_1", name: "One", role: "owner", permissions: [] }],
-      touch: async () => {},
-      fileSpaces: async () => new Map(),
-    },
+    organization: inertTurnSpaces([{ id: "spc_1", name: "One", role: "owner", permissions: [] }]),
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },

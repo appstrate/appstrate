@@ -17,17 +17,16 @@
 
 import { describe, it, expect } from "bun:test";
 import { createChatAttachmentAdapter } from "../src/ui/attachment-adapter.ts";
-import type { AttachUnavailable, UploadFile } from "../src/ui/runtime-context.ts";
+import type { AttachTarget, AttachUnavailable, UploadFile } from "../src/ui/runtime-context.ts";
 
 const NOTE = () => new File(["hello"], "note.txt", { type: "text/plain" });
 
 function adapterOver(
   upload: UploadFile,
-  personalSpaceId: () => string | null = () => "spc_me",
-  unavailable: () => AttachUnavailable = () => "loading",
+  attachTarget: () => AttachTarget = () => ({ spaceId: "spc_me" }),
 ) {
   // The translator echoes the KEY the adapter picked.
-  return createChatAttachmentAdapter({ upload, t: (key) => key, personalSpaceId, unavailable });
+  return createChatAttachmentAdapter({ upload, t: (key) => key, attachTarget });
 }
 
 /** An uploader recording the space of each upload. */
@@ -69,12 +68,12 @@ describe("chat attachment adapter — the space of an upload", () => {
 
   it("refuses a file while the personal space is not known, and uploads nothing", async () => {
     const { upload, uploads } = recordingUpload();
-    let space: string | null = null;
-    const adapter = adapterOver(upload, () => space);
+    let target: AttachTarget = { unavailable: "loading" };
+    const adapter = adapterOver(upload, () => target);
     await expect(adapter.add({ file: NOTE() })).rejects.toThrow("composer.attachUnavailable");
-    space = "spc_me";
+    target = { spaceId: "spc_me" };
     const pending = await adapter.add({ file: NOTE() });
-    space = null;
+    target = { unavailable: "loading" };
     await expect(adapter.send(pending)).rejects.toThrow("composer.attachUnavailable");
     expect(uploads).toEqual([]);
   });
@@ -88,11 +87,9 @@ describe("chat attachment adapter — no personal space", () => {
       preview: "composer.attachPreview",
     } as const;
     for (const [reason, message] of Object.entries(reasons)) {
-      const adapter = adapterOver(
-        recordingUpload().upload,
-        () => null,
-        () => reason as AttachUnavailable,
-      );
+      const adapter = adapterOver(recordingUpload().upload, () => ({
+        unavailable: reason as AttachUnavailable,
+      }));
       await expect(adapter.add({ file: NOTE() })).rejects.toThrow(message);
     }
   });

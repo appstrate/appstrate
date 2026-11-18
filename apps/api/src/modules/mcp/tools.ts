@@ -189,8 +189,8 @@ export interface McpToolContext {
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
-  /** How a file read by id reaches the file's own space (`requestFileAccess`). */
-  fileAccess: FileAccess;
+  /** How a file read by id reaches the file's own space (`requestFileAccess`), read on use. */
+  fileAccess: () => Promise<FileAccess>;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
@@ -1662,7 +1662,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
         ctx.scope.orgId,
         ctx.actor,
         docId,
-        ctx.fileAccess,
+        await ctx.fileAccess(),
       );
       if (!resolved) {
         throw new ToolRefusal({

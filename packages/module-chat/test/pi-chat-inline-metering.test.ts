@@ -16,14 +16,9 @@ import type { ModelCost } from "@appstrate/core/module";
 import { createPiOAuthModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
-import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
-/** The turn's one space; nothing here records a touched space. */
-const ORGANIZATION: TurnSpaces = {
-  spaces: [{ id: "spc_1", name: "One", role: "admin", permissions: [] }],
-  touch: async () => {},
-  fileSpaces: async () => new Map(),
-};
+const ORGANIZATION = inertTurnSpaces();
 
 const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_metering";
 

@@ -2232,7 +2232,7 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references (an existing file of any space the caller's credential reaches with `files:read` there, under the file's container ACL; a chat turn also reaches its own conversation's attachments; anything else is a 404), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
+                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references (an existing file, under its container ACL. The file resolves in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, in a space its credential reaches (the credential matrix is in `docs/architecture/SPACES.md`), and a chat turn's credential also reaches its own conversation's uploads. Anything else is indistinguishable from a missing file (404).), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
                   },
                   "rerun_from": {
                     "type": "string",
@@ -27485,7 +27485,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Filter to files anchored to this run."
+            "description": "Filter to the files of this run: those it produced, plus, for a caller who reads the run, the inputs it consumed, each resolved as a file read by id."
           },
           {
             "name": "packageId",
@@ -27754,7 +27754,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Filter to files anchored to this run."
+            "description": "Filter to the files of this run: those it produced, plus, for a caller who reads the run, the inputs it consumed, each resolved as a file read by id."
           },
           {
             "name": "packageId",
@@ -27998,7 +27998,7 @@
         "operationId": "getFile",
         "tags": ["Files"],
         "summary": "Get file metadata",
-        "description": "Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space, else the answer is the 404 of a missing file. A session, an MCP instance token and an OAuth delegate with an organization audience reach every space where the user holds a role; an API key, an end-user, a token issued for one space and a request through the space-pinned MCP endpoint reach only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). On top of it access is inherited from the file's container, so an id the caller cannot read returns 404.",
+        "description": "Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. The file resolves in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, in a space its credential reaches (the credential matrix is in `docs/architecture/SPACES.md`), and a chat turn's credential also reaches its own conversation's uploads. Anything else is indistinguishable from a missing file (404). On top of it access is inherited from the file's container. A credential whose scopes omit `files:read` is refused (403).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28181,7 +28181,7 @@
         "operationId": "deleteFile",
         "tags": ["Files"],
         "summary": "Delete a file",
-        "description": "Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file referenced by a run cannot be deleted until those consumer runs are removed. Unlike a read, `X-Space-Id` must name the file's own space.",
+        "description": "Delete a file (storage object + row) and release its quota. The file resolves in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, in a space its credential reaches (the credential matrix is in `docs/architecture/SPACES.md`), and a chat turn's credential also reaches its own conversation's uploads. Anything else is indistinguishable from a missing file (404). Allowed with the `files:delete` permission in the file's space, or for the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file consumed by a run of its own space cannot be deleted until those runs are removed; a run of another space keeps no claim on it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28220,7 +28220,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "File is still referenced by one or more consumer runs.",
+            "description": "File is still consumed by one or more runs of its own space.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -28248,7 +28248,7 @@
         "operationId": "keepFile",
         "tags": ["Files"],
         "summary": "Keep a file (clear its expiry)",
-        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404. Unlike a read, `X-Space-Id` must name the file's own space.",
+        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission in the file's space, or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. The file resolves in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, in a space its credential reaches (the credential matrix is in `docs/architecture/SPACES.md`), and a chat turn's credential also reaches its own conversation's uploads. Anything else is indistinguishable from a missing file (404).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28428,7 +28428,7 @@
         "operationId": "getFileContent",
         "tags": ["Files"],
         "summary": "Download file content",
-        "description": "Download the file bytes with `Content-Disposition: attachment`. The file is resolved in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, as its credential reaches that space, else the answer is the 404 of a missing file. A session, an MCP instance token and an OAuth delegate with an organization audience reach every space where the user holds a role; an API key, an end-user, a token issued for one space and a request through the space-pinned MCP endpoint reach only that space; a chat turn's credential also reaches its own conversation's uploads. A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
+        "description": "Download the file bytes with `Content-Disposition: attachment`. The file resolves in its own space, which may differ from `X-Space-Id`: the caller needs `files:read` there, in a space its credential reaches (the credential matrix is in `docs/architecture/SPACES.md`), and a chat turn's credential also reaches its own conversation's uploads. Anything else is indistinguishable from a missing file (404). A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"

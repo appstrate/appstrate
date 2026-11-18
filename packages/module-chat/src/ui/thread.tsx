@@ -98,32 +98,16 @@ export function Thread({
   useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
-  const { can, t, personalSpaceId } = useChatHost();
-  const aui = useAui();
+  const { can, t } = useChatHost();
   const canWrite = can("chat:write");
-  // The whole thread is the drop target, welcome screen and transcript alike, on the picker's
-  // adapter path; a reader or an unknown personal space gets none (no overlay either). The
-  // wrapper cancels a file drag the dropzone leaves alone so the browser never opens the file
-  // (text drags keep their default). A file dropped where attaching is unavailable goes through
-  // the adapter anyway: its refusal says why, as for a refused picked file.
-  const cancelFileDrag = (event: React.DragEvent) => {
-    if (event.dataTransfer.types.includes("Files")) event.preventDefault();
-  };
-  const onDrop = (event: React.DragEvent) => {
-    cancelFileDrag(event);
-    // One file is enough to get the refusal that says why; the rest would only repeat it.
-    const file = event.dataTransfer.files[0];
-    if (file && canWrite && personalSpaceId === null) {
-      aui
-        .composer()
-        .addAttachment(file)
-        .catch(() => {});
-    }
-  };
+  // The whole thread is the drop target, welcome screen and transcript alike; a reader gets none.
+  // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
+  // (a disabled dropzone would cancel the drop silently).
   return (
-    <div className="h-full min-h-0" onDragOver={cancelFileDrag} onDrop={onDrop}>
+    <div className="h-full min-h-0">
       <ComposerPrimitive.AttachmentDropzone
-        disabled={!canWrite || personalSpaceId === null}
+        disabled={!canWrite}
+        data-testid="chat-dropzone"
         className="group/drop relative h-full min-h-0"
       >
         <ThreadPrimitive.Root

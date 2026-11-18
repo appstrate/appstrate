@@ -33,12 +33,10 @@ afterAll(() => {
 const ACTING = ["spc_a"];
 
 /** The host's space services, as the shell passes them. */
-const { canIn, personalSpaceId, attachUnavailable, renderSpaces, linkInSpace, useSpaceLabelOf } =
-  testHost();
+const { canIn, attachTarget, renderSpaces, linkInSpace, useSpaceLabelOf } = testHost();
 const SPACE_PROPS = {
   canIn,
-  personalSpaceId,
-  attachUnavailable,
+  attachTarget,
   renderSpaces,
   linkInSpace,
   useSpaceLabelOf,

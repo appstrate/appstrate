@@ -66,12 +66,14 @@ function fakeCtx(ctx: { orgId: string; spaceId: string; user?: { id: string } })
         ? ctx.orgId
         : key === "spaceId"
           ? ctx.spaceId
-          : key === "user"
-            ? user
-            : key === "permissions"
-              ? // Run inputs read file content, which asks `files:read` in the file's space.
-                new Set(["files:read"])
-              : undefined,
+          : key === "space"
+            ? { id: ctx.spaceId }
+            : key === "user"
+              ? user
+              : key === "permissions"
+                ? // Run inputs read file content, which asks `files:read` in the file's space.
+                  new Set(["files:read"])
+                : undefined,
     set: () => {},
   } as unknown as Context;
 }

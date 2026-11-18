@@ -18,6 +18,7 @@ import {
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
+  type AttachTarget,
   type OpenFile,
   type SpaceChoiceMenu,
 } from "@appstrate/module-chat/ui";
@@ -114,7 +115,13 @@ export function ChatModulePage() {
   const { spaceId: personalSpaceId, failed: spacesFailed } = useOwnPersonalSpaceId();
   // A role preview holds no personal space: attaching is unavailable for good, not loading.
   const previewing = useViewAs() !== null;
-  const attachUnavailable = previewing ? "preview" : spacesFailed ? "error" : "loading";
+  const attachTarget = useMemo<AttachTarget>(
+    () =>
+      personalSpaceId
+        ? { spaceId: personalSpaceId }
+        : { unavailable: previewing ? "preview" : spacesFailed ? "error" : "loading" },
+    [personalSpaceId, previewing, spacesFailed],
+  );
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -209,8 +216,7 @@ export function ChatModulePage() {
               can={can}
               canIn={canIn}
               actingSpaceIds={actingSpaceIds}
-              personalSpaceId={personalSpaceId}
-              attachUnavailable={attachUnavailable}
+              attachTarget={attachTarget}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}

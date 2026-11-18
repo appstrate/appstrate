@@ -2,7 +2,7 @@
 
 /**
  * assistant-ui `AttachmentAdapter` for the chat composer (pinned
- * `@assistant-ui/react` 0.14.27). Its three methods:
+ * `@assistant-ui/react`). Its three methods:
  *
  *  - `add({file})` — register a picked file as a pending attachment (a chip). The client-side
  *    size guard rejects an over-cap file here, before any upload; a file added while the
@@ -26,7 +26,12 @@
 
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
-import type { AttachUnavailable, ChatTranslate, UploadFile } from "./runtime-context.ts";
+import type {
+  AttachTarget,
+  AttachUnavailable,
+  ChatTranslate,
+  UploadFile,
+} from "./runtime-context.ts";
 import { stageComposerFile } from "./upload.ts";
 
 /**
@@ -58,12 +63,10 @@ export function attachUnavailableKey(reason: AttachUnavailable): string {
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
-  /** The caller's personal space, where every file goes; `null` while not known. */
-  personalSpaceId: () => string | null;
-  /** Why a missing personal space is missing. */
-  unavailable: () => AttachUnavailable;
+  /** Where every file goes (the caller's personal space), or why it cannot. */
+  attachTarget: () => AttachTarget;
 }): AttachmentAdapter {
-  const { upload, t, personalSpaceId, unavailable } = deps;
+  const { upload, t, attachTarget } = deps;
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
@@ -73,8 +76,9 @@ export function createChatAttachmentAdapter(deps: {
     accept: "*",
     add({ file }): Promise<PendingAttachment> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
-      if (personalSpaceId() === null) {
-        return Promise.reject(new Error(t(attachUnavailableKey(unavailable()))));
+      const target = attachTarget();
+      if ("unavailable" in target) {
+        return Promise.reject(new Error(t(attachUnavailableKey(target.unavailable))));
       }
       return Promise.resolve({
         id: crypto.randomUUID(),
@@ -87,11 +91,11 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
-      const spaceId = personalSpaceId();
-      if (spaceId === null) throw new Error(t(attachUnavailableKey(unavailable())));
+      const target = attachTarget();
+      if ("unavailable" in target) throw new Error(t(attachUnavailableKey(target.unavailable)));
       let uri: string;
       try {
-        uri = await stageComposerFile(upload, attachment.file, spaceId);
+        uri = await stageComposerFile(upload, attachment.file, target.spaceId);
       } catch (err) {
         // The host uploader's message is technical (status codes, English) and
         // ends up in the composer chip — surface the translated one instead.

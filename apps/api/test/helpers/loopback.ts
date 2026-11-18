@@ -4,6 +4,7 @@
 
 import type { OrgRole } from "@appstrate/core/permissions";
 import { mintMcpLoopbackToken } from "../../../../packages/module-chat/src/loopback-auth.ts";
+import type { ViewAsPersona } from "../../src/lib/view-as.ts";
 import type { TestContext } from "./auth.ts";
 
 /**
@@ -20,7 +21,7 @@ export function loopbackHeaders(
     spaceIds?: string[];
     chatSessionId?: string;
     /** The role preview the turn runs under, as the chat signs it. */
-    viewAs?: unknown;
+    viewAs?: ViewAsPersona;
   },
 ): Record<string, string> {
   const token = mintMcpLoopbackToken({

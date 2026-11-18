@@ -21,7 +21,7 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
@@ -156,25 +156,28 @@ export async function createSession(input: {
 }
 
 /**
- * The space each of `fileIds` belongs to, in one read: ids `orgId` does not hold are left out,
- * and those the conversation `chatSessionId` holds (reached through their container) map to null.
+ * The spaces of `fileIds` that `orgId` holds, in one read, leaving out the files the conversation
+ * `chatSessionId` holds: those are reached through their container, not a space.
  */
 export async function fileSpaceIds(
   orgId: string,
   fileIds: readonly string[],
   chatSessionId: string | null,
-): Promise<Map<string, string | null>> {
-  if (fileIds.length === 0) return new Map();
+): Promise<Set<string>> {
+  if (fileIds.length === 0) return new Set();
   const rows = await db
-    .select({ id: files.id, spaceId: files.spaceId, chatSessionId: files.chatSessionId })
+    .selectDistinct({ spaceId: files.spaceId })
     .from(files)
-    .where(and(inArray(files.id, [...fileIds]), eq(files.orgId, orgId)));
-  return new Map(
-    rows.map((row) => [
-      row.id,
-      chatSessionId && row.chatSessionId === chatSessionId ? null : row.spaceId,
-    ]),
-  );
+    .where(
+      and(
+        inArray(files.id, [...fileIds]),
+        eq(files.orgId, orgId),
+        chatSessionId
+          ? or(isNull(files.chatSessionId), ne(files.chatSessionId, chatSessionId))
+          : undefined,
+      ),
+    );
+  return new Set(rows.map((row) => row.spaceId));
 }
 
 /** What a turn takes from the conversation row: its skill selection, origin space and limit. */

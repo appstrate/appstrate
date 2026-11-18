@@ -3,8 +3,8 @@
 /**
  * The space-pinned endpoint (`/api/mcp/o/:org/s/:space`) confines every door of the request,
  * the file readers included: a session or an organization-bound token on it reads files of that
- * space alone, as `invoke_operation` (a pinned dispatch) does. The organization endpoint reads a
- * file in its own space under the caller's set there.
+ * space alone, and so does `invoke_operation getFile` dispatched from it. The organization
+ * endpoint reads a file in its own space under the caller's set there, through both.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -107,6 +107,35 @@ describe("file reads on the space-pinned MCP endpoint", () => {
     return { tool: JSON.stringify(tool.result?.content), resource };
   }
 
+  /** `invoke_operation getFile` on `endpoint` (entering `spaceId` on the org one): its status. */
+  async function getFileThrough(
+    endpoint: string,
+    headers: Record<string, string>,
+    uri: string,
+    spaceId?: string,
+  ): Promise<number> {
+    const res = await app.request(endpoint, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "invoke_operation",
+          arguments: {
+            operation_id: "getFile",
+            ...(spaceId ? { space_id: spaceId } : {}),
+            path_params: { id: uri.replace("appfile://", "") },
+          },
+        },
+      }),
+    });
+    const envelope = (await res.json()) as JsonRpcEnvelope;
+    const content = (envelope.result?.content as Array<{ text: string }>) ?? [];
+    return (JSON.parse(content[0]!.text) as { status: number }).status;
+  }
+
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -133,21 +162,21 @@ describe("file reads on the space-pinned MCP endpoint", () => {
     for (const headers of credentials) {
       const allowed = await read(endpoint, headers, here);
       expect(allowed.tool).toContain("ici");
+      expect(await getFileThrough(endpoint, headers, here)).toBe(200);
       for (const uri of [elsewhere, personal]) {
         const refused = await read(endpoint, headers, uri);
         expect(refused.tool).toContain("not_found");
         expect(refused.tool).not.toMatch(/ailleurs|perso/);
         expect(refused.resource.error?.message).toContain("File not found");
+        expect(await getFileThrough(endpoint, headers, uri)).toBe(404);
       }
     }
 
     // The organization endpoint reads each in its own space, under the caller's set there.
-    const orgWide = await read(
-      `/api/mcp/o/${ctx.orgId}`,
-      { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
-      elsewhere,
-      pinned,
-    );
-    expect(orgWide.tool).toContain("ailleurs");
+    for (const headers of credentials) {
+      const orgWide = await read(`/api/mcp/o/${ctx.orgId}`, headers, elsewhere, pinned);
+      expect(orgWide.tool).toContain("ailleurs");
+      expect(await getFileThrough(`/api/mcp/o/${ctx.orgId}`, headers, elsewhere, pinned)).toBe(200);
+    }
   });
 });
