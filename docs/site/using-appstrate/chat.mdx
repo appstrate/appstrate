@@ -21,7 +21,7 @@ Things the assistant can do for you:
 - **Run your agents.** Ask for an agent by name, or describe the task. The conversation shows a progress card for the run with its status, a link to the run page, and the files it produced.
 - **Read and explain.** Look up runs, files and anything else the API shows your role.
 - **Connect accounts.** When an agent needs an integration you have not connected, the chat shows a connect card that starts the sign-in flow. If your browser blocks the window, use the link to open it in a new tab.
-- **Work with files.** Attach files to a message. A side panel next to the conversation has Preview, Runs, Files and Info tabs for what the conversation touched.
+- **Work with files.** Attach files to a message. A file you attach is stored in your personal space, private to you, whatever space the conversation works in, and it is deleted with the conversation unless a run still uses it. The assistant reads it, and can give it to a run in any space where you can launch one: the run's outputs are then visible to that space's readers. A conversation limited to one space stays limited. A side panel next to the conversation has Preview, Runs, Files and Info tabs for what the conversation touched.
 - **Schedule runs and create agents**, where your role allows it (see below).
 
 The assistant shows its reasoning as a collapsible row while it thinks, and names the model that answered. If a turn fails, the message says why (a provider refused the key, a rate limit, the organization out of credits, a connection that needs to be renewed) and offers **Retry**. When the server returned one, the failure shows a request ID that an administrator can look up in the logs.
