@@ -190,6 +190,9 @@ const NOT_SURFACED = new Set([
   "run_sink_expired",
   "timestamp_out_of_tolerance",
   "usage_context_required",
+  // A chat turn's import budget (`save_as_file`): the refusal is an entry of a tool result that
+  // the model reads and answers for, never a problem body a person sees.
+  "turn_import_limit",
   // Request headers only an API client sets (Idempotency-Key, Appstrate-Version, Appstrate-User).
   "header_not_allowed",
   "idempotency_conflict",
