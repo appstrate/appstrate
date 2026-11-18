@@ -127,6 +127,22 @@ export interface ResolvedChatAttachment {
   spaceId: string;
 }
 
+/** Read bytes for one model input under the current turn's file ACL. */
+export interface ChatAttachmentRead extends Pick<
+  ChatAttachmentRequest,
+  "orgId" | "userId" | "uri" | "spaces" | "beforeResolve"
+> {
+  kind: "image" | "pdf";
+  signal?: AbortSignal;
+  /** Reject a larger file before reading or allocating its bytes. */
+  maxBytes: number;
+}
+
+export interface ChatAttachmentContent {
+  mime: string;
+  bytes: Uint8Array;
+}
+
 /** One chat turn's metered usage — inserted as an `llm_usage` row (runId null). */
 export interface ChatUsageRecord {
   orgId: string;
