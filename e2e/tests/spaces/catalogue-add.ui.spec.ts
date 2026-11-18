@@ -99,7 +99,7 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
     );
     expect(response.status()).toBe(201);
     // The count follows: it runs in three spaces now.
-    await expect(trigger).toHaveAttribute("title", /\b3 espaces$/);
+    await expect(trigger).toHaveAccessibleName(/\b3 espaces$/);
   } finally {
     await context.close();
   }
