@@ -76,6 +76,14 @@ const ZIP_LIMITS = {
   maxFileBytes: 32 * 1024 * 1024,
   maxFiles: 5_000,
 };
+/**
+ * Wall time a PDF may spend before the pages read so far are returned. pdf.js runs on the API's
+ * event loop, so it is checked between pages: one page whose content stream is itself hostile is
+ * not interruptible here, which a worker would fix (the known limit of this reader).
+ */
+const PDF_TIME_BUDGET_MS = 20_000;
+/** PDFs read at once: the rest wait, so a burst of them cannot monopolize the event loop. */
+const PDF_MAX_CONCURRENT = 2;
 /** Cells of one spreadsheet row kept: a wider row is a layout artifact, not data a model reads. */
 const SHEET_MAX_COLUMNS = 100;
 
@@ -130,6 +138,11 @@ class TextBudget {
       this.used += separator + room;
       this.written += 1;
     }
+    this.truncated = true;
+  }
+
+  /** Stop here for a reason other than the character cap (the time limit): the output is truncated. */
+  cut(): void {
     this.truncated = true;
   }
 
@@ -307,16 +320,46 @@ function paragraphText(xml: string, textTag: string, paragraphTag: string): stri
   return tidy(out.join(""));
 }
 
+/** At most `limit` of the functions passed to the returned `run` are in flight; the others queue. */
+export function createGate(limit: number): <T>(work: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async (work) => {
+    // A waiter is handed the slot of the one that finished, so a caller arriving in between
+    // cannot take it and push the count past the limit.
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active += 1;
+    try {
+      return await work();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active -= 1;
+    }
+  };
+}
+
+const pdfGate = createGate(PDF_MAX_CONCURRENT);
+
 // ---------------------------------------------------------------------------
 // Formats
 // ---------------------------------------------------------------------------
 
-async function readPdf(bytes: Uint8Array, budget: TextBudget): Promise<{ units: number }> {
+async function readPdf(
+  bytes: Uint8Array,
+  budget: TextBudget,
+  timeBudgetMs: number,
+): Promise<{ units: number }> {
   const pdf = await getDocumentProxy(new Uint8Array(bytes));
   try {
     const units = pdf.numPages;
+    const started = performance.now();
     for (let pageNumber = 1; pageNumber <= Math.min(units, PDF_MAX_PAGES); pageNumber++) {
       if (budget.full) break;
+      if (pageNumber > 1 && performance.now() - started > timeBudgetMs) {
+        budget.cut();
+        break;
+      }
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
       const text = tidy(
@@ -517,12 +560,13 @@ async function extract(
   bytes: Uint8Array,
   format: DocumentFormat,
   maxChars: number,
+  pdfTimeBudgetMs = PDF_TIME_BUDGET_MS,
 ): Promise<DocumentTextResult> {
   const budget = new TextBudget(maxChars);
   try {
     let units: number;
     if (format === "pdf") {
-      ({ units } = await readPdf(bytes, budget));
+      ({ units } = await pdfGate(() => readPdf(bytes, budget, pdfTimeBudgetMs)));
     } else {
       const files = unzipBounded(bytes, ZIP_LIMITS);
       if (format === "docx") ({ units } = readDocx(files, budget));
@@ -593,6 +637,7 @@ export function extractDocumentTextUncached(
   bytes: Uint8Array,
   format: DocumentFormat,
   maxChars = DOCUMENT_TEXT_MAX_CHARS,
+  pdfTimeBudgetMs?: number,
 ): Promise<DocumentTextResult> {
-  return extract(bytes, format, maxChars);
+  return extract(bytes, format, maxChars, pdfTimeBudgetMs);
 }

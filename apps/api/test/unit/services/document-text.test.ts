@@ -7,6 +7,7 @@ import {
   documentFormatOf,
   extractDocumentText,
   extractDocumentTextUncached,
+  createGate,
   DOCUMENT_SOURCE_MAX_BYTES,
 } from "../../../src/services/document-text.ts";
 
@@ -284,5 +285,54 @@ describe("hostile markup", () => {
       status: "failed",
       format: "xlsx",
     });
+  });
+});
+
+describe("PDF limits", () => {
+  it("returns the pages read so far, flagged as truncated, once the time budget is spent", async () => {
+    // A zero budget: page 1 is read, the check before page 2 stops the loop.
+    const result = await extractDocumentTextUncached(
+      pdf(["premiere", "deuxieme", "troisieme"]),
+      "pdf",
+      undefined,
+      0,
+    );
+    expect(result).toMatchObject({ status: "text", truncated: true });
+    const { text, note } = result as { text: string; note: string };
+    expect(text).toContain("premiere");
+    expect(text).not.toContain("deuxieme");
+    expect(note).toMatch(/1 of 3 pages/);
+  });
+});
+
+describe("createGate", () => {
+  it("never runs more than the limit at once, and runs everything", async () => {
+    const run = createGate(2);
+    let active = 0;
+    let peak = 0;
+    const done: number[] = [];
+    await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        run(async () => {
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          done.push(i);
+        }),
+      ),
+    );
+    expect(peak).toBe(2);
+    expect(done.sort()).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it("frees its slot when the work throws", async () => {
+    const run = createGate(1);
+    await expect(
+      run(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await run(async () => "next")).toBe("next");
   });
 });
