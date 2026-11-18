@@ -530,8 +530,13 @@ export function orgRunConcurrencyLockKey(orgId: string): string {
  * throw propagate; a caller that reaches either without `initRunLimits()` has a
  * boot-ordering bug, not a run to admit.
  */
-async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<void> {
-  const cap = getPlatformRunLimits().max_concurrent_per_org;
+async function enforceOrgConcurrencyCap(
+  tx: DbTx,
+  scope: SpaceScope,
+  orgCap: number | null | undefined,
+): Promise<void> {
+  // The lower of the deployment-wide cap and the one a module set for this org (its plan).
+  const cap = Math.min(getPlatformRunLimits().max_concurrent_per_org, orgCap ?? Infinity);
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
   );
@@ -690,6 +695,12 @@ interface CreateRunParams {
   modelCredentialId?: string | null;
   /** The member whose own credential pays the run: see `runs.payer_user_id`. */
   payerUserId?: string | null;
+  /**
+   * The org's own cap on runs in flight, as the `runLimits` hook answered it at the launch
+   * gates (`run-preflight-gates.ts`). Enforced here with the deployment-wide one, under the
+   * per-org admission lock. Absent for a run that occupies no platform slot (remote).
+   */
+  maxConcurrentRuns?: number | null;
 }
 
 export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
@@ -710,7 +721,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
     // link. Only the ORDER of two independent acquisitions changed. One
     // visible consequence, deliberate: a request that is both over-cap and
     // references a deleted file now answers 429 instead of 409.
-    await enforceOrgConcurrencyCap(tx, scope);
+    await enforceOrgConcurrencyCap(tx, scope, params.maxConcurrentRuns);
 
     // Take the run FK's lock before file locks. If deletion won during preflight, refuse
     // this launch. A version deletion takes FOR UPDATE on this same package, so a pinned

@@ -23,7 +23,11 @@ import {
 } from "./billing/billing-sweeper.ts";
 import { ensureCursorSeeded } from "./billing/usage-recorder.ts";
 import { onOrgCreate, onOrgDelete, onOrgMemberRemove } from "./onboarding/post-signup.ts";
-import { checkComputeAdmission, ownsPlatformCompute } from "./compute/admission.ts";
+import {
+  checkComputeAdmission,
+  maxConcurrentRunsOf,
+  ownsPlatformCompute,
+} from "./compute/admission.ts";
 import {
   drainComputeSweeper,
   ensureComputeCursorSeeded,
@@ -251,6 +255,11 @@ const billingModule: AppstrateModule = {
   emailOverrides,
 
   hooks: {
+    // The plan's cap on runs in flight, enforced atomically by the platform when it inserts
+    // the run (see `compute/admission.ts`). Fails closed like `beforeUsage`: a throw here
+    // refuses the launch rather than admitting it uncapped.
+    runLimits: async (orgId: string) => ({ maxConcurrentRuns: await maxConcurrentRunsOf(orgId) }),
+
     // Unified admission gate (first-match-wins). Billing is NOT done here — the
     // cursor sweeper (billing-sweeper.ts) is the sole biller. This is a
     // read-only soft-cap check.

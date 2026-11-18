@@ -274,6 +274,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
  */
 const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
   beforeUsage: { owners: ["module-billing"] },
+  runLimits: { owners: ["module-billing"] },
   beforeSignup: { owners: ["oidc"] },
   afterSignup: { owners: ["oidc"] },
 };

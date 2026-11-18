@@ -195,3 +195,26 @@ describe("concurrency per plan", () => {
     expect(await beforeUsage(runParams({ runningCount: 49 }))).toBeNull();
   });
 });
+
+describe("runLimits hook", () => {
+  beforeEach(async () => {
+    await truncateEeTables();
+  });
+
+  function runLimits(orgId: string) {
+    return eeModule.hooks!.runLimits!(orgId);
+  }
+
+  it("hands the Free plan's three concurrent runs to the platform", async () => {
+    await seedBillingAccount({ orgId, planId: "free" });
+    expect(await runLimits(orgId)).toEqual({ maxConcurrentRuns: FREE_MAX_CONCURRENT_RUNS });
+  });
+
+  it("leaves the deployment-wide cap for a plan that sets none, and for an org with no account", async () => {
+    await seedBillingAccount({ orgId, planId: "pro" });
+    expect(await runLimits(orgId)).toEqual({ maxConcurrentRuns: null });
+    expect(await runLimits("00000000-0000-4000-a000-000000000b99")).toEqual({
+      maxConcurrentRuns: null,
+    });
+  });
+});
