@@ -96,6 +96,7 @@ import {
   ConversationScopeProvider,
   useAttachTarget,
   useConversationAttachTarget,
+  turnSpacesOf,
   useConversationScope,
 } from "./conversation-scope.ts";
 import {
@@ -628,18 +629,30 @@ function ConversationInner({
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
-  const { t } = useChatHost();
+  const { t, actingSpaceIds, useSpaceLabelOf } = useChatHost();
+  const scope = useConversationScope();
   // File attachments: the composer stages picked files through the HOST uploader, into the
-  // space the conversation acts in when the turn is sent, as `upload://` file parts the server
-  // materializes into durable files.
-  const getAttachSpaceId = useLatest(useAttachTarget().spaceId);
+  // space each was added in, as `upload://` file parts the server materializes into durable
+  // files. A file whose space the turn no longer reads fails instead (`turnSpacesOf`).
+  const attachTarget = useAttachTarget();
+  const forgetAttachPick = attachTarget.forget;
+  const getAttachSpaceId = useLatest(attachTarget.spaceId);
+  const getTurnSpaces = useLatest(turnSpacesOf(scope, actingSpaceIds));
+  const getSpaceLabelOf = useLatest(useSpaceLabelOf());
   const attachments = useMemo(
-    () => createChatAttachmentAdapter({ upload: uploadFile, t, spaceOf: getAttachSpaceId }),
-    [uploadFile, t, getAttachSpaceId],
+    () =>
+      createChatAttachmentAdapter({
+        upload: uploadFile,
+        t,
+        spaceOf: getAttachSpaceId,
+        turnSpaces: getTurnSpaces,
+        spaceLabelOf: (spaceId) => getSpaceLabelOf()(spaceId),
+      }),
+    [uploadFile, t, getAttachSpaceId, getTurnSpaces, getSpaceLabelOf],
   );
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
-  const getScope = useLatest(useConversationScope());
+  const getScope = useLatest(scope);
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
   // The seed, frozen: `useChat` reads it once.
@@ -674,8 +687,10 @@ function ConversationInner({
         getTransport,
         headers: buildHeaders,
         // Read at request time, like the model above, for the same reason.
-        body: ({ id: chatId, messages, body }) =>
-          turnBody({
+        body: ({ id: chatId, messages, body }) => {
+          // The turn is sent: a space picked for its files does not carry into the next one.
+          forgetAttachPick();
+          return turnBody({
             body,
             id: chatId,
             messages,
@@ -684,9 +699,10 @@ function ConversationInner({
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
             skills: getChosenSkills(),
             creation: getCreation(),
-          }),
+          });
+        },
       }),
-    [buildHeaders, getChosenSkills, getCreation, getTransport],
+    [buildHeaders, getChosenSkills, getCreation, getTransport, forgetAttachPick],
   );
 
   const chat = useChat({

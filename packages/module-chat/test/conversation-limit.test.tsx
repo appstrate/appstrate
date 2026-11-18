@@ -574,6 +574,10 @@ describe("the space a file is attached in", () => {
     ).toBeNull();
   });
 
+  it("forgets a pick once the turn it was made for is sent", () => {
+    expect(targetAcross([(t) => t.pick("spc_b"), (t) => t.forget()])).toBeNull();
+  });
+
   it("is the space picked, then the origin once the conversation is limited there", () => {
     expect(targetAcross([(t) => t.pick("spc_b")])).toBe("spc_b");
     expect(
@@ -609,7 +613,7 @@ describe("the composer's attach button", () => {
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
         <ChatTransportProvider value={transport}>
-          <AttachTargetProvider value={{ availability, spaceId, pick: () => {} }}>
+          <AttachTargetProvider value={{ availability, spaceId, pick: () => {}, forget: () => {} }}>
             <Runtime>
               <TooltipProvider>
                 <ComposerTools

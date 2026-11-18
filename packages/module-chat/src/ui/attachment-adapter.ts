@@ -4,15 +4,17 @@
  * assistant-ui `AttachmentAdapter` for the chat composer (pinned
  * `@assistant-ui/react` 0.14.27). Its three methods:
  *
- *  - `add({file})` — register a picked file as a pending attachment (a chip). A
- *    file added while there is no space to upload into (`spaceOf`) is refused,
- *    and the client-side size guard rejects an over-cap file here, before any upload.
- *  - `send(pending)` — on composer submit, stage the bytes through the host's
- *    uploader into the space read then (the turn acts there), and return a
- *    complete attachment whose `file` content part carries the `upload://upl_x` URI. react-ai-sdk's `toCreateMessage` maps that part to
- *    an ai-SDK file part (`url: upload://…`) on the outgoing UIMessage; the
- *    server then materializes it into a durable `appfile://` file.
- *  - `remove()` — no server round-trip (staging only happens in `send`; an
+ *  - `add({file})` — register a picked file as a pending attachment (a chip), stamped with the
+ *    space it goes to (`spaceOf`, the user's choice then). A file added while there is none is
+ *    refused, and the client-side size guard rejects an over-cap file here, before any upload.
+ *  - `send(pending)` — on composer submit, stage the bytes through the host's uploader into the
+ *    stamped space, and return a complete attachment whose `file` content part carries the
+ *    `upload://upl_x` URI. A stamped space the turn no longer reads (`turnSpaces`: the limit or
+ *    the acting set changed since) fails that attachment, naming the space, before any upload:
+ *    the server resolves an upload only among the turn's spaces. react-ai-sdk's
+ *    `toCreateMessage` maps the part to an ai-SDK file part (`url: upload://…`); the server then
+ *    materializes it into a durable `appfile://` file.
+ *  - `remove()` — forgets the stamp; no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
  *
  * The uploader and the translator come from the host injection seam
@@ -47,10 +49,16 @@ function uploadFailureKey(err: unknown): string {
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
-  /** The space a file is uploaded into now (`attachSpaceOf`), `null` for none. */
+  /** The space a file added now goes to (`attachSpaceOf`), `null` for none. */
   spaceOf: () => string | null;
+  /** The spaces the turn being sent reads (`turnSpacesOf`), `null` while not known. */
+  turnSpaces: () => readonly string[] | null;
+  /** The host's name of a space, `undefined` when it cannot name it. */
+  spaceLabelOf: (spaceId: string) => string | undefined;
 }): AttachmentAdapter {
-  const { upload, t, spaceOf } = deps;
+  const { upload, t, spaceOf, turnSpaces, spaceLabelOf } = deps;
+  // The space each pending attachment was added in, by attachment id.
+  const stamps = new Map<string, string>();
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
@@ -60,9 +68,12 @@ export function createChatAttachmentAdapter(deps: {
     accept: "*",
     add({ file }): Promise<PendingAttachment> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
-      if (spaceOf() === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
+      const spaceId = spaceOf();
+      if (spaceId === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
+      const id = crypto.randomUUID();
+      stamps.set(id, spaceId);
       return Promise.resolve({
-        id: crypto.randomUUID(),
+        id,
         type: "file",
         name: file.name,
         contentType: file.type || "application/octet-stream",
@@ -72,8 +83,17 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
-      const spaceId = spaceOf();
-      if (spaceId === null) throw new Error(t("composer.attachUnavailable"));
+      const spaceId = stamps.get(attachment.id);
+      const readable = turnSpaces();
+      if (spaceId === undefined || readable === null) {
+        throw new Error(t("composer.attachUnavailable"));
+      }
+      if (!readable.includes(spaceId)) {
+        const space = spaceLabelOf(spaceId);
+        throw new Error(
+          space ? t("upload.spaceNotRead", { space }) : t("upload.spaceNotReadUnnamed"),
+        );
+      }
       let uri: string;
       try {
         uri = await stageComposerFile(upload, attachment.file, spaceId);
@@ -88,6 +108,7 @@ export function createChatAttachmentAdapter(deps: {
         // browser console instead of gone.
         throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
+      stamps.delete(attachment.id);
       return {
         ...attachment,
         status: { type: "complete" },
@@ -101,7 +122,8 @@ export function createChatAttachmentAdapter(deps: {
         ],
       };
     },
-    remove(): Promise<void> {
+    remove(attachment): Promise<void> {
+      stamps.delete(attachment.id);
       return Promise.resolve();
     },
   };

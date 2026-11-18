@@ -37,6 +37,8 @@
   "upload.failed": "File upload failed.",
   "upload.storageLimit": "Not enough storage space for this organization.",
   "upload.stagingLimit": "Too many pending uploads. Try again in a few minutes.",
+  "upload.spaceNotRead": "This file is attached in {{space}}, which this message no longer reads. Remove it and attach it again.",
+  "upload.spaceNotReadUnnamed": "This file is attached in a space this message no longer reads. Remove it and attach it again.",
   "run.fallbackLabel": "Run",
   "run.starting": "Starting",
   "run.running": "Running",

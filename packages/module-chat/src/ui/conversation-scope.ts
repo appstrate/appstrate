@@ -5,7 +5,7 @@
  * published by `Conversation` to the composer, the skills picker and the tool cards.
  */
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { actsIn, useChatHost } from "./runtime-context.ts";
 
 export interface ConversationScope {
@@ -125,6 +125,8 @@ interface AttachTarget {
   spaceId: string | null;
   /** Picks the space the next files go to. */
   pick: (spaceId: string) => void;
+  /** Drops the pick: the turn it was made for is sent. */
+  forget: () => void;
 }
 
 /** Where a file goes now: the decided space, else the one picked while it is a choice. */
@@ -142,6 +144,7 @@ const NO_ATTACH_TARGET: AttachTarget = {
   availability: { kind: "unavailable", reason: null },
   spaceId: null,
   pick: () => {},
+  forget: () => {},
 };
 
 const AttachTargetContext = createContext<AttachTarget>(NO_ATTACH_TARGET);
@@ -155,7 +158,7 @@ export function useAttachTarget(): AttachTarget {
 /**
  * The open conversation's {@link AttachTarget} under the space the host shows (`selectedSpaceId`,
  * `null` in « Tous les espaces »). A pick answers the choice offered when it was made: a target
- * that is no longer that choice drops it.
+ * that is no longer that choice drops it, and so does sending the turn (`forget`).
  */
 export function useConversationAttachTarget(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
@@ -170,7 +173,22 @@ export function useConversationAttachTarget(
   );
   const spaceId = attachSpaceOf(availability, picked);
   if (picked && (availability.kind !== "choose" || spaceId === null)) pick(null);
-  return useMemo(() => ({ availability, spaceId, pick }), [availability, spaceId]);
+  const forget = useCallback(() => pick(null), []);
+  return useMemo(() => ({ availability, spaceId, pick, forget }), [availability, spaceId, forget]);
+}
+
+/**
+ * The spaces a turn sent now reads, where its attachments must be: a limited conversation's
+ * origin alone (while the chat acts there), else the acting set. `null` while that is not known.
+ */
+export function turnSpacesOf(
+  scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
+  actingSpaceIds: readonly string[] | null,
+): readonly string[] | null {
+  if (actingSpaceIds === null) return null;
+  const limited = limitedSpaceOf(scope);
+  if (limited === undefined) return actingSpaceIds;
+  return actsIn(actingSpaceIds, limited) ? [limited] : [];
 }
 
 /**

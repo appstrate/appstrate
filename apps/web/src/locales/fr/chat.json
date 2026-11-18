@@ -37,6 +37,8 @@
   "upload.failed": "Échec de l'envoi du fichier.",
   "upload.storageLimit": "Stockage insuffisant pour cette organisation.",
   "upload.stagingLimit": "Trop d'envois en attente. Réessayez dans quelques minutes.",
+  "upload.spaceNotRead": "Ce fichier est joint dans {{space}}, que ce message ne lit plus. Retirez-le et joignez-le à nouveau.",
+  "upload.spaceNotReadUnnamed": "Ce fichier est joint dans un espace que ce message ne lit plus. Retirez-le et joignez-le à nouveau.",
   "run.fallbackLabel": "Run",
   "run.starting": "Lancement",
   "run.running": "Exécution en cours",
