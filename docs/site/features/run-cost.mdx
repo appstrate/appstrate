@@ -60,7 +60,7 @@ Every successful call that reached the provider ends up in the ledger. When the 
 
 ## Limits and quotas
 
-`cost` is reporting, not a limit. A deployment can load the optional billing module (Stripe billing, credit quotas, usage metering), which admits or refuses usage before a run or chat turn starts. A refusal answers `402` with `quota_exceeded`, `subscription_blocked` or, once a plan's monthly compute minutes are used up, `compute_quota_exceeded` (compute minutes are counted per finished platform run, to the second, and the LLM is not part of them). A plan's cap on concurrent runs answers `429` with `org_run_concurrency_exceeded`.
+`cost` is reporting, not a limit. A deployment can load the optional billing module (Stripe billing, credit quotas, usage metering), which admits or refuses usage before a run or chat turn starts. A refusal answers `402` with `quota_exceeded`, `subscription_blocked` or, once a plan's monthly compute minutes are used up, `compute_quota_exceeded` (compute minutes are counted per finished platform run, to the second, in calendar months in UTC: the allowance renews at 00:00 UTC on the first of the month, and the LLM is not part of them). A plan's cap on concurrent runs answers `429` with `org_run_concurrency_exceeded`.
 
 ## Reference
 
