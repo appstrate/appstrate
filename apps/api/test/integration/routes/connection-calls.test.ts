@@ -10,7 +10,9 @@
  *     the request space, and never another space's or another organization's.
  *
  * Both take the same filters and keyset pagination. Their rows come from `recordConnectionCall`,
- * the journal's single writer: its own cases close the file.
+ * the journal's single writer: its own cases close the file. A call toward an integration that
+ * binds no connection is journaled with `connection_id` NULL: the space door lists it, no owner
+ * door can.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -59,7 +61,7 @@ describe("connection call journal routes", () => {
 
   /** Journal one call made by the owner in the default space, unless `overrides` say otherwise. */
   async function record(
-    connectionId: string,
+    connectionId: string | null,
     overrides: Partial<Parameters<typeof recordConnectionCall>[0]> = {},
   ): Promise<void> {
     await recordConnectionCall({
@@ -261,6 +263,25 @@ describe("connection call journal routes", () => {
       ]);
     });
 
+    it("lists a call that used no connection, with no owner; the owner door never does", async () => {
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
+      await record(connectionId, { requestId: "req_connection" });
+      await record(null, { requestId: "req_unauthenticated" });
+
+      const body = await page(SPACE_DOOR);
+
+      expect(
+        body.data.map((call) => [call.request_id, call.connection_id, call.owner_type]),
+      ).toEqual([
+        ["req_unauthenticated", null, null],
+        ["req_connection", connectionId, "user"],
+      ]);
+      expect(body.data[0]!.owner_id).toBeNull();
+      expect((await page(ownDoor(connectionId))).data.map((call) => call.request_id)).toEqual([
+        "req_connection",
+      ]);
+    });
+
     it("never lists another space's calls, nor another organization's", async () => {
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
       const outside = await createTestContext({ orgSlug: "outside" });
@@ -366,6 +387,19 @@ describe("connection call journal routes", () => {
 
       const [row] = await rows();
       expect(row).toMatchObject({ ownerType: null, ownerId: null, outcome: "200" });
+    });
+
+    it("records a call that used no connection, with no connection and no owner", async () => {
+      await record(null);
+
+      const [row] = await rows();
+      expect(row).toMatchObject({
+        connectionId: null,
+        ownerType: null,
+        ownerId: null,
+        integrationId: CRM,
+        outcome: "200",
+      });
     });
 
     it("caps the host it stores", async () => {

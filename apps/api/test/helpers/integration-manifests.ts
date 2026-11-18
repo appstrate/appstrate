@@ -239,12 +239,14 @@ export function remoteIntegrationManifest(opts: {
   transport?: string;
   /** When false, omit `source.remote` to exercise the missing-url guard. */
   withRemote?: boolean;
-  auths: Record<string, AuthSpec>;
+  /** Omitted: an unauthenticated integration (AFPS §7.2), with no `auths` at all. */
+  auths?: Record<string, AuthSpec>;
   tools_policy?: Record<string, unknown>;
 }): IntegrationManifest {
   const version = opts.version ?? "1.0.0";
-  const auths: Record<string, unknown> = {};
-  for (const [k, spec] of Object.entries(opts.auths)) auths[k] = buildAuth(spec);
+  const auths = opts.auths
+    ? Object.fromEntries(Object.entries(opts.auths).map(([k, spec]) => [k, buildAuth(spec)]))
+    : undefined;
   const withRemote = opts.withRemote ?? true;
   return {
     type: "integration",
@@ -263,7 +265,7 @@ export function remoteIntegrationManifest(opts: {
           }
         : {}),
     },
-    auths,
+    ...(auths ? { auths } : {}),
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;
 }
@@ -312,7 +314,7 @@ export function apiIntegrationManifest(opts: {
     source: { kind: "none" },
     ...(opts.defaultTools ? { default_tools: opts.defaultTools } : {}),
     ...meta,
-    auths,
+    ...(auths ? { auths } : {}),
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;
 }

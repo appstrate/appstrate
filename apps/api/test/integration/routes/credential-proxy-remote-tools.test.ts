@@ -56,6 +56,7 @@ import {
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import {
+  startBreakingEventStreamRelay,
   startFakeMcpServer,
   type FakeMcpServer,
   type FakeMcpServerOptions,
@@ -1556,6 +1557,51 @@ describe("the typed tools of a remote MCP integration", () => {
         });
       } finally {
         tokenServer.stop(true);
+      }
+    });
+
+    it("lets a call proceed when an answered exchange's event stream breaks after its result", async () => {
+      // The tool runs for 300 ms; `initialize`, answered in an event stream, is cut 50 ms later.
+      await withServer(
+        { tools: ["search"], delayMs: 300, delayedMethod: "tools/call" },
+        async (slow) => {
+          const relay = startBreakingEventStreamRelay(slow.url, {
+            method: "initialize",
+            afterResult: true,
+          });
+          try {
+            await seedProxyIntegration(
+              ctx,
+              remote({ url: relay.url, authorizedUris: [`${relay.origin}/**`] }),
+            );
+            await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+            const res = await post("call", { integration_package_id: ID, name: "search" });
+            expect(res.status).toBe(200);
+            expect(slow.requests.some((r) => r.body.includes('"tools/call"'))).toBe(true);
+          } finally {
+            relay.stop();
+          }
+        },
+      );
+    });
+
+    it("answers at once when an event-stream answer breaks mid-read: 502 upstream_unreachable", async () => {
+      _setRemoteToolTimeoutsForTesting({ callMs: 4_000 });
+      const relay = startBreakingEventStreamRelay(server.url);
+      try {
+        await seedProxyIntegration(
+          ctx,
+          remote({ url: relay.url, authorizedUris: [`${relay.origin}/**`] }),
+        );
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+        const started = Date.now();
+        const res = await post("call", { integration_package_id: ID, name: "search" });
+        const problem = (await res.json()) as { code: string };
+        expect([res.status, problem.code]).toEqual([502, "upstream_unreachable"]);
+        // The SDK swallows the stream's error: only failing the operation answers before 4 s.
+        expect(Date.now() - started).toBeLessThan(2_000);
+      } finally {
+        relay.stop();
       }
     });
 

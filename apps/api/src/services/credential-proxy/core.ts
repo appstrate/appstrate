@@ -195,6 +195,8 @@ export class ProxyCallError extends Error {
     readonly code: ProxyProblemCode,
     message: string,
     readonly connectionId?: string,
+    /** A request may have reached the upstream; with a connection, its credential with it. */
+    readonly sent: boolean = connectionId !== undefined,
   ) {
     super(message);
     this.name = "ProxyCallError";
