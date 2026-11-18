@@ -2,17 +2,6 @@
 
 /** Pure, React-free helpers for the files surfaces (run page, Fichiers page). */
 
-import {
-  File as FileIcon,
-  FileArchive,
-  FileAudio,
-  FileCode,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  FileVideo,
-  type LucideIcon,
-} from "lucide-react";
 import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import { localPreviewKind } from "@appstrate/core/mime";
 import type { ViewableFile } from "../components/file-viewer";
@@ -82,34 +71,6 @@ export function pinPreviewUrl(
   url: string | null | undefined,
 ): PinnedPreviewUrl {
   return pinned.fileId === fileId && (pinned.url || !url) ? pinned : { fileId, url };
-}
-
-/** A Lucide file icon for a MIME type (small mapping, neutral `File` fallback). */
-export function mimeIconFor(mime: string): LucideIcon {
-  const m = mime.toLowerCase();
-  if (m.startsWith("image/")) return FileImage;
-  if (m.startsWith("audio/")) return FileAudio;
-  if (m.startsWith("video/")) return FileVideo;
-  if (m.startsWith("text/csv") || m.includes("spreadsheet") || m.includes("excel"))
-    return FileSpreadsheet;
-  if (
-    m === "application/zip" ||
-    m === "application/gzip" ||
-    m === "application/x-tar" ||
-    m.includes("compressed")
-  )
-    return FileArchive;
-  if (
-    m.startsWith("text/html") ||
-    m.includes("json") ||
-    m.includes("javascript") ||
-    m.includes("xml") ||
-    m.startsWith("text/x-") ||
-    m.includes("typescript")
-  )
-    return FileCode;
-  if (m.startsWith("text/") || m === "application/pdf") return FileText;
-  return FileIcon;
 }
 
 /** Run-page URL for a file's producing run; `undefined` without a run container or package id (e.g. an inline run's ephemeral shadow). */

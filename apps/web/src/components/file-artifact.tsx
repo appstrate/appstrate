@@ -42,7 +42,8 @@ import { useFileDownload, useFileTextCopy } from "../hooks/use-files";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { mimeKind, type LocalViewableFile } from "../lib/files";
 import { fileReaderPath, fileReaderUrl, type FileContext } from "../lib/file-link";
-import { ExpiryBadge, MimeIcon } from "./file-badges";
+import { MimeIcon } from "@appstrate/ui/components/mime-icon";
+import { ExpiryBadge } from "./file-badges";
 import { FileViewer, type ViewableFile } from "./file-viewer";
 
 export function FileArtifact({

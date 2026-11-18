@@ -62,8 +62,8 @@ import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
+  AttachmentChip,
   FileAttachment,
-  InertAttachmentChip,
   PendingAttachmentChip,
   ATTACHMENT_IMAGE_CLASS,
 } from "./file-attachment.tsx";
@@ -257,34 +257,9 @@ function ScrollToBottom() {
 }
 
 /**
- * A pending image's thumbnail. The object URL lives exactly as long as the
- * element (React 19 ref cleanup), with no state round-trip. Not the staged
- * cache of `upload.ts`: that one is filled at send time, after the chip is gone.
- */
-function PendingImage({ file, name }: { file: File; name: string }) {
-  const attach = React.useCallback(
-    (img: HTMLImageElement | null) => {
-      if (!img) return;
-      const url = URL.createObjectURL(file);
-      img.src = url;
-      return () => URL.revokeObjectURL(url);
-    },
-    [file],
-  );
-  return (
-    <img
-      ref={attach}
-      alt={name || "image"}
-      title={name}
-      className="size-12 shrink-0 rounded-md border object-cover"
-    />
-  );
-}
-
-/**
- * A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both
- * removable. Either opens the host's panel on the picked file when the browser can show its own
- * copy (`localPreviewKind`); the remove button never does.
+ * A pending composer attachment: the one chip (an image's thumbnail or the file type's icon,
+ * name, size, remove button). Its media and name open the host's panel on the picked file when
+ * the browser can show its own copy (`localPreviewKind`); the remove button never does.
  */
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
@@ -292,7 +267,6 @@ function ComposerAttachmentChip() {
   const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, openFile, t } = useChatHost();
-  const previewFile = file && isImageMime(file.type) ? file : undefined;
   const preview =
     openFile && file && localPreviewKind(file.type)
       ? {
@@ -300,54 +274,29 @@ function ComposerAttachmentChip() {
           onActivate: () => openFile({ local: file }),
         }
       : null;
-  const remove = (
-    <AttachmentPrimitive.Remove asChild>
-      <button
-        type="button"
-        aria-label={t("composer.removeAttachment")}
-        className={
-          previewFile
-            ? "bg-foreground/70 text-background hover:bg-foreground absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full"
-            : "text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
-        }
-      >
-        <XIcon className={previewFile ? "size-3" : "size-3.5"} />
-      </button>
-    </AttachmentPrimitive.Remove>
-  );
   return (
     <AttachmentPrimitive.Root className="inline-flex min-w-0 flex-col items-start gap-1">
-      {previewFile ? (
-        <span className="relative inline-flex">
-          {preview ? (
-            <button
-              type="button"
-              onClick={preview.onActivate}
-              title={preview.label}
-              aria-label={preview.label}
-              className="rounded-md"
-            >
-              <PendingImage file={previewFile} name={name} />
-            </button>
-          ) : (
-            <PendingImage file={previewFile} name={name} />
-          )}
-          {remove}
-        </span>
-      ) : (
-        <PendingAttachmentChip
-          name={name}
-          preview={preview}
-          trailing={
-            <>
-              {size > 0 && (
-                <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
-              )}
-              {remove}
-            </>
-          }
-        />
-      )}
+      <PendingAttachmentChip
+        name={name}
+        file={file}
+        preview={preview}
+        trailing={
+          <>
+            {size > 0 && (
+              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
+            )}
+            <AttachmentPrimitive.Remove asChild>
+              <button
+                type="button"
+                aria-label={t("composer.removeAttachment")}
+                className="text-muted-foreground hover:text-foreground shrink-0"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </AttachmentPrimitive.Remove>
+          </>
+        }
+      />
       {status.type === "incomplete" && status.reason === "error" && status.message && (
         <span role="alert" className="text-destructive text-xs">
           <span className="sr-only">{name}. </span>
@@ -360,13 +309,13 @@ function ComposerAttachmentChip() {
 
 /**
  * A sent file attachment, rendered from a message `file` part. The wire part
- * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + icon
- * only (the composer chip shows the size, read from the picked File).
+ * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + the
+ * type's icon only (the composer chip shows the size, read from the picked File).
  */
-function FileAttachmentPart({ filename }: { filename?: string }) {
+function FileAttachmentPart({ filename, mimeType }: { filename?: string; mimeType?: string }) {
   return (
     <div className="mt-1">
-      <InertAttachmentChip name={filename ?? ""} />
+      <AttachmentChip name={filename ?? ""} mime={mimeType} />
     </div>
   );
 }
@@ -406,7 +355,7 @@ function SentAttachmentChip() {
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
     if (localSrc && isImageMime(contentType))
       return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
-    return <InertAttachmentChip name={name} />;
+    return <AttachmentChip name={name} mime={contentType} />;
   }
 
   // A resolved `appfile://` is interactive: the unified renderer shows an image

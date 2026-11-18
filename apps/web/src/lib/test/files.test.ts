@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { File as FileIcon, FileArchive, FileCode, FileImage, FileText } from "lucide-react";
 import {
   fileExpiryInfo,
   fileRunHref,
@@ -10,7 +9,6 @@ import {
   isMarkdownFile,
   isPublishedFileLogEvent,
   localViewableFile,
-  mimeIconFor,
   mimeKind,
   pinPreviewUrl,
   runFileDirection,
@@ -34,22 +32,6 @@ function file(overrides: Partial<FileLike>): FileLike {
 /** The run whose page is open, and an earlier run that chained a file into it. */
 const RUN = "run_1";
 const EARLIER = "run_0";
-
-describe("mimeIconFor", () => {
-  it("maps common families", () => {
-    expect(mimeIconFor("image/png")).toBe(FileImage);
-    expect(mimeIconFor("text/html")).toBe(FileCode);
-    expect(mimeIconFor("application/json")).toBe(FileCode);
-    expect(mimeIconFor("application/zip")).toBe(FileArchive);
-    expect(mimeIconFor("text/plain")).toBe(FileText);
-    expect(mimeIconFor("application/pdf")).toBe(FileText);
-  });
-
-  it("falls back to the neutral file icon", () => {
-    expect(mimeIconFor("application/octet-stream")).toBe(FileIcon);
-    expect(mimeIconFor("")).toBe(FileIcon);
-  });
-});
 
 describe("fileRunHref", () => {
   it("builds the agent run route with literal scope slashes", () => {
