@@ -8843,7 +8843,7 @@ export interface operations {
                 kind?: "pinned" | "memory";
                 /** @description Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope. */
                 actor_type?: "user" | "end_user" | "shared";
-                /** @description Required when `actor_type` is `user` or `end_user`. */
+                /** @description Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected. */
                 actor_id?: string;
                 /** @description Narrow `memories` and `pinned` to rows touched during a specific run. */
                 runId?: string;
@@ -8917,6 +8917,7 @@ export interface operations {
             query?: {
                 kind?: "pinned" | "memory";
                 actor_type?: "user" | "end_user" | "shared";
+                /** @description Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected. */
                 actor_id?: string;
             };
             header?: {
@@ -20528,7 +20529,7 @@ export interface operations {
                 kind?: "pinned" | "memory";
                 /** @description Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope. */
                 actor_type?: "user" | "end_user" | "shared";
-                /** @description Required when `actor_type` is `user` or `end_user`. */
+                /** @description Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected. */
                 actor_id?: string;
                 /** @description Narrow `memories` and `pinned` to rows touched during a specific run. */
                 runId?: string;

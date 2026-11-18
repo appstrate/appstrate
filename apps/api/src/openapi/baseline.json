@@ -1359,9 +1359,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
-            "description": "Required when `actor_type` is `user` or `end_user`."
+            "description": "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected."
           },
           {
             "name": "runId",
@@ -1548,8 +1549,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
-            }
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected."
           }
         ],
         "responses": {
@@ -1638,9 +1641,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
-            "description": "Required when `actor_type` is `user` or `end_user`."
+            "description": "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected."
           },
           {
             "name": "runId",

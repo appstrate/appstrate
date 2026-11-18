@@ -98,23 +98,18 @@ export const agentInputSettingsSchema = z
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the
  * persistence GET / DELETE routes into a {@link PersistenceScope}.
- * Returns `null` when the caller did not supply `actor_type` (i.e. no
- * scope override) and throws `invalidRequest` when the combination is
- * malformed.
+ * Omitting both fields leaves the actor scope unrestricted for authorized callers.
  */
 function scopeFromQueryParams(
   actorTypeParam: string | undefined,
   actorIdParam: string | undefined,
-): PersistenceScope | null {
-  if (!actorTypeParam) return null;
-  if (actorTypeParam === "shared") return { type: "shared" };
-  if (actorTypeParam === "user" && actorIdParam) {
-    return { type: "user", id: actorIdParam };
+): PersistenceScope | undefined {
+  if (actorTypeParam === undefined && actorIdParam === undefined) return undefined;
+  if (actorTypeParam === "shared" && actorIdParam === undefined) return { type: "shared" };
+  if ((actorTypeParam === "user" || actorTypeParam === "end_user") && actorIdParam) {
+    return { type: actorTypeParam, id: actorIdParam };
   }
-  if (actorTypeParam === "end_user" && actorIdParam) {
-    return { type: "end_user", id: actorIdParam };
-  }
-  throw invalidRequest("Invalid actor_type / actor_id combination");
+  throw invalidRequest("Invalid actor_type / actor_id combination", "actor_id");
 }
 
 /**
@@ -219,6 +214,7 @@ export async function respondAgentPersistence(
   const wantsMemory = query.kind !== "pinned";
   const runIdParam = query.runId;
 
+  const overrideScope = scopeFromQueryParams(query.actor_type, query.actor_id);
   const callerScope = scopeFromActor(getActor(c));
 
   const perSpace = await Promise.all(
@@ -228,9 +224,7 @@ export async function respondAgentPersistence(
       // action of this family. A reader naming no actor then sees every
       // actor's rows; `runId` only filters rows, never changes whose.
       const readsEveryActor = permissions.has("persistence:delete");
-      const visibleScope = readsEveryActor
-        ? (scopeFromQueryParams(query.actor_type, query.actor_id) ?? undefined)
-        : callerScope;
+      const visibleScope = readsEveryActor ? overrideScope : callerScope;
       const [pinned, memories] = await Promise.all([
         wantsPinned ? listPinnedSlots(packageId, spaceId, visibleScope, runIdParam) : [],
         wantsMemory ? listMemories(packageId, spaceId, visibleScope, runIdParam) : [],
@@ -604,17 +598,7 @@ export function createAgentsRouter() {
         actor_id: actorIdParam,
       } = parseStrictQuery(c, persistenceQuerySchema.omit({ runId: true }));
 
-      // Same actor-override guard the GET path applies: only a holder of
-      // `persistence:delete` may target another actor's rows (or omit the
-      // scope to bulk-wipe every actor). Everyone else is narrowed to their
-      // own actor scope, so they cannot delete another actor's
-      // memories/checkpoints by supplying an arbitrary actor_type / actor_id.
-      const callerScope = scopeFromActor(getActor(c));
-      const canTouchEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
-      const scopeOverride = canTouchEveryActor
-        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
-        : null;
-      const scope = canTouchEveryActor ? (scopeOverride ?? undefined) : callerScope;
+      const scope = scopeFromQueryParams(actorTypeParam, actorIdParam);
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;

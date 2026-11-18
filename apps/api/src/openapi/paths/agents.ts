@@ -5,6 +5,15 @@ import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 import { ORG_READ_REACH } from "../parameters.ts";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 
+const persistenceActorId = {
+  name: "actor_id",
+  in: "query",
+  required: false,
+  schema: { type: "string", minLength: 1 },
+  description:
+    "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected.",
+};
+
 /** The query of both persistence reads: one space's, and the one spanning spaces. */
 const PERSISTENCE_QUERY = [
   {
@@ -22,13 +31,7 @@ const PERSISTENCE_QUERY = [
     description:
       "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
   },
-  {
-    name: "actor_id",
-    in: "query",
-    required: false,
-    schema: { type: "string" },
-    description: "Required when `actor_type` is `user` or `end_user`.",
-  },
+  persistenceActorId,
   {
     name: "runId",
     in: "query",
@@ -459,12 +462,7 @@ export const agentsPaths = {
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
         },
-        {
-          name: "actor_id",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-        },
+        persistenceActorId,
       ],
       responses: {
         "200": {

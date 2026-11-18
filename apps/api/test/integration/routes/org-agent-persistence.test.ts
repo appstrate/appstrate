@@ -190,7 +190,12 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
 
   it("refuses an unknown parameter and a value outside a closed set, on both doors", async () => {
     const spaceHeaders = { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": s.deux };
-    for (const query of ["?bogus=1", "?kind=all", "?actor_type=robot"]) {
+    const invalidActorFilters = [
+      `?kind=memory&actor_id=${member.user.id}`,
+      `?actor_type=shared&actor_id=${member.user.id}`,
+      "?actor_type=user",
+    ];
+    for (const query of ["?bogus=1", "?kind=all", "?actor_type=robot", ...invalidActorFilters]) {
       const org = await app.request(path(AGENT, query), { headers: { Cookie: member.cookie } });
       expect(org.status, query).toBe(400);
       const space = await app.request(`/api/agents/${AGENT}/persistence${query}`, {
@@ -199,14 +204,20 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
       expect(space.status, query).toBe(400);
     }
     // The bulk delete reads the same filters, without `runId`; a refused query deletes nothing.
-    for (const query of ["?bogus=1", "?kind=all", `?runId=${runOf[s.deux]}`]) {
+    for (const query of [
+      "?bogus=1",
+      "?kind=all",
+      `?runId=${runOf[s.deux]}`,
+      ...invalidActorFilters,
+    ]) {
       const removed = await app.request(`/api/agents/${AGENT}/persistence${query}`, {
         method: "DELETE",
         headers: spaceHeaders,
       });
       expect(removed.status, query).toBe(400);
     }
-    expect((await read({ Cookie: member.cookie })).memories).not.toEqual([]);
+    const { memories } = await read({ Cookie: member.cookie }, `?runId=${runOf[s.deux]}`);
+    expect(memories).toEqual(everyActor("deux").sort());
   });
 
   it("narrows to one run's rows with runId", async () => {
