@@ -978,6 +978,21 @@ describe("call_integration_tool — result", () => {
     expect(JSON.stringify(result.structuredContent)).not.toContain(btoa(bytes));
   });
 
+  it("decodes a text file by its declared charset, and refuses one it cannot decode", async () => {
+    const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9]); // "café" in ISO-8859-1
+    const read = (contentType: string) =>
+      apiCall({ requests: [get()], read_as_file: true }, () =>
+        relayed(latin1, { headers: { "content-type": contentType } }),
+      );
+    const decoded = await read("text/plain; charset=ISO-8859-1");
+    expect(decoded.result.content[1]).toMatchObject({ resource: { text: "café" } });
+    // Undeclared means UTF-8, where 0xe9 alone is not a character: refused, never mangled.
+    for (const contentType of ["text/plain", "text/plain; charset=x-unknown"]) {
+      const { payload } = await read(contentType);
+      expect(entries(payload)[0]).toMatchObject({ error: { code: "unsupported_file_type" } });
+    }
+  });
+
   it("declines a batch or write before dispatching a file read", async () => {
     for (const requests of [[get(), get()], [get({ method: "POST" })]]) {
       const { result, calls } = await apiCall({ requests, read_as_file: true });

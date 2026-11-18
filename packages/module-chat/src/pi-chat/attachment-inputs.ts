@@ -12,6 +12,23 @@ type UserContent = Extract<Message, { role: "user" }>["content"];
 export type PiImageContent = Extract<Exclude<UserContent, string>[number], { type: "image" }>;
 export type AttachmentImages = ReadonlyMap<string, ReadonlyMap<string, PiImageContent>>;
 
+/**
+ * Base64 bytes of binary input one chat request may carry, in all: under the llm-proxy's default
+ * request cap (`LLM_PROXY_LIMITS.max_request_bytes`, 10 MiB) with room left for the text of the
+ * conversation. The three kinds of binary share it, each bounded on its own path:
+ * - tool-result images: {@link INLINE_IMAGE_BUDGET_BYTES}, by the runner's `inlineImageBudgetExtension`;
+ * - PDFs: {@link RESOURCE_BLOB_MAX_BYTES} raw per turn, by `createTurnPdfInput`;
+ * - attachment images: what is left, {@link ATTACHMENT_IMAGE_BUDGET_BYTES}.
+ */
+export const REQUEST_BINARY_BUDGET_BYTES = 7 * 1024 * 1024;
+
+/** Base64 size of `bytes` raw bytes. */
+const base64Size = (bytes: number) => Math.ceil(bytes / 3) * 4;
+
+/** The attachment images' share of {@link REQUEST_BINARY_BUDGET_BYTES}. */
+export const ATTACHMENT_IMAGE_BUDGET_BYTES =
+  REQUEST_BINARY_BUDGET_BYTES - INLINE_IMAGE_BUDGET_BYTES - base64Size(RESOURCE_BLOB_MAX_BYTES);
+
 /** Images are eligible in the newest three user messages, including the current prompt. */
 const RECENT_USER_MESSAGES = 3;
 const FILES_PER_KIND_PER_MESSAGE = 4;
@@ -23,7 +40,7 @@ export async function loadAttachmentImages(
   signal: AbortSignal,
 ): Promise<AttachmentImages> {
   const result = new Map<string, Map<string, PiImageContent>>();
-  let remaining = INLINE_IMAGE_BUDGET_BYTES;
+  let remaining = ATTACHMENT_IMAGE_BUDGET_BYTES;
   let turns = 0;
   for (
     let index = messages.length - 1;
@@ -84,11 +101,11 @@ export async function readPromptPdfs(
     signal.throwIfAborted();
     let note =
       "PDF content unavailable (unreadable or over the inline limit). Use an inline run to inspect larger files.";
-    if (receipts.size >= FILES_PER_KIND_PER_MESSAGE) {
-      note =
-        "PDF omitted: at most four PDFs are read per message. Use an inline run to inspect it.";
-    } else if (!pdfInput.supported) {
+    // A model that reads no PDF says so for every one; the per-message cap applies only when it does.
+    if (!pdfInput.supported) {
       note = PDF_INPUT_UNSUPPORTED;
+    } else if (receipts.size >= FILES_PER_KIND_PER_MESSAGE) {
+      note = `PDF omitted: at most ${FILES_PER_KIND_PER_MESSAGE} PDFs are read per message. Use an inline run to inspect it.`;
     } else if (read) {
       try {
         const file = await read(part.url, {

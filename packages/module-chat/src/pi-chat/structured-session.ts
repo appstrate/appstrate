@@ -136,51 +136,30 @@ function json(value: unknown): string {
   }
 }
 
-/** Older read_file/read_resource responses persisted MCP binary resources as JSON text. */
-function replayFileResult(text: string, toolName: string): string {
-  if ((toolName !== "read_file" && toolName !== "read_resource") || !text.startsWith("{"))
-    return text;
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object") return text;
-    const resource =
-      "type" in parsed && parsed.type === "resource" && "resource" in parsed
-        ? parsed.resource
-        : parsed;
-    if (
-      resource &&
-      typeof resource === "object" &&
-      "blob" in resource &&
-      typeof resource.blob === "string" &&
-      "uri" in resource &&
-      typeof resource.uri === "string"
-    ) {
-      return `[File content omitted on replay: ${resource.uri}]`;
-    }
-  } catch {
-    // A text file typically contains prose, not a serialized MCP resource.
-  }
-  return text;
-}
-
-/** Persisted tool results replay as text. Binary blocks become pointers; their contents are transient. */
-function toolResultContent(
-  value: unknown,
-  scope: OfferScope,
-  toolName: string,
-  input: unknown,
-): ToolResultContent {
-  const uri = record(input).uri;
-  // Older threads recorded read_resource appfile text verbatim (including arbitrary JSON).
-  // Only the platform envelope can attest to a new receipt, never the document's own text.
-  if (
-    (toolName === "read_file" || toolName === "read_resource") &&
-    typeof uri === "string" &&
-    uri.startsWith("appfile://") &&
-    record(value).fileReceipt !== true
-  ) {
-    return [{ type: "text", text: `[File content omitted on replay: ${uri}]` }];
-  }
+/**
+ * Convert one persisted tool output into Pi tool-result content.
+ *
+ * TEXT ONLY, because that is all a chat tool can produce: every tool a turn can
+ * call goes through `mcp-tools.ts`, whose forwarder renders an MCP image block
+ * as the pointer `[image <mime>]` and whose `run_and_wait` result is JSON text.
+ * Replay must reproduce what the live turn showed the model, so a block type
+ * the live path cannot emit has no branch here either.
+ *
+ * The one exception is an MCP-shaped result whose blocks are ALL non-text. The
+ * generic JSON fallback below would stringify it whole — and for an image block
+ * that means the raw base64 lands in the model's context, the exact thing the
+ * live forwarder exists to prevent. Such a result should not reach here (the
+ * forwarder textifies images before anything is persisted), but "should not"
+ * is not "cannot": a row written by an older build, or a foreign persisted
+ * shape, still replays through this function. So a content array with no
+ * surviving text block is rendered as pointers, the same way the forwarder
+ * would have rendered it live.
+ *
+ * `scope` is the call's ({@link offerScopeOf}), as live — the tool, its arguments and the
+ * persisted `relayed` mark: a relayed third-party payload replays verbatim, exactly as the model
+ * first read it.
+ */
+function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent {
   if (value && typeof value === "object") {
     const content = (value as { content?: unknown }).content;
     if (Array.isArray(content)) {
@@ -190,10 +169,7 @@ function toolResultContent(
         return [
           {
             type: "text",
-            text: replayFileResult(
-              splitJsonText(String((part as { text?: unknown }).text ?? ""), scope).text,
-              toolName,
-            ),
+            text: splitJsonText(String((part as { text?: unknown }).text ?? ""), scope).text,
           },
         ];
       });
@@ -207,7 +183,7 @@ function toolResultContent(
       if (pointers.length > 0) return pointers;
     }
   }
-  return [{ type: "text", text: replayFileResult(json(scope(value).redacted), toolName) }];
+  return [{ type: "text", text: json(scope(value).redacted) }];
 }
 
 function userMessage(
@@ -290,8 +266,6 @@ function assistantMessages(
             arguments: part.input,
             relayed: (result as { relayed?: unknown } | null)?.relayed === true,
           }),
-          toolName,
-          part.input,
         ),
         isError,
       });

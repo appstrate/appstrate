@@ -471,10 +471,22 @@ function projectFile(
   if (!text && mimeType !== "application/pdf" && !isRasterImageMime(mimeType))
     return refuse("unsupported_file_type");
 
+  let decodedText: string | undefined;
+  if (text) {
+    // The declared charset decodes the body (UTF-8 when none): an unknown label, or bytes it cannot
+    // decode, are refused rather than corrupted.
+    const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(outcome.contentType)?.[1] ?? "utf-8";
+    try {
+      // Any WHATWG label: the constructor throws on one it does not know, caught below.
+      const label = charset as ConstructorParameters<typeof TextDecoder>[0];
+      decodedText = new TextDecoder(label, { fatal: true }).decode(bytes);
+    } catch {
+      return refuse("unsupported_file_type");
+    }
+  }
   // JSON escaping can cost six bytes per text byte; bound the serialized MCP result too.
-  const decoded = text
-    ? jsonTextHead(new TextDecoder().decode(bytes), MAX_RESULT_BYTES)
-    : undefined;
+  const decoded =
+    decodedText === undefined ? undefined : jsonTextHead(decodedText, MAX_RESULT_BYTES);
   if (decoded?.cut) return refuse("incomplete_file");
   const result = report();
   result.content.push({

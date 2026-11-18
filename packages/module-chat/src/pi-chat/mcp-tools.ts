@@ -44,6 +44,7 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
+import { FILE_NAME_META_KEY } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
@@ -651,7 +652,11 @@ async function liveResources(
     } else if (text !== undefined) {
       content.push({ type: "text", text });
     } else if (mimeType === "application/pdf" && opts.pdfInput) {
-      const pdf = opts.pdfInput.add({ name: "document.pdf", data: blob }, toolCallId);
+      const name = resource._meta?.[FILE_NAME_META_KEY];
+      const pdf = opts.pdfInput.add(
+        { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
+        toolCallId,
+      );
       note = pdf.note;
       if (pdf.reference) content.push({ type: "text", text: pdf.reference });
     } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {

@@ -3,6 +3,13 @@
 import { sanitizeFilename } from "@appstrate/core/naming";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { Api, ExtensionFactory } from "@appstrate/runner-pi";
+import { readsPdfNatively } from "../pdf-input.ts";
+
+/** A one-turn reference to a PDF, swapped for the file itself at serialization. */
+const REFERENCE = /\[pdf:[0-9a-f-]{36}\]/g;
+
+/** Items of a Responses request that carry a tool's output: plain and grammar (custom) tools. */
+const TOOL_OUTPUT_TYPES = new Set(["function_call_output", "custom_tool_call_output"]);
 
 export const PDF_INPUT_UNSUPPORTED =
   "This model's chat adapter does not accept PDF input. Use an inline run to inspect the file.";
@@ -30,8 +37,8 @@ export interface TurnPdfInput {
  * messages and attach them at serialization, to the same user or tool result
  * that supplied them. A new turn starts with an empty set.
  */
-export function createTurnPdfInput(api: Api): TurnPdfInput {
-  const supported = api === "openai-responses";
+export function createTurnPdfInput(model: { api: Api; input: readonly string[] }): TurnPdfInput {
+  const supported = readsPdfNatively(model);
   const files: {
     source?: string;
     receipt: PdfReceipt & { reference: string };
@@ -78,7 +85,7 @@ export function createTurnPdfInput(api: Api): TurnPdfInput {
           return;
         const input = payload.input.map((item) => {
           const user = item?.role === "user";
-          if (!user && item?.type !== "function_call_output") return item;
+          if (!user && !TOOL_OUTPUT_TYPES.has(item?.type)) return item;
           const content = user ? item.content : item.output;
           const parts =
             typeof content === "string" ? [{ type: "input_text", text: content }] : content;
@@ -87,15 +94,21 @@ export function createTurnPdfInput(api: Api): TurnPdfInput {
           const attached = new Set<(typeof files)[number]>();
           const cleaned = parts.flatMap((part) => {
             if (part?.type !== "input_text" || typeof part.text !== "string") return [part];
+            if (!part.text.includes("[pdf:")) return [part];
             let text: string = part.text;
             for (const file of files) {
               if (file.source !== source || !text.includes(file.receipt.reference)) continue;
               attached.add(file);
               text = text.replaceAll(file.receipt.reference, "");
             }
-            return text.trim() ? [{ ...part, text }] : [];
+            // A reference this item does not own (another call's, or one copied into a summary) is
+            // dropped, never sent as text.
+            text = text.replace(REFERENCE, "").trim();
+            return text ? [{ ...part, text }] : [];
           });
-          if (!attached.size) return item;
+          if (cleaned.length === parts.length && cleaned.every((part, i) => part === parts[i])) {
+            return item;
+          }
           const native = Array.from(attached, (file) => ({
             type: "input_file",
             filename: file.name,

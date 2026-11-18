@@ -1363,12 +1363,24 @@ export async function resolveChatAttachment(
   };
 }
 
+/** The grant every read of a stored file's content asks, whatever the door (REST guards it in middleware). */
+export const FILE_CONTENT_GRANT = "files:read";
+
+/**
+ * Whether a caller may read stored file content in a space. The container ACL of
+ * {@link getFileForActor} says whose file it is, not whether this caller reads files at all, so
+ * every door that reads content outside the REST content route asks this first.
+ */
+export function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
+  return permissions.has(FILE_CONTENT_GRANT);
+}
+
 /** Attaching and reading a stored file use the same space grant and container ACL as the file gallery. */
 async function resolveStoredChatFile(
   request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces">,
   fileId: string,
 ): Promise<ResolvedFile | null> {
-  const spaces = request.spaces.filter((space) => space.permissions.has("files:read"));
+  const spaces = request.spaces.filter((space) => mayReadFileContent(space.permissions));
   if (!spaces.length) return null;
   const [owner] = await db
     .select({ spaceId: files.spaceId })

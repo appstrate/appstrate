@@ -52,7 +52,7 @@ import {
 } from "@appstrate/core/run-and-wait-client";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
-import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -79,6 +79,7 @@ import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
+  mayReadFileContent,
   readStoredFileBytes,
   projectFileMetadata,
   type FileCapabilities,
@@ -94,6 +95,7 @@ import {
   jsonResult,
   refusalResult,
   ToolRefusal,
+  fileContentNotGranted,
   trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
@@ -1654,13 +1656,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
       }
 
       // The in-process read skips the REST middleware; apply its file-family grant before the container ACL.
-      if (!ctx.permissions.has("files:read")) {
-        throw new ToolRefusal({
-          code: "not_granted",
-          error: "Reading an Appstrate file requires files:read in its space.",
-          required_permissions: ["files:read"],
-        });
-      }
+      if (!mayReadFileContent(ctx.permissions)) throw fileContentNotGranted();
       const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
       if (!resolved) {
         throw new ToolRefusal({
@@ -1693,7 +1689,16 @@ function buildFileResourceReader(ctx: McpToolContext): {
           const content = textFile
             ? { text: new TextDecoder().decode(bytes) }
             : { blob: Buffer.from(bytes).toString("base64") };
-          return { contents: [{ uri: canonicalUri, mimeType: row.mime, ...content }] };
+          return {
+            contents: [
+              {
+                uri: canonicalUri,
+                mimeType: row.mime,
+                ...content,
+                _meta: { [FILE_NAME_META_KEY]: row.name },
+              },
+            ],
+          };
         }
       }
 

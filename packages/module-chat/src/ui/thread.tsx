@@ -50,7 +50,11 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { getSelectedModelAcceptsImages, subscribeModel } from "./model-store.ts";
+import {
+  getSelectedModelAcceptsImages,
+  getSelectedModelReadsPdf,
+  subscribeModel,
+} from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
@@ -287,8 +291,18 @@ function ComposerAttachmentChip() {
     getSelectedModelAcceptsImages,
     getSelectedModelAcceptsImages,
   );
+  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
+  const readsPdf = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelReadsPdf,
+    getSelectedModelReadsPdf,
+  );
   const imageNotice =
-    previewFile && acceptsImages === false ? t("composer.imageNotSeen") : undefined;
+    previewFile && acceptsImages === false
+      ? t("composer.imageNotSeen")
+      : file?.type === "application/pdf" && readsPdf === false
+        ? t("composer.pdfNotRead")
+        : undefined;
   const remove = (
     <AttachmentPrimitive.Remove asChild>
       <button

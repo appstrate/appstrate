@@ -399,7 +399,7 @@ describe("runPiChat against a stub provider", () => {
     });
     const readAttachment = mock(async () => ({ mime: "application/pdf", bytes }));
     const { chunks, usage } = await runTurn(() => "pdf-bearer", undefined, undefined, {
-      model: { ...orgModel(), apiShape: "openai-responses" },
+      model: { ...orgModel(), apiShape: "openai-responses", input: ["text", "image"] },
       messages,
       readAttachment,
     });
@@ -458,7 +458,7 @@ describe("runPiChat against a stub provider", () => {
         },
       };
       const { chunks } = await runTurn(() => "tool-read", undefined, undefined, {
-        model: { ...orgModel(), apiShape: "openai-responses" },
+        model: { ...orgModel(), apiShape: "openai-responses", input: ["text", "image"] },
       });
       expect(capture.bodies).toHaveLength(steps + 1);
       expect(capture.bodies.slice(0, steps).some((body) => body.includes(data))).toBe(false);

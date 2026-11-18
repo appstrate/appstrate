@@ -11,6 +11,7 @@
   "composer.attach.choose": "Attach in…",
   "composer.removeAttachment": "Remove attachment",
   "composer.imageNotSeen": "This model cannot view the image.",
+  "composer.pdfNotRead": "This model cannot read PDFs.",
   "composer.send": "Send",
   "composer.stop": "Stop",
   "welcome.hint": "Launch an agent, inspect a run, create a package or search your files.",

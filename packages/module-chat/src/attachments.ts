@@ -21,6 +21,7 @@
 import type { FileUIPart, UIMessage } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { formatBytes } from "@appstrate/core/format";
+import { isImageMime } from "@appstrate/core/mime";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -67,7 +68,7 @@ function imageNote(
   part: FileUIPart,
   context: AttachmentContext | undefined,
 ): string {
-  if (!context || !part.mediaType.startsWith("image/")) return "";
+  if (!context || !isImageMime(part.mediaType)) return "";
   if (!context.modelSeesImages) {
     return " — you cannot view images with this model: say so rather than guess its content";
   }

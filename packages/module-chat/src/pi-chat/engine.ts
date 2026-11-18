@@ -343,7 +343,7 @@ export function runPiChat(input: PiChatInput): Response {
         // MCP client it goes on to open — `finally` cannot close what was never
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
-        const pdfInput = createTurnPdfInput(model.api);
+        const pdfInput = createTurnPdfInput(model);
         const modelSeesImages = model.input.includes("image");
         const construction = Promise.allSettled([
           timed(

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `FILE_NAME_META_KEY` (`@appstrate/core/file-uri`): the content `_meta` key under which an
+  `appfile://` resource read names the stored file (`dev.appstrate/file_name`).
 - `PlatformServices.readChatAttachment` accepts a `ChatAttachmentRead` and returns `ChatAttachmentContent` for bounded image and PDF inputs under the caller's current file permissions. `isRasterImageMime` in `@appstrate/core/mime` identifies the inline raster formats used by the chat and file preview.
 
 - `findCause` in `@appstrate/core/error-cause` finds the first matching object in an error's cause chain, up to eight levels deep.

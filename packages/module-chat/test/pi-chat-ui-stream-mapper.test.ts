@@ -171,7 +171,7 @@ describe("PiChatUiStreamMapper", () => {
       {
         type: "tool-output-available",
         toolCallId: "file-1",
-        output: { content: [receipt], fileReceipt: true },
+        output: { content: [receipt] },
       },
     ]);
     expect(run([{ ...end, isError: true }]).chunks).toEqual([
