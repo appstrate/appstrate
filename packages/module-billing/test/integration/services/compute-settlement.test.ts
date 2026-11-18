@@ -276,23 +276,38 @@ describe("ensureComputeCursorSeeded", () => {
     await truncateBillingTables();
   });
 
-  it("seeds the watermark at now, so history is not billed retroactively", async () => {
+  it("seeds the watermark one replay window ahead, so the first pass starts at now", async () => {
     const before = Date.now();
     await ensureComputeCursorSeeded();
 
     const row = await cursorRow();
-    expect(row.completedAt.getTime()).toBeGreaterThanOrEqual(before - 1000);
-    expect(row.completedAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+    expect(row.completedAt.getTime()).toBeGreaterThanOrEqual(before + REPLAY_WINDOW_MS - 1000);
+    expect(row.completedAt.getTime()).toBeLessThanOrEqual(Date.now() + REPLAY_WINDOW_MS + 1000);
     expect(row.runId).toBe("");
+  });
 
-    // A run that finished before the seed is never read as new.
+  it("does not bill a run that finished minutes before the seed, replay window included", async () => {
+    const before = Date.now();
+    await ensureComputeCursorSeeded();
+    // Finished 2 minutes before the module was enabled: inside a naive `now - window` reach.
     seedTerminalRun({
       orgId,
+      id: "run_before_seed",
       durationMs: 600_000,
-      completedAt: new Date(before - 3 * REPLAY_WINDOW_MS),
+      completedAt: new Date(before - 2 * 60_000),
     });
+    // And one that finishes after the seed, which the first pass must count.
+    seedTerminalRun({
+      orgId,
+      id: "run_after_seed",
+      durationMs: 30_000,
+      completedAt: new Date(before + 1_000),
+    });
+
+    // The timer's pass: the one that re-reads the replay window.
     await settleTerminalRuns();
-    expect(await secondsUsed()).toBe(0);
+
+    expect(await secondsUsed()).toBe(30);
   });
 
   it("leaves an existing watermark alone, so a module that was off resumes where it stopped", async () => {

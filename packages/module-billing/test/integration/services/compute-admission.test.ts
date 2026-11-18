@@ -198,11 +198,11 @@ describe("concurrency per plan", () => {
 
 describe("runLimits hook", () => {
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
   });
 
   function runLimits(orgId: string) {
-    return eeModule.hooks!.runLimits!(orgId);
+    return billingModule.hooks!.runLimits!(orgId);
   }
 
   it("hands the Free plan's three concurrent runs to the platform", async () => {

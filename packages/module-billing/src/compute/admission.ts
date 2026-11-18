@@ -40,7 +40,7 @@ type RunParams = Extract<BeforeUsageParams, { context: "run" }>;
  * for an org with no account or a plan that sets none (the deployment-wide cap alone).
  */
 export async function maxConcurrentRunsOf(orgId: string): Promise<number | null> {
-  const [account] = await getEeDb()
+  const [account] = await getBillingDb()
     .select({ planId: billingAccounts.planId })
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
