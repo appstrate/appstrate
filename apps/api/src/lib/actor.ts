@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import { and, eq, isNull, or } from "drizzle-orm";
 import type { Column, SQL } from "drizzle-orm";
 import type { Actor } from "@appstrate/connect";
+import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 
 export type { Actor };
 
@@ -15,10 +16,11 @@ export function getActor(c: Context): Actor {
 }
 
 /**
- * The chat conversation that issued this request, read from the VALIDATED credential's claims
- * (`authExtra`, never a caller-supplied header): only the chat's loopback bearers carry one.
+ * The chat conversation that issued this request: a signed claim of the chat's loopback bearer,
+ * never a header, and no other strategy's `authExtra`.
  */
 export function issuingChatSessionId(c: Context): string | null {
+  if (c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD) return null;
   const extra = c.get("authExtra") as Record<string, unknown> | undefined;
   return typeof extra?.chatSessionId === "string" ? extra.chatSessionId : null;
 }

@@ -194,6 +194,8 @@ export interface ChatPageProps {
   actingSpaceIds: ChatHost["actingSpaceIds"];
   /** The caller's personal space, `null` until known (see `ChatHost`). */
   personalSpaceId: ChatHost["personalSpaceId"];
+  /** A role preview is on (see `ChatHost`). */
+  previewing: ChatHost["previewing"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -229,6 +231,7 @@ export function ChatPage({
   canIn,
   actingSpaceIds,
   personalSpaceId,
+  previewing,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -338,6 +341,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       personalSpaceId,
+      previewing,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -357,6 +361,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       personalSpaceId,
+      previewing,
       personalModelCredentials,
       modelCredentials,
       formatBytes,

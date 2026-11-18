@@ -32,7 +32,7 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
+import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 
@@ -397,15 +397,16 @@ describe("mcp resources/read (appfile://)", () => {
       method: "tools/call",
       params: { name: "read_file", arguments: { uri } },
     });
+    // Without `files:read` in the file's space the file is as absent as a missing one.
     expect(viaTool.envelope.result?.isError).toBe(true);
-    expect(JSON.stringify(viaTool.envelope)).toContain("not_granted");
+    expect(JSON.stringify(viaTool.envelope)).toContain("not_found");
     const direct = await rpc(limited, {
       jsonrpc: "2.0",
       id: 2,
       method: "resources/read",
       params: { uri },
     });
-    expect(direct.envelope.error?.message).toContain("files:read");
+    expect(direct.envelope.error?.message).toContain("File not found");
     expect(JSON.stringify([direct.envelope, viaTool.envelope])).not.toContain("private-report");
   });
 
@@ -660,12 +661,16 @@ describe("mcp file-backed package workflow", () => {
       packageArchive(true),
     );
 
-    const sessionHeaders = mcpAuthHeaders(ctx);
+    // On the organization endpoint: one pinned to a space reaches that space alone.
+    const sessionHeaders = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
     const { envelope } = await rpc(sessionHeaders, {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "import_package_file", arguments: { file_uri: `appfile://${docId}` } },
+      params: {
+        name: "import_package_file",
+        arguments: { file_uri: `appfile://${docId}`, space_id: ctx.defaultSpaceId },
+      },
     });
     const result = toolData(envelope);
     expect(result.isError, JSON.stringify(envelope)).toBe(false);
@@ -727,11 +732,8 @@ describe("mcp file-backed package workflow", () => {
     );
     const result = toolData(envelope);
     expect(result.isError).toBe(true);
-    // Refused before the bytes are read: no validation verdict comes back.
-    expect(result.data).toMatchObject({
-      code: "not_granted",
-      required_permissions: ["files:read"],
-    });
+    // Refused before the bytes are read, as a missing file: no validation verdict comes back.
+    expect(result.data).toMatchObject({ code: "not_found" });
     expect(result.data.valid).toBeUndefined();
   });
 

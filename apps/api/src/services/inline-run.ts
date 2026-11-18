@@ -23,6 +23,7 @@ import { logger } from "../lib/logger.ts";
 import type { InlineRunPreflightResult } from "./inline-run-preflight.ts";
 import { collectMountedFileIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
+import type { ConsumedFile } from "./state/runs.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { fileUri, extractFileIdsFromText, isFileUri, parseFileUri } from "@appstrate/core/file-uri";
@@ -379,7 +380,7 @@ export async function triggerInlineRun(params: {
   apiKeyId?: string;
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
-}): Promise<{ runId: string; packageId: string }> {
+}): Promise<{ runId: string; packageId: string; consumedFiles: ConsumedFile[] }> {
   // Before the shadow package below: nothing may be written while run capacity is starting.
   assertRunCapacityReady();
   const { orgId, spaceId, actor, payerUserId, runId, preflight, parsed, apiKeyId, traceparent } =
@@ -411,8 +412,9 @@ export async function triggerInlineRun(params: {
   const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt);
 
   // ----- Fire the pipeline. -----
+  let consumedFiles: ConsumedFile[];
   try {
-    await prepareAndExecuteRun({
+    ({ consumedFiles } = await prepareAndExecuteRun({
       runId,
       agent: shadowAgent,
       orgId,
@@ -437,13 +439,13 @@ export async function triggerInlineRun(params: {
       // The preflight's own memo, already seeded with the PINNED integration
       // manifests — the pipeline must not resolve them a second time.
       manifestCache: preflight.manifestCache,
-    });
+    }));
   } catch (err) {
     await deleteOrphanShadowPackage(shadowId);
     throw err;
   }
 
-  return { runId, packageId: shadowId };
+  return { runId, packageId: shadowId, consumedFiles };
 }
 
 /**

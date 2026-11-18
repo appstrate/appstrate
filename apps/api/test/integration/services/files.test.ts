@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   files,
@@ -1525,6 +1525,59 @@ describe("files service + routes", () => {
     await expect(attach(`upload://${foreign}`)).rejects.toMatchObject({ status: 404 });
   });
 
+  it("an unlimited conversation's own upload touches no space, though the turn acts in its space", async () => {
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Mon espace",
+      ownerUserId: ctx.user.id,
+      visibility: "private",
+    });
+    const personalScope = { orgId: ctx.orgId, spaceId: personal.id };
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db
+      .insert(chatSessions)
+      .values({ id: chatSessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const png = Uint8Array.from(
+      atob(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      ),
+      (char) => char.charCodeAt(0),
+    );
+    const announced: string[] = [];
+    const grants = [{ id: personal.id, permissions: new Set(["files:read"]) }];
+    const request = {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      chatSessionId,
+      // The personal space is one of the turn's: an unlimited conversation acts there.
+      spaces: grants,
+      reach: grants,
+      beforeResolve: async (spaceId: string) => {
+        announced.push(spaceId);
+      },
+    };
+    const upload = await stageUpload(personalScope, ctx.user.id, "p.png", png, "image/png");
+    const attached = await resolveChatAttachment({ ...request, uri: `upload://${upload}` });
+    expect(await resolveChatAttachment({ ...request, uri: attached.uri })).toMatchObject({
+      spaceId: personal.id,
+    });
+    expect(
+      (await readChatAttachment({ ...request, uri: attached.uri, kind: "image", maxBytes: 1024 }))
+        ?.bytes,
+    ).toEqual(png);
+    expect(announced).toEqual([]);
+
+    // A file of that space the conversation does not hold still touches it.
+    const { row: output } = await publishStream(
+      personalScope,
+      await seedRunRow(personalScope, { userId: ctx.user.id }),
+      "out.txt",
+      "x",
+    );
+    await resolveChatAttachment({ ...request, uri: `appfile://${output.id}` });
+    expect(announced).toEqual([personal.id]);
+  });
+
   it("a conversation reads its own attachment outside the turn's spaces; nobody else does", async () => {
     const personal = await seedSpace({
       orgId: ctx.orgId,
@@ -2119,6 +2172,56 @@ describe("files service + routes", () => {
     expect(
       (await listFilesIn(scope, strangerActor, {}, NO_GRANTS)).data.map((d) => d.id),
     ).not.toContain(doc.id);
+  });
+
+  it("a consumer run in another space protects a file from none of its own space's deletions", async () => {
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
+    const otherScope = { orgId: ctx.orgId, spaceId: other.id };
+    const link = async (fileId: string, inScope: typeof scope) =>
+      db
+        .insert(fileLinks)
+        .values({ fileId, consumerRunId: await seedRunRow(inScope), orgId: ctx.orgId });
+    const exists = async (fileId: string) =>
+      (await db.select().from(files).where(eq(files.id, fileId))).length === 1;
+
+    // Explicit delete: a link from another space is no claim (no 409).
+    const { row: borrowed } = await publishStream(scope, await seedRunRow(scope), "a.txt", "a");
+    await link(borrowed.id, otherScope);
+    await deleteFile(scope, borrowed.id);
+    expect(await exists(borrowed.id)).toBe(false);
+
+    // Retention sweep: only a same-space consumer keeps an expired file.
+    const { row: expiring } = await publishStream(scope, await seedRunRow(scope), "e.txt", "e");
+    const { row: kept } = await publishStream(scope, await seedRunRow(scope), "k.txt", "k");
+    await link(expiring.id, otherScope);
+    await link(kept.id, scope);
+    await db
+      .update(files)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(inArray(files.id, [expiring.id, kept.id]));
+    expect(await cleanupExpiredFiles()).toBe(1);
+    expect(await exists(expiring.id)).toBe(false);
+    expect(await exists(kept.id)).toBe(true);
+
+    // Conversation teardown: an upload a run of another space consumed dies with it; one a
+    // run of its own space consumed is detached and kept.
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const attach = async (name: string) =>
+      createFileFromUpload(
+        scope,
+        userActor,
+        await stageUpload(scope, ctx.user.id, name, new TextEncoder().encode(name)),
+        { chatSessionId: sessionId },
+      );
+    const lent = await attach("lent.txt");
+    const used = await attach("used.txt");
+    await link(lent.id, otherScope);
+    await link(used.id, scope);
+    await detachOrDeleteContainedFiles({ chatSessionId: sessionId, orgId: ctx.orgId });
+    expect(await exists(lent.id)).toBe(false);
+    const [detached] = await db.select().from(files).where(eq(files.id, used.id));
+    expect(detached?.chatSessionId).toBeNull();
   });
 
   it("deletes an unconsumed chat-session file when the session is deleted", async () => {

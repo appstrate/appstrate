@@ -24,10 +24,14 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceGrant } from "../../helpers/seed.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
-import { auditEvents, chatSessions, fileLinks, runs, uploads } from "@appstrate/db/schema";
+import { auditEvents, chatSessions, fileLinks, files, runs, uploads } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { createUpload } from "../../../src/services/uploads.ts";
-import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
+import {
+  createFileFromStream,
+  createFileFromUpload,
+  detachOrDeleteContainedFiles,
+} from "../../../src/services/files.ts";
 import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import { fileUri } from "@appstrate/core/file-uri";
 import {
@@ -114,10 +118,12 @@ describe("run inputs across spaces", () => {
     return fileUri(row.id);
   }
 
-  /** A chat upload of `userId`, held by conversation `sessionId`, in their personal space. */
-  async function chatUpload(userId: string, sessionId: string): Promise<string> {
-    const personal = await ensurePersonalSpaceFor(ctx.orgId, userId);
-    const scope = { orgId: ctx.orgId, spaceId: personal.id };
+  /** A chat upload of `userId`, held by conversation `sessionId`, in their personal space by default. */
+  async function chatUpload(userId: string, sessionId: string, spaceId?: string): Promise<string> {
+    const scope = {
+      orgId: ctx.orgId,
+      spaceId: spaceId ?? (await ensurePersonalSpaceFor(ctx.orgId, userId)).id,
+    };
     await db
       .insert(chatSessions)
       .values({ id: sessionId, orgId: ctx.orgId, userId })
@@ -238,8 +244,27 @@ describe("run inputs across spaces", () => {
       (await launch(headers, teamB, [await chatUpload(ctx.user.id, `chs_${crypto.randomUUID()}`)]))
         .status,
     ).toBe(404);
-    // Its own space still resolves: the refusal is the space, not the key.
-    await launchedRunId(await launch(headers, teamB, [await runOutput(teamB, ctx.user.id)]));
+    // Its own space still resolves: the refusal is the space, not the key, which the audit names
+    // as it names the key on `run.triggered`.
+    const own = await runOutput(teamB, ctx.user.id);
+    const runId = await launchedRunId(await launch(headers, teamB, [own]));
+    const consumed = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "file.consumed"), eq(auditEvents.spaceId, teamB)));
+    const [triggered] = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "run.triggered"), eq(auditEvents.resourceId, runId)));
+    expect(consumed).toHaveLength(1);
+    expect(consumed[0]).toMatchObject({
+      actorType: "api_key",
+      actorId: key.id,
+      requestId: triggered!.requestId,
+      resourceId: own.replace("appfile://", ""),
+      after: { runId, fileSpaceId: teamB },
+    });
+    expect(consumed[0]!.requestId).not.toBeNull();
   });
 
   it("a chat turn bound to space B consumes its own conversation's files, and no other", async () => {
@@ -266,5 +291,36 @@ describe("run inputs across spaces", () => {
       chatSessionId: sessionId,
     });
     expect((await launch(noFiles, teamB, [own])).status).toBe(404);
+
+    // The widening is the conversation's uploads in the caller's own personal space: a file it
+    // holds in a team space the bearer does not reach resolves like any other file there.
+    const inTeam = await chatUpload(ctx.user.id, sessionId, ctx.defaultSpaceId);
+    expect((await launch(bearer(sessionId), teamB, [inTeam])).status).toBe(404);
+    // Never under a role preview.
+    const previewing = loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "owner",
+      permissions: [...LAUNCHES_HERE, "models:read"],
+      spaceIds: [teamB],
+      chatSessionId: sessionId,
+      viewAs: {
+        orgId: ctx.orgId,
+        orgRole: "member",
+        space: { spaceId: teamB, role: { kind: "preset", preset: "admin" } },
+      },
+    });
+    expect((await launch(previewing, teamB, [own])).status).toBe(404);
+    await launchedRunId(await launch(previewing, teamB, [await runOutput(teamB, ctx.user.id)]));
+  });
+
+  it("a team run keeps no claim on a personal upload: it dies with its conversation", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    const uri = await chatUpload(ctx.user.id, sessionId);
+    await launchedRunId(await launch(authHeaders(ctx), teamB, [uri]));
+
+    await detachOrDeleteContainedFiles({ chatSessionId: sessionId, orgId: ctx.orgId });
+    const fileId = uri.replace("appfile://", "");
+    expect(await db.select().from(files).where(eq(files.id, fileId))).toEqual([]);
+    // Launching the same input again resolves nothing: a rerun of that run fails the same way.
+    expect((await launch(authHeaders(ctx), teamB, [uri])).status).toBe(404);
   });
 });

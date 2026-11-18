@@ -677,11 +677,7 @@ export async function parseRequestInput(
         // (any org member could consume another member's staged bytes).
         const actor = getActor(c);
 
-        // Resolve every `appfile://` reference in the FILE's own space, under the
-        // caller's grant there as its credential reaches it (`files:read` required,
-        // here as on every door reading file content), then the container ACL (D2)
-        // — `requestFileAccess`, which also admits the issuing chat conversation's
-        // own files. Anything refused is indistinguishable from missing (404).
+        // In the file's own space, as the credential reaches it; refused = missing (404).
         const fileAccess = requestFileAccess(c, spaceId);
         const resolvedDocs =
           fileRefs.length > 0

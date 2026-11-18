@@ -33,8 +33,8 @@ export interface ReachableSpace {
 
 /**
  * The spaces where the caller holds a role (persona overlay included): the reach of every read
- * spanning spaces and of `packageAccessSpaces`. A request pinned to a space (its credential or
- * `dispatchSpacePin`) reaches that space only; a credential bound to a SET of spaces
+ * spanning spaces and of `packageAccessSpaces`. A request pinned to a space (its credential, a
+ * pinned dispatch, the space-pinned MCP endpoint) reaches that space only; a credential bound to a SET of spaces
  * (`credentialSpaceIds`) reaches those alone. A read crossing into another organization names
  * `orgRole`.
  */
@@ -48,12 +48,17 @@ export function callerReachableSpaces(
   // the role: one request can ask about two organizations.
   const cache = c.get("reachableSpacesCache") ?? new Map<string, Promise<ReachableSpace[]>>();
   if (!c.get("reachableSpacesCache")) c.set("reachableSpacesCache", cache);
-  const key = `${orgId}:${orgRole}`;
+  const key = `${orgId}:${orgRole}:${spacePin(c) ?? ""}`;
   const cached = cache.get(key);
   if (cached) return cached;
   const pending = resolveReachableSpaces(c, orgId, orgRole);
   cache.set(key, pending);
   return pending;
+}
+
+/** The space this request is confined to by its door: a pinned dispatch or endpoint. */
+function spacePin(c: Context<AppEnv>): string | undefined {
+  return dispatchSpacePin(c) ?? c.get("endpointSpaceId");
 }
 
 /** The read itself — {@link callerReachableSpaces} is the memo in front of it. */
@@ -70,9 +75,9 @@ async function resolveReachableSpaces(
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
   );
-  const dispatchPin = dispatchSpacePin(c);
+  const pin = spacePin(c);
   return entries.flatMap(({ space, role }) =>
-    role && credentialAdmitsSpace(c, space.id) && (!dispatchPin || space.id === dispatchPin)
+    role && credentialAdmitsSpace(c, space.id) && (!pin || space.id === pin)
       ? [
           {
             id: space.id,

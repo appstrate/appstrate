@@ -96,6 +96,11 @@ export type AppEnv = {
      */
     credentialSpaceIds?: readonly string[];
     /**
+     * The space the endpoint itself pins (the space-pinned MCP endpoint), whatever the
+     * credential reaches: the reach is cut to it like a pinned dispatch's.
+     */
+    endpointSpaceId?: string;
+    /**
      * Resolved space row (id/orgId/isDefault) set by
      * `requireSpaceContext()` alongside `spaceId`. Services called from
      * space-scoped routes should accept this shape directly instead of taking

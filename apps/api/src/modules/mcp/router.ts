@@ -511,6 +511,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       if (new Set(pinned).size > 1) {
         throw forbidden("The space in the URL is not the credential's space");
       }
+      // The pin confines every door of the request, not only its dispatches.
+      c.set("endpointSpaceId", pinned[0]!);
       await enterSpaceById(c, pinned[0]!, orgId);
       return next();
     }

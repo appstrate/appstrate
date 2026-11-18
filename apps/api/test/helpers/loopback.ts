@@ -14,7 +14,14 @@ import type { TestContext } from "./auth.ts";
 export function loopbackHeaders(
   member: Pick<TestContext, "user">,
   orgId: string,
-  options: { orgRole: OrgRole; permissions: string[]; spaceIds?: string[]; chatSessionId?: string },
+  options: {
+    orgRole: OrgRole;
+    permissions: string[];
+    spaceIds?: string[];
+    chatSessionId?: string;
+    /** The role preview the turn runs under, as the chat signs it. */
+    viewAs?: unknown;
+  },
 ): Record<string, string> {
   const token = mintMcpLoopbackToken({
     userId: member.user.id,
@@ -25,6 +32,7 @@ export function loopbackHeaders(
     permissions: options.permissions,
     spaceIds: options.spaceIds,
     chatSessionId: options.chatSessionId,
+    viewAs: options.viewAs,
   });
   return { Authorization: `Bearer ${token}`, "X-Org-Id": orgId };
 }

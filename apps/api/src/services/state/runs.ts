@@ -60,7 +60,6 @@ import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../l
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
-import { recordAudit } from "../audit.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
@@ -692,9 +691,19 @@ interface CreateRunParams {
   payerUserId?: string | null;
 }
 
-export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
+/** An input file a run consumes, and the space it lives in (the run's or another). */
+export interface ConsumedFile {
+  id: string;
+  spaceId: string;
+}
+
+/** Create the run with its consumption links; returns the files it consumes. */
+export async function createRun(
+  scope: SpaceScope,
+  params: CreateRunParams,
+): Promise<ConsumedFile[]> {
   const { id, packageId, actor, input } = params;
-  let consumed: { id: string; spaceId: string }[] = [];
+  let consumed: ConsumedFile[] = [];
 
   await db.transaction(async (tx) => {
     // FIRST statement, before any row lock: the per-org admission key is the
@@ -850,19 +859,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
     }
   });
 
-  // Best-effort, once the run and its links exist: who gave which file to which run.
-  for (const file of consumed) {
-    await recordAudit({
-      orgId: scope.orgId,
-      spaceId: scope.spaceId,
-      actorType: actor ? actor.type : "system",
-      actorId: actor?.id ?? null,
-      action: "file.consumed",
-      resourceType: "file",
-      resourceId: file.id,
-      after: { runId: id, fileSpaceId: file.spaceId },
-    });
-  }
+  return consumed;
 }
 
 /**

@@ -66,7 +66,8 @@ import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { withoutConnectOffers } from "../services/connect/preflight-connect-offer.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
-import { recordAuditFromContext } from "../services/audit.ts";
+import { recordAuditFromContext, recordAuditsFromContext } from "../services/audit.ts";
+import type { ConsumedFile } from "../services/state/runs.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { parseGlobalRunListQuery, parseRunListFilters } from "../lib/run-list-filters.ts";
@@ -191,6 +192,19 @@ function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
 
 /** Read back a launch, replay or cancellation in the space that authorized it. */
+/** One `file.consumed` per input file, attributed like `run.triggered`, in one insert. */
+function recordFilesConsumed(c: Context<AppEnv>, runId: string, consumed: ConsumedFile[]) {
+  return recordAuditsFromContext(
+    c,
+    consumed.map((file) => ({
+      action: "file.consumed",
+      resourceType: "file",
+      resourceId: file.id,
+      after: { runId, fileSpaceId: file.spaceId },
+    })),
+  );
+}
+
 function readRunInRequestSpace(
   c: Context<AppEnv>,
   id: string,
@@ -404,7 +418,7 @@ export function createRunsRouter() {
         });
 
         const runner = await resolveRunnerContext(c);
-        await prepareAndExecuteRun({
+        const { consumedFiles } = await prepareAndExecuteRun({
           runId,
           agent: effectiveAgent,
           orgId,
@@ -449,6 +463,7 @@ export function createRunsRouter() {
             origin: "platform",
           },
         });
+        await recordFilesConsumed(c, runId, consumedFiles);
 
         // 201 + the bare created run resource — same DTO and serializer as
         // GET /runs/:id — so callers see the full launched state (resolved
@@ -747,7 +762,7 @@ export function createRunsRouter() {
           { injectedInput: inputPatch },
         );
 
-        const { packageId } = await triggerInlineRun({
+        const { packageId, consumedFiles } = await triggerInlineRun({
           orgId,
           spaceId,
           actor,
@@ -767,6 +782,7 @@ export function createRunsRouter() {
           resourceId: runId,
           after: { packageId, origin: "inline" },
         });
+        await recordFilesConsumed(c, runId, consumedFiles);
 
         // 201 + the bare created run resource — same DTO and serializer
         // as GET /runs/:id, same status code as the sibling trigger

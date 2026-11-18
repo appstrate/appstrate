@@ -12,7 +12,6 @@ import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
-  mayReadFileContent,
   resolveFileAcrossSpaces,
   streamFileContent,
   type FileAccess,
@@ -23,13 +22,7 @@ import {
   preflightBundleImport,
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
-import {
-  asString,
-  fileContentNotGranted,
-  jsonResult,
-  refusalResult,
-  ToolRefusal,
-} from "./tool-results.ts";
+import { asString, jsonResult, refusalResult, ToolRefusal } from "./tool-results.ts";
 
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
@@ -106,8 +99,7 @@ async function readPackageFileBytes(
       arguments: ["file_uri"],
     });
   }
-  // Validating or importing an archive reads its bytes.
-  if (!mayReadFileContent(ctx.permissions)) throw fileContentNotGranted();
+  // Validating or importing an archive reads its bytes: `files:read` in the file's space.
   const resolved = await resolveFileAcrossSpaces(
     ctx.scope.orgId,
     ctx.actor,

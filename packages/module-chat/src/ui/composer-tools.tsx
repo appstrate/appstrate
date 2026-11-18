@@ -24,6 +24,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
@@ -270,19 +271,34 @@ function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
 
 /** The attach button opens the native picker: files always go to the caller's personal space. */
 function AttachButton() {
-  const { t, personalSpaceId } = useChatHost();
+  const { t, personalSpaceId, previewing } = useChatHost();
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      disabled={personalSpaceId === null}
+      className={ICON_BUTTON}
+      aria-label={t("composer.attach")}
+    >
+      <PaperclipIcon />
+    </Button>
+  );
+  if (personalSpaceId !== null) {
+    return <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>;
+  }
+  const reason = t(previewing ? "composer.attachPreview" : "composer.attachUnavailable");
   return (
-    <ComposerPrimitive.AddAttachment asChild>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        disabled={personalSpaceId === null}
-        className={ICON_BUTTON}
-        aria-label={t("composer.attach")}
-      >
-        <PaperclipIcon />
-      </Button>
-    </ComposerPrimitive.AddAttachment>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex shrink-0">
+          {button}
+          <span className="sr-only">{reason}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs">
+        {reason}
+      </TooltipContent>
+    </Tooltip>
   );
 }

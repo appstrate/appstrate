@@ -2,6 +2,7 @@
 
 import type { PackageType } from "@appstrate/core/validation";
 import { spacePackagePermission } from "@appstrate/core/permissions";
+import { isOwnPersonalSpace } from "./own-personal-space";
 
 export interface SpaceGrant {
   permissions: string[];
@@ -14,7 +15,7 @@ export interface SpaceGrant {
  * hand (anything holding a package row reads the served `activation` verdict instead)?
  * Mirrors the server: the activation grant, or owning the space (RBAC spec §3.6,
  * `gateSpacePackageWrite`). A personal space is reached by its owner alone, so
- * `personal && access === "member"` IS "mine" (the owner's id is absent from the wire).
+ * `isOwnPersonalSpace` is "mine".
  */
 export function maySetPackageActive(
   space: SpaceGrant | undefined,
@@ -22,6 +23,6 @@ export function maySetPackageActive(
   next: boolean,
 ): boolean {
   if (!space) return false;
-  if (space.personal && space.access === "member") return true;
+  if (isOwnPersonalSpace(space)) return true;
   return space.permissions.includes(spacePackagePermission(type, next ? "activate" : "deactivate"));
 }

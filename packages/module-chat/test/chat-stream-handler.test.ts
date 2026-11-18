@@ -358,6 +358,8 @@ describe("handleChatStream", () => {
       permissions?: Set<string>;
       /** Replace the single user message (to carry a composer attachment). */
       parts?: unknown[];
+      /** The new message's id; an empty one makes an unpersisted turn. */
+      messageId?: string;
       /** The kind the auth pipeline resolved; production reaches here as `user` only. */
       principalKind?: PrincipalKind;
       /** The composer's package-authoring switch for this turn; omitted = on. */
@@ -403,7 +405,7 @@ describe("handleChatStream", () => {
         messages: [
           ...(overrides?.history ?? []),
           {
-            id: "u1",
+            id: overrides?.messageId ?? "u1",
             role: "user",
             parts: overrides?.parts ?? [{ type: "text", text: "dis bonjour" }],
           },
@@ -954,6 +956,26 @@ describe("handleChatStream", () => {
       headers: new Headers({ authorization: input.platformMcp!.headers!.Authorization as string }),
     } as never);
     expect(resolved?.extra?.chatSessionId).toBe(sessionId);
+
+    // An unpersisted turn naming the same conversation is not it: its reads get no widening.
+    const { engine: ephemeralEngine, calls: ephemeralCalls } = scriptedEngine();
+    // The personal space reads files but takes no chat there: only the conversation reaches it.
+    const ephemeral = await postChat(sessionId, undefined, ephemeralEngine, {
+      reachable: [
+        reach[0]!,
+        reachableSpace({ id: personal.id, personal: true, permissions: ["files:read"] }),
+      ],
+      messageId: "",
+    });
+    expect(ephemeral.status).toBe(200);
+    await collectUiChunks(ephemeral);
+    expect(
+      await ephemeralCalls[0]!.readAttachment!(earlier.uri, {
+        kind: "image",
+        maxBytes: 4096,
+        signal,
+      }),
+    ).toBeNull();
 
     // `read_resource` neither refuses nor touches a space for a file the conversation holds; a
     // file of a space outside the turn's still names it, and is refused there.

@@ -485,8 +485,8 @@ describe("the composer's limit entry", () => {
 
 describe("the composer's attach button", () => {
   /** In « Tous les espaces » with several acting spaces: the destination is never asked. */
-  function render(personalSpaceId: string | null) {
-    const host = testHost({ actingSpaceIds: ["spc_a", "spc_b"], personalSpaceId });
+  function render(personalSpaceId: string | null, previewing = false) {
+    const host = testHost({ actingSpaceIds: ["spc_a", "spc_b"], personalSpaceId, previewing });
     const transport = transportOf(() => ({}), null);
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
@@ -514,7 +514,15 @@ describe("the composer's attach button", () => {
     expect(out).not.toContain("composer.attach.choose");
   });
 
-  it("is disabled until the personal space is known", () => {
-    expect(render(null)).toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
+  it("is disabled with its reason until the personal space is known", () => {
+    const out = render(null);
+    expect(out).toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
+    expect(out).toContain("composer.attachUnavailable");
+  });
+
+  it("says a role preview has no personal space, rather than loading", () => {
+    const out = render(null, true);
+    expect(out).toContain("composer.attachPreview");
+    expect(out).not.toContain("composer.attachUnavailable");
   });
 });

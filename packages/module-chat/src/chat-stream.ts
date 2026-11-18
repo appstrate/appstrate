@@ -67,7 +67,7 @@ import {
   type ChatPlatformDeps,
 } from "./platform-services.ts";
 import type { TurnSpaces } from "./pi-chat/mcp-tools.ts";
-import type { UsageRejection } from "@appstrate/core/module";
+import type { ReachableSpaceGrant, UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
 import { classifyClientTurnError, clientTurnErrorMarker, turnErrorLogIds } from "./turn-error.ts";
 import {
@@ -710,17 +710,12 @@ export async function handleChatStream(
   // because resolving an attachment touches its space on the conversation, which a
   // refused turn must not widen. Only the last message can carry fresh uploads:
   // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
-  // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
-  const attachmentSpaces = spaces.map((space) => ({
-    id: space.id,
-    permissions: new Set(space.permissions),
-  }));
-  // The caller's whole reach: a file the conversation holds (an upload, in the personal space)
-  // reads under the caller's set in its own space, even outside the turn's spaces.
-  const attachmentReach = reachable.map((space) => ({
-    id: space.id,
-    permissions: new Set(space.permissions),
-  }));
+  // A file resolves in the turn's spaces; the conversation's own uploads, under the caller's set
+  // in the personal space they live in, which a limited turn does not act in.
+  const grantsOf = (grants: readonly ReachableSpaceGrant[]) =>
+    grants.map((space) => ({ id: space.id, permissions: new Set(space.permissions) }));
+  const attachmentSpaces = grantsOf(spaces);
+  const attachmentReach = grantsOf(reachable);
   // What the browser's optimistic `upload://` parts became, for the stream to tell it.
   let uploadResolutions: UIMessageChunk | null = null;
   if (sessionId && lastMessage) {
@@ -876,7 +871,7 @@ export async function handleChatStream(
             uri,
             spaces: attachmentSpaces,
             reach: attachmentReach,
-            chatSessionId: sessionId ?? null,
+            chatSessionId: meteringSessionId,
             beforeResolve: organization.touch,
             ...options,
           }),

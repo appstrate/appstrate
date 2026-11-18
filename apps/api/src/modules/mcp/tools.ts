@@ -80,7 +80,6 @@ import type { SpaceScope } from "../../lib/scope.ts";
 import {
   resolveFileAcrossSpaces,
   type FileAccess,
-  mayReadFileContent,
   readStoredFileBytes,
   projectFileMetadata,
   type FileCapabilities,
@@ -96,7 +95,6 @@ import {
   jsonResult,
   refusalResult,
   ToolRefusal,
-  fileContentNotGranted,
   trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
@@ -1658,10 +1656,8 @@ function buildFileResourceReader(ctx: McpToolContext): {
         });
       }
 
-      // The in-process read skips the REST middleware; apply its file-family grant before the container ACL.
-      if (!mayReadFileContent(ctx.permissions)) throw fileContentNotGranted();
-      // In the file's own space: a file of another reached space, or one the issuing
-      // conversation holds (a chat upload, in the personal space), reads as its REST twin would.
+      // `files:read` is asked in the file's own space, which may be another reached space or,
+      // for the issuing conversation's upload, the personal space.
       const resolved = await resolveFileAcrossSpaces(
         ctx.scope.orgId,
         ctx.actor,

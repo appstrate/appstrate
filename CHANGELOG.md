@@ -157,6 +157,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING: run inputs read a file under `files:read` in the file's own space** (#2287). An
+  `appfile://` input (`input`, `context_files`, `rerun_from`) now requires `files:read` in the
+  space the file lives in, also when it is the run's own space: a custom role, API key or OAuth
+  client holding `agents:run` without `files:read` gets a `404` where it used to launch. In
+  exchange a run may take a file from another space its credential reaches with `files:read`
+  there, including the launcher's personal space; a credential bound to one space reaches no
+  other. Each consumed file is recorded as `file.consumed`. Only a consumer run of the file's own
+  space keeps it from deletion; a rerun of a run whose input was deleted answers `404`. The MCP
+  `read_file`, `resources/read` and package-file tools follow the same rule, and a space-pinned
+  MCP endpoint reads files of its space alone.
+
+- **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
+  the chat goes to « Mon espace » from every screen, private to you, and adds no space to the
+  conversation: a conversation limited to one space stays limited and still reads its
+  attachments. They are deleted with the conversation.
+
 - **The chat no longer lists your connected integrations and runnable agents in
   its system prompt.** It used to read them from `GET /api/me/context` on every
   turn; the assistant now reads them with the MCP `get_me` tool, for the space

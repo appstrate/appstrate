@@ -204,6 +204,8 @@ export interface ChatHost {
    * is staged, `null` until the host's listing has answered: attaching waits for it.
    */
   personalSpaceId: string | null;
+  /** A role preview is on: the caller has no personal space, so attaching is unavailable for good. */
+  previewing: boolean;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal

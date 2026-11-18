@@ -1335,7 +1335,7 @@ export async function resolveChatAttachment(
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
     const attached = await resolveStoredChatFile(request, fileId);
     if (!attached) throw notFound(`File '${fileId}' not found`);
-    await touchIfTurnSpace(request, attached.row.spaceId);
+    await touchIfTurnSpace(request, attached.row);
     row = { ...attached.row, ...projectFileMetadata(attached.row, attached.capabilities) };
   } else {
     const uploadId = parseUploadUri(request.uri);
@@ -1380,19 +1380,16 @@ export const FILE_CONTENT_GRANT = "files:read";
  * {@link getFileForActor} says whose file it is, not whether this caller reads files at all, so
  * every door that reads content outside the REST content route asks this first.
  */
-export function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
+function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
   return permissions.has(FILE_CONTENT_GRANT);
 }
 
 /** A caller's effective set in a space, or undefined where it holds none. */
-type GrantIn = (
-  spaceId: string,
-) => ReadonlySet<string> | undefined | Promise<ReadonlySet<string> | undefined>;
+type GrantIn = (spaceId: string) => Promise<ReadonlySet<string> | undefined>;
 
 /**
- * How a caller reaches files across spaces: its grant in each space its credential reaches and,
- * when a chat conversation issued the request, the grant the conversation's own files are read
- * under wherever they live (they are reachable through their container, not through a space).
+ * How a caller reaches files by id: its set in each space its credential reaches, plus the chat
+ * conversation that issued the request and the set its own uploads are read under.
  */
 export interface FileAccess {
   grantIn: GrantIn;
@@ -1400,10 +1397,9 @@ export interface FileAccess {
 }
 
 /**
- * Resolve a file in its OWN space: the caller's grant there (or, for a file the issuing
- * conversation holds, the conversation's), which must read file content, then the container
- * ACL of {@link getFileForActor}. Anything refused is indistinguishable from missing (null).
- * Every door taking a file by id across spaces calls this: run inputs and chat attachments.
+ * Resolve a file in its OWN space, then the container ACL of {@link getFileForActor}; anything
+ * refused is null. The conversation widens to its own uploads in the actor's personal space only
+ * (a chat upload lives there, outside the spaces a limited turn reaches).
  */
 export async function resolveFileAcrossSpaces(
   orgId: string,
@@ -1413,24 +1409,29 @@ export async function resolveFileAcrossSpaces(
 ): Promise<ResolvedFile | null> {
   if (!FILE_ID_RE.test(fileId)) return null;
   const [location] = await db
-    .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })
+    .select({
+      spaceId: files.spaceId,
+      chatSessionId: files.chatSessionId,
+      ownerUserId: spaces.ownerUserId,
+    })
     .from(files)
+    .innerJoin(spaces, eq(spaces.id, files.spaceId))
     .where(and(eq(files.orgId, orgId), eq(files.id, fileId)))
     .limit(1);
   if (!location) return null;
+  const conversationUpload =
+    access.conversation !== undefined &&
+    location.chatSessionId === access.conversation.id &&
+    actor.type === "user" &&
+    location.ownerUserId === actor.id;
   const permissions =
     (await access.grantIn(location.spaceId)) ??
-    (access.conversation && location.chatSessionId === access.conversation.id
-      ? await access.conversation.grantIn(location.spaceId)
-      : undefined);
+    (conversationUpload ? await access.conversation!.grantIn(location.spaceId) : undefined);
   if (!permissions || !mayReadFileContent(permissions)) return null;
   return getFileForActor({ orgId, spaceId: location.spaceId }, actor, fileId, permissions);
 }
 
-/**
- * The chat's reach for a stored file: the turn's spaces, plus — for a file this conversation
- * holds — the caller's grant in the file's own space (its personal space for an upload).
- */
+/** The chat's {@link FileAccess}: the turn's spaces, and the caller's real set where its uploads live. */
 async function resolveStoredChatFile(
   request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces" | "reach"> & {
     chatSessionId: string | null;
@@ -1438,7 +1439,8 @@ async function resolveStoredChatFile(
   fileId: string,
 ): Promise<ResolvedFile | null> {
   const grantOf =
-    (grants: readonly { id: string; permissions: ReadonlySet<string> }[]) => (spaceId: string) =>
+    (grants: readonly { id: string; permissions: ReadonlySet<string> }[]): GrantIn =>
+    async (spaceId) =>
       grants.find((grant) => grant.id === spaceId)?.permissions;
   return resolveFileAcrossSpaces(request.orgId, { type: "user", id: request.userId }, fileId, {
     grantIn: grantOf(request.spaces),
@@ -1448,12 +1450,17 @@ async function resolveStoredChatFile(
   });
 }
 
-/** Touch the file's space only when it is one of the turn's: a conversation's own file outside them touches none. */
+/** A conversation's own file touches no space; any other touches its space when the turn acts there. */
 async function touchIfTurnSpace(
-  request: Pick<ChatAttachmentRequest, "spaces" | "beforeResolve">,
-  spaceId: string,
+  request: Pick<ChatAttachmentRequest, "spaces" | "beforeResolve"> & {
+    chatSessionId: string | null;
+  },
+  file: Pick<FileRow, "spaceId" | "chatSessionId">,
 ): Promise<void> {
-  if (request.spaces.some((space) => space.id === spaceId)) await request.beforeResolve(spaceId);
+  if (request.chatSessionId !== null && file.chatSessionId === request.chatSessionId) return;
+  if (request.spaces.some((space) => space.id === file.spaceId)) {
+    await request.beforeResolve(file.spaceId);
+  }
 }
 
 export async function readChatAttachment(
@@ -1466,7 +1473,7 @@ export async function readChatAttachment(
   if (!resolved?.capabilities.download) return null;
   const file = resolved.row;
   if (previewKind(file.mime) !== request.kind || file.size > request.maxBytes) return null;
-  await touchIfTurnSpace(request, file.spaceId);
+  await touchIfTurnSpace(request, file);
   const bytes = await readStoredFileBytes(file, request.signal);
   return bytes ? { bytes, mime: normalizeMime(file.mime) } : null;
 }
@@ -1740,6 +1747,12 @@ export async function listFilesForActor(
 // ---------------------------------------------------------------------------
 
 /**
+ * The join keeping a `file_links` row as a claim on its file: the consumer run lives in the
+ * file's own space. A run elsewhere borrowed the file and does not keep it from its own space.
+ */
+const protectingLink = and(eq(runs.id, fileLinks.consumerRunId), eq(runs.spaceId, files.spaceId));
+
+/**
  * Container-teardown for a deleted run set, chat-session set, or end-user: decide,
  * per contained file, whether to DETACH it (a live consumer outside the
  * deleted set still references it — the "durable & chainable" promise) or DELETE
@@ -1813,11 +1826,13 @@ export async function detachOrDeleteContainedFiles(
     if (contained.length === 0) return 0;
     const containedIds = contained.map((d) => d.id);
 
-    // Protected = still referenced by a live consumer outside the deleted set.
-    // One query (not per-row): the contained doc ids that carry such a link.
+    // Protected = still referenced by a live consumer outside the deleted set, in the file's
+    // own space (`protectingLink`). One query: the contained ids that carry such a link.
     const protectedRows = await exec
       .selectDistinct({ fileId: fileLinks.fileId })
       .from(fileLinks)
+      .innerJoin(files, eq(files.id, fileLinks.fileId))
+      .innerJoin(runs, protectingLink)
       .where(
         runIds
           ? and(
@@ -1907,6 +1922,8 @@ export async function deleteFile(scope: SpaceScope, fileId: string): Promise<voi
     const [liveLink] = await tx
       .select({ fileId: fileLinks.fileId })
       .from(fileLinks)
+      .innerJoin(files, eq(files.id, fileLinks.fileId))
+      .innerJoin(runs, protectingLink)
       .where(eq(fileLinks.fileId, fileId))
       .limit(1);
     if (liveLink) {
@@ -2003,6 +2020,7 @@ export async function cleanupExpiredFiles(): Promise<number> {
                 tx
                   .select({ fileId: fileLinks.fileId })
                   .from(fileLinks)
+                  .innerJoin(runs, protectingLink)
                   .where(eq(fileLinks.fileId, files.id)),
               ),
             ),
@@ -2015,6 +2033,8 @@ export async function cleanupExpiredFiles(): Promise<number> {
         const linked = await tx
           .selectDistinct({ fileId: fileLinks.fileId })
           .from(fileLinks)
+          .innerJoin(files, eq(files.id, fileLinks.fileId))
+          .innerJoin(runs, protectingLink)
           .where(inArray(fileLinks.fileId, ids));
         const linkedIds = new Set(linked.map((row) => row.fileId));
         const removableIds = ids.filter((id) => !linkedIds.has(id));
