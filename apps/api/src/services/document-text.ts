@@ -297,7 +297,9 @@ const attributePatterns = new Map<string, RegExp>();
 function attribute(attributes: string, name: string): string | undefined {
   let pattern = attributePatterns.get(name);
   if (!pattern) {
-    pattern = new RegExp(`(?:^|\\s)${name.replace(/[:.]/g, "\\$&")}="([^"]*)"`);
+    // The names are a fixed handful (`r`, `t`, `Id`, `table:name`…); the escape covers the whole
+    // regex metacharacter set, the backslash included, so no name can change what is matched.
+    pattern = new RegExp(`(?:^|\\s)${name.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")}="([^"]*)"`);
     attributePatterns.set(name, pattern);
   }
   return pattern.exec(attributes)?.[1];
