@@ -288,6 +288,39 @@ describe("structured Pi session reconstruction", () => {
     expect(JSON.stringify(replayed("invoke_operation", false))).not.toContain("evil.example");
   });
 
+  it.each(["read_file", "read_resource"])(
+    "replays old %s binary results as references",
+    (toolName) => {
+      const resource = {
+        uri: "appfile://file_document",
+        mimeType: "application/pdf",
+        blob: "JVBERi0xLjQK",
+      };
+      const stored = toolName === "read_file" ? { type: "resource", resource } : resource;
+      const thread: UIMessage[] = [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "Read" }] },
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [
+            {
+              type: "dynamic-tool",
+              toolName,
+              toolCallId: "call",
+              state: "output-available",
+              input: { uri: resource.uri },
+              output: { content: [{ type: "text", text: JSON.stringify(stored) }] },
+            },
+          ],
+        },
+        { id: "u2", role: "user", parts: [{ type: "text", text: "Next" }] },
+      ];
+      const history = JSON.stringify(buildStructuredPiTurn(thread, MODEL, OPTIONS).history);
+      expect(history).toContain(resource.uri);
+      expect(history).not.toContain(resource.blob);
+    },
+  );
+
   it("never inlines a tool-result image as base64, whatever was persisted", () => {
     // The case above pins the shape the CURRENT forwarder writes. This one
     // pins the guarantee, which is older and wider than that shape: base64
@@ -375,5 +408,87 @@ describe("structured Pi session reconstruction", () => {
     expect(() => buildStructuredPiTurn(toolThread.slice(0, -1), MODEL, OPTIONS)).toThrow(
       "must end with a user message",
     );
+  });
+});
+
+describe("attachment images in the projected turn", () => {
+  const image = { type: "image" as const, data: "QUJD", mimeType: "image/png" };
+  const thread = (): UIMessage[] => [
+    {
+      id: "u1",
+      role: "user",
+      parts: [
+        { type: "text", text: "Voici un graphique" },
+        { type: "file", url: "appfile://file_old", mediaType: "image/png", filename: "old.png" },
+      ],
+    },
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "Je le vois." }] },
+    {
+      id: "u2",
+      role: "user",
+      parts: [
+        { type: "text", text: "Et celui-ci ?" },
+        { type: "file", url: "appfile://file_new", mediaType: "image/png", filename: "new.png" },
+      ],
+    },
+  ];
+
+  it("puts the prompt message's images on the prompt and the replayed ones on their own turn", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, {
+      ...OPTIONS,
+      modelSeesImages: true,
+      images: new Map([
+        ["u1", new Map([["appfile://file_old", image]])],
+        ["u2", new Map([["appfile://file_new", image]])],
+      ]),
+    });
+    expect(turn.promptImages).toEqual([image]);
+    const first = turn.history[0]!;
+    expect(first.role === "user" && Array.isArray(first.content) && first.content).toContainEqual(
+      image,
+    );
+    // The pointer line stays so the URI can still be chained into a run.
+    expect(turn.prompt).toContain("appfile://file_new");
+  });
+
+  it("tells a model that sees images which pixels were left out", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, {
+      ...OPTIONS,
+      modelSeesImages: true,
+      images: new Map([["u2", new Map([["appfile://file_new", image]])]]),
+    });
+    const first = JSON.stringify(turn.history[0]);
+    expect(first).toContain("pixels are not part of this request");
+    expect(turn.prompt).not.toContain("pixels are not part");
+  });
+
+  it("tells a model without image input it cannot view them, and sends no image", () => {
+    const turn = buildStructuredPiTurn(thread(), MODEL, OPTIONS);
+    expect(turn.promptImages).toEqual([]);
+    expect(turn.prompt).toContain("you cannot view images with this model");
+    expect(JSON.stringify(turn.history)).not.toContain('"type":"image"');
+  });
+
+  it("leaves the pointer line of a non-image file untouched", () => {
+    const turn = buildStructuredPiTurn(
+      [
+        {
+          id: "u1",
+          role: "user",
+          parts: [
+            { type: "text", text: "Résume" },
+            {
+              type: "file",
+              url: "appfile://file_pdf",
+              mediaType: "application/pdf",
+              filename: "a.pdf",
+            },
+          ],
+        },
+      ],
+      MODEL,
+      OPTIONS,
+    );
+    expect(turn.prompt).toContain("[Attached file: a.pdf — appfile://file_pdf — application/pdf]");
   });
 });

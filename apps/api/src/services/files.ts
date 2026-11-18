@@ -1405,6 +1405,15 @@ export async function readChatAttachment(
   const file = resolved.row;
   if (previewKind(file.mime) !== request.kind || file.size > request.maxBytes) return null;
   await request.beforeResolve(file.spaceId);
+  const bytes = await readStoredFileBytes(file, request.signal);
+  return bytes ? { bytes, mime: normalizeMime(file.mime) } : null;
+}
+
+/** After the caller checks its byte cap, enforce the recorded size as storage streams the object. */
+export async function readStoredFileBytes(
+  file: Pick<FileRow, "size" | "storageKey">,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer> | null> {
   const stream = await streamFileContent(file.storageKey);
   if (!stream) return null;
   // A short or oversized storage object must never be sent or allocate past the verified row size.
@@ -1419,9 +1428,9 @@ export async function readChatAttachment(
         written += chunk.length;
       },
     }),
-    { signal: request.signal },
+    { signal },
   );
-  return written === bytes.length ? { bytes, mime: normalizeMime(file.mime) } : null;
+  return written === bytes.length ? bytes : null;
 }
 
 // ---------------------------------------------------------------------------

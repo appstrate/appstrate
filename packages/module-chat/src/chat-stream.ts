@@ -692,15 +692,12 @@ export async function handleChatStream(
   // because resolving an attachment touches its space on the conversation, which a
   // refused turn must not widen. Only the last message can carry fresh uploads —
   // earlier turns already hold rewritten `appfile://` URIs.
+  // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
+  const attachmentSpaces = spaces.map((space) => ({
+    id: space.id,
+    permissions: new Set(space.permissions),
+  }));
   if (sessionId && lastMessage) {
-    // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
-    // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
-    // `runs:read-all` widens to the whole space's run outputs — must still resolve when
-    // they attach it. Picker and attach answer the same set.
-    const attachmentSpaces = spaces.map((space) => ({
-      id: space.id,
-      permissions: new Set(space.permissions),
-    }));
     try {
       lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
         return deps.resolveChatAttachment({
@@ -840,6 +837,15 @@ export async function handleChatStream(
         chatSessionId: meteringSessionId,
         requestId,
         messages,
+        readAttachment: (uri, options) =>
+          deps.readChatAttachment({
+            orgId,
+            userId: user.id,
+            uri,
+            spaces: attachmentSpaces,
+            beforeResolve: organization.touch,
+            ...options,
+          }),
         system,
         generation: generationSettings,
         platformMcp: {

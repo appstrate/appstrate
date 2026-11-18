@@ -50,6 +50,7 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
+import { getSelectedModelAcceptsImages, subscribeModel } from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
@@ -280,6 +281,14 @@ function ComposerAttachmentChip() {
   const size = file?.size ?? 0;
   const { formatBytes, t } = useChatHost();
   const previewFile = file && isImageMime(file.type) ? file : undefined;
+  // A model known not to read images only gets the file's pointer: say so on the chip.
+  const acceptsImages = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelAcceptsImages,
+    getSelectedModelAcceptsImages,
+  );
+  const imageNotice =
+    previewFile && acceptsImages === false ? t("composer.imageNotSeen") : undefined;
   const remove = (
     <AttachmentPrimitive.Remove asChild>
       <button
@@ -296,7 +305,10 @@ function ComposerAttachmentChip() {
     </AttachmentPrimitive.Remove>
   );
   return (
-    <AttachmentPrimitive.Root className="inline-flex min-w-0 flex-col items-start gap-1">
+    <AttachmentPrimitive.Root
+      className="inline-flex min-w-0 flex-col items-start gap-1"
+      title={imageNotice}
+    >
       {previewFile ? (
         <span className="relative inline-flex">
           <PendingImage file={previewFile} name={name} />
@@ -314,6 +326,11 @@ function ComposerAttachmentChip() {
             </>
           }
         />
+      )}
+      {imageNotice && (
+        <span role="status" className="text-muted-foreground max-w-40 text-xs">
+          {imageNotice}
+        </span>
       )}
       {status.type === "incomplete" && status.reason === "error" && status.message && (
         <span role="alert" className="text-destructive text-xs">

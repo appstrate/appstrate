@@ -56,6 +56,7 @@ import {
   deleteFile,
   listFilesForActor,
   readChatAttachment,
+  readStoredFileBytes,
   resolveChatAttachment,
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
@@ -1290,6 +1291,16 @@ describe("files service + routes", () => {
       metadata: true,
       download: true,
     });
+  });
+
+  it("rejects storage objects whose actual size differs from the recorded file", async () => {
+    const run = await seedRunRow(scope, { userId: ctx.user.id });
+    const { row } = await publishStream(scope, run, "note.txt", "hello");
+    expect(await readStoredFileBytes(row)).toEqual(new TextEncoder().encode("hello"));
+    expect(await readStoredFileBytes({ ...row, size: row.size + 1 })).toBeNull();
+    await expect(readStoredFileBytes({ ...row, size: row.size - 1 })).rejects.toThrow(
+      "exceeds its recorded size",
+    );
   });
 
   it("a chat attachment resolves as wide as the caller reads runs", async () => {

@@ -18,6 +18,7 @@ import {
   editGenerationSettings,
   getCompatibleGenerationSettings,
   getSelectedModel,
+  getSelectedModelAcceptsImages,
   setModelCatalog,
   setSelectedModel,
   subscribeModel,
@@ -58,6 +59,19 @@ beforeEach(reset);
 afterEach(reset);
 
 describe("the model a conversation is on", () => {
+  it("reports the selected model's image support, including an alias with hidden capabilities", () => {
+    setModelCatalog([
+      { id: "alias" },
+      { id: "text", input: ["text"] },
+      { id: "vision", input: ["text", "image"] },
+    ]);
+    expect(getSelectedModelAcceptsImages()).toBeNull();
+    setSelectedModel("text");
+    expect(getSelectedModelAcceptsImages()).toBe(false);
+    setSelectedModel("vision");
+    expect(getSelectedModelAcceptsImages()).toBe(true);
+  });
+
   it("is the seeded one, not the stored default", () => {
     setSelectedModel("default-model");
     attachConversation("chs_a", "model-a");

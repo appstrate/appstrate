@@ -17,6 +17,7 @@ import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { Api, Message } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
+import type { AttachmentImages, PiImageContent } from "./attachment-inputs.ts";
 import { offerScopeOf, splitJsonText, type OfferScope } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
 import { PI_CHAT_CWD } from "./resource-loader.ts";
@@ -38,11 +39,23 @@ export interface BuildStructuredPiTurnOptions {
    * so the figure is a floor, not a measurement.
    */
   baseTokens: number;
+  /**
+   * The pixels of the attachments this request shows the model, by user message
+   * id (`loadAttachmentImages`). Omitted = a model that sees no images: every
+   * attachment stays its pointer line. Never persisted — rebuilt from the files
+   * each turn.
+   */
+  images?: AttachmentImages;
+  pdfReceipts?: ReadonlyMap<string, string>;
+  /** Whether the model accepts image input, for the wording of the pointer lines. */
+  modelSeesImages?: boolean;
 }
 
 interface StructuredPiTurn {
   history: Message[];
   prompt: string;
+  /** The images of the prompt message itself; the history ones ride their own messages. */
+  promptImages: PiImageContent[];
   branchHeadId: string;
   sourceMessageCount: number;
   toolCallCount: number;
@@ -123,30 +136,35 @@ function json(value: unknown): string {
   }
 }
 
-/**
- * Convert one persisted tool output into Pi tool-result content.
- *
- * TEXT ONLY, because that is all a chat tool can produce: every tool a turn can
- * call goes through `mcp-tools.ts`, whose forwarder renders an MCP image block
- * as the pointer `[image <mime>]` and whose `run_and_wait` result is JSON text.
- * Replay must reproduce what the live turn showed the model, so a block type
- * the live path cannot emit has no branch here either.
- *
- * The one exception is an MCP-shaped result whose blocks are ALL non-text. The
- * generic JSON fallback below would stringify it whole — and for an image block
- * that means the raw base64 lands in the model's context, the exact thing the
- * live forwarder exists to prevent. Such a result should not reach here (the
- * forwarder textifies images before anything is persisted), but "should not"
- * is not "cannot": a row written by an older build, or a foreign persisted
- * shape, still replays through this function. So a content array with no
- * surviving text block is rendered as pointers, the same way the forwarder
- * would have rendered it live.
- *
- * `scope` is the call's ({@link offerScopeOf}), as live — the tool, its arguments and the
- * persisted `relayed` mark: a relayed third-party payload replays verbatim, exactly as the model
- * first read it.
- */
-function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent {
+/** Older read_file/read_resource responses persisted MCP binary resources as JSON text. */
+function replayFileResult(text: string, toolName: string): string {
+  if ((toolName !== "read_file" && toolName !== "read_resource") || !text.startsWith("{"))
+    return text;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return text;
+    const resource =
+      "type" in parsed && parsed.type === "resource" && "resource" in parsed
+        ? parsed.resource
+        : parsed;
+    if (
+      resource &&
+      typeof resource === "object" &&
+      "blob" in resource &&
+      typeof resource.blob === "string" &&
+      "uri" in resource &&
+      typeof resource.uri === "string"
+    ) {
+      return `[File content omitted on replay: ${resource.uri}]`;
+    }
+  } catch {
+    // A text file typically contains prose, not a serialized MCP resource.
+  }
+  return text;
+}
+
+/** Persisted tool results replay as text. Binary blocks become pointers; their contents are transient. */
+function toolResultContent(value: unknown, scope: OfferScope, toolName: string): ToolResultContent {
   if (value && typeof value === "object") {
     const content = (value as { content?: unknown }).content;
     if (Array.isArray(content)) {
@@ -156,7 +174,10 @@ function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent
         return [
           {
             type: "text",
-            text: splitJsonText(String((part as { text?: unknown }).text ?? ""), scope).text,
+            text: replayFileResult(
+              splitJsonText(String((part as { text?: unknown }).text ?? ""), scope).text,
+              toolName,
+            ),
           },
         ];
       });
@@ -170,16 +191,21 @@ function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent
       if (pointers.length > 0) return pointers;
     }
   }
-  return [{ type: "text", text: json(scope(value).redacted) }];
+  return [{ type: "text", text: replayFileResult(json(scope(value).redacted), toolName) }];
 }
 
-function userMessage(message: UIMessage, nextTimestamp: () => number): Message | null {
-  const content = message.parts.flatMap((part) =>
+function userMessage(
+  message: UIMessage,
+  nextTimestamp: () => number,
+  images: readonly PiImageContent[] = [],
+): Message | null {
+  const text = message.parts.flatMap((part) =>
     part.type === "text" && part.text.length > 0
       ? [{ type: "text" as const, text: part.text }]
       : [],
   );
-  if (content.length === 0) return null;
+  if (text.length === 0) return null;
+  const content = [...text, ...images];
   return { role: "user", content, timestamp: nextTimestamp() };
 }
 
@@ -248,6 +274,7 @@ function assistantMessages(
             arguments: part.input,
             relayed: (result as { relayed?: unknown } | null)?.relayed === true,
           }),
+          toolName,
         ),
         isError,
       });
@@ -295,9 +322,20 @@ function assistantMessages(
 export function buildStructuredPiTurn(
   input: UIMessage[],
   model: PiHistoryModel,
-  { estimateTokens, baseTokens }: BuildStructuredPiTurnOptions,
+  {
+    estimateTokens,
+    baseTokens,
+    images,
+    modelSeesImages = false,
+    pdfReceipts,
+  }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
-  const messages = messagesWithAttachmentsAsText(input);
+  const sentImages: AttachmentImages = images ?? new Map();
+  const messages = messagesWithAttachmentsAsText(input, {
+    modelSeesImages,
+    sent: sentImages,
+    pdfReceipts,
+  });
   const last = messages.at(-1);
   if (!last || last.role !== "user") {
     throw new Error("The active Pi chat branch must end with a user message.");
@@ -309,7 +347,9 @@ export function buildStructuredPiTurn(
   let toolResultCount = 0;
   for (const message of messages.slice(0, -1)) {
     if (message.role === "user") {
-      const converted = userMessage(message, nextTimestamp);
+      const converted = userMessage(message, nextTimestamp, [
+        ...(sentImages.get(message.id)?.values() ?? []),
+      ]);
       if (converted) history.push(converted);
       continue;
     }
@@ -335,6 +375,7 @@ export function buildStructuredPiTurn(
   return {
     history,
     prompt: uiMessageText(last.parts),
+    promptImages: [...(sentImages.get(last.id)?.values() ?? [])],
     branchHeadId: last.id,
     sourceMessageCount: messages.length - 1,
     toolCallCount,
