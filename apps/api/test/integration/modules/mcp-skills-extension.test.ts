@@ -34,6 +34,7 @@ import {
   seedSpaceMember,
   seedSpacePackage,
   seedSpaceRole,
+  seedSystemSkill,
 } from "../../helpers/seed.ts";
 import { mcpRpc, type JsonRpcEnvelope, inSpace } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
@@ -41,6 +42,11 @@ import {
   AGENT_PACKAGES_BUCKET,
   versionZipKey,
 } from "../../../src/services/package-storage-keys.ts";
+import {
+  PACKAGE_ITEMS_BUCKET,
+  SYSTEM_STORAGE_NAMESPACE,
+  packageItemKey,
+} from "../../../src/services/package-items/config.ts";
 // By path, as `mcp-read-skill.test.ts` does: the minting secret is process-local
 // to the module instance whose auth strategy the app registered.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
@@ -317,6 +323,31 @@ describe("served skills of the package API (`appstrate code sync`)", () => {
     expect(await recovered.text()).toContain("/restore/");
   });
 
+  it("refuses a missing system archive and serves all its original resources after restoration", async () => {
+    const id = "@appstrate/restore-system";
+    await seedSystemSkill(id, skillMd("restore-system"), {
+      "references/guide.md": encode("guide"),
+    });
+    const key = packageItemKey("skills", SYSTEM_STORAGE_NAMESPACE, id);
+    const bytes = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, key);
+    const endpoint = "/api/packages/skills/served";
+    const uri = `skill://${owner.defaultSpaceId}/appstrate/restore-system/restore-system/SKILL.md`;
+    const original = (await (await rest(ownerHeaders(), endpoint)).json()) as { data: Entry[] };
+    const entry = original.data.find((skill) => skill.uri === uri);
+    expect(entry?.resources.some((file) => file.uri.endsWith("/references/guide.md"))).toBe(true);
+
+    await storage.deleteFile(PACKAGE_ITEMS_BUCKET, key);
+    for (const path of [endpoint, archivePath(uri)]) {
+      const res = await rest(ownerHeaders(), path);
+      expect(res.status).toBe(422);
+      expect((await res.json()).code).toBe("version_artifact_unavailable");
+    }
+    expect((await call(ownerHeaders(), "skills/list", {})).error).toBeDefined();
+    await storage.uploadFile(PACKAGE_ITEMS_BUCKET, key, new Uint8Array(bytes!));
+    const restored = (await (await rest(ownerHeaders(), endpoint)).json()) as { data: Entry[] };
+    expect(restored.data.find((skill) => skill.uri === uri)).toEqual(entry);
+  });
+
   it("lists the drafts an author may read with definition=draft, and none to a reader", async () => {
     const draftUri = `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
     const mcp = await call(ownerHeaders(), "skills/get", { uri: draftUri });
@@ -463,14 +494,7 @@ describe("skills/get and resources/read in a chat turn", () => {
 
   it("serves an injected system skill as the platform ships it, and refuses its @draft", async () => {
     const system = "@appstrate/system-tone";
-    await seedPackage({
-      id: system,
-      orgId: null,
-      source: "system",
-      type: "skill",
-      draftManifest: { name: system, version: "1.0.0", type: "skill" },
-      draftContent: skillMd("system-tone"),
-    });
+    await seedSystemSkill(system, skillMd("system-tone"));
     const headers = turnHeaders({ [system]: { definition: "published", version: null } });
     const dir = `skill://${owner.defaultSpaceId}/appstrate/system-tone`;
     expect(await readText(headers, `${dir}/system-tone/SKILL.md`)).toContain("version: 1.0.0");
