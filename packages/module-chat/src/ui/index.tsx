@@ -68,7 +68,11 @@ export type {
   SelectConversation,
   SpaceChoiceMenu,
 } from "./runtime-context.ts";
-export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
+export {
+  ChatConversationList,
+  ChatConversationSettingsButton,
+  ChatConversationSettingsDialog,
+} from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModelsEnvelope, selectChatModels, type OrgModelOption } from "./models-data.ts";

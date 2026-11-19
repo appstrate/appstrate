@@ -595,6 +595,27 @@ export function ChatConversationSettingsButton(props: {
   return <ConversationSettingsButton key={props.activeId} {...props} />;
 }
 
+/**
+ * The settings dialog of the open conversation, opened by a control of the host's own (the phone
+ * header's pencil): `ChatConversationSettingsButton` is the same dialog behind its icon button.
+ */
+export function ChatConversationSettingsDialog({
+  activeId,
+  t,
+  can,
+  onClose,
+}: {
+  activeId: string | null;
+  t: ChatTranslate;
+  can: ChatCan;
+  onClose: () => void;
+}) {
+  const { data: sessions } = useSessions();
+  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
+  if (!session || !can("chat:write")) return null;
+  return <ConversationSettingsDialog session={session} t={t} onClose={onClose} />;
+}
+
 function ConversationSettingsButton({
   activeId,
   t,

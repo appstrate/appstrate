@@ -166,6 +166,7 @@
   "threads.age.years_other": "{{count}} ans",
   "conversation.notFound.title": "Conversation introuvable",
   "conversation.notFound.hint": "Elle n'existe pas ou plus, ou elle appartient à un autre compte ou à un autre espace.",
+  "conversation.rename": "Modifier le nom de la conversation",
   "conversation.loading": "Chargement…",
   "threads.empty": "Aucune conversation pour l’instant",
   "threads.emptyReadOnly": "Vous n’avez aucune conversation à relire.",

@@ -97,6 +97,13 @@ they start with `packages/` or `e2e/`.
   state is not duplicated: the header's trail is not drawn by the page, a
   `PageHeader` publishes its `breadcrumbs` to `stores/breadcrumb-store.ts` and
   `ShellBreadcrumb` draws them.
+- **The chat has its own header on a phone** (`ChatPhoneHeader`, `components/app-shell.tsx`; below
+  `md`, the shell's header is for the other products and for desktop). One control opens the
+  sidebar: a burger, then the organization's avatar with the space's on its corner (`OrgSpaceTile`,
+  the switcher's own, stacked, never side by side), no names; its accessible name says them. After it, what the
+  chat puts in the `phone` slot (`ShellHeaderPhone`): the conversation's name, truncated; the
+  pencil that edits it; the context panel at the right end. Controls are 44 px. It has no
+  notification bell: in the chat the bell is in the sidebar's header on a phone.
 - Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
   (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
   `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll
