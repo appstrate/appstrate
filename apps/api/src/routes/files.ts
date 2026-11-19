@@ -15,14 +15,14 @@
  *      the narrowest possible scope set (even `scopes: []`, which
  *      `validateScopes` accepts) could list and download every
  *      `agent_output` of the space. The list asks it in the entered space;
- *      every door by id asks it in the FILE's space (`resolveFileAcrossSpaces`,
+ *      every read by id asks it in the FILE's space (`resolveFileAcrossSpaces`,
  *      the rule of every door naming a file by id).
  *   2. The per-file container ACL (`getFileForActor` /
  *      `getFileCapabilities`) — "may this ACTOR touch THIS file",
  *      inherited from the run read-ACL or the chat-session owner. The
  *      end-user guard lives there.
  *
- * DELETE/keep act on the file a read by id resolves, authorized by
+ * DELETE/keep resolve the file the same way without asking `files:read`, authorized by
  * `capabilities.delete` / `capabilities.keep` there (`files:delete` in the
  * file's space, or its creator), so they do what a GET's capabilities say.
  */
@@ -75,14 +75,17 @@ export async function respondFileList(c: Context<AppEnv>, orgId: string, grants:
   );
 }
 
-/** The file the path names, in its own space under the request's reach (`requestFileAccess`). */
-async function resolveFileById(c: Context<AppEnv>) {
+/**
+ * The file the path names, in its own space under the request's reach (`requestFileAccess`), as
+ * `door` asks it: a read needs `files:read` there, delete and keep their own capability.
+ */
+async function resolveFileById(c: Context<AppEnv>, door: "read" | "lifecycle") {
   const resolved = await resolveFileAcrossSpaces(
     getSpaceScope(c).orgId,
     getActor(c),
     c.req.param("id")!,
     await requestFileAccess(c),
-    fileLifecycleCeiling(c),
+    { ...fileLifecycleCeiling(c), door },
   );
   if (!resolved) throw notFound("File not found");
   return resolved;
@@ -102,7 +105,7 @@ export function createFilesRouter() {
   // that hands out its `content_url` does.
   router.get("/files/:id", rateLimit(120), requireCeiling("files", "read"), async (c) => {
     const actor = getActor(c);
-    const resolved = await resolveFileById(c);
+    const resolved = await resolveFileById(c, "read");
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   });
 
@@ -111,7 +114,7 @@ export function createFilesRouter() {
   // presigned GET when storage supports it (S3 with a public endpoint), else
   // proxy-stream. Content-Disposition: attachment.
   router.get("/files/:id/content", rateLimit(120), requireCeiling("files", "read"), async (c) => {
-    const resolved = await resolveFileById(c);
+    const resolved = await resolveFileById(c, "read");
     if (!resolved.capabilities.download) {
       throw forbidden("This file is not downloadable by the current actor");
     }
@@ -160,7 +163,7 @@ export function createFilesRouter() {
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.
   router.delete("/files/:id", rateLimit(60), async (c) => {
-    const resolved = await resolveFileById(c);
+    const resolved = await resolveFileById(c, "lifecycle");
     const { row } = resolved;
 
     if (!resolved.capabilities.delete) {
@@ -187,7 +190,7 @@ export function createFilesRouter() {
   // own creator). Idempotent — pinning an already-permanent file is a no-op
   // that returns 200 with the (unchanged) file. Returns the updated DTO.
   router.post("/files/:id/keep", rateLimit(60), async (c) => {
-    const resolved = await resolveFileById(c);
+    const resolved = await resolveFileById(c, "lifecycle");
     const { row } = resolved;
 
     if (!resolved.capabilities.keep) {

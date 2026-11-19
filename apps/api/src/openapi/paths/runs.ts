@@ -11,7 +11,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
-import { FILE_BY_ID_REACH, ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
+import { FILE_BY_ID_READ, ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -322,7 +322,7 @@ const canonicalRunsPaths = {
                     "take `upload://upl_xxx` references (from `createUpload`), " +
                     "`appfile://file_xxx` references (an existing file, under its container " +
                     "ACL. " +
-                    FILE_BY_ID_REACH +
+                    FILE_BY_ID_READ +
                     "), " +
                     "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The space of a file a chat call names is recorded only once the REAL platform served the
- * call: a colleague's private run output, in a space where the caller reads files, is refused
- * by its container ACL and records nothing; the caller's own run output there is recorded.
+ * Against the REAL platform, the chat bearer (bound to the turn's spaces) reads a file in the one
+ * space a call entered, and that space is the one the conversation records: a file of another
+ * turn space is the 404 of a missing one there. In its own space, a colleague's private run
+ * output stays behind its container ACL.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -22,7 +23,7 @@ import { createFileFromStream } from "../../../apps/api/src/services/files.ts";
 import { ensurePersonalSpaceFor } from "../../../apps/api/src/services/spaces.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
-import { fileSpaceIds } from "../src/persistence.ts";
+import { fileSpaceId } from "../src/persistence.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -33,7 +34,7 @@ const ORIGIN = "http://localhost";
 const platformFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
   app.request(input instanceof URL ? input.toString() : input, init)) as typeof fetch;
 
-interface ReadFile {
+interface FileTool {
   name: string;
   execute: (id: string, params: unknown) => Promise<{ content: Array<{ text?: string }> }>;
 }
@@ -64,8 +65,8 @@ async function runOutput(owner: TestContext): Promise<string> {
   return `appfile://${row.id}`;
 }
 
-/** `read_file` of a turn over the caller's personal space, where each call is dispatched, and the shared space. */
-async function readFileTool(touched: string[]) {
+/** `read_file` and `read_resource` of a turn over the caller's personal space and the shared space. */
+async function fileTools(touched: string[]) {
   const personal = (await ensurePersonalSpaceFor(caller.orgId, caller.user.id)).id;
   const organization: TurnSpaces = {
     spaces: [
@@ -75,12 +76,10 @@ async function readFileTool(touched: string[]) {
     touch: async (space) => {
       touched.push(space);
     },
-    fileSpaces: (uris) =>
-      fileSpaceIds(
-        colleague.orgId,
-        uris.flatMap((uri) => parseFileUri(uri) ?? []),
-        null,
-      ),
+    fileSpace: async (uri) => {
+      const fileId = parseFileUri(uri);
+      return fileId ? fileSpaceId(colleague.orgId, fileId, null) : undefined;
+    },
   };
   const token = mintMcpLoopbackToken({
     userId: caller.user.id,
@@ -100,31 +99,51 @@ async function readFileTool(touched: string[]) {
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
     fetch: platformFetch,
   });
-  let readFile: ReadFile | undefined;
+  const registered = new Map<string, FileTool>();
   const pi = {
-    registerTool: (tool: ReadFile) => {
-      if (tool.name === "read_file") readFile = tool;
-    },
+    registerTool: (tool: FileTool) => registered.set(tool.name, tool),
   } as unknown as ExtensionAPI;
   for (const factory of built.extensionFactories) factory(pi);
   return {
     built,
-    read: (uri: string) => readFile!.execute("c1", { uri, space_id: personal }),
+    readFile: (uri: string, spaceId: string) =>
+      registered.get("read_file")!.execute("c1", { uri, space_id: spaceId }),
+    readResource: (uri: string) => registered.get("read_resource")!.execute("c2", { uri }),
     personal,
   };
 }
 
-describe("the space of a file a chat call names", () => {
-  it("is recorded after the platform served the read, never for one it refused", async () => {
+describe("a chat call reads a file in the one space it entered", () => {
+  it("records that space, and refuses a file of another turn space as missing", async () => {
     const touched: string[] = [];
-    const { built, read, personal } = await readFileTool(touched);
+    const { built, readFile, personal } = await fileTools(touched);
     try {
-      const refused = await read(await runOutput(colleague));
-      expect(refused.content[0]!.text).toContain("not_found");
+      const own = await runOutput(caller);
+      // Entered from the personal space, a file of the shared space is not reached.
+      expect((await readFile(own, personal)).content[0]!.text).toContain("not_found");
       expect(touched).toEqual([personal]);
+      // Entered in its own space it is read, and that space is the one recorded.
+      expect((await readFile(own, colleague.defaultSpaceId)).content[0]!.text).not.toContain(
+        "not_found",
+      );
+      expect(touched).toEqual([personal, colleague.defaultSpaceId]);
+      // There, a colleague's private output stays behind its container ACL.
+      const theirs = await runOutput(colleague);
+      expect((await readFile(theirs, colleague.defaultSpaceId)).content[0]!.text).toContain(
+        "not_found",
+      );
+    } finally {
+      await built.close();
+    }
+  });
 
-      await read(await runOutput(caller));
-      expect(touched).toEqual([personal, personal, colleague.defaultSpaceId]);
+  it("reads a file resource in its own space after recording it", async () => {
+    const touched: string[] = [];
+    const { built, readResource } = await fileTools(touched);
+    try {
+      const read = await readResource(await runOutput(caller));
+      expect(read.content.map((block) => block.text).join("")).toContain("x");
+      expect(touched).toEqual([colleague.defaultSpaceId]);
     } finally {
       await built.close();
     }

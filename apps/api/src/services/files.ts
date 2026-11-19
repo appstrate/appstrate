@@ -93,7 +93,6 @@ import {
   recordFileStorageLimitRejection,
 } from "@appstrate/core/telemetry";
 import { toStorageName } from "../lib/storage-name.ts";
-import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
 import { recordAudit } from "./audit.ts";
 import { previewKind, type PreviewKind } from "@appstrate/core/mime";
@@ -1243,17 +1242,60 @@ export async function getFileForActor(
       and(eq(files.id, fileId), eq(files.orgId, scope.orgId), eq(files.spaceId, scope.spaceId)),
     )
     .limit(1);
-  return row ? fileForActor(scope, row as FileRow, actor, permissions, opts) : null;
+  if (!row) return null;
+  const owners = await loadContainerOwners(scope.orgId, [row]);
+  return fileForActor(row as FileRow, actor, permissions, opts, owners);
 }
 
-/** The container ACL of {@link getFileForActor} on a loaded row of `scope`. */
-async function fileForActor(
-  scope: SpaceScope,
+/** Whom each container of a set of rows belongs to, as the container ACL reads it. */
+interface ContainerOwners {
+  runs: ReadonlyMap<string, { spaceId: string; userId: string | null; endUserId: string | null }>;
+  /** Chat session id → its author. */
+  sessions: ReadonlyMap<string, string>;
+}
+
+/** The owners of the containers of `rows`: one read per kind, whatever the number of rows. */
+async function loadContainerOwners(
+  orgId: string,
+  rows: readonly Pick<FileRow, "runId" | "chatSessionId">[],
+): Promise<ContainerOwners> {
+  const runIds = [...new Set(rows.flatMap((row) => (row.runId ? [row.runId] : [])))];
+  const sessionIds = [
+    ...new Set(rows.flatMap((row) => (row.chatSessionId ? [row.chatSessionId] : []))),
+  ];
+  const runRows =
+    runIds.length === 0
+      ? []
+      : await db
+          .select({
+            id: runs.id,
+            spaceId: runs.spaceId,
+            userId: runs.userId,
+            endUserId: runs.endUserId,
+          })
+          .from(runs)
+          .where(and(eq(runs.orgId, orgId), inArray(runs.id, runIds)));
+  const sessionRows =
+    sessionIds.length === 0
+      ? []
+      : await db
+          .select({ id: chatSessions.id, userId: chatSessions.userId })
+          .from(chatSessions)
+          .where(and(eq(chatSessions.orgId, orgId), inArray(chatSessions.id, sessionIds)));
+  return {
+    runs: new Map(runRows.map((run) => [run.id, run])),
+    sessions: new Map(sessionRows.map((session) => [session.id, session.userId])),
+  };
+}
+
+/** The container ACL of {@link getFileForActor} on a loaded row, its container's owner loaded. */
+function fileForActor(
   row: FileRow,
   actor: Actor,
   permissions: ReadonlySet<string>,
   opts: { creatorCanManage?: boolean },
-): Promise<ResolvedFile | null> {
+  owners: ContainerOwners,
+): ResolvedFile | null {
   if (row.runId) {
     // Run container: the file inherits its run's read-ACL, so resolving it by
     // id is exactly as narrow as reading the run — a caller without
@@ -1261,17 +1303,11 @@ async function fileForActor(
     // colleague's file id is indistinguishable from naming a missing one.
     // Tested on the RUN row rather than the file's own columns; the mirroring
     // invariant in `lib/run-visibility.ts` says why the two agree.
-    const run = await getRun(scope, row.runId);
-    if (!run || !readsRun(permissions, actor, run)) return null;
+    const run = owners.runs.get(row.runId);
+    if (!run || run.spaceId !== row.spaceId || !readsRun(permissions, actor, run)) return null;
   } else if (row.chatSessionId) {
     // Chat container: sessions are per-dashboard-user; only the owner reads.
-    if (actor.type !== "user") return null;
-    const [session] = await db
-      .select({ userId: chatSessions.userId })
-      .from(chatSessions)
-      .where(and(eq(chatSessions.id, row.chatSessionId), eq(chatSessions.orgId, scope.orgId)))
-      .limit(1);
-    if (!session || session.userId !== actor.id) return null;
+    if (actor.type !== "user" || owners.sessions.get(row.chatSessionId) !== actor.id) return null;
   } else {
     // Detached (both containers NULL — the legal state under
     // `chk_files_single_container`): there is no container left to inherit an
@@ -1352,7 +1388,7 @@ export async function resolveChatAttachment(
       throw invalidRequest("Attachment URI must be an 'upload://' or 'appfile://' URI");
     // A chat upload lives in the caller's personal space, reached through the conversation
     // that holds it: it touches no space, so a limited conversation stays limited.
-    const personal = await reachedPersonalSpace(request);
+    const personal = request.personalSpaceId;
     const [staged] = personal
       ? await db
           .select({ spaceId: uploads.spaceId })
@@ -1387,17 +1423,8 @@ export async function resolveChatAttachment(
 export const FILE_CONTENT_GRANT = "files:read";
 
 /**
- * Whether a caller may read stored files in a space. The container ACL of
- * {@link getFileForActor} says whose file it is, not whether this caller reads files at all, so
- * {@link resolveFilesAcrossSpaces} asks this first.
- */
-function mayReadFileContent(permissions: ReadonlySet<string>): boolean {
-  return permissions.has(FILE_CONTENT_GRANT);
-}
-
-/**
- * How a caller reaches files by id: its set in each space its credential reaches, and the chat
- * conversation that issued the request when it may read its own uploads.
+ * How a caller reaches files by id: its set in each space it reaches, and the chat conversation
+ * that issued the request when it may read its own uploads.
  */
 export interface FileAccess {
   grants: readonly SpaceGrant[];
@@ -1406,6 +1433,14 @@ export interface FileAccess {
 
 /** The set a conversation reads its own uploads under, where its bearer reaches no grant. */
 const CONVERSATION_UPLOAD_GRANT: ReadonlySet<string> = new Set([FILE_CONTENT_GRANT]);
+
+/**
+ * What a door by id asks of a file it resolves. `read` serves its content or metadata, so the
+ * caller must read files in the file's space (`files:read`): the container ACL says whose file
+ * it is, not whether this caller reads files at all. `lifecycle` (delete, keep) asks no such
+ * grant: its own capability, `files:delete` there or the creator under the ceiling, decides.
+ */
+type FileDoor = { door?: "read" | "lifecycle"; creatorCanManage?: boolean };
 
 /**
  * Resolve files in their OWN spaces, then the container ACL of {@link getFileForActor}; anything
@@ -1417,7 +1452,7 @@ export async function resolveFilesAcrossSpaces(
   actor: Actor,
   fileIds: readonly string[],
   access: FileAccess,
-  opts: { creatorCanManage?: boolean } = {},
+  opts: FileDoor = {},
 ): Promise<ResolvedFile[]> {
   const ids = [...new Set(fileIds)].filter((id) => FILE_ID_RE.test(id));
   if (ids.length === 0) return [];
@@ -1427,8 +1462,7 @@ export async function resolveFilesAcrossSpaces(
     .innerJoin(spaces, eq(spaces.id, files.spaceId))
     .where(and(eq(files.orgId, orgId), inArray(files.id, ids)));
   const grants = new Map(access.grants.map((grant) => [grant.spaceId, grant.permissions]));
-  const resolved: ResolvedFile[] = [];
-  for (const { ownerUserId, ...row } of rows) {
+  const reached = rows.flatMap(({ ownerUserId, ...row }) => {
     const conversationUpload =
       access.conversationId !== undefined &&
       row.chatSessionId === access.conversationId &&
@@ -1436,12 +1470,18 @@ export async function resolveFilesAcrossSpaces(
       ownerUserId === actor.id;
     const permissions =
       grants.get(row.spaceId) ?? (conversationUpload ? CONVERSATION_UPLOAD_GRANT : undefined);
-    if (!permissions || !mayReadFileContent(permissions)) continue;
-    const scope = { orgId, spaceId: row.spaceId };
-    const file = await fileForActor(scope, row as FileRow, actor, permissions, opts);
-    if (file) resolved.push(file);
-  }
-  return resolved;
+    if (!permissions) return [];
+    if (opts.door !== "lifecycle" && !permissions.has(FILE_CONTENT_GRANT)) return [];
+    return [{ row: row as FileRow, permissions }];
+  });
+  const owners = await loadContainerOwners(
+    orgId,
+    reached.map(({ row }) => row),
+  );
+  return reached.flatMap(({ row, permissions }) => {
+    const file = fileForActor(row, actor, permissions, opts, owners);
+    return file ? [file] : [];
+  });
 }
 
 /** {@link resolveFilesAcrossSpaces} for one file: null when refused or missing. */
@@ -1450,46 +1490,21 @@ export async function resolveFileAcrossSpaces(
   actor: Actor,
   fileId: string,
   access: FileAccess,
-  opts: { creatorCanManage?: boolean } = {},
+  opts: FileDoor = {},
 ): Promise<ResolvedFile | null> {
   const [file] = await resolveFilesAcrossSpaces(orgId, actor, [fileId], access, opts);
   return file ?? null;
 }
 
-/**
- * The caller's personal space when the turn's reach holds it (a role preview's does not): where
- * the conversation's uploads are staged, and the condition for it to read them.
- */
-async function reachedPersonalSpace(
-  request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "reach">,
-): Promise<string | null> {
-  if (request.reach.length === 0) return null;
-  const [space] = await db
-    .select({ id: spaces.id })
-    .from(spaces)
-    .where(
-      and(
-        eq(spaces.orgId, request.orgId),
-        eq(spaces.ownerUserId, request.userId),
-        inArray(
-          spaces.id,
-          request.reach.map((reached) => reached.id),
-        ),
-      ),
-    )
-    .limit(1);
-  return space?.id ?? null;
-}
-
 /** A stored file of a chat turn: in one of the turn's spaces, or held by its conversation. */
 async function resolveStoredChatFile(
-  request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces" | "reach"> & {
+  request: Pick<ChatAttachmentRequest, "orgId" | "userId" | "spaces" | "personalSpaceId"> & {
     chatSessionId: string | null;
   },
   fileId: string,
 ): Promise<ResolvedFile | null> {
   const conversationId =
-    request.chatSessionId !== null && (await reachedPersonalSpace(request)) !== null
+    request.chatSessionId !== null && request.personalSpaceId !== null
       ? request.chatSessionId
       : undefined;
   return resolveFileAcrossSpaces(request.orgId, { type: "user", id: request.userId }, fileId, {
@@ -1565,10 +1580,11 @@ export interface ListFilesFilters {
  * The rows of one run in the file gallery. A run's files are not only the ones it PRODUCED
  * (`files.run_id = run`, under the gallery's `visible`) — it also CONSUMES files passed as input
  * (`appfile://file_xxx` references in `runs.input`), which may live in another space (a team
- * run reading its launcher's personal upload). Its inputs are listed only to a caller who may
- * read the run in its space as the run routes decide (`runs:read` for its own runs, `runs:read-all`
- * for any), and each resolves in its own space under the rule of every read by id
- * (`resolveFilesAcrossSpaces`), so whoever may read it there sees it and nobody else does.
+ * run reading its launcher's personal upload). A caller who may not read the run in its space as
+ * the run routes decide (`runs:read` for its own runs, `runs:read-all` for any) is listed nothing
+ * of it, inputs, launch uploads and outputs alike; for a reader each input resolves in its own
+ * space under the rule of every read by id (`resolveFilesAcrossSpaces`), so whoever may read it
+ * there sees it and nobody else does.
  *
  * The run is looked up in the listed spaces only, so a run of another org or of a space outside
  * the list resolves to nothing and its input refs never widen the result.
@@ -1608,7 +1624,7 @@ async function runFilesFilter(
     !canReadRuns((permission) => permissions.has(permission)) ||
     !readsRun(permissions, actor, run)
   ) {
-    return produced;
+    return sql`false`;
   }
   const inputs = await resolveFilesAcrossSpaces(orgId, actor, extractFileIds(run.input), access);
   if (inputs.length === 0) return produced;

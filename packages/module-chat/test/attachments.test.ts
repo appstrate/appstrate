@@ -102,7 +102,7 @@ function resolverFor(
       uri,
       // The container ACL never widens: the narrowest set is the honest one.
       spaces: [{ id: scope.teamSpaceId, permissions: new Set() }],
-      reach: [{ id: scope.spaceId, permissions: new Set() }],
+      personalSpaceId: scope.spaceId,
       beforeResolve: async () => {},
     });
 }
@@ -301,7 +301,7 @@ describe("chat attachments", () => {
       uri,
       chatSessionId: null,
       spaces: [{ id: scope.spaceId, permissions: new Set(over.permissions ?? ["files:read"]) }],
-      reach: [],
+      personalSpaceId: null,
       kind: "image" as const,
       beforeResolve: async () => {},
       maxBytes: over.maxBytes ?? 4096,

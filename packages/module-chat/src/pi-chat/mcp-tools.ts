@@ -213,10 +213,10 @@ export interface TurnSpaces {
    */
   touch(spaceId: string): Promise<void>;
   /**
-   * The spaces of the files `uris` name, in one read. A missing file names none, nor does one
-   * the conversation holds: it is reached through its container, not a space.
+   * The space of the file `uri` names. A missing file names none, nor does one the conversation
+   * holds: it is reached through its container, not a space.
    */
-  fileSpaces(uris: readonly string[]): Promise<ReadonlySet<string>>;
+  fileSpace(uri: string): Promise<string | undefined>;
 }
 
 type BuildPlatformMcpToolsOptions = {
@@ -433,15 +433,6 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** The distinct `appfile://` URIs anywhere in a call's arguments. */
-function fileUrisIn(value: unknown, found = new Set<string>()): Set<string> {
-  if (isFileUri(value)) found.add(value);
-  else if (value && typeof value === "object") {
-    for (const item of Object.values(value)) fileUrisIn(item, found);
-  }
-  return found;
-}
-
 /**
  * Refuse a space a call names outside the turn's, or record it before the call is dispatched
  * there: the space is never defaulted.
@@ -454,26 +445,6 @@ async function enterNamedSpace(
   if (refusal) return { ...refusal };
   await organization.touch(spaceId as string);
   return undefined;
-}
-
-/**
- * Record the turn spaces of the files `args` name, once the platform has served the call: only
- * a read it allowed widens the conversation, and its result enters the conversation only once
- * recorded (a failed touch fails the call). The conversation's own files, and spaces outside the
- * turn, are never recorded.
- */
-async function recordFileSpaces(
-  organization: TurnSpaces,
-  args: unknown,
-  named?: string,
-): Promise<void> {
-  const uris = fileUrisIn(args);
-  if (uris.size === 0) return;
-  for (const space of await organization.fileSpaces([...uris])) {
-    if (space !== named && organization.spaces.some((turnSpace) => turnSpace.id === space)) {
-      await organization.touch(space);
-    }
-  }
 }
 
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
@@ -514,7 +485,6 @@ function makeForwardExtension(
           { name: tool.name, arguments: args },
           { signal: callSignal },
         );
-        if (result.isError !== true) await recordFileSpaces(organization, args, spaceId);
         const scope = offerScopeOf(toolName, {
           arguments: params,
           relayed: isRelayedResult(result),
@@ -603,10 +573,17 @@ function makeReadResourceExtension(
               turnBudget,
             );
           }
+        } else if (isFileUri(uri)) {
+          // The platform reads a file in its own space when the bearer may enter it, and the
+          // conversation records that space first. Any other file it refuses as missing, so the
+          // refusal tells nothing of where the file lives.
+          const fileSpace = await organization.fileSpace(uri);
+          if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
+            await organization.touch(fileSpace);
+          }
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
-        await recordFileSpaces(organization, uri);
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
         // Keep the text of skills in the replay so their procedures still apply on later turns.
         const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
@@ -773,7 +750,6 @@ function makeRunAndWaitExtension(
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
         };
-        let launched = false;
         // The run's wait budget descends from the TURN's deadline (never the
         // 30-minute client default), and a launch with no room left is refused
         // here — before any run row exists.
@@ -795,11 +771,6 @@ function makeRunAndWaitExtension(
           },
         })) {
           finalPayload = step.payload;
-          // The first step carrying a run id is the accepted launch: its input files were read.
-          if (!launched && !step.isError && typeof step.payload.id === "string") {
-            launched = true;
-            await recordFileSpaces(ctx.organization, args, spaceId as string);
-          }
           // Live card: push each step's payload under this tool call id so the
           // UI reflects launch → progress → terminal before execute resolves.
           // `preliminary` (AI SDK): the call is not settled until the result below.

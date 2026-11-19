@@ -8,8 +8,9 @@
  * The local `run_and_wait` takes the space from its arguments (refusing a missing
  * one in the server's own words), strips it before the shared launch, sends it as
  * `X-Space-Id` on the REST hops, and records it on the session first. A forwarded
- * tool and a `read_resource` record the space they name the same way. The space of a file a call
- * names is recorded only once the platform served the call, before its result is returned.
+ * tool and a `read_resource` record the space they name the same way, and the files a call's
+ * arguments name record nothing: the platform reads them in that space only. A `read_resource` of
+ * a file records the file's space before the read when the turn acts there.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -154,7 +155,7 @@ function transcript() {
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
-  const lookups: string[][] = [];
+  const lookups: string[] = [];
   return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups };
 }
 
@@ -169,15 +170,11 @@ function organizationOf(
       events.push(`touch ${spaceId}`);
     },
     // A file id names its space here (`file_beta…` → `spc_beta`); `file_own…` is a file the
-    // conversation holds and any other id is missing: both name none. One lookup per call.
-    fileSpaces: async (uris) => {
-      lookups.push([...uris]);
-      return new Set(
-        uris.flatMap((uri) => {
-          const space = uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1];
-          return space ? [`spc_${space}`] : [];
-        }),
-      );
+    // conversation holds and any other id is missing: both name none.
+    fileSpace: async (uri) => {
+      lookups.push(uri);
+      const space = uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1];
+      return space ? `spc_${space}` : undefined;
     },
   };
 }
@@ -334,119 +331,68 @@ describe("the conversation's forwarded tools and resources", () => {
 });
 
 describe("the files a call names", () => {
-  it("records the turn spaces of the files a served call named, after the call, in one lookup", async () => {
+  it("records only the space a call names, whatever files its arguments name", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      // An unlimited conversation over Alpha and Beta reads a Beta file from Alpha; its own
-      // file and a file of a space outside the turn record nothing.
       await tool("read_file").execute("c1", {
         uri: "appfile://file_beta0001",
         space_id: "spc_alpha",
-        again: [
-          "appfile://file_beta0001",
-          { deep: "appfile://file_own00001", out: "appfile://file_gamma001" },
-        ],
+        again: ["appfile://file_gamma001", { deep: "appfile://file_own00001" }],
       });
-      expect(transport.events).toEqual(["touch spc_alpha", "tools/call", "touch spc_beta"]);
-      expect(transport.lookups).toEqual([
-        ["appfile://file_beta0001", "appfile://file_own00001", "appfile://file_gamma001"],
-      ]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("forwards a file it does not record, and records nothing for its own or an outside file", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport);
-    try {
-      for (const uri of ["appfile://file_own00001", "appfile://file_gamma001"]) {
-        await tool("read_file").execute("c1", { uri });
-      }
-      expect(transport.events).toEqual(["tools/call", "tools/call"]);
-      expect(transport.toolCalls).toHaveLength(2);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("records nothing for a file the platform refuses, and returns its answer as is", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport);
-    try {
-      // A colleague's private file of Beta, where the caller reads files: the container ACL is
-      // the platform's, and a refused read never widens the conversation.
-      const refused = await tool("read_file").execute("c1", {
-        uri: "appfile://file_beta_private1",
-      });
-      expect(JSON.parse(text(refused))).toEqual(PLATFORM_REFUSAL);
-      await expect(
-        tool("read_resource").execute("c2", { uri: "appfile://file_beta_private1" }),
-      ).rejects.toThrow();
-      expect(transport.events).toEqual(["tools/call", "resources/read"]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("records the space of a resource it read, before returning it", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport);
-    try {
-      await tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" });
-      expect(transport.events).toEqual(["resources/read", "touch spc_beta"]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("fails a served call whose file space cannot be recorded: nothing is returned", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport, "spc_beta");
-    try {
-      await expect(
-        tool("read_file").execute("c1", { uri: "appfile://file_beta0001" }),
-      ).rejects.toThrow("cannot record spc_beta");
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("records an input file's space once the run is launched in another, and none for a refused launch", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport);
-    try {
-      await tool("run_and_wait").execute("c1", {
-        kind: "agent",
-        scope: "@acme",
-        name: "demo",
-        space_id: "spc_beta",
-        input: { doc: "appfile://file_alpha001", own: "appfile://file_own00001" },
-      });
-      expect(transport.events.slice(0, 3)).toEqual(["touch spc_beta", "launch", "touch spc_alpha"]);
-
-      transport.events.length = 0;
       await tool("run_and_wait").execute("c2", {
         kind: "agent",
         scope: "@acme",
         name: "demo",
         space_id: "spc_beta",
-        input: { doc: "appfile://file_alpha_private1" },
+        input: { doc: "appfile://file_alpha001" },
       });
-      expect(transport.events).toEqual(["touch spc_beta", "launch"]);
+      expect(transport.events.slice(0, 4)).toEqual([
+        "touch spc_alpha",
+        "tools/call",
+        "touch spc_beta",
+        "launch",
+      ]);
+      expect(transport.events).not.toContain("touch spc_gamma");
+      expect(transport.lookups).toEqual([]);
     } finally {
       await built.close();
     }
   });
 
-  it("fails a call whose arguments nest past the stack, recording nothing", async () => {
+  it("records the space of a file resource of the turn before reading it", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      let nested: unknown = "appfile://file_beta0001";
-      for (let level = 0; level < 100_000; level++) nested = [nested];
-      await expect(tool("read_file").execute("c1", { uri: nested })).rejects.toThrow();
+      await tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" });
+      expect(transport.events).toEqual(["touch spc_beta", "resources/read"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("forwards its own, an outside or a missing file unrecorded, the platform's refusal as is", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      await tool("read_resource").execute("c1", { uri: "appfile://file_own00001" });
+      await tool("read_resource").execute("c2", { uri: "appfile://file_gamma001" });
+      await expect(
+        tool("read_resource").execute("c3", { uri: "appfile://file_nowhere01" }),
+      ).rejects.toThrow();
+      expect(transport.events).toEqual(["resources/read", "resources/read", "resources/read"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("fails a file read whose space cannot be recorded: nothing is read", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport, "spc_beta");
+    try {
+      await expect(
+        tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" }),
+      ).rejects.toThrow("cannot record spc_beta");
       expect(transport.events).toEqual([]);
     } finally {
       await built.close();

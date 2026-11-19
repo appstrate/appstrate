@@ -50,7 +50,7 @@ export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import {
   ensureSession,
-  fileSpaceIds,
+  fileSpaceId,
   type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
@@ -66,7 +66,7 @@ import {
   type ChatPlatformDeps,
 } from "./platform-services.ts";
 import type { TurnSpaces } from "./pi-chat/mcp-tools.ts";
-import type { ReachableSpaceGrant, UsageRejection } from "@appstrate/core/module";
+import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
 import { classifyClientTurnError, clientTurnErrorMarker, turnErrorLogIds } from "./turn-error.ts";
 import {
@@ -446,9 +446,9 @@ export async function handleChatStream(
     // only a `manual` turn lists the spaces' skills on the user's request.
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
-    // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names
-    // before the call, refused outside the set; the space of a file a call names once the
-    // platform served it. Skills are procedures, not data: injecting one touches no space.
+    // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
+    // or the space of a file `read_resource` reads, before the call, refused outside the set.
+    // Skills are procedures, not data: injecting one touches no space.
     const organization: TurnSpaces = {
       spaces,
       touch: async (touchedSpaceId) => {
@@ -458,12 +458,10 @@ export async function handleChatStream(
           touchedSpaceId,
         );
       },
-      fileSpaces: (uris) =>
-        fileSpaceIds(
-          orgId,
-          uris.flatMap((uri) => parseFileUri(uri) ?? []),
-          chatSessionId,
-        ),
+      fileSpace: async (uri) => {
+        const fileId = parseFileUri(uri);
+        return fileId ? fileSpaceId(orgId, fileId, chatSessionId) : undefined;
+      },
     };
     return {
       skills: conv.selection,
@@ -707,12 +705,13 @@ export async function handleChatStream(
   // because resolving an attachment touches its space on the conversation, which a
   // refused turn must not widen. Only the last message can carry fresh uploads:
   // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
-  // A file resolves in the turn's spaces; the conversation's own uploads, under the caller's set
-  // in the personal space they live in, which a limited turn does not act in.
-  const grantsOf = (grants: readonly ReachableSpaceGrant[]) =>
-    grants.map((space) => ({ id: space.id, permissions: new Set(space.permissions) }));
-  const attachmentSpaces = grantsOf(spaces);
-  const attachmentReach = grantsOf(reachable);
+  // A file resolves in the turn's spaces; the conversation's own uploads in the caller's personal
+  // space, which a limited turn does not act in.
+  const attachmentSpaces = spaces.map((space) => ({
+    id: space.id,
+    permissions: new Set(space.permissions),
+  }));
+  const personalSpaceId = reachable.find((space) => space.personal)?.id ?? null;
   // What the browser's optimistic `upload://` parts became, for the stream to tell it.
   let uploadResolutions: UIMessageChunk | null = null;
   if (chatSessionId && lastMessage) {
@@ -725,7 +724,7 @@ export async function handleChatStream(
           chatSessionId,
           uri,
           spaces: attachmentSpaces,
-          reach: attachmentReach,
+          personalSpaceId,
           // A gallery file's space is touched by the session that comes to hold it, before
           // it is attached; an upload lands in the personal space and touches none.
           beforeResolve: organization.touch,
@@ -867,7 +866,7 @@ export async function handleChatStream(
             userId: user.id,
             uri,
             spaces: attachmentSpaces,
-            reach: attachmentReach,
+            personalSpaceId,
             chatSessionId,
             beforeResolve: organization.touch,
             ...options,

@@ -5,6 +5,10 @@
  * the file readers included: a session or an organization-bound token on it reads files of that
  * space alone, and so does `invoke_operation getFile` dispatched from it. The organization
  * endpoint reads a file in its own space under the caller's set there, through both.
+ *
+ * A credential bound to a set of spaces (the chat's bearer) reads a file by id in the one space
+ * its request entered, through REST and every MCP door alike, plus the uploads its issuing
+ * conversation holds in the caller's personal space.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -15,9 +19,13 @@ import { createTestContext, type TestContext } from "../../../../../test/helpers
 import { seedSpace } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { loopbackHeaders } from "../../../../../test/helpers/loopback.ts";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
-import { createFileFromStream } from "../../../../services/files.ts";
+import { chatSessions, runs, uploads } from "@appstrate/db/schema";
+import { uploadStream } from "@appstrate/db/storage";
+import { eq } from "drizzle-orm";
+import { createUpload } from "../../../../services/uploads.ts";
+import { createFileFromStream, createFileFromUpload } from "../../../../services/files.ts";
 import { ensurePersonalSpaceFor } from "../../../../services/spaces.ts";
 import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
 import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
@@ -177,6 +185,87 @@ describe("file reads on the space-pinned MCP endpoint", () => {
       const orgWide = await read(`/api/mcp/o/${ctx.orgId}`, headers, elsewhere, pinned);
       expect(orgWide.tool).toContain("ailleurs");
       expect(await getFileThrough(`/api/mcp/o/${ctx.orgId}`, headers, elsewhere, pinned)).toBe(200);
+    }
+  });
+
+  /** `GET /api/files/{id}` entering `spaceId`: its status. */
+  async function getFileRest(
+    headers: Record<string, string>,
+    uri: string,
+    spaceId: string,
+  ): Promise<number> {
+    const res = await app.request(`/api/files/${uri.replace("appfile://", "")}`, {
+      headers: { ...headers, "X-Space-Id": spaceId },
+    });
+    return res.status;
+  }
+
+  /** A chat upload of the owner's, held by conversation `sessionId`, in their personal space. */
+  async function conversationUpload(sessionId: string): Promise<string> {
+    const scope = {
+      orgId: ctx.orgId,
+      spaceId: (await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id)).id,
+    };
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const bytes = new TextEncoder().encode("joint");
+    const up = await createUpload({
+      ...scope,
+      createdBy: ctx.user.id,
+      name: "joint.txt",
+      size: bytes.byteLength,
+      mime: "text/plain",
+    });
+    const [staged] = await db
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.id, up.id));
+    const [bucket, ...rest] = staged!.storageKey.split("/");
+    await uploadStream(bucket!, rest.join("/"), new Blob([bytes]).stream(), { exclusive: true });
+    const file = await createFileFromUpload(scope, { type: "user", id: ctx.user.id }, up.id, {
+      chatSessionId: sessionId,
+    });
+    return `appfile://${file.id}`;
+  }
+
+  it("a credential bound to a set reads a file by id in the space its request entered, whatever the door", async () => {
+    const ofOther = await fileIn(other, "ailleurs");
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    const own = await conversationUpload(sessionId);
+    const endpoint = `/api/mcp/o/${ctx.orgId}`;
+    const bound = loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "owner",
+      permissions: ["files:read", "runs:read", "mcp:read", "mcp:invoke"],
+      spaceIds: [pinned, other],
+      chatSessionId: sessionId,
+    });
+
+    // Entered in the other turn space, a file of `other` is a missing one, through every door.
+    expect(await getFileThrough(endpoint, bound, ofOther, pinned)).toBe(404);
+    expect(await getFileRest(bound, ofOther, pinned)).toBe(404);
+    expect((await read(endpoint, bound, ofOther, pinned)).tool).toContain("not_found");
+    // Entered in its own space, it is read.
+    expect(await getFileThrough(endpoint, bound, ofOther, other)).toBe(200);
+    expect(await getFileRest(bound, ofOther, other)).toBe(200);
+    // `resources/read` enters the file's space, one of the set.
+    const resource = await read(endpoint, bound, ofOther);
+    expect(JSON.stringify(resource.resource.result)).toContain("ailleurs");
+
+    // The conversation's own upload, in the personal space outside the set, from either space.
+    for (const spaceId of [pinned, other]) {
+      expect(await getFileThrough(endpoint, bound, own, spaceId)).toBe(200);
+      expect(await getFileRest(bound, own, spaceId)).toBe(200);
+      expect((await read(endpoint, bound, own, spaceId)).tool).toContain("joint");
+    }
+  });
+
+  it("a session and an organization-bound token keep their reach for a file by id", async () => {
+    const ofOther = await fileIn(other, "ailleurs");
+    const endpoint = `/api/mcp/o/${ctx.orgId}`;
+    const session = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
+    expect(await getFileRest(session, ofOther, pinned)).toBe(200);
+    for (const headers of [session, { Authorization: `Bearer ${await mintOrgToken()}` }]) {
+      expect(await getFileThrough(endpoint, headers, ofOther, pinned)).toBe(200);
+      expect((await read(endpoint, headers, ofOther, pinned)).tool).toContain("ailleurs");
     }
   });
 });

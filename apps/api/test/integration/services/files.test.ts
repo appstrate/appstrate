@@ -1342,7 +1342,7 @@ describe("files service + routes", () => {
         uri: `appfile://${fileId}`,
         // `files:read` is what lets a caller attach a stored file at all; the set under test widens it.
         spaces: [{ id: ctx.defaultSpaceId, permissions: new Set([...permissions, "files:read"]) }],
-        reach: [],
+        personalSpaceId: null,
         beforeResolve: async () => {},
       });
 
@@ -1364,7 +1364,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri: `appfile://${ownOutput.id}`,
         spaces: [{ id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN }],
-        reach: [],
+        personalSpaceId: null,
         beforeResolve: async () => {},
       }),
     ).rejects.toMatchObject({ status: 404 });
@@ -1475,7 +1475,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri,
         spaces,
-        reach: spaces,
+        personalSpaceId: null,
         beforeResolve: async () => {},
       });
     const here = { id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN };
@@ -1514,17 +1514,14 @@ describe("files service + routes", () => {
     // A limited conversation: the turn acts in the team space alone, the personal space is
     // neither one of its spaces nor touched.
     const teamGrant = { id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) };
-    const attach = (
-      uri: string,
-      reach = [{ id: personal.id, permissions: new Set(["files:read"]) }],
-    ) =>
+    const attach = (uri: string, personalSpaceId: string | null = personal.id) =>
       resolveChatAttachment({
         orgId: ctx.orgId,
         userId: ctx.user.id,
         chatSessionId,
         uri,
         spaces: [teamGrant],
-        reach,
+        personalSpaceId,
         beforeResolve: async (spaceId) => {
           announced.push(spaceId);
         },
@@ -1547,9 +1544,9 @@ describe("files service + routes", () => {
       "perso.txt",
       new TextEncoder().encode("contenu"),
     );
-    // Under a role preview the reach holds no personal space: an upload staged there before
+    // Under a role preview the turn reaches no personal space: an upload staged there before
     // the preview is refused, and nothing materializes.
-    await expect(attach(`upload://${upload}`, [teamGrant])).rejects.toMatchObject({
+    await expect(attach(`upload://${upload}`, null)).rejects.toMatchObject({
       status: 404,
     });
     expect(await filesOfSession()).toEqual([]);
@@ -1607,7 +1604,7 @@ describe("files service + routes", () => {
       chatSessionId,
       // The personal space is one of the turn's: an unlimited conversation acts there.
       spaces: grants,
-      reach: grants,
+      personalSpaceId: personal.id,
       beforeResolve: async (spaceId: string) => {
         announced.push(spaceId);
       },
@@ -1657,8 +1654,11 @@ describe("files service + routes", () => {
     const upload = await stageUpload(personalScope, ctx.user.id, "photo.png", png, "image/png");
     const file = await createFileFromUpload(personalScope, userActor, upload, { chatSessionId });
 
-    const personalGrant = { id: personal.id, permissions: new Set(["files:read"]) };
-    const read = (userId: string, sessionId: string | null, reach = [personalGrant]) =>
+    const read = (
+      userId: string,
+      sessionId: string | null,
+      personalSpaceId: string | null = personal.id,
+    ) =>
       readChatAttachment({
         orgId: ctx.orgId,
         userId,
@@ -1666,7 +1666,7 @@ describe("files service + routes", () => {
         uri: `appfile://${file.id}`,
         // A later turn of a limited conversation: the team space alone.
         spaces: [{ id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) }],
-        reach,
+        personalSpaceId,
         beforeResolve: async () => {
           throw new Error("a conversation's own file touches no space");
         },
@@ -1675,8 +1675,8 @@ describe("files service + routes", () => {
       });
 
     expect((await read(ctx.user.id, chatSessionId))?.bytes).toEqual(png);
-    // Only while the turn reaches the caller's personal space (a role preview's reach does not).
-    expect(await read(ctx.user.id, chatSessionId, [])).toBeNull();
+    // Only while the turn reaches the caller's personal space (a role preview's does not).
+    expect(await read(ctx.user.id, chatSessionId, null)).toBeNull();
     // Another conversation of the same user does not hold it, and its spaces do not include it.
     expect(await read(ctx.user.id, otherSessionId)).toBeNull();
     expect(await read(ctx.user.id, null)).toBeNull();
@@ -1705,7 +1705,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri: `appfile://${theirOutput.id}`,
         spaces: [{ id: ctx.defaultSpaceId, permissions }],
-        reach: [],
+        personalSpaceId: null,
         beforeResolve: async (spaceId) => {
           announced.push(spaceId);
         },
@@ -1769,7 +1769,7 @@ describe("files service + routes", () => {
       spaces: [
         { id: ctx.defaultSpaceId, permissions: new Set(["files:read", ...READS_EVERY_RUN]) },
       ],
-      reach: [],
+      personalSpaceId: null,
       beforeResolve: async () => {},
     };
     expect(

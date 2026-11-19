@@ -105,10 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`ChatAttachmentRequest`, `ChatAttachmentRead`** (`@appstrate/core/chat-contract`, #2287) —
-  BREAKING: both take a required `reach` (every space the caller reaches, with its set there), and
-  `ChatAttachmentRead` a required `chatSessionId` (null on an unpersisted turn). A file the
-  conversation holds resolves under the caller's set in its own space even outside `spaces`, and
-  touches no space; an `upload://` must be staged in the caller's personal space.
+  BREAKING: both take a required `personalSpaceId` (the caller's personal space when the turn
+  reaches it, null under a role preview), and `ChatAttachmentRead` a required `chatSessionId`
+  (null on an unpersisted turn). An `upload://` must be staged in `personalSpaceId`; a file the
+  conversation holds there is read under `files:read` alone even outside `spaces`, and touches
+  no space.
 
 - **`ChatAttachmentRequest`** (`@appstrate/core/chat-contract`, #1886) — BREAKING: `spaceId` is gone
   and `permissions` becomes `spaces`, a list of `{ id, permissions }`, one per space the caller may

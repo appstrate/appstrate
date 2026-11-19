@@ -33,34 +33,38 @@ export interface ReachableSpace {
 
 /**
  * The spaces where the caller holds a role (persona overlay included): the reach of every read
- * spanning spaces and of `packageAccessSpaces`. A request pinned to a space (its credential, the
- * space-pinned MCP endpoint, a dispatch acting in one space) reaches that space only; a credential
- * bound to a SET of spaces (`credentialSpaceIds`) reaches those alone. A read crossing into
- * another organization names `orgRole`.
+ * spanning spaces, of a file named by id (`requestFileAccess`) and of `packageAccessSpaces`. A
+ * request pinned to a space (its credential, the space-pinned MCP endpoint, a dispatch acting in
+ * one space) reaches that space only. A credential bound to a SET of spaces (`credentialSpaceIds`)
+ * acts per request in ONE of them: the one the request entered, none when it entered none, so a
+ * read by id answers the same through REST and every MCP door. A read crossing into another
+ * organization names `orgRole`.
  */
 export function callerReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
   orgRole: OrgRole | undefined = callerOrgRole(c, orgId),
 ): Promise<ReachableSpace[]> {
-  return reachPinnedTo(c, orgId, orgRole, dispatchSpacePin(c)?.spaceId ?? endpointPin(c));
+  const pin = requestPin(c);
+  if (pin !== undefined || c.get("credentialSpaceIds") === undefined) {
+    return reachPinnedTo(c, orgId, orgRole, pin);
+  }
+  const entered = c.get("space")?.id;
+  return entered ? reachPinnedTo(c, orgId, orgRole, entered) : Promise.resolve([]);
 }
 
 /**
- * The reach of a file read by id (`requestFileAccess`): the credential's and the endpoint's, not
- * the one space a dispatch acts in, so REST and `invoke_operation` answer alike.
+ * The spaces a request may still enter: a credential bound to a set reaches all of it here. Read
+ * by the MCP admission alone, which picks the space a request enters and builds from this list the
+ * spaces its tools may name.
  */
-export function credentialReachableSpaces(
-  c: Context<AppEnv>,
-  orgId: string,
-): Promise<ReachableSpace[]> {
-  return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), endpointPin(c));
+export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
+  return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));
 }
 
-/** The space the endpoint confines this request to, dispatches included. */
-function endpointPin(c: Context<AppEnv>): string | undefined {
-  const dispatched = dispatchSpacePin(c);
-  return c.get("endpointSpaceId") ?? (dispatched?.endpoint ? dispatched.spaceId : undefined);
+/** The space the endpoint or the dispatch confines this request to. */
+function requestPin(c: Context<AppEnv>): string | undefined {
+  return c.get("endpointSpaceId") ?? dispatchSpacePin(c);
 }
 
 function reachPinnedTo(

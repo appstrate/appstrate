@@ -156,28 +156,28 @@ export async function createSession(input: {
 }
 
 /**
- * The spaces of `fileIds` that `orgId` holds, in one read, leaving out the files the conversation
- * `chatSessionId` holds: those are reached through their container, not a space.
+ * The space of the file `fileId` names in `orgId`, undefined for a missing file and for one the
+ * conversation `chatSessionId` holds: that one is reached through its container, not a space.
  */
-export async function fileSpaceIds(
+export async function fileSpaceId(
   orgId: string,
-  fileIds: readonly string[],
+  fileId: string,
   chatSessionId: string | null,
-): Promise<Set<string>> {
-  if (fileIds.length === 0) return new Set();
-  const rows = await db
-    .selectDistinct({ spaceId: files.spaceId })
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ spaceId: files.spaceId })
     .from(files)
     .where(
       and(
-        inArray(files.id, [...fileIds]),
+        eq(files.id, fileId),
         eq(files.orgId, orgId),
         chatSessionId
           ? or(isNull(files.chatSessionId), ne(files.chatSessionId, chatSessionId))
           : undefined,
       ),
-    );
-  return new Set(rows.map((row) => row.spaceId));
+    )
+    .limit(1);
+  return row?.spaceId;
 }
 
 /** What a turn takes from the conversation row: its skill selection, origin space and limit. */

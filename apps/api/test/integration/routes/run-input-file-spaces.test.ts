@@ -186,6 +186,26 @@ describe("run inputs across spaces", () => {
     return fileUri(file.id);
   }
 
+  /** A launch upload of `userId`, staged in `spaceId`: its `upload://` URI. */
+  async function stagedUpload(userId: string, spaceId: string): Promise<string> {
+    const bytes = new TextEncoder().encode("lancement");
+    const up = await createUpload({
+      orgId: ctx.orgId,
+      spaceId,
+      createdBy: userId,
+      name: "lancement.txt",
+      size: bytes.byteLength,
+      mime: "text/plain",
+    });
+    const [staged] = await db
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.id, up.id));
+    const [bucket, ...rest] = staged!.storageKey.split("/");
+    await uploadStream(bucket!, rest.join("/"), new Blob([bytes]).stream(), { exclusive: true });
+    return `upload://${up.id}`;
+  }
+
   async function launchedRunId(res: Response): Promise<string> {
     expect(res.status).toBe(201);
     return ((await res.json()) as { id: string }).id;
@@ -230,24 +250,27 @@ describe("run inputs across spaces", () => {
   });
 
   it("one rule whatever the door: REST and invoke_operation agree on a cross-space input", async () => {
-    const third = (await seedSpace({ orgId: ctx.orgId, name: "Équipe C" })).id;
     const ofA = await runOutput(ctx.defaultSpaceId, ctx.user.id);
-    const ofC = await runOutput(third, ctx.user.id);
-    // A credential bound to [A, B], launching in B: every request it makes acts in one space,
-    // and a file named by id still answers to the credential's spaces.
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    const own = await chatUpload(ctx.user.id, sessionId);
+    // A credential bound to [A, B] (the chat's bearer, as `run_and_wait` launches with it in B)
+    // acts in the one space a request entered: a file of A is a missing one from B, its own
+    // conversation's upload is read wherever it launches.
     const bound = loopbackHeaders(ctx, ctx.orgId, {
       orgRole: "owner",
       permissions: [...LAUNCHES_HERE, "models:read", "mcp:read", "mcp:invoke"],
       spaceIds: [ctx.defaultSpaceId, teamB],
+      chatSessionId: sessionId,
     });
+    expect((await launch(bound, teamB, [ofA])).status).toBe(404);
+    expect(await launchThroughMcp(bound, teamB, [ofA])).toBe(404);
+    expect((await launch(bound, ctx.defaultSpaceId, [ofA])).status).toBe(201);
+    expect((await launch(bound, teamB, [own])).status).toBe(201);
+    expect(await launchThroughMcp(bound, teamB, [own])).toBe(201);
+    // A session reaches every space it holds a role in, through both doors.
     const session = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
-    for (const headers of [bound, session]) {
-      expect((await launch(headers, teamB, [ofA])).status).toBe(201);
-      expect(await launchThroughMcp(headers, teamB, [ofA])).toBe(201);
-    }
-    // Outside the bound set, both doors answer the 404 of a missing file.
-    expect((await launch(bound, teamB, [ofC])).status).toBe(404);
-    expect(await launchThroughMcp(bound, teamB, [ofC])).toBe(404);
+    expect((await launch(session, teamB, [ofA])).status).toBe(201);
+    expect(await launchThroughMcp(session, teamB, [ofA])).toBe(201);
   });
 
   it("refuses a file of a space where the caller lacks files:read, as a missing one", async () => {
@@ -476,7 +499,7 @@ describe("run inputs across spaces", () => {
     expect(audit).toMatchObject({ spaceId: ctx.defaultSpaceId });
   });
 
-  it("a launcher who lost runs:read sees none of the run's inputs", async () => {
+  it("a launcher who lost runs:read sees nothing of the run, inputs and launch uploads alike", async () => {
     const member = await memberContext(ctx, "member");
     await seedSpaceGrant({
       orgId: ctx.orgId,
@@ -491,16 +514,42 @@ describe("run inputs across spaces", () => {
       permissions: ["runs:read", "files:read"],
     });
     const uri = await runOutput(ctx.defaultSpaceId, member.user.id);
-    const runId = await launchedRunId(await launch(authHeaders(member), teamB, [uri]));
-    const listed = async () => {
+    const staged = await stagedUpload(member.user.id, teamB);
+    const base = inlineRun([]);
+    const withUpload = await app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(member), "X-Space-Id": teamB, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...base,
+        context_files: undefined,
+        manifest: {
+          ...base.manifest,
+          input: {
+            schema: {
+              type: "object",
+              properties: {
+                doc: { type: "string", format: "uri", contentMediaType: "text/plain" },
+              },
+            },
+          },
+        },
+        input: { doc: staged },
+      }),
+    });
+    const runIds = [
+      await launchedRunId(await launch(authHeaders(member), teamB, [uri])),
+      await launchedRunId(withUpload),
+    ];
+    const listed = async (runId: string) => {
       const res = await app.request(`/api/files?runId=${runId}`, {
         headers: { ...authHeaders(member), "X-Space-Id": teamB },
       });
       return ((await res.json()) as { data: { id: string }[] }).data.map((file) => file.id);
     };
-    expect(await listed()).toEqual([uri.replace("appfile://", "")]);
+    expect(await listed(runIds[0]!)).toEqual([uri.replace("appfile://", "")]);
+    expect(await listed(runIds[1]!)).toHaveLength(1);
     // Its role in B keeps `files:read` and loses `runs:read`: the run detail is refused, and so
-    // are the run's inputs, though the launcher still reads the file itself in A.
+    // is everything the run lists, though the launcher still reads the file itself in A.
     const [membership] = await db
       .select({ roleId: spaceMembers.customRoleId })
       .from(spaceMembers)
@@ -509,7 +558,28 @@ describe("run inputs across spaces", () => {
       .update(spaceRoles)
       .set({ permissions: ["files:read"] })
       .where(eq(spaceRoles.id, membership!.roleId!));
-    expect(await listed()).toEqual([]);
+    for (const runId of runIds) expect(await listed(runId)).toEqual([]);
+  });
+
+  it("a creator without files:read still deletes and keeps their own upload", async () => {
+    const member = await memberContext(ctx, "member");
+    await seedSpaceGrant({
+      orgId: ctx.orgId,
+      spaceId: teamB,
+      userId: member.user.id,
+      permissions: ["files:delete"],
+    });
+    const fileId = (await chatUpload(member.user.id, `chs_${crypto.randomUUID()}`, teamB)).replace(
+      "appfile://",
+      "",
+    );
+    const inB = { ...authHeaders(member), "X-Space-Id": teamB };
+    // Reading it needs files:read; acting on its lifecycle needs its own capability.
+    expect((await app.request(`/api/files/${fileId}`, { headers: inB })).status).toBe(404);
+    const kept = await app.request(`/api/files/${fileId}/keep`, { method: "POST", headers: inB });
+    expect(kept.status).toBe(200);
+    const deleted = await app.request(`/api/files/${fileId}`, { method: "DELETE", headers: inB });
+    expect(deleted.status).toBe(204);
   });
 
   it("a team run keeps no claim on a personal upload: it dies with its conversation", async () => {

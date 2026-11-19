@@ -521,9 +521,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
     const proxied = proxyAcceptsCredential(c);
-    // A credential bound to a set of spaces reaches those alone (`callerReachableSpaces`): the
+    // A credential bound to a set of spaces may enter any of them (`enterableSpaces`): the
     // spaces its tools name, the skills it lists and the `space_id` it may send come from this
-    // one list.
+    // one list, and the request then reaches the one it entered.
     const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
       deriveMcpSurface(permissions, ceiling, actor, proxied, space),
     );
@@ -591,19 +591,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // and cannot have been skipped: the org guard just proved `orgId` is set,
     // and that is the middleware's only early return.
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
-    // Dispatched calls re-enter the space this request entered — and, on the
-    // endpoint pinned to it, stay confined to it whatever the credential pins:
-    // the caller's reach is then that space only, for the lists spanning spaces
-    // and for the package home authority alike.
-    // On the organization-wide endpoint, a credential bound to a set of spaces acts in ONE
-    // space per request, so its reads spanning spaces reach the entered space alone; a file
-    // named by id answers to the credential, as through REST.
+    // Dispatched calls re-enter the space this request entered, and stay confined to it on the
+    // endpoint pinned to it and under a credential bound to a set of spaces (it acts in one
+    // space per request, `callerReachableSpaces`), the org-path routes included.
     authHeaders.set("x-space-id", scope.spaceId);
     const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
-      : (request) =>
-          dispatchInProcess(request, { spaceId: scope.spaceId, endpoint: orgSpaces === undefined });
+      : (request) => dispatchInProcess(request, scope.spaceId);
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.

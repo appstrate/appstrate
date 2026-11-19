@@ -6,5 +6,5 @@ import type { TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 export function inertTurnSpaces(
   spaces: TurnSpaces["spaces"] = [{ id: "spc_1", name: "One", role: "admin", permissions: [] }],
 ): TurnSpaces {
-  return { spaces, touch: async () => {}, fileSpaces: async () => new Set() };
+  return { spaces, touch: async () => {}, fileSpace: async () => undefined };
 }

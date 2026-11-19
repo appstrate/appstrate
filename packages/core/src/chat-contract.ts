@@ -95,8 +95,8 @@ export interface ChatAttachmentRequest {
   /**
    * The spaces the attachment may resolve in, each with the caller's effective
    * permission set there: the turn's spaces. A stored file resolves in the space it belongs
-   * to, which must be one of these unless the conversation already holds it (see `reach`); an
-   * `upload://` must be staged in the caller's personal space and resolves there. A
+   * to, which must be one of these unless the conversation already holds it in
+   * `personalSpaceId`; an `upload://` must be staged in `personalSpaceId` and resolves there. A
    * permission set decides how wide a container ACL reads there — with
    * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,
    * which is what the file gallery the user picked it from already shows;
@@ -104,15 +104,15 @@ export interface ChatAttachmentRequest {
    */
   spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
   /**
-   * Every space the caller reaches, with their effective set there: the grant a file this
-   * conversation holds is read under when its space is not one of `spaces` (a chat upload
-   * lives in the caller's personal space, which a limited conversation does not act in).
+   * The caller's personal space when the turn reaches it, null under a role preview: where an
+   * upload is staged, and where the files this conversation holds are read, under `files:read`
+   * alone, whether or not the turn acts there.
    */
-  reach: readonly { id: string; permissions: ReadonlySet<string> }[];
+  personalSpaceId: string | null;
   /**
    * Called with the space the attachment belongs to, once it is one of `spaces` and BEFORE
    * anything is read in it: a rejection refuses the attachment. The conversation records the
-   * space as touched here. A file the conversation holds outside `spaces` touches none.
+   * space as touched here. A file the conversation holds touches none.
    */
   beforeResolve: (spaceId: string) => Promise<void>;
 }

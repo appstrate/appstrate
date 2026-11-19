@@ -27,12 +27,14 @@ export function useSpaces(enabled = true) {
 }
 
 /**
- * The caller's personal space id (« Mon espace »): `null` until the listing answers, when it
- * failed (`failed`), or when they have none (a role preview lists none, whatever role is previewed).
+ * The caller's personal space id (« Mon espace »): `null` until the listing answers, and when it
+ * failed or answered without one (`failed`: a role preview lists none, whatever role is
+ * previewed), so `null` without `failed` only ever means loading.
  */
 export function useOwnPersonalSpaceId(): { spaceId: string | null; failed: boolean } {
   const { data: spaces, isError } = useSpaces();
-  return { spaceId: spaces?.find(isOwnPersonalSpace)?.id ?? null, failed: isError };
+  const spaceId = spaces?.find(isOwnPersonalSpace)?.id ?? null;
+  return { spaceId, failed: isError || (spaces !== undefined && spaceId === null) };
 }
 
 /** The listed spaces among `spaceIds`, in order; the ones the listing does not know are left out. */

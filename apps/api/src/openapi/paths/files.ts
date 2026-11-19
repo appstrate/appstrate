@@ -2,7 +2,7 @@
 
 import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { FILE_BY_ID_REACH, ORG_READ_REACH } from "../parameters.ts";
+import { FILE_BY_ID_READ, FILE_BY_ID_REACH, ORG_READ_REACH } from "../parameters.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`, `runId`,
@@ -299,7 +299,7 @@ export const filesPaths = {
       description:
         "Fetch a file's metadata, including the derived `downloadable` flag and — for a " +
         "previewable file — a freshly minted `preview_url`. " +
-        FILE_BY_ID_REACH +
+        FILE_BY_ID_READ +
         " On top of it access is inherited from the file's container. A credential whose " +
         "scopes omit `files:read` is refused (403).",
       parameters: [
@@ -401,7 +401,7 @@ export const filesPaths = {
       summary: "Download file content",
       description:
         "Download the file bytes with `Content-Disposition: attachment`. " +
-        FILE_BY_ID_REACH +
+        FILE_BY_ID_READ +
         " A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public " +
         "endpoint), responds `307` with a short-lived presigned `Location`; otherwise " +
         "proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag " +

@@ -172,9 +172,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `not_granted`. `invoke_operation` answers as the REST route does.
   - REST by id and lists: `GET /api/files/{id}`, `/content`, `DELETE` and `POST …/keep` act on
     the file in its own space, `files:delete` judged there, so the capabilities a read returns
-    are what delete and keep do, from any `X-Space-Id`. A credential whose scopes omit
-    `files:read` still gets `403`. A run's file list (`GET /api/files?runId=`) shows its
-    inputs only to a caller who reads the run, each under the same rule.
+    are what delete and keep do, from any `X-Space-Id`. Reading by id needs `files:read` in
+    the file's space (a credential whose scopes omit it still gets `403` on `GET`); `DELETE`
+    and `keep` need what they always did, `files:delete` there or being the file's creator.
+    A run's file list (`GET /api/files?runId=`) lists nothing of a run the caller may not
+    read (inputs, launch uploads, outputs), and a reader its inputs each under the same rule.
+  - The chat's MCP credential acts in one space per request for reads too: a file named by id
+    (`read_file`, `invoke_operation getFile`, a run input of `run_and_wait`, `GET /api/files/{id}`)
+    is read in the space the call names, never in another space the conversation acts in; its
+    own uploads are read from any of them. Sessions and MCP tokens keep reading a file in any
+    space where you hold a role.
   - Space-pinned MCP endpoint (`/api/mcp/o/{org}/s/{space}`): every tool of the request, its
     dispatched operations included, reaches that space only (file reads, package authorisation
     and placement), so a package homed in another space is out of reach there.

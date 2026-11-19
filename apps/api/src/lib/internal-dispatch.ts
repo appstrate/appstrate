@@ -69,23 +69,14 @@ export function isInternalDispatch(headers: Headers): boolean {
  */
 const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
 
-/**
- * A dispatch's space. `endpoint`: the space-pinned MCP endpoint confines the whole request to it,
- * reads by id included; otherwise a credential bound to a set of spaces acts in that one space per
- * request, which bounds the reads spanning spaces, not a file named by id.
- */
-export interface DispatchSpacePin {
-  spaceId: string;
-  endpoint: boolean;
-}
-
-/** The `app.fetch` env of a dispatch confined to `pin`. */
-export function dispatchSpacePinEnv(pin: DispatchSpacePin): Record<symbol, DispatchSpacePin> {
-  return { [DISPATCH_SPACE_PIN]: pin };
+/** The `app.fetch` env of a dispatch confined to `spaceId`. */
+export function dispatchSpacePinEnv(spaceId: string): Record<symbol, string> {
+  return { [DISPATCH_SPACE_PIN]: spaceId };
 }
 
 /** The space this request is a dispatch confined to, if it is one. */
-export function dispatchSpacePin(c: Context): DispatchSpacePin | undefined {
+export function dispatchSpacePin(c: Context): string | undefined {
   const env = c.env as Record<symbol, unknown> | undefined;
-  return env?.[DISPATCH_SPACE_PIN] as DispatchSpacePin | undefined;
+  const pin = env?.[DISPATCH_SPACE_PIN];
+  return typeof pin === "string" ? pin : undefined;
 }

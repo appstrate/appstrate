@@ -80,7 +80,8 @@ test("a drop in « Tous les espaces » stages the file in the personal space", a
         await expect
           .poll(async () => {
             const listed = await apiClient.withSpace(personal!.id).get("/files");
-            return JSON.stringify(await listed.json());
+            const { data } = (await listed.json()) as { data: { name: string }[] };
+            return data.map((file) => file.name);
           })
           .toContain("depose.txt");
       },
