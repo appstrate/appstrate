@@ -63,6 +63,7 @@ interface PiToolResult {
   content: Array<
     { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
   >;
+  isError?: true;
   /** Local receipts replacing live file contents on SSE and in replay. */
   persistedContent?: Array<{ type: "text"; text: string }>;
   details: unknown;
@@ -200,10 +201,21 @@ async function relayedToolResult(
   scope: OfferScope,
   modelSeesImages: boolean,
 ): Promise<PiToolResult> {
-  const projected = mcpResultToPi(result, scope);
-  if (result.isError || !result.content.some((block) => block.type === "image")) return projected;
+  const blocks = result.content.map((block) => {
+    const audience = block.annotations?.audience;
+    if (audience && !audience.includes("assistant")) {
+      return {
+        type: "text" as const,
+        text: "Tool content omitted from model input by its audience annotation.",
+      };
+    }
+    return block;
+  });
+  const projected = mcpResultToPi({ ...result, content: blocks }, scope);
+  if (result.isError) projected.isError = true;
+  if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
-  for (const [index, block] of result.content.entries()) {
+  for (const [index, block] of blocks.entries()) {
     if (block.type === "image") content[index] = await liveRelayedImage(block, modelSeesImages);
   }
   const persistedContent = content.map((block) =>

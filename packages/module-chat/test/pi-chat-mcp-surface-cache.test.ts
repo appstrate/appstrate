@@ -58,7 +58,7 @@ function register(factories: Array<(pi: ExtensionAPI) => void>): RegisteredTool[
  * every `initialize` a 500 from then on; `initGate`, while set, holds every
  * `initialize` until it resolves.
  */
-function mcpStub(imageBlocks?: Array<Record<string, unknown>>) {
+function mcpStub(imageBlocks?: Array<Record<string, unknown>>, isError = false) {
   const methods: string[] = [];
   const state: { failInitialize: boolean; initGate: Promise<void> | null } = {
     failInitialize: false,
@@ -177,6 +177,7 @@ function mcpStub(imageBlocks?: Array<Record<string, unknown>>) {
         if (imageBlocks) {
           return reply({
             content: imageBlocks,
+            isError,
             ...(remote ? { _meta: { "dev.appstrate/relayed": true } } : {}),
           });
         }
@@ -573,6 +574,55 @@ describe("inline images from remote integration tools", () => {
       expect(JSON.stringify(chunks)).not.toContain(data);
       expect(stub.count("tools/call")).toBe(1);
       expect(stub.count("resources/read")).toBe(0);
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("keeps an error screenshot for the assistant while withholding user-only blocks", async () => {
+    const audience = { audience: ["user"] };
+    const hiddenData = Buffer.from("user-only-image").toString("base64");
+    const diagnostic = { type: "text", text: "Preview failed" };
+    const stub = mcpStub(
+      [
+        diagnostic,
+        { ...image, annotations: { audience: ["user", "assistant"] } },
+        { ...image, data: hiddenData, annotations: audience },
+        { type: "text", text: "private caption", annotations: audience },
+      ],
+      true,
+    );
+    const turn = await buildTurn(stub, "file-reader", undefined);
+    try {
+      const call = register(turn.extensionFactories).find(
+        (t) => t.name === "call_integration_tool",
+      )!;
+      const result = await call.execute("diagnostic", { tool: "typed" });
+      expect(result).toMatchObject({ isError: true });
+      expect(result.content.slice(0, 2)).toEqual([diagnostic, image]);
+      expect(result.content.slice(2, 4)).toEqual(
+        Array(2).fill({
+          type: "text",
+          text: "Tool content omitted from model input by its audience annotation.",
+        }),
+      );
+      const chunks = new PiChatUiStreamMapper().map({
+        type: "tool_execution_end",
+        toolName: call.name,
+        toolCallId: "diagnostic",
+        result,
+        isError: true,
+      });
+      expect(chunks).toContainEqual(
+        expect.objectContaining({
+          type: "tool-output-error",
+          errorText: expect.stringContaining("Preview failed"),
+        }),
+      );
+      expect(JSON.stringify(chunks)).toContain("supplied for this turn");
+      for (const secret of [data, hiddenData, "private caption"]) {
+        expect(JSON.stringify(chunks)).not.toContain(secret);
+      }
     } finally {
       await turn.close();
     }
