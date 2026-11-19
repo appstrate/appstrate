@@ -2,7 +2,7 @@
 
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
+import { truncateBillingTables, getBillingDb } from "../../helpers/db.ts";
 import {
   seedBillingAccount,
   seedBillingManager,
@@ -19,11 +19,11 @@ import {
   _resetBillingSweeperForTests,
 } from "../../../src/billing/billing-sweeper.ts";
 import { billingAccounts, freeTierClaims, orgUsageRecords } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
-// EE owns its DB now — no org stub/FK to seed before onOrgCreate.
+// The billing module owns its DB now — no org stub/FK to seed before onOrgCreate.
 async function testOrgCreated(orgId: string, email: string): Promise<void> {
   return onOrgCreate(orgId, email);
 }
@@ -32,7 +32,7 @@ describe("post-signup", () => {
   const orgId = "00000000-0000-4000-a000-000000000050";
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
   });
 
@@ -40,7 +40,7 @@ describe("post-signup", () => {
     it("creates a billing account with 5000 credits quota for a new email", async () => {
       await testOrgCreated(orgId, "alice@example.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -58,7 +58,7 @@ describe("post-signup", () => {
       // an invoice to a rewritten address is a different job.
       await testOrgCreated(orgId, "Alice.Smith+billing@gmail.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -71,7 +71,7 @@ describe("post-signup", () => {
     it("inserts a free tier claim for new emails", async () => {
       await testOrgCreated(orgId, "bob@example.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [claim] = await db
         .select()
         .from(freeTierClaims)
@@ -86,7 +86,7 @@ describe("post-signup", () => {
       const orgId2 = "00000000-0000-4000-a000-000000000051";
       await testOrgCreated(orgId2, "claimed@example.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -108,7 +108,7 @@ describe("post-signup", () => {
         testOrgCreated(orgB, "race@example.com"),
       ]);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const accounts = await db
         .select({ creditQuota: billingAccounts.creditQuota })
         .from(billingAccounts);
@@ -120,7 +120,7 @@ describe("post-signup", () => {
     it("normalizes email to lowercase", async () => {
       await testOrgCreated(orgId, "Alice@Example.COM");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [claim] = await db
         .select()
         .from(freeTierClaims)
@@ -136,7 +136,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "a.l.i.c.e@gmail.com");
       await testOrgCreated(orgId2, "alice@gmail.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -153,7 +153,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "alice+test@example.com");
       await testOrgCreated(orgId2, "alice+other@example.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -170,7 +170,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "alice@googlemail.com");
       await testOrgCreated(orgId2, "alice@gmail.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -187,7 +187,7 @@ describe("post-signup", () => {
       await testOrgCreated(orgId1, "a.l.i.c.e+tag@googlemail.com");
       await testOrgCreated(orgId2, "alice@gmail.com");
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account2] = await db
         .select()
         .from(billingAccounts)
@@ -247,23 +247,23 @@ describe("post-signup", () => {
 
       await onOrgDelete(orphanOrg);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       expect(
         await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orphanOrg)),
       ).toHaveLength(0);
       expect(await listBillingManagers(orphanOrg)).toHaveLength(0);
     });
 
-    it("deletes all of the org's EE-owned rows (no FK cascade exists)", async () => {
-      // EE runs its own DB — onOrgDelete is the ONLY thing that cleans up
-      // an org's rows. Seed every org-keyed EE table, then assert empty.
+    it("deletes all of the org's module-owned rows (no FK cascade exists)", async () => {
+      // The billing module runs its own DB — onOrgDelete is the ONLY thing that cleans up
+      // an org's rows. Seed every org-keyed billing table, then assert empty.
       await seedBillingAccount({ orgId, creditsUsed: 100, creditQuota: 5000 });
       await seedUsageRecord({ orgId, contextId: "run-del-001", costCredits: 100 });
       await seedBillingManager({ orgId, userId: "user-finance" });
 
       await onOrgDelete(orgId);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const accounts = await db
         .select()
         .from(billingAccounts)
@@ -281,7 +281,7 @@ describe("post-signup", () => {
     const orgId = "00000000-0000-4000-a000-000000000061";
 
     async function account() {
-      const db = getEeDb();
+      const db = getBillingDb();
       const [row] = await db.select().from(billingAccounts).where(eq(billingAccounts.orgId, orgId));
       return row ?? null;
     }
@@ -323,7 +323,7 @@ describe("post-signup", () => {
         requests.filter((r) => r.method === "DELETE" && r.path === "/v1/subscriptions/sub_retry"),
       ).toHaveLength(2); // the failed attempt, then the successful retry
       expect(await account()).toBeNull();
-      const db = getEeDb();
+      const db = getBillingDb();
       expect(await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId))).toHaveLength(0); // prettier-ignore
     });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SubscriptionExpiredProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { wrapEeLayout, ctaButton } from "../layout.ts";
+import { wrapBillingLayout, ctaButton } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -39,6 +39,6 @@ ${ctaButton(s.button, resubscribeUrl)}`;
 
   return {
     subject: s.subject,
-    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapBillingLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

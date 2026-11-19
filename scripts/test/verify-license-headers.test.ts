@@ -1,49 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The classifier behind `verify:license-boundary`.
+ * The classifier behind `verify:license-headers`.
  *
  * The repo scan reports only what the tree happens to contain; these assertions
- * drive each branch from synthetic input, so the commercial side — the whole
- * reason the gate exists — stays exercised whatever the tree looks like.
+ * drive each branch from synthetic input.
  */
 
 import { describe, it, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  LICENSED_GLOBS,
-  checkLicenseHeader,
-  expectedLicenseFor,
-  generatorOf,
-} from "../verify-license-boundary.ts";
+import { LICENSED_GLOBS, checkLicenseHeader, generatorOf } from "../verify-license-headers.ts";
 import { SOURCE_GLOBS } from "../lib/tracked-files.ts";
 
 /** The single entry in the gate's `GENERATED_ALLOWLIST`. */
 const GENERATED_FILE = "apps/web/src/api/schema.d.ts";
 
 const APACHE = "// SPDX-License-Identifier: Apache-2.0";
-const COMMERCIAL = "// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial";
-
-describe("expectedLicenseFor", () => {
-  it("puts the root ee/ directory under the commercial licence", () => {
-    expect(expectedLicenseFor("ee/src/index.ts")).toBe("LicenseRef-Appstrate-Commercial");
-  });
-
-  it("puts everything else under Apache-2.0", () => {
-    expect(expectedLicenseFor("packages/module-chat/src/index.ts")).toBe("Apache-2.0");
-    expect(expectedLicenseFor("packages/module-billing/src/index.ts")).toBe("Apache-2.0");
-    // Prefix matching from the root, not substring: a nested `ee/` and a
-    // sibling directory whose name merely starts the same way are Apache-2.0.
-    expect(expectedLicenseFor("packages/ee/src/index.ts")).toBe("Apache-2.0");
-    expect(expectedLicenseFor("eee/src/index.ts")).toBe("Apache-2.0");
-  });
-});
+const OTHER_LICENCE = "// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial";
 
 describe("checkLicenseHeader", () => {
-  it("accepts each side carrying its own header", () => {
+  it("accepts the Apache-2.0 header", () => {
     expect(checkLicenseHeader("apps/api/src/index.ts", [APACHE])).toBeNull();
-    expect(checkLicenseHeader("ee/src/index.ts", [COMMERCIAL])).toBeNull();
+    expect(checkLicenseHeader("packages/module-billing/src/index.ts", [APACHE])).toBeNull();
   });
 
   it("accepts a header preceded by a shebang or a triple-slash directive", () => {
@@ -68,17 +47,8 @@ describe("checkLicenseHeader", () => {
     );
   });
 
-  it("reports Apache-2.0 inside the commercial directory", () => {
-    // The defect the gate is for: a file moved into `ee/` keeps the licence of
-    // where it came from, and nothing else in the toolchain notices.
-    const problem = checkLicenseHeader("ee/src/sso.ts", [APACHE]);
-    expect(problem).toContain(
-      "expected `// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial`",
-    );
-  });
-
-  it("reports the commercial licence outside that directory", () => {
-    const problem = checkLicenseHeader("packages/core/src/x.ts", [COMMERCIAL]);
+  it("reports any other licence", () => {
+    const problem = checkLicenseHeader("packages/core/src/x.ts", [OTHER_LICENCE]);
     expect(problem).toContain("expected `// SPDX-License-Identifier: Apache-2.0`");
   });
 

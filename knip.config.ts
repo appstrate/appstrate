@@ -358,7 +358,7 @@ const config: KnipConfig = {
    * runs; none of them is reachable from a workspace this config models, and
    * its dependencies resolve from its own `node_modules`. Without this, every
    * file in it reads as unused. Its build, type check and link check run in
-   * `.github/workflows/docs-site.yml`; `lint` and `verify:license-boundary`
+   * `.github/workflows/docs-site.yml`; `lint` and `verify:license-headers`
    * still cover its tracked sources here.
    */
   ignore: ["docs/web/**"],

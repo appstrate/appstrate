@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount, seedBillingManager } from "../../helpers/seed.ts";
 import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -14,10 +14,10 @@ import {
   resolvePrincipalPermissions,
   setPrincipalPermissionsProviders,
 } from "@appstrate/core/principal-permissions";
-import eeModule from "../../../src/index.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import billingModule from "../../../src/index.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 /**
  * Billing managers — org users who hold `billing:*` without an admin role
@@ -39,7 +39,7 @@ describe("billing managers", () => {
   }
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     await seedBillingAccount({ orgId });
     seedOrgMembers(orgId, [
       { userId: "user-owner", email: "owner@example.com", role: "owner" },
@@ -209,12 +209,14 @@ describe("billing managers", () => {
     /**
      * Through core's own registry and cache, which is what the platform runs:
      * the module declares the surface, the platform caches the answer for 10s,
-     * and only EE's own `invalidatePrincipalPermissions` call can make a
+     * and only the billing module's own `invalidatePrincipalPermissions` call can make a
      * write visible before the TTL. A write that forgot to invalidate passes
      * every test above and fails this one.
      */
     it("grants both strings through core, and a write is visible immediately", async () => {
-      setPrincipalPermissionsProviders([{ moduleId: "EE", ...eeModule.principalPermissions! }]);
+      setPrincipalPermissionsProviders([
+        { moduleId: "billing", ...billingModule.principalPermissions! },
+      ]);
       try {
         const ctx = { orgId, userId: "user-finance" };
         expect([...(await resolvePrincipalPermissions(ctx))]).toEqual([]);
@@ -240,11 +242,13 @@ describe("billing managers", () => {
    */
   describe("onOrgMemberRemove", () => {
     const otherOrgId = "00000000-0000-4000-a000-0000000000b1";
-    const onOrgMemberRemove = eeModule.events!.onOrgMemberRemove!;
+    const onOrgMemberRemove = billingModule.events!.onOrgMemberRemove!;
 
     it("drops the manager's row and grant, and re-joining does not restore it", async () => {
       await seedBillingManager({ orgId, userId: "user-finance" });
-      setPrincipalPermissionsProviders([{ moduleId: "EE", ...eeModule.principalPermissions! }]);
+      setPrincipalPermissionsProviders([
+        { moduleId: "billing", ...billingModule.principalPermissions! },
+      ]);
       try {
         const ctx = { orgId, userId: "user-finance" };
         // Warm the platform's cache with the grant: the handler must invalidate it.

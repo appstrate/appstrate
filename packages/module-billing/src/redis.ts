@@ -2,15 +2,15 @@
 
 import Redis from "ioredis";
 
-let eeRedis: Redis | null = null;
+let billingRedis: Redis | null = null;
 
-export function getEeRedis(): Redis | null {
-  return eeRedis;
+export function getBillingRedis(): Redis | null {
+  return billingRedis;
 }
 
-export function initEeRedis(redisUrl: string): void {
-  if (!redisUrl) return; // Redis is optional — EE features degrade gracefully
-  eeRedis = new Redis(redisUrl, {
+export function initBillingRedis(redisUrl: string): void {
+  if (!redisUrl) return; // Redis is optional — billing features degrade gracefully
+  billingRedis = new Redis(redisUrl, {
     keyPrefix: "ee:",
     maxRetriesPerRequest: 3,
     enableReadyCheck: true,

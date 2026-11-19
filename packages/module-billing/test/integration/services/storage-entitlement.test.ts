@@ -3,9 +3,9 @@
 /**
  * Plan → storage-entitlement projection.
  *
- * EE owns the platform's per-org document storage limit and projects the
+ * The billing module owns the platform's per-org document storage limit and projects the
  * billing plan onto it via `PlatformServices.setFileStorageLimit` (the
- * only platform WRITE EE performs — recorded by the mock, no platform DB).
+ * only platform WRITE the billing module performs — recorded by the mock, no platform DB).
  * Covered here:
  *   - the sync service itself (plan mapping, unknown plan, missing account,
  *     platform write failure)
@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount, seedBillingCursor } from "../../helpers/seed.ts";
 import {
   resetStripeMock,
@@ -27,7 +27,7 @@ import {
 import { mockStorageLimitCalls, resetMockStorageLimits } from "../../helpers/mock-platform.ts";
 import { setMockStorageLimitError, setMockStorageLimitHook } from "../../helpers/mock-platform.ts";
 import { eq } from "drizzle-orm";
-import { getEeDb } from "../../../src/db.ts";
+import { getBillingDb } from "../../../src/db.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
 import {
   syncOrgStorageEntitlement,
@@ -46,11 +46,11 @@ import {
 import { setMockLedgerListHook } from "../../helpers/mock-platform.ts";
 import { logger } from "../../../src/logger.ts";
 import { getPlans, GIB } from "../../../src/config.ts";
-import { _resetEeEnvForTests } from "../../../src/env.ts";
-import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
+import { _resetBillingEnvForTests } from "../../../src/env.ts";
+import { useBillingReconciliationEnv, useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
-useEeReconciliationEnv();
+useBillingTestSeams();
+useBillingReconciliationEnv();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -58,7 +58,7 @@ describe("storage entitlement", () => {
   const orgId = "00000000-0000-4000-a000-000000000060";
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
     resetMockStorageLimits();
   });
@@ -129,7 +129,7 @@ describe("storage entitlement", () => {
       setMockStorageLimitHook(async () => {
         if (fired) return;
         fired = true;
-        await getEeDb()
+        await getBillingDb()
           .update(billingAccounts)
           .set({ planId: "pro" })
           .where(eq(billingAccounts.orgId, orgId));
@@ -152,7 +152,7 @@ describe("storage entitlement", () => {
       let i = 0;
       setMockStorageLimitHook(async () => {
         const next = flip[i++ % flip.length]!;
-        await getEeDb()
+        await getBillingDb()
           .update(billingAccounts)
           .set({ planId: next })
           .where(eq(billingAccounts.orgId, orgId));
@@ -306,8 +306,8 @@ describe("storage entitlement", () => {
 
   describe("throttled reconcile on the billing tick", () => {
     beforeEach(() => {
-      process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-      _resetEeEnvForTests();
+      process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+      _resetBillingEnvForTests();
       _resetBillingSweeperForTests();
     });
 
@@ -381,18 +381,18 @@ describe("shutdown drain", () => {
   const orgId = "00000000-0000-4000-a000-000000000062";
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetMockStorageLimits();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "1";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.BILLING_RECONCILIATION_INTERVAL_SECONDS = "1";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
   });
 
   it("REGRESSION: waits for a reconcile the tick started while the drain was already waiting", async () => {
     // The tick STARTS the reconcile from inside the very promise a drain entered
     // mid-sweep is awaiting, so a drain that snapshotted [sweep, resync] once would
-    // return the instant the sweep finished and let `closeEeDb()` run under it.
+    // return the instant the sweep finished and let `closeBillingDb()` run under it.
     await seedBillingAccount({ orgId, planId: "starter" });
     // Seed the cursor so the FIRST tick reads the ledger (and blocks in the hook below)
     // instead of returning early to seed it, leaving the reconcile un-started.

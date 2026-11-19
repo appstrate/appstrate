@@ -2,23 +2,23 @@
 
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import { flushEeRedis } from "../../helpers/redis.ts";
-import { eeRateLimit } from "../../../src/middleware.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { flushBillingRedis } from "../../helpers/redis.ts";
+import { billingRateLimit } from "../../../src/middleware.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 describe("middleware", () => {
   beforeEach(async () => {
-    await flushEeRedis();
+    await flushBillingRedis();
   });
 
-  describe("eeRateLimit", () => {
+  describe("billingRateLimit", () => {
     function createRateLimitApp(maxPerMinute: number) {
       const app = new Hono();
       app.use(
         "/test",
-        eeRateLimit(maxPerMinute, (c) => `test:${c.req.header("X-Client-Id") ?? "default"}`),
+        billingRateLimit(maxPerMinute, (c) => `test:${c.req.header("X-Client-Id") ?? "default"}`),
       );
       app.get("/test", (c) => c.json({ ok: true }));
       return app;

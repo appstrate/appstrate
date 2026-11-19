@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getStripe } from "./client.ts";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 
 export async function createPortalSession(orgId: string, appUrl: string): Promise<string> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({ stripeCustomerId: billingAccounts.stripeCustomerId })
     .from(billingAccounts)

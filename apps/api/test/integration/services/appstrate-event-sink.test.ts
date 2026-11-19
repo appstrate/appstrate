@@ -435,8 +435,8 @@ describe("persistRunEvent", () => {
    * The ledger row's `cost_usd` is computed by the PLATFORM, from
    * `runs.model_cost` × the reported token counts — never taken from the `cost`
    * the agent container reports alongside them. The container is the sandbox the
-   * platform is isolating, and `llm_usage.cost_usd` is the sole number the ee
-   * billing module debits credits from.
+   * platform is isolating, and `llm_usage.cost_usd` is the sole number the billing
+   * module's billing module debits credits from.
    *
    * Every test here makes the container's figure DIFFER from the correct product
    * on purpose, so an assertion passing by coincidence is impossible.

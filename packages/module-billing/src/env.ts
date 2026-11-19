@@ -16,14 +16,14 @@ export const LEDGER_LIST_MAX_LIMIT = 1000;
  * literal specifier would be an Apache-2.0 file naming this package, which
  * `verify-module-isolation.ts` refuses.
  */
-export const eeEnvSchema = z
+export const billingEnvSchema = z
   .object({
     STRIPE_SECRET_KEY: z.string().min(1),
     STRIPE_WEBHOOK_SECRET: z.string().min(1),
     STRIPE_PRICE_ID_STARTER: z.string().min(1),
     STRIPE_PRICE_ID_PRO: z.string().min(1),
 
-    // Billing sweeper — the EE metering consumer. Each tick advances a
+    // Billing sweeper — the billing metering consumer. Each tick advances a
     // serial-`id` watermark through the platform's append-only `llm_usage`
     // ledger, claims platform-provided rows into `ee_billed_llm_usage`, and
     // debits credits. A failed pass advances nothing; the next tick retries.
@@ -33,8 +33,8 @@ export const eeEnvSchema = z
     //
     // INTERVAL=0 pauses METERING only; the tick's maintenance half keeps its own
     // timer (see `runMaintenance` in billing/billing-sweeper.ts).
-    EE_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
-    EE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).default(100),
+    BILLING_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
+    BILLING_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).default(100),
 
     // How far BELOW the watermark every sweep pass re-reads the ledger.
     //
@@ -76,7 +76,7 @@ export const eeEnvSchema = z
     //
     // 0 disables replay, restoring the pre-fix cursor AND its silent-loss window.
     // That is an emergency escape hatch, not a tuning knob.
-    EE_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
+    BILLING_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
 
     // How long the sweep may have been ABSENT before it refuses to resume over the
     // gap it left. The predicate is on `assertCursorResumable` in
@@ -85,7 +85,7 @@ export const eeEnvSchema = z
     // DEFAULT 86400 (a day). A sweep that has not confirmed the watermark in 24
     // hours on a platform that kept metering was not running. 0 disables the
     // check and resumes over any gap — the "bill it, whatever its size" answer.
-    EE_RECONCILIATION_MAX_GAP_SECONDS: z.coerce.number().int().min(0).default(86400),
+    BILLING_RECONCILIATION_MAX_GAP_SECONDS: z.coerce.number().int().min(0).default(86400),
   })
   // The two knobs SHARE one read budget (a pass reads replay ON TOP of batch and
   // is capped at LEDGER_LIST_MAX_LIMIT). Rejected at boot rather than clamped: a
@@ -93,27 +93,27 @@ export const eeEnvSchema = z
   // unreachable and its own warning dead with it.
   .refine(
     (env) =>
-      env.EE_RECONCILIATION_REPLAY_WINDOW + env.EE_RECONCILIATION_BATCH_SIZE <=
+      env.BILLING_RECONCILIATION_REPLAY_WINDOW + env.BILLING_RECONCILIATION_BATCH_SIZE <=
       LEDGER_LIST_MAX_LIMIT,
     {
-      message: `EE_RECONCILIATION_BATCH_SIZE + EE_RECONCILIATION_REPLAY_WINDOW must not exceed ${LEDGER_LIST_MAX_LIMIT}, the platform's usage.list ceiling — a pass reads the replay window ON TOP of the batch, so a larger sum shrinks the forward slice below the batch size instead of reading more`,
-      path: ["EE_RECONCILIATION_BATCH_SIZE"],
+      message: `BILLING_RECONCILIATION_BATCH_SIZE + BILLING_RECONCILIATION_REPLAY_WINDOW must not exceed ${LEDGER_LIST_MAX_LIMIT}, the platform's usage.list ceiling — a pass reads the replay window ON TOP of the batch, so a larger sum shrinks the forward slice below the batch size instead of reading more`,
+      path: ["BILLING_RECONCILIATION_BATCH_SIZE"],
     },
   );
 
-export type EeEnv = z.infer<typeof eeEnvSchema>;
+export type BillingEnv = z.infer<typeof billingEnvSchema>;
 
-let _env: EeEnv | null = null;
+let _env: BillingEnv | null = null;
 
-export function getEeEnv(): EeEnv {
+export function getBillingEnv(): BillingEnv {
   if (!_env) {
-    _env = eeEnvSchema.parse(process.env);
+    _env = billingEnvSchema.parse(process.env);
   }
   return _env;
 }
 
 /**
- * One line naming every environment variable {@link getEeEnv} rejected, and why
+ * One line naming every environment variable {@link getBillingEnv} rejected, and why
  * — `STRIPE_SECRET_KEY (Required), STRIPE_PRICE_ID_PRO (…)`. A boot crash has to
  * say WHICH of the module's variables is wrong; "not configured" sends an
  * operator to read the schema.
@@ -124,10 +124,10 @@ export function describeEnvIssues(err: unknown): string {
 }
 
 /**
- * Test-only — drop the cached parsed env so the next `getEeEnv()` re-
+ * Test-only — drop the cached parsed env so the next `getBillingEnv()` re-
  * reads `process.env`. Lets a single test file flip env vars between
  * cases without spawning a fresh process.
  */
-export function _resetEeEnvForTests(): void {
+export function _resetBillingEnvForTests(): void {
   _env = null;
 }

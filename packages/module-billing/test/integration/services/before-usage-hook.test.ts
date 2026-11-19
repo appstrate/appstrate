@@ -15,29 +15,29 @@
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { getEeDb, truncateEeTables } from "../../helpers/db.ts";
+import { getBillingDb, truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
-import eeModule from "../../../src/index.ts";
+import billingModule from "../../../src/index.ts";
 import {
   ESTIMATED_MODEL_CREDITS_PER_RUN,
   ESTIMATED_MODEL_CREDITS_PER_CHAT_TURN,
 } from "../../../src/config.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000900";
 
 function beforeUsage(
-  ...args: Parameters<NonNullable<NonNullable<typeof eeModule.hooks>["beforeUsage"]>>
+  ...args: Parameters<NonNullable<NonNullable<typeof billingModule.hooks>["beforeUsage"]>>
 ) {
-  return eeModule.hooks!.beforeUsage!(...args);
+  return billingModule.hooks!.beforeUsage!(...args);
 }
 
 describe("beforeUsage hook", () => {
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
   });
 
   it("allows a system run when the org has credits (null)", async () => {
@@ -272,7 +272,7 @@ describe("beforeUsage hook", () => {
       });
       expect(result).toBeNull();
 
-      const rows = await getEeDb()
+      const rows = await getBillingDb()
         .select({ orgId: billingAccounts.orgId })
         .from(billingAccounts)
         .where(eq(billingAccounts.orgId, orgId));
@@ -451,7 +451,7 @@ describe("beforeUsage hook", () => {
   });
 
   describe("fail-CLOSED on an unexpected error", () => {
-    // This hook is the only thing between an unreachable EE DB and unmetered
+    // This hook is the only thing between an unreachable billing DB and unmetered
     // usage: it must BLOCK, not admit. Nothing pinned that before — replacing
     // its `return { status: 500 }` with `return null`, i.e. admitting unbilled
     // usage whenever the billing DB hiccups, broke no test.

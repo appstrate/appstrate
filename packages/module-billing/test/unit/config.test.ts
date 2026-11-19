@@ -16,9 +16,9 @@ import {
   COMPUTE_CREDITS_PER_CHAT_TURN,
   DEFAULT_QUOTE_RATES,
 } from "../../src/config.ts";
-import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+import { applyBillingFixtureEnv } from "../helpers/fixture-env.ts";
 
-applyEeFixtureEnv();
+applyBillingFixtureEnv();
 
 describe("config", () => {
   describe("getPlans()", () => {

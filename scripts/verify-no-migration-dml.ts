@@ -36,7 +36,7 @@
  *
  * Only NEW files are gated. Every migration already in a directory has run
  * on real databases and cannot be changed, so the ones that predate this rule
- * are listed in `GRANDFATHERED` / `EE_GRANDFATHERED` below — explicitly, so the
+ * are listed in `GRANDFATHERED` / `BILLING_GRANDFATHERED` below — explicitly, so the
  * exemption is reviewable rather than implicit, and checked against the directory so an
  * entry cannot go on excusing a name nothing occupies.
  */
@@ -99,7 +99,7 @@ export const GRANDFATHERED: readonly string[] = [
  * `0003_normalize_free_subscription_status` rewrites legacy free-tier rows.
  * Both shipped and have been applied; the list is frozen the same way.
  */
-export const EE_GRANDFATHERED: readonly string[] = [
+export const BILLING_GRANDFATHERED: readonly string[] = [
   "0001_cursor_billing",
   "0003_normalize_free_subscription_status",
 ];
@@ -113,7 +113,7 @@ export interface MigrationSet {
 
 export const SCANS: readonly MigrationSet[] = [
   { dir: "packages/db/drizzle", grandfathered: GRANDFATHERED },
-  { dir: "packages/module-billing/drizzle/migrations", grandfathered: EE_GRANDFATHERED },
+  { dir: "packages/module-billing/drizzle/migrations", grandfathered: BILLING_GRANDFATHERED },
 ];
 
 /**

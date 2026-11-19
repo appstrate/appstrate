@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SubscriptionConfirmedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { ctaButton, formatDate, interpolate, wrapEeLayout } from "../layout.ts";
+import { ctaButton, formatDate, interpolate, wrapBillingLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -44,6 +44,6 @@ ${ctaButton(s.button, "/")}`;
 
   return {
     subject: s.subject,
-    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapBillingLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

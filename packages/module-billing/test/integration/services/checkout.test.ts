@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { resetStripeMock, setCheckoutResponse, requests } from "../../helpers/stripe.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
 import { getPlans } from "../../../src/config.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 describe("createCheckoutSession", () => {
   const orgId = "00000000-0000-4000-a000-000000000020";
   const appUrl = "http://localhost:3000";
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
   });
 

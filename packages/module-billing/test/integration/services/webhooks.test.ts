@@ -3,7 +3,7 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import type Stripe from "stripe";
 import { eq } from "drizzle-orm";
-import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
+import { truncateBillingTables, getBillingDb } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import {
   resetStripeMock,
@@ -15,9 +15,9 @@ import {
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { billingAccounts, stripeEvents } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -25,7 +25,7 @@ describe("handleWebhook", () => {
   const orgId = "00000000-0000-4000-a000-000000000040";
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
   });
 
@@ -69,7 +69,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -108,7 +108,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -152,7 +152,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -215,7 +215,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -254,7 +254,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -289,7 +289,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -324,7 +324,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -381,7 +381,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -436,7 +436,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -490,7 +490,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -545,7 +545,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -590,7 +590,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -636,7 +636,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -684,7 +684,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -724,7 +724,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -767,7 +767,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -786,7 +786,7 @@ describe("handleWebhook", () => {
     // are new, real, and about a subscription that no longer matters.
 
     async function account() {
-      const db = getEeDb();
+      const db = getBillingDb();
       const [row] = await db.select().from(billingAccounts).where(eq(billingAccounts.orgId, orgId));
       return row!;
     }
@@ -1084,7 +1084,7 @@ describe("handleWebhook", () => {
       await handleWebhook(body, signature);
 
       // Verify it was processed
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -1121,7 +1121,7 @@ describe("handleWebhook", () => {
     });
 
     it("deletes stale claims (>5min) for retry", async () => {
-      const db = getEeDb();
+      const db = getBillingDb();
 
       // Manually insert a stale stripe_event claim (6 minutes old)
       const staleTime = new Date(Date.now() - 6 * 60 * 1000);
@@ -1203,7 +1203,7 @@ describe("handleWebhook", () => {
       await handleWebhook(body, signature);
 
       // Account should remain unchanged
-      const db = getEeDb();
+      const db = getBillingDb();
       const [account] = await db
         .select()
         .from(billingAccounts)
@@ -1230,7 +1230,7 @@ describe("handleWebhook", () => {
 
       await handleWebhook(body, signature);
 
-      const db = getEeDb();
+      const db = getBillingDb();
       const [event] = await db
         .select()
         .from(stripeEvents)

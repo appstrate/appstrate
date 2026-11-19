@@ -82,11 +82,20 @@ Follow the [beta.68 to beta.69 maintenance procedure](docs/deployment/BETA_69.md
   resolves, and the platform refuses to boot with
   `Module "@appstrate/module-ee" could not be loaded`. Nothing maps the old
   name to the new one. The module's id in logs changes from `ee` to `billing`
-  (`Module loaded {"id":"billing"}`). Nothing else changes for a deployment: the
-  `ee_*` tables, the `drizzle.ee_migrations` journal, the `STRIPE_*` and
-  `EE_RECONCILIATION_*` variables and the `/api/billing/*` routes keep their
-  names, and no migration runs. `verify:license-boundary` now reserves the
-  root `ee/` directory for code under a commercial licence.
+  (`Module loaded {"id":"billing"}`). **The four `EE_RECONCILIATION_*`
+  variables are now `BILLING_RECONCILIATION_*`** (`_INTERVAL_SECONDS`,
+  `_BATCH_SIZE`, `_REPLAY_WINDOW`, `_MAX_GAP_SECONDS`): nothing reads the old
+  spelling, so a value left under it is silently ignored and the setting falls
+  back to its default. Rename them in the same window as `MODULES`. **The billing operation ids
+  and schema names drop their `Ee` prefix** (`getEeBillingAccount` →
+  `getBillingAccount`, `EeBillingPlan` → `BillingPlan`: nine operation ids and seven
+  schemas):
+  a client that calls an operation by id, an MCP `invoke_operation` included,
+  must use the new id; paths and payloads are unchanged. Nothing else changes
+  for a deployment: the `ee_*` tables, the `drizzle.ee_migrations` journal, the
+  `STRIPE_*` variables and the `/api/billing/*` routes keep their names, and no
+  migration runs. `verify:license-boundary` is now `verify:license-headers`:
+  every source file must declare `Apache-2.0`.
 
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default

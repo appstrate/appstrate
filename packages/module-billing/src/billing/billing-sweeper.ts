@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from "../logger.ts";
-import { getEeEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
+import { getBillingEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
 import { retryPendingCancellations } from "./org-cancellation.ts";
 import { resyncAllStorageEntitlements } from "./storage-entitlement.ts";
 import {
@@ -15,19 +15,19 @@ import {
 import { getPlatformServices } from "../platform.ts";
 
 /**
- * Periodic billing sweeper — the EE metering consumer.
+ * Periodic billing sweeper — the billing metering consumer.
  *
- * EE consumes the platform's append-only `llm_usage` ledger by serial-`id`
+ * The billing module consumes the platform's append-only `llm_usage` ledger by serial-`id`
  * cursor: each tick advances a watermark through the settled frontier, claims
  * the platform-provided ("system") rows into `ee_billed_llm_usage`, and
  * debits credits. A failed pass advances nothing and the next tick retries from
- * the last committed id. EE reads the ledger only through
+ * the last committed id. billing reads the ledger only through
  * `services.usage.list` / `services.usage.settledFrontier`; it never joins the
  * platform DB.
  *
  * Scope:
  *   - Each `sweepLedgerBatch` pass processes at most one batch
- *     (`EE_RECONCILIATION_BATCH_SIZE`). A tick DRAINS consecutive full
+ *     (`BILLING_RECONCILIATION_BATCH_SIZE`). A tick DRAINS consecutive full
  *     batches (up to `MAX_DRAIN_ITERATIONS`) so a backlog is worked down within
  *     the tick instead of trickling one batch per interval; the remainder rides
  *     the next tick.
@@ -55,7 +55,7 @@ import { getPlatformServices } from "../platform.ts";
  * exposes a fixed set of platform recorders with no generic counter or gauge a
  * billing counter could use.
  *
- * Pause METERING: set `EE_RECONCILIATION_INTERVAL_SECONDS=0`. The timer keeps
+ * Pause METERING: set `BILLING_RECONCILIATION_INTERVAL_SECONDS=0`. The timer keeps
  * running at {@link MAINTENANCE_INTERVAL_SECONDS} — see {@link runMaintenance}.
  */
 
@@ -86,14 +86,14 @@ const ALERT_AFTER_FAILED_TICKS = 3;
 
 /**
  * Max `sweepLedgerBatch` calls per tick when draining a backlog. Bounds a tick
- * to a finite amount of work (`MAX_DRAIN_ITERATIONS × EE_RECONCILIATION_BATCH_SIZE`
+ * to a finite amount of work (`MAX_DRAIN_ITERATIONS × BILLING_RECONCILIATION_BATCH_SIZE`
  * rows, e.g. 50 × 100 = 5000) so a huge backlog can't turn one tick into an
  * unbounded loop; the remainder rides the next tick.
  */
 const MAX_DRAIN_ITERATIONS = 50;
 
 /**
- * Tick cadence when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering. Its own, not a
+ * Tick cadence when `BILLING_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering. Its own, not a
  * fallback: {@link runMaintenance} is idempotent and, in steady state, one empty indexed SELECT.
  */
 const MAINTENANCE_INTERVAL_SECONDS = 300;
@@ -127,20 +127,20 @@ let inFlightResync: Promise<unknown> | null = null;
  * row and the replay window; the rest of a large ledger cannot change the decision.
  */
 export async function assertCursorResumable(cursor: CursorSeedResult): Promise<void> {
-  const env = getEeEnv();
+  const env = getBillingEnv();
   // Metering is paused on purpose: no sweep is about to resume over anything.
   // The gap keeps growing and is checked at the boot that un-pauses it.
-  if (env.EE_RECONCILIATION_INTERVAL_SECONDS === 0) return;
-  if (env.EE_RECONCILIATION_MAX_GAP_SECONDS === 0) return;
+  if (env.BILLING_RECONCILIATION_INTERVAL_SECONDS === 0) return;
+  if (env.BILLING_RECONCILIATION_MAX_GAP_SECONDS === 0) return;
 
   // Cheap half first: a fresh watermark needs no ledger read at all. A cursor
   // seeded by THIS boot is `defaultNow()`, so the cutover path falls out here.
   const absentSeconds = Math.floor((Date.now() - cursor.updatedAt.getTime()) / 1000);
-  if (absentSeconds <= env.EE_RECONCILIATION_MAX_GAP_SECONDS) return;
+  if (absentSeconds <= env.BILLING_RECONCILIATION_MAX_GAP_SECONDS) return;
 
   // One tick's full drain capacity: below it the next tick clears the gap by
   // itself, which is the ordinary catch-up this must not interrupt.
-  const drainCapacity = MAX_DRAIN_ITERATIONS * env.EE_RECONCILIATION_BATCH_SIZE;
+  const drainCapacity = MAX_DRAIN_ITERATIONS * env.BILLING_RECONCILIATION_BATCH_SIZE;
   let afterId = ledgerScanStart(cursor);
   let remaining = drainCapacity + 1 + cursor.lastLlmUsageId - afterId;
   let backlog = 0;
@@ -166,14 +166,14 @@ export async function assertCursorResumable(cursor: CursorSeedResult): Promise<v
       `Choose explicitly — forgive the gap with \`DELETE FROM ee_billing_cursor;\`, which makes ` +
       `the next boot re-seed the watermark AND floor_id at the settled frontier exactly as the ` +
       `original cutover did, so no row below it is ever read again; or bill it by setting ` +
-      `EE_RECONCILIATION_MAX_GAP_SECONDS above ${absentSeconds} (0 disables this check). ` +
+      `BILLING_RECONCILIATION_MAX_GAP_SECONDS above ${absentSeconds} (0 disables this check). ` +
       `Either way, organizations created while the sweep was absent have no ee_billing_accounts ` +
       `row — the sweep names each one, repair with \`bun run repair:account\`.`,
   );
 }
 
 /**
- * Start the periodic worker. `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses the
+ * Start the periodic worker. `BILLING_RECONCILIATION_INTERVAL_SECONDS=0` pauses the
  * METERING sweep only — see {@link runMaintenance}. Re-entry is guarded.
  */
 export function startBillingSweeper(): void {
@@ -181,13 +181,13 @@ export function startBillingSweeper(): void {
     logger.warn("billing sweeper already running");
     return;
   }
-  const env = getEeEnv();
-  const intervalSec = env.EE_RECONCILIATION_INTERVAL_SECONDS;
+  const env = getBillingEnv();
+  const intervalSec = env.BILLING_RECONCILIATION_INTERVAL_SECONDS;
   stopped = false;
 
   if (intervalSec === 0) {
     logger.info(
-      "billing metering paused (EE_RECONCILIATION_INTERVAL_SECONDS=0) — maintenance tick still running",
+      "billing metering paused (BILLING_RECONCILIATION_INTERVAL_SECONDS=0) — maintenance tick still running",
       { intervalSeconds: MAINTENANCE_INTERVAL_SECONDS },
     );
     scheduleNext(MAINTENANCE_INTERVAL_SECONDS, runMaintenance);
@@ -196,13 +196,13 @@ export function startBillingSweeper(): void {
 
   logger.info("billing sweeper started", {
     intervalSeconds: intervalSec,
-    batchSize: env.EE_RECONCILIATION_BATCH_SIZE,
+    batchSize: env.BILLING_RECONCILIATION_BATCH_SIZE,
   });
   scheduleNext(intervalSec, runBillingSweepTick);
 }
 
 /**
- * Stop the periodic sweep — called from the EE module's `shutdown()`.
+ * Stop the periodic sweep — called from the billing module's `shutdown()`.
  * Idempotent.
  */
 export function stopBillingSweeper(): void {
@@ -232,7 +232,7 @@ function scheduleNext(intervalSec: number, tick: () => Promise<unknown>): void {
 
 /**
  * How long {@link drainBillingSweeper} waits for in-flight work at shutdown: a full drain
- * tick, since a timeout expiring mid-pass lets `closeEeDb()` run under an open transaction.
+ * tick, since a timeout expiring mid-pass lets `closeBillingDb()` run under an open transaction.
  */
 const DRAIN_TIMEOUT_MS = 60_000;
 
@@ -246,7 +246,7 @@ const DRAIN_TIMEOUT_MS = 60_000;
  *
  * RE-READS AFTER EVERY WAIT, because the tick starts the reconcile from inside the very
  * promise this is awaiting: a single snapshot would return the moment the sweep finished,
- * letting `closeEeDb()` run under a reconcile that began in between.
+ * letting `closeBillingDb()` run under a reconcile that began in between.
  */
 export async function drainBillingSweeper(): Promise<void> {
   const deadline = Date.now() + DRAIN_TIMEOUT_MS;
@@ -312,7 +312,7 @@ function maybeResyncEntitlements(): void {
 
 /**
  * The half of a tick that is NOT metering, and therefore keeps its own timer
- * when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses the sweep: the throttled
+ * when `BILLING_RECONCILIATION_INTERVAL_SECONDS=0` pauses the sweep: the throttled
  * entitlement reconcile, and the retry of every Stripe cancellation
  * `onOrgDelete` could not confirm. A pending cancellation means a customer is
  * still being charged for an organization that is gone — pausing metering must
@@ -371,7 +371,7 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
  * ({@link runBillingSweepTick}) owns the retry/alert accounting.
  *
  * Drains a backlog WITHIN the tick: `sweepLedgerBatch` processes at most one
- * batch (`EE_RECONCILIATION_BATCH_SIZE`) per call, so a single pass per tick
+ * batch (`BILLING_RECONCILIATION_BATCH_SIZE`) per call, so a single pass per tick
  * caps throughput at `batchSize / interval` rows (e.g. 100 / 300 s = 1200 rows/h)
  * and lets a backlog grow unboundedly. Instead we keep sweeping while the last
  * pass filled its batch AND made cursor progress, bounded by
@@ -381,8 +381,8 @@ export async function runBillingSweepTick(): Promise<SweepResult | null> {
  * stall/backlog accounting below runs once per tick, not once per drained batch.
  */
 export async function runBillingSweep(): Promise<SweepResult> {
-  const env = getEeEnv();
-  const batchSize = env.EE_RECONCILIATION_BATCH_SIZE;
+  const env = getBillingEnv();
+  const batchSize = env.BILLING_RECONCILIATION_BATCH_SIZE;
 
   let result = await sweepLedgerBatch(batchSize);
   let iterations = 1;
@@ -475,7 +475,7 @@ export async function runBillingSweep(): Promise<SweepResult> {
     logger.warn("billing sweep billed a ledger row from BELOW the watermark (replay window)", {
       replayBilled: totalReplayBilled,
       replayed: totalReplayed,
-      replayWindow: env.EE_RECONCILIATION_REPLAY_WINDOW,
+      replayWindow: env.BILLING_RECONCILIATION_REPLAY_WINDOW,
       cursorTo: result.cursorTo,
     });
   }

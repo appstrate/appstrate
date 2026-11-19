@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEeEnv } from "./env.ts";
+import { getBillingEnv } from "./env.ts";
 import type { QuoteRates } from "./billing/usage-quote.ts";
 
 export interface PlanDefinition {
@@ -50,10 +50,10 @@ export type Plans = Record<PlanId, PlanDefinition>;
 
 /**
  * Build plan definitions from env config. Not cached independently
- * since getEeEnv() is already a lazy singleton.
+ * since getBillingEnv() is already a lazy singleton.
  */
 export function getPlans(): Plans {
-  const env = getEeEnv();
+  const env = getBillingEnv();
   return {
     free: {
       id: "free",

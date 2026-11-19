@@ -253,7 +253,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["module-billing"],
     justification:
       "Org-level grants attached to a PRINCIPAL rather than a role (RBAC spec §4.2/§10). " +
-      "The EE billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
+      "The billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
       "zero billing vocabulary — and the grant is per-user, so `permissionsContribution` " +
       "(role-keyed) cannot express it. Single-owner today; SSO group mapping is the second " +
       "consumer and promotes it to `extension`.",
@@ -262,7 +262,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     kind: "seam",
     owners: ["module-billing"],
     justification:
-      "Email-template override into @appstrate/emails registry — EE branding, single-owner by design.",
+      "Email-template override into @appstrate/emails registry — billing branding, single-owner by design.",
   },
 } satisfies Record<ContractMember, LedgerEntry>;
 

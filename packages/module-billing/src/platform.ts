@@ -3,9 +3,9 @@
 /**
  * Holder for the `PlatformServices` handle injected at `init(ctx)`.
  *
- * The platform reads EE needs — the append-only `llm_usage` ledger cursor —
+ * The platform reads the billing module needs — the append-only `llm_usage` ledger cursor —
  * go through `services.usage.list` / `services.usage.settledFrontier`, never
- * through SQL of EE's own, even though the two schemas share a database.
+ * through SQL of the billing module's own, even though the two schemas share a database.
  *
  * Also holds the platform's public base URL (`ctx.appUrl`). Both are captured
  * once at `init(ctx)` and read from here rather than from `index.ts`, so the
@@ -22,7 +22,7 @@ export function setPlatformServices(services: PlatformServices): void {
 }
 
 export function getPlatformServices(): PlatformServices {
-  if (!_services) throw new Error("EE not initialized. Call init() first.");
+  if (!_services) throw new Error("Billing module not initialized. Call init() first.");
   return _services;
 }
 
@@ -34,6 +34,6 @@ export function setAppUrl(appUrl: string): void {
 
 /** The platform's public base URL — no trailing slash, as `ctx.appUrl` gives it. */
 export function getAppUrl(): string {
-  if (!_appUrl) throw new Error("EE not initialized. Call init() first.");
+  if (!_appUrl) throw new Error("Billing module not initialized. Call init() first.");
   return _appUrl;
 }

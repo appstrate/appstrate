@@ -423,7 +423,7 @@ function assertWithinOrgQuota(used: number, addBytes: number, limit: number | un
 
 /**
  * Set (or clear) an organization's per-org file storage limit — the narrow
- * capability a billing module (the ee module, `@appstrate/module-billing`) pilots
+ * capability a billing module (`@appstrate/module-billing`) pilots
  * per org via `PlatformServices.setFileStorageLimit`. Billing-neutral: a technical byte
  * ceiling, never a plan or price.
  *

@@ -14,9 +14,15 @@ managers. Apache-2.0, like the rest of the repository.
   there at `init()`, under a migration journal of its own —
   `drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`.
   It needs PostgreSQL, so it refuses to start on the tier-0 PGlite adapter.
-  Its variables are the four `STRIPE_*` and the three `EE_RECONCILIATION_*`,
+  Its variables are the four `STRIPE_*` and the four `BILLING_RECONCILIATION_*`,
   validated by this module's own Zod schema (`src/env.ts`) and documented in
   `docs/ENV.md`.
+- **`ee` in a stored name is historical.** The module was `@appstrate/module-ee`
+  until it moved to Apache-2.0. The names that live in a deployed database or
+  in Redis kept that prefix, because renaming them would be a data migration
+  for no change in behaviour: the `ee_*` tables, the `drizzle.ee_migrations`
+  journal, the `ee:` Redis key prefix and the `ee-stripe-subscription:` advisory
+  lock key. Nothing else in the module carries it; a new name never does.
 - **Tests** run under the repository's harness — see "Testing" at the bottom.
 - **No lockstep.** `@appstrate/core` is a `workspace:*` dependency, so there is
   no npm publish, no version gate and no peer range to keep in step.
@@ -66,7 +72,7 @@ construction plus two explicit repairs":
   can commit after the one holding id 101: a pass sees 101, bills it, advances
   past 100, and `WHERE id > watermark` can never return row 100 again — unbilled
   and unlogged. Every pass therefore re-reads a bounded window BELOW the
-  watermark (`EE_RECONCILIATION_REPLAY_WINDOW`, default 200) rather than
+  watermark (`BILLING_RECONCILIATION_REPLAY_WINDOW`, default 200) rather than
   starting at it. The window is a READ offset only: the committed watermark
   stays `GREATEST`-monotonic, and a re-read row that was already claimed debits
   nothing. `replayBilled > 0` in the tick heartbeat warns — it is the proof the
@@ -94,7 +100,7 @@ construction plus two explicit repairs":
 
 ### Module-owned tables
 
-These seven tables live in the **platform** database (`DATABASE_URL`). `migrateEeDb` applies `drizzle/migrations` there at boot and records what it applied in `drizzle.ee_migrations`, a journal of this module's own: two journals in one database, and the core schema in `packages/db` still declares no `ee_*` table. A dev box running `docker-compose.dev.yml` needs no extra step — the database is already there. There is no FK between an `ee_*` table and a platform one, and the platform `llm_usage` ledger is read through the `ctx.services.usage` cursor (`list` / `settledFrontier`), never a SQL join across the module boundary:
+These seven tables live in the **platform** database (`DATABASE_URL`). `migrateBillingDb` applies `drizzle/migrations` there at boot and records what it applied in `drizzle.ee_migrations`, a journal of this module's own: two journals in one database, and the core schema in `packages/db` still declares no `ee_*` table. A dev box running `docker-compose.dev.yml` needs no extra step — the database is already there. There is no FK between an `ee_*` table and a platform one, and the platform `llm_usage` ledger is read through the `ctx.services.usage` cursor (`list` / `settledFrontier`), never a SQL join across the module boundary:
 
 - `ee_billing_accounts` — plan, credits (used/quota), Stripe subscription status, customer/subscription IDs
 - `ee_usage_records` — per-context cost records keyed `(context_type, context_id)` — a run, a chat session, or the org's durable `(unattributed, orgId)` bucket. Carries both cumulative `cost_usd` (`numeric(24,12)`, the delta-billing basis) and the debited `cost_credits` (integer); the sweep bills `dollarsToCredits(cost_usd) − cost_credits` so sub-credit remainders carry forward instead of flooring to 0 each pass. `numeric`, not `double precision`: the `unattributed` bucket is one row per org that grows forever, and the sweep reconstructs the pre-pass cumulative as `cost_usd − delta` — both the accumulation and that reconstruction must be exact. Customer accounting data: never purged
@@ -321,7 +327,7 @@ billing sweeper (periodic, cursor over llm_usage.id):
       history the cutover excluded. READ offset only — the watermark itself never
       rewinds. The replay span is read ON TOP of the batch
       (limit = span + batch, ≤ 1000, the platform's usage.list hard cap), so the
-      forward slice keeps its full EE_RECONCILIATION_BATCH_SIZE
+      forward slice keeps its full BILLING_RECONCILIATION_BATCH_SIZE
   → frontier = leading rows the watermark may pass: settled rows always; an
       UNSETTLED row stalls ONLY if credentialSource === "system" (billed once it
       settles). Unsettled NON-system rows (BYOK/null) are advanced PAST (never
@@ -519,7 +525,7 @@ recorded them, so no future sweep can ever read them again.
 ### Turning the module off, and back on
 
 Taking `@appstrate/module-billing` out of `MODULES` (or pinning
-`EE_RECONCILIATION_INTERVAL_SECONDS=0`) stops the sweep. It does **not** stop the
+`BILLING_RECONCILIATION_INTERVAL_SECONDS=0`) stops the sweep. It does **not** stop the
 platform appending to `llm_usage` — metering is platform-side. Three things
 happen across such a window, and only the first is guarded:
 
@@ -530,7 +536,7 @@ happen across such a window, and only the first is guarded:
    reads the heartbeat, and irreversible (the claim table is never purged, so the
    rows cannot be un-billed by re-reading them). `assertCursorResumable`
    (`src/billing/billing-sweeper.ts`) refuses that boot instead: it fires when the
-   sweep last confirmed the watermark more than `EE_RECONCILIATION_MAX_GAP_SECONDS`
+   sweep last confirmed the watermark more than `BILLING_RECONCILIATION_MAX_GAP_SECONDS`
    ago (default a day) **and** more rows piled up than one tick can drain. Both
    halves are required — age alone would refuse a platform that was simply shut
    down for a week, backlog alone a sweep that is honestly behind while ticking.
@@ -543,7 +549,7 @@ happen across such a window, and only the first is guarded:
      re-seeds the watermark _and_ `floor_id` at the current settled frontier,
      exactly as the original cutover did, so nothing below it is ever read again.
      This is the usual answer: customers were told billing was off;
-   - **bill the gap** — set `EE_RECONCILIATION_MAX_GAP_SECONDS` above the age the
+   - **bill the gap** — set `BILLING_RECONCILIATION_MAX_GAP_SECONDS` above the age the
      refusal printed (`0` resumes over any gap). Rehearse it: the debits land
      against today's balances, not the window's.
 2. **Orgs created in the window have no billing account.** `onOrgCreate` never
@@ -595,7 +601,7 @@ scans this directory alongside the platform's and fails a new migration that
 writes rows unless a `SET NOT NULL` / `CHECK` / `VALIDATE CONSTRAINT` on the
 **same table** in the same file licences it. `0001_cursor_billing` and
 `0003_normalize_free_subscription_status` predate the gate and are listed in
-`EE_GRANDFATHERED` — that list may shrink, never grow.
+`BILLING_GRANDFATHERED` — that list may shrink, never grow.
 
 Money is what these tables hold. A task that touches `credits_used`,
 `credit_quota`, `cost_credits` or `cost_usd` is rehearsed against a restored
@@ -621,9 +627,9 @@ knowing:
   (`bun run test:tier0`) the module is not imported, not initialized, and its
   test files are not collected. It needs PostgreSQL and `postgres.js`, neither
   of which the tier-0 PGlite adapter offers. The runner prints the skip.
-- the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0`, which pauses
+- the same file sets `BILLING_RECONCILIATION_INTERVAL_SECONDS=0`, which pauses
   METERING — a sweep firing mid-suite would bill rows a test seeded. `init()`
-  still arms the maintenance tick that keeps running under it; `useEeTestSeams()`
+  still arms the maintenance tick that keeps running under it; `useBillingTestSeams()`
   is what disarms that. The sweep functions are driven directly by
   `test/integration/services/billing-sweeper.test.ts`.
 
@@ -631,7 +637,7 @@ knowing:
 in-memory `llm_usage` ledger (`mock-platform.ts`) in place of the real
 `services.usage`, and the in-memory org directory (`org-queries.ts`) in place of
 the platform's member lookups. Both are plain setters, not mocks. Every
-integration test file calls `useEeTestSeams()` at the top; it is idempotent.
+integration test file calls `useBillingTestSeams()` at the top; it is idempotent.
 `test/tables.ts` lists the seven `ee_*` tables, so the root `truncateAll()`
 clears them between tests along with every platform table.
 

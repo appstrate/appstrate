@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { resetStripeMock } from "../../helpers/stripe.ts";
-import { flushEeRedis } from "../../helpers/redis.ts";
+import { flushBillingRedis } from "../../helpers/redis.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { mockAuditEntries, resetMockAudit } from "../../helpers/mock-platform.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 /**
  * Billing mutations reach the platform audit trail through
@@ -34,9 +34,9 @@ describe("billing audit trail", () => {
   }
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
-    await flushEeRedis();
+    await flushBillingRedis();
     resetMockAudit();
     seedOrgMembers(orgId, [
       { userId: "user-owner", email: "owner@example.com", role: "owner" },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEeDb, type EeTx } from "../db.ts";
+import { getBillingDb, type BillingTx } from "../db.ts";
 import { billingAccounts, freeTierClaims } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { getPlans } from "../config.ts";
@@ -55,7 +55,7 @@ export function normalizeEmail(email: string): string {
  * the wrong one for an address a human reads.
  */
 export async function provisionBillingAccount(
-  tx: EeTx,
+  tx: BillingTx,
   orgId: string,
   normalizedEmail: string,
   billingEmail: string,
@@ -88,7 +88,7 @@ export async function provisionBillingAccount(
 
 export async function onOrgCreate(orgId: string, userEmail: string): Promise<void> {
   const normalized = normalizeEmail(userEmail);
-  const { freeTierGranted, creditQuota } = await getEeDb().transaction((tx) =>
+  const { freeTierGranted, creditQuota } = await getBillingDb().transaction((tx) =>
     provisionBillingAccount(tx, orgId, normalized, userEmail),
   );
 
@@ -109,7 +109,7 @@ export async function onOrgCreate(orgId: string, userEmail: string): Promise<voi
 }
 
 export async function onOrgDelete(orgId: string): Promise<void> {
-  const db = getEeDb();
+  const db = getBillingDb();
 
   // FINAL BILLING DRAIN — must run BEFORE anything below is deleted.
   //
@@ -146,7 +146,7 @@ export async function onOrgDelete(orgId: string): Promise<void> {
  * A member left or was removed — emitted by the platform after the removal has
  * committed, so the org's owner list no longer names them.
  *
- * Two things EE keyed on the person outlive the membership row: a
+ * Two things the billing module keyed on the person outlive the membership row: a
  * billing-manager grant (keyed on `(org, user)`, so it would come back with a
  * re-invite) and, when that person was the owner the contact fell back to,
  * the Stripe customer's email.

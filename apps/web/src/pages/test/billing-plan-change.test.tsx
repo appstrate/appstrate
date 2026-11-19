@@ -12,13 +12,13 @@ import { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/client.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
-type BillingAccount = components["schemas"]["EeBillingAccount"];
-type Plan = components["schemas"]["EeBillingPlan"];
-type UpgradePlan = components["schemas"]["EeBillingUpgradePlan"];
+type BillingAccount = components["schemas"]["BillingAccount"];
+type Plan = components["schemas"]["BillingPlan"];
+type UpgradePlan = components["schemas"]["BillingUpgradePlan"];
 
 installFakeStorage({
   // The billing page redirects when the module is absent, so the flag the
-  // ee module contributes has to be on for the page to render at all.
+  // billing module contributes has to be on for the page to render at all.
   __APP_CONFIG__: { features: { billing: true }, trustedOrigins: [] },
 });
 

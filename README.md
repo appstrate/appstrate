@@ -201,7 +201,7 @@ appstrate/
 │   ├── emails/               # @appstrate/emails — email template registry + module overrides
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
-│   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, ee are opt-in
+│   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, billing are opt-in
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
 ├── system-packages/           # System package `.afps` archives — integrations (a local integration carries its MCP server), loaded at boot

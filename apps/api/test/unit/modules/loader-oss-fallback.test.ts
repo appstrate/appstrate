@@ -13,7 +13,7 @@
  *     specifier name (so operators see "Module \"@appstrate/module-billing\" could
  *     not be loaded" instead of a raw ESM resolution stack trace).
  *
- * The latter is the OSS/EE contract from AGENTS.md: the platform
+ * The latter is the OSS/the billing module contract from AGENTS.md: the platform
  * should fail fast with a clear message rather than crash mysteriously
  * when a paid deployment is misconfigured.
  */
@@ -57,7 +57,7 @@ describe("OSS-mode module loading", () => {
     resetModules();
   });
 
-  it("default registry is the OSS module set — EE + subscription modules never auto-loaded", () => {
+  it("default registry is the OSS module set — The billing module + subscription modules never auto-loaded", () => {
     const previous = process.env.MODULES;
     setModulesEnv(undefined);
     try {

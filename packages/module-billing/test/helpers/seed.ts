@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Seed factories for EE module tests.
+ * Seed factories for billing module tests.
  *
- * Each function inserts a row into the corresponding EE table
+ * Each function inserts a row into the corresponding billing table
  * and returns the inserted record. Required fields must be provided;
  * optional fields have sensible defaults.
  */
-import { getEeDb } from "../../src/db.ts";
+import { getBillingDb } from "../../src/db.ts";
 import {
   billingAccounts,
   orgUsageRecords,
   freeTierClaims,
-  eeBilledLlmUsage,
+  billedLlmUsage,
   billingCursor,
   billingManagers,
 } from "../../drizzle/schema.ts";
@@ -35,7 +35,7 @@ export async function seedBillingAccount(overrides: {
   /** Non-null models an org deletion whose Stripe cancellation is unconfirmed. */
   cancelRequestedAt?: Date | null;
 }) {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .insert(billingAccounts)
     .values({
@@ -69,7 +69,7 @@ export async function seedUsageRecord(overrides: {
   costCredits: number;
   costUsd?: number;
 }) {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [record] = await db
     .insert(orgUsageRecords)
     .values({
@@ -84,7 +84,7 @@ export async function seedUsageRecord(overrides: {
 }
 
 export async function seedFreeTierClaim(overrides: { email: string }) {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [claim] = await db
     .insert(freeTierClaims)
     .values({
@@ -103,7 +103,7 @@ export function resetLlmUsageIdSeq(): void {
 
 /**
  * Append a ledger row the platform would return via the mock
- * `PlatformServices.usage.list`. EE reads the ledger through that cursor —
+ * `PlatformServices.usage.list`. billing reads the ledger through that cursor —
  * never from its own DB — so tests populate the mock, not a table. Returns the
  * synthetic `llm_usage.id` so tests can assert the resulting billing marker in
  * `ee_billed_llm_usage`.
@@ -152,7 +152,7 @@ export function seedLlmUsage(overrides: {
 }
 
 /**
- * Insert a billing marker into the EE-owned `ee_billed_llm_usage`,
+ * Insert a billing marker into the module-owned `ee_billed_llm_usage`,
  * simulating a past sweep that already claimed the ledger row. Used by tests
  * that need a pre-billed row (double-sweep idempotency).
  */
@@ -160,8 +160,8 @@ export async function markLlmUsageBilled(args: {
   llmUsageId: number;
   billedAt?: Date;
 }): Promise<void> {
-  const db = getEeDb();
-  await db.insert(eeBilledLlmUsage).values({
+  const db = getBillingDb();
+  await db.insert(billedLlmUsage).values({
     llmUsageId: args.llmUsageId,
     billedAt: args.billedAt ?? new Date(),
   });
@@ -178,7 +178,7 @@ export async function seedBillingCursor(
   floorId = 0,
   updatedAt = new Date(),
 ): Promise<void> {
-  const db = getEeDb();
+  const db = getBillingDb();
   await db
     .insert(billingCursor)
     .values({ id: true, lastLlmUsageId, floorId, updatedAt })
@@ -188,13 +188,13 @@ export async function seedBillingCursor(
     });
 }
 
-/** Grant `billing:*` to a user through the EE-owned billing-manager table. */
+/** Grant `billing:*` to a user through the module-owned billing-manager table. */
 export async function seedBillingManager(overrides: {
   orgId: string;
   userId: string;
   addedBy?: string;
 }) {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [row] = await db
     .insert(billingManagers)
     .values({

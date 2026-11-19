@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Redis helpers for EE module tests.
+ * Redis helpers for billing module tests.
  */
-import { getEeRedis } from "../../src/redis.ts";
+import { getBillingRedis } from "../../src/redis.ts";
 
 /**
  * Drop this module's Redis keys — the `ee:` prefix only.
@@ -15,8 +15,8 @@ import { getEeRedis } from "../../src/redis.ts";
  * `keys` `keyStart: 0`) — the pattern is written out in full, and the names it
  * returns come back prefixed, to be stripped before `del` re-prefixes them.
  */
-export async function flushEeRedis(): Promise<void> {
-  const redis = getEeRedis();
+export async function flushBillingRedis(): Promise<void> {
+  const redis = getBillingRedis();
   if (!redis) return;
   const prefix = redis.options.keyPrefix ?? "";
   const keys = await redis.keys(`${prefix}*`);

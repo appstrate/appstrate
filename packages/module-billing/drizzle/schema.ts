@@ -16,8 +16,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-// All EE tables are prefixed with "ee_" to avoid collisions with the platform's
-// own, which share the database. EE migrations touch `ee_*` objects and nothing
+// All billing tables are prefixed with "ee_" to avoid collisions with the platform's
+// own, which share the database. The billing module migrations touch `ee_*` objects and nothing
 // else: a reference to a platform table would cross the module boundary AND
 // break `onOrgDelete`'s explicit-delete contract, which is what deletes an
 // org's billing rows.
@@ -138,14 +138,14 @@ export const stripeEvents = pgTable("ee_stripe_events", {
  * Side-car table tracking which `llm_usage` rows have been billed.
  *
  * The platform-owned `llm_usage` table is the canonical LLM-call ledger
- * (per-call cost, attribution, credential source). Billing is an EE-only
- * concern, so the "this row has been debited" marker lives here instead of as a
+ * (per-call cost, attribution, credential source). Billing is this module's
+ * concern alone, so the "this row has been debited" marker lives here instead of as a
  * column on `llm_usage` — that would leak a billing concept into the OSS schema.
  *
  * Contract:
  *   - `llmUsageId` — PRIMARY KEY, type `bigint` to match the OSS
  *     `llm_usage.id` column (declared `bigserial`). Cross-
- *     table FKs are intentionally avoided: EE schemas never
+ *     table FKs are intentionally avoided: billing schemas never
  *     `.references()` platform-owned tables (no ownership inversion).
  *     The primary key gives us idempotent inserts via
  *     `ON CONFLICT (llm_usage_id) DO NOTHING` — the claim that lets the
@@ -155,7 +155,7 @@ export const stripeEvents = pgTable("ee_stripe_events", {
  * `(bigint, timestamptz)` row per billed ledger row is small enough that
  * unbounded growth is not a concern at any plausible scale.
  */
-export const eeBilledLlmUsage = pgTable("ee_billed_llm_usage", {
+export const billedLlmUsage = pgTable("ee_billed_llm_usage", {
   llmUsageId: bigint("llm_usage_id", { mode: "number" }).primaryKey(),
   /** What the claim is WORTH: `PricingFaults` in `src/billing/usage-recorder.ts`. */
   pricingStatus: text("pricing_status", { enum: ["priced", "partial", "unpriced", "unknown"] })
@@ -170,7 +170,7 @@ export const freeTierClaims = pgTable("ee_free_tier_claims", {
 });
 
 /**
- * Single-row watermark for the cursor-based billing sweep. EE consumes the
+ * Single-row watermark for the cursor-based billing sweep. The billing module consumes the
  * platform's append-only `llm_usage` ledger by serial `id`: `last_llm_usage_id`
  * is the highest ledger id already processed. The sweep reads
  * `usage.list({ afterId: last_llm_usage_id })`, bills the settled frontier, and
@@ -201,15 +201,15 @@ export const billingCursor = pgTable(
 
 /**
  * Billing managers — org users who may act on billing without being org admins
- * (RBAC spec §10). EE grants them `billing:read` + `billing:manage` through
+ * (RBAC spec §10). The billing module grants them `billing:read` + `billing:manage` through
  * the module's `principalPermissions` surface, so the grant attaches to a
- * PRINCIPAL instead of to an org role: `billing` is EE vocabulary and core's
+ * PRINCIPAL instead of to an org role: `billing` is billing vocabulary and core's
  * `org_role` enum is Apache-2.0, which is exactly the coupling that surface
  * exists to avoid.
  *
  * `user_id` / `added_by` are `text`, matching the platform's `user.id` (Better
- * Auth ids are text, not uuid); `org_id` is `uuid` like every other EE
- * table. As everywhere in EE, there is no FK to a platform-owned table: EE
+ * Auth ids are text, not uuid); `org_id` is `uuid` like every other billing
+ * table. As everywhere in this module, there is no FK to a platform-owned table: the billing module
  * declares no reference across the module boundary. Consequence: a row can
  * outlive the user it names. That is harmless because the resolver only ever answers "is THIS
  * caller a manager", and a caller the platform no longer authenticates never

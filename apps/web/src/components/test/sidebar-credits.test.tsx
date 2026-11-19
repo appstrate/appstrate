@@ -22,7 +22,7 @@ await i18n.changeLanguage("fr");
 
 const ORG_ID = "org_credits";
 
-const account: components["schemas"]["EeBillingAccount"] = {
+const account: components["schemas"]["BillingAccount"] = {
   plan: { id: "starter", name: "Starter" },
   plans: [],
   usage_percent: 42,

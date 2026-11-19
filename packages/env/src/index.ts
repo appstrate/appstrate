@@ -653,7 +653,7 @@ export const envSchema = z
     // Per-org durable-storage quota in bytes. Checked synchronously against
     // `organizations.files_bytes_used` before a file write (403
     // `storage_limit_exceeded` on over-cap). Absent ⇒ unlimited (OSS default);
-    // the ee module (`@appstrate/module-billing`) sets a plan value in the same column.
+    // the billing module (`@appstrate/module-billing`) sets a plan value in the same column.
     ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
 
     // Ceiling on the total bytes of files a single run may publish as

@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
+import { truncateBillingTables, getBillingDb } from "../../helpers/db.ts";
 import {
   seedBillingAccount,
   seedLlmUsage,
@@ -21,25 +21,25 @@ import {
 } from "../../helpers/seed.ts";
 import { runBillingSweep, _resetBillingSweeperForTests } from "../../../src/billing/billing-sweeper.ts"; // prettier-ignore
 import { repairBillingAccount } from "../../../src/billing/repair-account.ts";
-import { _resetEeEnvForTests } from "../../../src/env.ts";
+import { _resetBillingEnvForTests } from "../../../src/env.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000300";
 
 async function account() {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [row] = await db.select().from(billingAccounts).where(eq(billingAccounts.orgId, orgId));
   return row ?? null;
 }
 
 describe("repairBillingAccount", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
   });
 

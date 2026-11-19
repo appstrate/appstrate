@@ -21,7 +21,7 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { getStripe } from "../stripe/client.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
@@ -49,7 +49,7 @@ export interface BillingContact {
 
 /** The org's contact, or null when it has no billing account. */
 export async function getBillingContact(orgId: string): Promise<BillingContact | null> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({
       billingEmail: billingAccounts.billingEmail,
@@ -80,7 +80,7 @@ export async function resolvePrimaryBillingEmail(
  * receipts follow it.
  *
  * Best-effort, and every caller runs it AFTER its local commit: the contact is
- * EE's record, and a Stripe outage must not refuse a change the org can see is
+ * The billing module's record, and a Stripe outage must not refuse a change the org can see is
  * correct. A failed push is logged; the next checkout re-sends the address
  * anyway.
  */
@@ -105,13 +105,13 @@ async function pushPrimaryEmailToStripe(
 /**
  * Re-push the owner fallback after a member left the org.
  *
- * The fallback is resolved live for EE's own emails but COPIED into Stripe, so
+ * The fallback is resolved live for the billing module's own emails but COPIED into Stripe, so
  * when the owner it resolved to leaves, Stripe keeps sending receipts to an
  * ex-member until something re-sends it. Only an org with no explicit
  * `billing_email` and an existing Stripe customer has anything to re-send.
  */
 export async function resyncOwnerFallbackToStripe(orgId: string): Promise<void> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({
       billingEmail: billingAccounts.billingEmail,
@@ -133,7 +133,7 @@ export async function updateBillingContact(
   orgId: string,
   patch: z.infer<typeof billingContactPatchSchema>,
 ): Promise<BillingContact | null> {
-  const db = getEeDb();
+  const db = getBillingDb();
 
   const [updated] = await db
     .update(billingAccounts)

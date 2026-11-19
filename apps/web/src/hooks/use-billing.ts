@@ -8,7 +8,7 @@ import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 
 /** One plan of the catalog: price, credit quota, and storage entitlement. */
-export type BillingPlanDetail = components["schemas"]["EeBillingPlan"];
+export type BillingPlanDetail = components["schemas"]["BillingPlan"];
 
 // Keyed on the spec's plan ids so a new plan without an icon/description fails to compile.
 export const PLAN_ICONS: Record<BillingPlanDetail["id"], LucideIcon> = {
@@ -25,7 +25,7 @@ export const PLAN_DESCRIPTION_KEYS: Record<BillingPlanDetail["id"], string> = {
 };
 
 /** A plan id `POST /api/billing/checkout` accepts: the catalog's minus `free` (no Stripe price). */
-export type CheckoutPlanId = components["schemas"]["EeCheckoutPlanId"];
+export type CheckoutPlanId = components["schemas"]["BillingCheckoutPlanId"];
 
 /**
  * `billing:read` is an org grant a `guest` lacks, and the sidebar mounts this everywhere.

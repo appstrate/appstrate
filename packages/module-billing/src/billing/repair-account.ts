@@ -56,7 +56,7 @@
  */
 
 import { eq, sql } from "drizzle-orm";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts, orgUsageRecords } from "../../drizzle/schema.ts";
 import { normalizeEmail, provisionBillingAccount } from "../onboarding/post-signup.ts";
 import { logger } from "../logger.ts";
@@ -86,7 +86,7 @@ export async function repairBillingAccount(
   ownerEmail: string,
   hooks?: RepairHooks,
 ): Promise<RepairOutcome> {
-  const db = getEeDb();
+  const db = getBillingDb();
 
   const outcome = await db.transaction(async (tx): Promise<RepairOutcome> => {
     const [existing] = await tx

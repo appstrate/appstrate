@@ -5,7 +5,7 @@
  *
  * WHY THIS EXISTS
  *
- * The periodic cursor sweep runs every `EE_RECONCILIATION_INTERVAL_SECONDS`
+ * The periodic cursor sweep runs every `BILLING_RECONCILIATION_INTERVAL_SECONDS`
  * (300 s by default). An org that spends and then deletes itself inside that
  * window was never debited: `onOrgDelete` dropped its `ee_billing_accounts`
  * row, and the platform's org cascade then removed its `llm_usage` rows — so
@@ -33,9 +33,9 @@
  *     (the only billable rows). A truncated drain is reported at `warn`.
  */
 
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { getPlatformServices } from "../platform.ts";
-import { getEeEnv } from "../env.ts";
+import { getBillingEnv } from "../env.ts";
 import { logger } from "../logger.ts";
 import {
   addPricingFaults,
@@ -82,8 +82,8 @@ export interface OrgDrainResult {
  */
 export async function drainOrgUsage(orgId: string): Promise<OrgDrainResult> {
   const services = getPlatformServices();
-  const db = getEeDb();
-  const batchSize = getEeEnv().EE_RECONCILIATION_BATCH_SIZE;
+  const db = getBillingDb();
+  const batchSize = getBillingEnv().BILLING_RECONCILIATION_BATCH_SIZE;
 
   // Same selection policy as the sweep. Re-reading rows an earlier pass claimed
   // costs nothing: the claim table, not the cursor, arbitrates what was billed.

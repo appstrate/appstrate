@@ -3,7 +3,7 @@
 /**
  * Stripe contract suite — LIVE, opt-in.
  *
- * The EE billing suite talks to a hand-written mock (`packages/module-billing/
+ * The billing suite talks to a hand-written mock (`packages/module-billing/
  * test/helpers/stripe.ts`). That mock proves what the module SENDS: every
  * request is recorded and asserted. It cannot prove what Stripe RETURNS, or
  * what Stripe does with what we sent — those responses are fixtures we wrote,

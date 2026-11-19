@@ -1,53 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import eeModule, { QuotaExceededError } from "../../src/index.ts";
-import { useEeTestSeams } from "../helpers/setup.ts";
+import billingModule, { QuotaExceededError } from "../../src/index.ts";
+import { useBillingTestSeams } from "../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 describe("billing module exports", () => {
   describe("manifest", () => {
     it("has correct module metadata", () => {
-      expect(eeModule.manifest.id).toBe("billing");
-      expect(eeModule.manifest.name).toBe("Appstrate Billing");
-      expect(eeModule.manifest.version).toBe("0.1.0");
+      expect(billingModule.manifest.id).toBe("billing");
+      expect(billingModule.manifest.name).toBe("Appstrate Billing");
+      expect(billingModule.manifest.version).toBe("0.1.0");
     });
   });
 
   describe("hooks", () => {
     it("has a unified beforeUsage admission gate", () => {
-      expect(typeof eeModule.hooks?.beforeUsage).toBe("function");
+      expect(typeof billingModule.hooks?.beforeUsage).toBe("function");
     });
   });
 
   describe("emailOverrides", () => {
     it("provides branded email template overrides", () => {
-      expect(eeModule.emailOverrides).toBeDefined();
-      expect(typeof eeModule.emailOverrides?.verification).toBe("function");
-      expect(typeof eeModule.emailOverrides?.invitation).toBe("function");
-      expect(typeof eeModule.emailOverrides?.["magic-link"]).toBe("function");
-      expect(typeof eeModule.emailOverrides?.["reset-password"]).toBe("function");
+      expect(billingModule.emailOverrides).toBeDefined();
+      expect(typeof billingModule.emailOverrides?.verification).toBe("function");
+      expect(typeof billingModule.emailOverrides?.invitation).toBe("function");
+      expect(typeof billingModule.emailOverrides?.["magic-link"]).toBe("function");
+      expect(typeof billingModule.emailOverrides?.["reset-password"]).toBe("function");
     });
   });
 
   describe("events", () => {
     it("has onOrgCreate function", () => {
-      expect(typeof eeModule.events?.onOrgCreate).toBe("function");
+      expect(typeof billingModule.events?.onOrgCreate).toBe("function");
     });
 
     it("has onOrgDelete function", () => {
-      expect(typeof eeModule.events?.onOrgDelete).toBe("function");
+      expect(typeof billingModule.events?.onOrgDelete).toBe("function");
     });
 
     it("has onOrgMemberRemove function", () => {
-      expect(typeof eeModule.events?.onOrgMemberRemove).toBe("function");
+      expect(typeof billingModule.events?.onOrgMemberRemove).toBe("function");
     });
   });
 
   describe("publicPaths", () => {
     it('includes "/api/billing/webhooks"', () => {
-      expect(eeModule.publicPaths).toContain("/api/billing/webhooks");
+      expect(billingModule.publicPaths).toContain("/api/billing/webhooks");
     });
   });
 
@@ -66,19 +66,19 @@ describe("billing module exports", () => {
       // assertion is the absence. This module contributed `custom_roles` until
       // custom space roles became OSS (RBAC spec §9), and a licence flag over
       // platform-owned routes is what must not come back.
-      expect(eeModule.features).toEqual({ billing: true });
+      expect(billingModule.features).toEqual({ billing: true });
     });
   });
 
   describe("module initialization", () => {
     it("init was called successfully by preload (DB and Redis are available)", async () => {
-      const { getEeDb } = await import("../../src/db.ts");
-      expect(() => getEeDb()).not.toThrow();
+      const { getBillingDb } = await import("../../src/db.ts");
+      expect(() => getBillingDb()).not.toThrow();
     });
 
     it("Redis is initialized and reachable", async () => {
-      const { getEeRedis } = await import("../../src/redis.ts");
-      const redis = getEeRedis();
+      const { getBillingRedis } = await import("../../src/redis.ts");
+      const redis = getBillingRedis();
       const pong = await redis!.ping();
       expect(pong).toBe("PONG");
     });

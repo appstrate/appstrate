@@ -13,7 +13,7 @@
  * entitlement resync repairs it within one interval.
  */
 
-import { initEeDb, closeEeDb } from "../db.ts";
+import { initBillingDb, closeBillingDb } from "../db.ts";
 import { repairBillingAccount } from "../billing/repair-account.ts";
 
 const [orgId, ownerEmail] = process.argv.slice(2);
@@ -29,7 +29,7 @@ if (!databaseUrl) {
   process.exit(2);
 }
 
-initEeDb(databaseUrl);
+initBillingDb(databaseUrl);
 try {
   const outcome = await repairBillingAccount(orgId, ownerEmail);
   if (outcome.status === "already_provisioned") {
@@ -42,5 +42,5 @@ try {
     `repaired ${orgId}: credit_quota=${outcome.creditQuota} credits_used=${outcome.creditsApplied}\n`,
   );
 } finally {
-  await closeEeDb();
+  await closeBillingDb();
 }

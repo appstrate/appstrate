@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Test Hono app for EE billing route tests.
+ * Test Hono app for billing route tests.
  *
  * Simulates the platform's auth and org-context middleware by reading
  * test headers (X-Test-Org-Id, X-Test-Org-Role) instead of requiring
  * real Better Auth sessions.
  */
 import { Hono } from "hono";
-import eeModule from "../../src/index.ts";
+import billingModule from "../../src/index.ts";
 import { createBillingRoutes } from "../../src/routes/billing.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 
@@ -18,14 +18,14 @@ import type { OrgRole } from "@appstrate/core/permissions";
  */
 export function permissionsForRole(orgRole: OrgRole): ReadonlySet<string> {
   const granted = new Set<string>();
-  for (const entry of eeModule.permissionsContribution?.() ?? []) {
+  for (const entry of billingModule.permissionsContribution?.() ?? []) {
     if (entry.level !== "org" || !entry.grantTo.includes(orgRole)) continue;
     for (const action of entry.actions) granted.add(`${entry.resource}:${action}`);
   }
   return granted;
 }
 
-type EeTestEnv = {
+type BillingTestEnv = {
   Variables: {
     orgId: string;
     orgRole: OrgRole;
@@ -34,12 +34,12 @@ type EeTestEnv = {
   };
 };
 
-let cachedApp: Hono<EeTestEnv> | null = null;
+let cachedApp: Hono<BillingTestEnv> | null = null;
 
-export function getTestApp(): Hono<EeTestEnv> {
+export function getTestApp(): Hono<BillingTestEnv> {
   if (cachedApp) return cachedApp;
 
-  const app = new Hono<EeTestEnv>();
+  const app = new Hono<BillingTestEnv>();
 
   // Simulate platform middleware: extract org context from test headers.
   // Skip auth for public paths (webhooks are verified by Stripe signature, not session).
@@ -57,7 +57,7 @@ export function getTestApp(): Hono<EeTestEnv> {
     c.set("user", { id: userId, email: `${userId}@test.local`, name: userId });
     const permissions = new Set<string>(permissionsForRole(orgRole));
     // The platform unions each module's `principalPermissions` answer into the
-    // same set — the header stands in for EE's billing-manager resolver, so
+    // same set — the header stands in for the billing module's billing-manager resolver, so
     // a non-admin manager reaches the routes exactly as they would in production.
     for (const p of (c.req.header("X-Test-Principal-Grants") ?? "").split(",")) {
       if (p.trim()) permissions.add(p.trim());

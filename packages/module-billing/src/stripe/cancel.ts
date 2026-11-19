@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one way EE ends a subscription at Stripe. Its two callers share nothing else — an org
+ * The one way the billing module ends a subscription at Stripe. Its two callers share nothing else — an org
  * being deleted, and a duplicate checkout being reconciled — but both need the same
  * subtlety: Stripe reports "already canceled" as an undistinguished 400, and reading that
  * as a failure turns an idempotent retry into a permanent one.

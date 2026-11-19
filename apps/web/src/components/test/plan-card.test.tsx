@@ -9,7 +9,7 @@
  * assertions use.
  *
  * The storage entitlement is always on the wire: `@appstrate/module-billing` declares
- * `file_storage_bytes` required on `EeBillingPlan` and sets it on every plan
+ * `file_storage_bytes` required on `BillingPlan` and sets it on every plan
  * definition, so the card renders the line unconditionally — including for a
  * plan that grants zero, which is a real entitlement and not a missing one.
  */

@@ -13,24 +13,24 @@
  */
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
-import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
+import { truncateBillingTables, getBillingDb } from "../../helpers/db.ts";
 import { seedBillingAccount, seedLlmUsage, seedBillingCursor } from "../../helpers/seed.ts";
 import { drainOrgUsage } from "../../../src/billing/org-drain.ts";
 import { onOrgDelete } from "../../../src/onboarding/post-signup.ts";
 import { runBillingSweep, _resetBillingSweeperForTests } from "../../../src/billing/billing-sweeper.ts"; // prettier-ignore
-import { _resetEeEnvForTests } from "../../../src/env.ts";
-import { billingAccounts, billingCursor, eeBilledLlmUsage } from "../../../drizzle/schema.ts";
+import { _resetBillingEnvForTests } from "../../../src/env.ts";
+import { billingAccounts, billingCursor, billedLlmUsage } from "../../../drizzle/schema.ts";
 import { logger } from "../../../src/logger.ts";
-import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingReconciliationEnv, useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
-useEeReconciliationEnv();
+useBillingTestSeams();
+useBillingReconciliationEnv();
 
 const orgId = "00000000-0000-4000-a000-000000000200";
 const otherOrgId = "00000000-0000-4000-a000-000000000201";
 
 async function creditsUsed(org: string): Promise<number | null> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({ creditsUsed: billingAccounts.creditsUsed })
     .from(billingAccounts)
@@ -39,7 +39,7 @@ async function creditsUsed(org: string): Promise<number | null> {
 }
 
 async function cursorValue(): Promise<number> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [row] = await db
     .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
     .from(billingCursor)
@@ -48,19 +48,19 @@ async function cursorValue(): Promise<number> {
 }
 
 async function claimedIds(ids: number[]): Promise<number[]> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const rows = await db
-    .select({ llmUsageId: eeBilledLlmUsage.llmUsageId })
-    .from(eeBilledLlmUsage)
-    .where(inArray(eeBilledLlmUsage.llmUsageId, ids));
+    .select({ llmUsageId: billedLlmUsage.llmUsageId })
+    .from(billedLlmUsage)
+    .where(inArray(billedLlmUsage.llmUsageId, ids));
   return rows.map((r) => r.llmUsageId).sort((a, b) => a - b);
 }
 
 describe("final usage drain on org deletion", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });

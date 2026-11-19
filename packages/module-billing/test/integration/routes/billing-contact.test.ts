@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount, seedBillingManager } from "../../helpers/seed.ts";
 import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -9,10 +9,10 @@ import { resetStripeMock, requests } from "../../helpers/stripe.ts";
 import { resolveBillingRecipients } from "../../../src/emails/recipients.ts";
 import { resyncOwnerFallbackToStripe } from "../../../src/billing/contact.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
-import eeModule from "../../../src/index.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
+import billingModule from "../../../src/index.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 /**
  * Billing contact (RBAC spec §10): the address invoices go to, the CC list, and
@@ -34,7 +34,7 @@ describe("billing contact", () => {
   }
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
     seedOrgMembers(orgId, [
       { userId: "user-owner", email: "owner@example.com", role: "owner" },
@@ -261,7 +261,7 @@ describe("billing contact", () => {
   });
 
   /**
-   * The owner fallback is resolved live for EE's emails but copied into Stripe,
+   * The owner fallback is resolved live for the billing module's emails but copied into Stripe,
    * so an owner who was that fallback and leaves must be replaced there too.
    * The platform emits `onOrgMemberRemove` after its commit: the directory
    * seeded below is the org as it stands once the owner is gone.
@@ -271,7 +271,7 @@ describe("billing contact", () => {
    * negative cases await the resync itself, since an absence cannot be polled.
    */
   describe("onOrgMemberRemove", () => {
-    const onOrgMemberRemove = eeModule.events!.onOrgMemberRemove!;
+    const onOrgMemberRemove = billingModule.events!.onOrgMemberRemove!;
     const customerUpdates = () =>
       requests.filter((r) => r.method === "POST" && r.path.startsWith("/v1/customers/"));
 

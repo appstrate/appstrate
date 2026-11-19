@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getStripe } from "./client.ts";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { getPlans, isPlanId, planAction } from "../config.ts";
@@ -22,7 +22,7 @@ export async function changeSubscriptionPlan(orgId: string, planId: string): Pro
   const plan = isPlanId(planId) ? getPlans()[planId] : undefined;
   if (!plan || !plan.stripePriceId) throw new Error(`Invalid plan: ${planId}`);
 
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({
       stripeSubscriptionId: billingAccounts.stripeSubscriptionId,

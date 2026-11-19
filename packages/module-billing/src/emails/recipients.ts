@@ -15,7 +15,7 @@
  */
 
 import { eq } from "drizzle-orm";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { listBillingManagers } from "../billing/managers.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
@@ -57,7 +57,7 @@ export function composeBillingRecipients(input: {
  * the platform round-trip.
  */
 export async function resolveBillingRecipients(orgId: string): Promise<string[]> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({
       billingEmail: billingAccounts.billingEmail,

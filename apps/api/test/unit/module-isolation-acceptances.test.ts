@@ -2,9 +2,8 @@
 
 /**
  * Unit tests for the pure decisions in `scripts/verify-module-isolation.ts` —
- * the two-directional acceptance check (module → module), the platform
- * import review (core → module) and the commercial-dependency review
- * (Apache-2.0 → `ee/`).
+ * the two-directional acceptance check (module → module) and the platform
+ * import review (core → module).
  *
  * `ACCEPTED_CROSS_MODULE_IMPORTS` is checked both ways: an accepted import must
  * not be reported as a violation, AND an acceptance with no matching import
@@ -25,7 +24,6 @@ import { describe, it, expect } from "bun:test";
 import {
   importSpecifiers,
   isScannedSource,
-  reviewCommercialDependencies,
   reviewCrossModuleImports,
   reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
@@ -222,62 +220,6 @@ describe("importSpecifiers", () => {
       'import { boot } from "./boot.ts";',
     ].join("\n");
     expect(importSpecifiers(source)).toEqual(["./boot.ts"]);
-  });
-});
-
-/**
- * The Apache-2.0 → commercial direction. Unlike the other two it has no
- * acceptance list and no root narrowing, so the only thing to pin is which
- * specifiers count as reaching into `ee/`.
- */
-describe("reviewCommercialDependencies", () => {
-  const commercial: PlatformImport[] = [
-    { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/ee" },
-    { file: "apps/web/src/hooks/use-sso.ts", spec: "@appstrate/ee/sso" },
-    {
-      file: "packages/db/src/schema/x.ts",
-      spec: "../../../../ee/src/sso.ts",
-      resolved: "ee/src/sso.ts",
-    },
-  ];
-
-  it("reports a test tree, the SPA and a relative path alike", () => {
-    const problems = reviewCommercialDependencies(commercial);
-    expect(problems).toHaveLength(3);
-    for (const p of problems) expect(p).toContain("`ee/`");
-  });
-
-  it("leaves every other module alone — this direction is about the LICENCE", () => {
-    expect(
-      reviewCommercialDependencies([
-        { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/module-claude-code" },
-        { file: "apps/web/src/x.ts", spec: "@appstrate/module-billing" },
-        { file: "apps/web/src/x.ts", spec: "@appstrate/module-chat" },
-        {
-          file: "apps/api/src/x.ts",
-          spec: "../modules/oidc/index.ts",
-          resolved: "apps/api/src/modules/oidc/index.ts",
-        },
-      ]),
-    ).toEqual([]);
-  });
-
-  it("does not mistake a package whose name merely starts with the commercial one", () => {
-    expect(
-      reviewCommercialDependencies([
-        { file: "apps/api/src/x.ts", spec: "@appstrate/eels" },
-        {
-          file: "apps/api/src/x.ts",
-          spec: "../../../eels/src/index.ts",
-          resolved: "eels/src/index.ts",
-        },
-        {
-          file: "apps/api/src/x.ts",
-          spec: "../../../packages/ee/src/index.ts",
-          resolved: "packages/ee/src/index.ts",
-        },
-      ]),
-    ).toEqual([]);
   });
 });
 

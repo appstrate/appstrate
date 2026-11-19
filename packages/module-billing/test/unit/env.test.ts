@@ -3,15 +3,15 @@
 import { describe, expect, it } from "bun:test";
 import {
   LEDGER_LIST_MAX_LIMIT,
-  eeEnvSchema,
+  billingEnvSchema,
   describeEnvIssues,
-  getEeEnv,
-  _resetEeEnvForTests,
+  getBillingEnv,
+  _resetBillingEnvForTests,
 } from "../../src/env.ts";
 import requirements from "../requirements.ts";
-import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+import { applyBillingFixtureEnv } from "../helpers/fixture-env.ts";
 
-applyEeFixtureEnv();
+applyBillingFixtureEnv();
 
 describe("env", () => {
   it("pins the platform's usage.list ceiling", () => {
@@ -20,9 +20,9 @@ describe("env", () => {
     expect(LEDGER_LIST_MAX_LIMIT).toBe(1000);
   });
 
-  describe("getEeEnv()", () => {
-    it("returns a valid EeEnv object with all required fields", () => {
-      const env = getEeEnv();
+  describe("getBillingEnv()", () => {
+    it("returns a valid BillingEnv object with all required fields", () => {
+      const env = getBillingEnv();
       expect(env.STRIPE_SECRET_KEY).toBeString();
       expect(env.STRIPE_WEBHOOK_SECRET).toBeString();
       expect(env.STRIPE_PRICE_ID_STARTER).toBeString();
@@ -30,7 +30,7 @@ describe("env", () => {
     });
 
     it("returns the fixture values the module declares for its tests", () => {
-      const env = getEeEnv();
+      const env = getBillingEnv();
       expect(env.STRIPE_SECRET_KEY).toBe("sk_test_fake_key_for_testing");
       expect(env.STRIPE_WEBHOOK_SECRET).toBe("whsec_test_secret_for_webhook_verification");
       expect(env.STRIPE_PRICE_ID_STARTER).toBe("price_starter_test");
@@ -38,13 +38,13 @@ describe("env", () => {
     });
 
     it("returns the same cached reference on subsequent calls", () => {
-      const first = getEeEnv();
-      const second = getEeEnv();
+      const first = getBillingEnv();
+      const second = getBillingEnv();
       expect(first).toBe(second);
     });
 
     it("has non-empty string values for all fields", () => {
-      const env = getEeEnv();
+      const env = getBillingEnv();
       expect(env.STRIPE_SECRET_KEY.length).toBeGreaterThan(0);
       expect(env.STRIPE_WEBHOOK_SECRET.length).toBeGreaterThan(0);
       expect(env.STRIPE_PRICE_ID_STARTER.length).toBeGreaterThan(0);
@@ -52,32 +52,32 @@ describe("env", () => {
     });
 
     it("returns an object containing the required Stripe keys plus reconciliation tunables", () => {
-      const env = getEeEnv();
+      const env = getBillingEnv();
       expect(Object.keys(env)).toEqual(
         expect.arrayContaining([
           "STRIPE_SECRET_KEY",
           "STRIPE_WEBHOOK_SECRET",
           "STRIPE_PRICE_ID_STARTER",
           "STRIPE_PRICE_ID_PRO",
-          "EE_RECONCILIATION_INTERVAL_SECONDS",
-          "EE_RECONCILIATION_BATCH_SIZE",
-          "EE_RECONCILIATION_REPLAY_WINDOW",
+          "BILLING_RECONCILIATION_INTERVAL_SECONDS",
+          "BILLING_RECONCILIATION_BATCH_SIZE",
+          "BILLING_RECONCILIATION_REPLAY_WINDOW",
         ]),
       );
     });
 
     it("applies sensible defaults to reconciliation env vars when unset", () => {
-      const env = getEeEnv();
-      expect(env.EE_RECONCILIATION_INTERVAL_SECONDS).toBeGreaterThanOrEqual(0);
-      expect(env.EE_RECONCILIATION_BATCH_SIZE).toBeGreaterThan(0);
+      const env = getBillingEnv();
+      expect(env.BILLING_RECONCILIATION_INTERVAL_SECONDS).toBeGreaterThanOrEqual(0);
+      expect(env.BILLING_RECONCILIATION_BATCH_SIZE).toBeGreaterThan(0);
     });
 
     it("defaults the replay window to a non-zero value on an unconfigured deployment", () => {
       // The window closes a SILENT revenue loss, so it must be on by default —
       // an operator who never heard of the var still gets the fix. Preload sets
       // no value for it, so this reads the schema default.
-      const env = getEeEnv();
-      expect(env.EE_RECONCILIATION_REPLAY_WINDOW).toBe(200);
+      const env = getBillingEnv();
+      expect(env.BILLING_RECONCILIATION_REPLAY_WINDOW).toBe(200);
     });
 
     it("refuses a batch size the replay window leaves no room for", () => {
@@ -89,10 +89,10 @@ describe("env", () => {
       // throughput fall, and the "drain cap reached" warning could not fire to
       // say so. Boot has to refuse the combination, not clamp it.
       const parse = (batchSize: string, replayWindow: string) =>
-        eeEnvSchema.safeParse({
+        billingEnvSchema.safeParse({
           ...requirements.env,
-          EE_RECONCILIATION_BATCH_SIZE: batchSize,
-          EE_RECONCILIATION_REPLAY_WINDOW: replayWindow,
+          BILLING_RECONCILIATION_BATCH_SIZE: batchSize,
+          BILLING_RECONCILIATION_REPLAY_WINDOW: replayWindow,
         }).success;
       expect(parse("800", "200")).toBe(true);
       expect(parse("801", "200")).toBe(false);
@@ -101,15 +101,15 @@ describe("env", () => {
     });
 
     it("names the batch size when the two reconciliation knobs overrun the read budget", () => {
-      const result = eeEnvSchema.safeParse({
+      const result = billingEnvSchema.safeParse({
         ...requirements.env,
-        EE_RECONCILIATION_BATCH_SIZE: "1000",
-        EE_RECONCILIATION_REPLAY_WINDOW: "200",
+        BILLING_RECONCILIATION_BATCH_SIZE: "1000",
+        BILLING_RECONCILIATION_REPLAY_WINDOW: "200",
       });
       expect(result.success).toBe(false);
       const message = describeEnvIssues(result.error);
-      expect(message).toContain("EE_RECONCILIATION_BATCH_SIZE");
-      expect(message).toContain("EE_RECONCILIATION_REPLAY_WINDOW");
+      expect(message).toContain("BILLING_RECONCILIATION_BATCH_SIZE");
+      expect(message).toContain("BILLING_RECONCILIATION_REPLAY_WINDOW");
     });
 
     it("bounds the replay window so it can never starve the forward batch", () => {
@@ -119,10 +119,10 @@ describe("env", () => {
       // capacity, not the whole guarantee — what makes it exactly BATCH_SIZE is
       // the cross-field rule covered by the test above.
       const parse = (value: string): boolean => {
-        process.env.EE_RECONCILIATION_REPLAY_WINDOW = value;
-        _resetEeEnvForTests();
+        process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = value;
+        _resetBillingEnvForTests();
         try {
-          getEeEnv();
+          getBillingEnv();
           return true;
         } catch {
           return false;
@@ -135,8 +135,8 @@ describe("env", () => {
         // 0 stays legal: the escape hatch back to the plain cursor.
         expect(parse("0")).toBe(true);
       } finally {
-        delete process.env.EE_RECONCILIATION_REPLAY_WINDOW;
-        _resetEeEnvForTests();
+        delete process.env.BILLING_RECONCILIATION_REPLAY_WINDOW;
+        _resetBillingEnvForTests();
       }
     });
   });
@@ -147,11 +147,11 @@ describe("describeEnvIssues()", () => {
     const saved = { ...process.env };
     delete process.env.STRIPE_WEBHOOK_SECRET;
     delete process.env.STRIPE_SECRET_KEY;
-    _resetEeEnvForTests();
+    _resetBillingEnvForTests();
     try {
       let message = "";
       try {
-        getEeEnv();
+        getBillingEnv();
       } catch (err) {
         message = describeEnvIssues(err);
       }
@@ -162,7 +162,7 @@ describe("describeEnvIssues()", () => {
     } finally {
       process.env.STRIPE_WEBHOOK_SECRET = saved.STRIPE_WEBHOOK_SECRET;
       process.env.STRIPE_SECRET_KEY = saved.STRIPE_SECRET_KEY;
-      _resetEeEnvForTests();
+      _resetBillingEnvForTests();
     }
   });
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { ENDED_SUBSCRIPTION_STATUSES, HARD_BLOCKED_STATUSES } from "../config.ts";
@@ -99,7 +99,7 @@ export function isAffordable(quote: UsageQuote, account: AccountBalance): boolea
  * @param quote - the per-component credit estimate from `quoteUsage`.
  */
 export async function checkQuota(orgId: string, quote: UsageQuote): Promise<void> {
-  const db = getEeDb();
+  const db = getBillingDb();
 
   const [account] = await db
     .select({

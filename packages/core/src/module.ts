@@ -287,7 +287,7 @@ export interface AppstrateModule {
 
   /**
    * Org-level permissions granted to a PRINCIPAL (one user in one org) rather
-   * than to a role — for a population the module maintains (the ee module's
+   * than to a role — for a population the module maintains (the billing module's
    * billing managers, RBAC spec §10; an SSO group mapping). Composes with
    * {@link permissionsContribution}, which still declares the resource and its
    * role grants; this hands extra copies of those strings to named users.

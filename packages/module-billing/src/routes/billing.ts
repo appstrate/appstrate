@@ -3,7 +3,7 @@
 import { Hono, type Context } from "hono";
 import Stripe from "stripe";
 import { z } from "zod";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { createCheckoutSession } from "../stripe/checkout.ts";
@@ -19,7 +19,7 @@ import {
   type PlanDefinition,
 } from "../config.ts";
 import { logger } from "../logger.ts";
-import { eeRateLimit } from "../middleware.ts";
+import { billingRateLimit } from "../middleware.ts";
 import {
   listBillingManagers,
   replaceBillingManagers,
@@ -53,7 +53,7 @@ import {
 // the platform's own `AppEnv` declares): billing-manager grants are attributed
 // to whoever made them, and the platform's `principalPermissions` surface is
 // session-only, so a request reaching a `billing:manage` route always has one.
-type EeEnv = {
+type BillingEnv = {
   Variables: {
     orgId: string;
     orgRole: OrgRole;
@@ -181,7 +181,7 @@ function managerList(managers: BillingManager[]) {
  * follows it never calls an endpoint this API is going to reject.
  */
 async function billingSnapshot(orgId: string) {
-  const [account] = await getEeDb()
+  const [account] = await getBillingDb()
     .select({
       planId: billingAccounts.planId,
       creditsUsed: billingAccounts.creditsUsed,
@@ -221,7 +221,7 @@ async function billingSnapshot(orgId: string) {
   };
 }
 
-function auditBilling(c: Context<EeEnv>, action: string, after: AuditPayload): Promise<void> {
+function auditBilling(c: Context<BillingEnv>, action: string, after: AuditPayload): Promise<void> {
   return getPlatformServices().audit.record(c, {
     action,
     resourceType: "billing_account",
@@ -235,7 +235,7 @@ function auditBilling(c: Context<EeEnv>, action: string, after: AuditPayload): P
  * module raises itself are decisions, and a generic 503 would invite a pointless retry.
  */
 function stripeCallFailure(
-  c: Context<EeEnv>,
+  c: Context<BillingEnv>,
   err: unknown,
   context: Record<string, unknown>,
 ): Response {
@@ -254,8 +254,8 @@ function stripeCallFailure(
   return problemJson(c, paymentServiceUnavailable());
 }
 
-export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
-  const router = new Hono<EeEnv>();
+export function createBillingRoutes(appUrl: string): Hono<BillingEnv> {
+  const router = new Hono<BillingEnv>();
 
   // The shared permission guards and body reader signal a refusal by THROWING an
   // `ApiError`, while this module's Stripe-facing failures return `problemJson` directly;
@@ -277,7 +277,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   router.post(
     "/api/billing/checkout",
     requireModulePermission("billing", "manage"),
-    eeRateLimit(5, (c) => `checkout:${c.get("orgId")}`),
+    billingRateLimit(5, (c) => `checkout:${c.get("orgId")}`),
     async (c) => {
       const orgId = c.get("orgId");
       const body = await readJsonBody(c, checkoutBodySchema);
@@ -299,7 +299,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   router.post(
     "/api/billing/plan",
     requireModulePermission("billing", "manage"),
-    eeRateLimit(5, (c) => `plan:${c.get("orgId")}`),
+    billingRateLimit(5, (c) => `plan:${c.get("orgId")}`),
     async (c) => {
       const orgId = c.get("orgId");
       const body = await readJsonBody(c, planBodySchema);
@@ -324,7 +324,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   router.post(
     "/api/billing/portal",
     requireModulePermission("billing", "manage"),
-    eeRateLimit(5, (c) => `portal:${c.get("orgId")}`),
+    billingRateLimit(5, (c) => `portal:${c.get("orgId")}`),
     async (c) => {
       const orgId = c.get("orgId");
 
@@ -354,7 +354,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
 
     const wanted = [...new Set(body.user_ids)];
 
-    // One platform call answers both refusals below: EE has no access to the
+    // One platform call answers both refusals below: the billing module has no access to the
     // platform's membership table, and an id that is not a member of this org
     // simply does not come back.
     const members = wanted.length === 0 ? [] : await getOrgQueries().getOrgMembers(orgId, wanted);

@@ -6,7 +6,7 @@
  *
  * The grant travels through the module contract's `principalPermissions`
  * surface, so it attaches to a `(orgId, userId)` pair rather than to an org
- * role. That is the whole point: `billing` is EE vocabulary, core's
+ * role. That is the whole point: `billing` is billing vocabulary, core's
  * `org_role` enum is Apache-2.0, and a `billing_manager` role would put the
  * one inside the other.
  *
@@ -20,7 +20,7 @@
 
 import { and, eq, inArray } from "drizzle-orm";
 import { invalidatePrincipalPermissions } from "@appstrate/core/principal-permissions";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingManagers } from "../../drizzle/schema.ts";
 
 /** The two strings a billing manager holds — also the module's `mayGrant`. */
@@ -34,7 +34,7 @@ export interface BillingManager {
 
 /** The org's managers, oldest grant first. */
 export async function listBillingManagers(orgId: string): Promise<BillingManager[]> {
-  const db = getEeDb();
+  const db = getBillingDb();
   return db
     .select({
       userId: billingManagers.userId,
@@ -51,7 +51,7 @@ export async function listBillingManagers(orgId: string): Promise<BillingManager
  * once per principal per cache miss on every session request. Keep it that.
  */
 export async function isBillingManager(orgId: string, userId: string): Promise<boolean> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [row] = await db
     .select({ userId: billingManagers.userId })
     .from(billingManagers)
@@ -77,7 +77,7 @@ export async function replaceBillingManagers(
   userIds: readonly string[],
   addedBy: string,
 ): Promise<BillingManager[]> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const wanted = [...new Set(userIds)];
 
   const previous = await db
@@ -126,7 +126,7 @@ export async function replaceBillingManagers(
  * manager deletes nothing.
  */
 export async function deleteBillingManagers(orgId: string, userId?: string): Promise<void> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const byOrg = eq(billingManagers.orgId, orgId);
   const removed = await db
     .delete(billingManagers)

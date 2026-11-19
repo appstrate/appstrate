@@ -353,7 +353,7 @@ this is the copy kept in step with it: `turbo typecheck lint format:check` plus
 `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
 `verify:release-version`, `verify:env-docs`, `verify:workflows`, `detect:breaking`,
 `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
-`verify:module-isolation`, `verify:module-sql-boundary`, `verify:license-boundary`,
+`verify:module-isolation`, `verify:module-sql-boundary`, `verify:license-headers`,
 `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`,
 `verify:overrides`.
 turbo fans those out to **43** actual tasks (`typecheck` alone runs in 22 workspaces) — count them

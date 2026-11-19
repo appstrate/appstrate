@@ -891,7 +891,7 @@ export interface paths {
          * Get the current org's billing account
          * @description Returns the org's current plan, credit usage, subscription status, and available upgrade tiers. Requires `billing:read` (granted to every org member).
          */
-        get: operations["getEeBillingAccount"];
+        get: operations["getBillingAccount"];
         put?: never;
         post?: never;
         delete?: never;
@@ -913,7 +913,7 @@ export interface paths {
          * Create a Stripe Checkout session
          * @description Returns a one-time Stripe Checkout URL the dashboard redirects to. Admin-only (`billing:manage`). Rate-limited to 5/min per org.
          */
-        post: operations["createEeBillingCheckoutSession"];
+        post: operations["createBillingCheckoutSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -931,7 +931,7 @@ export interface paths {
          * Get the billing contact
          * @description The address invoices, receipts and payment alerts are sent to, plus the CC list. Requires `billing:manage`.
          */
-        get: operations["getEeBillingContact"];
+        get: operations["getBillingContact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -941,7 +941,7 @@ export interface paths {
          * Update the billing contact
          * @description Sets `billing_email` and/or `billing_cc`; omitted fields are left as they are, and `billing_email: null` clears the contact so it falls back to the organization's owners. The primary address is pushed to the Stripe customer so Stripe addresses its own receipts. Requires `billing:manage`.
          */
-        patch: operations["updateEeBillingContact"];
+        patch: operations["updateBillingContact"];
         trace?: never;
     };
     "/api/billing/managers": {
@@ -955,12 +955,12 @@ export interface paths {
          * List the organization's billing managers
          * @description Org users granted `billing:read` + `billing:manage` without being owners or admins. Requires `billing:manage`.
          */
-        get: operations["listEeBillingManagers"];
+        get: operations["listBillingManagers"];
         /**
          * Replace the organization's billing managers
          * @description Replaces the whole set with `user_ids`. Every id must be a member of the organization, and none may be an owner or admin — those already hold `billing:*` through their org role, so listing them would grant nothing while making the list read as if they were the only ones who could. Requires `billing:manage`.
          */
-        put: operations["replaceEeBillingManagers"];
+        put: operations["replaceBillingManagers"];
         post?: never;
         delete?: never;
         options?: never;
@@ -981,7 +981,7 @@ export interface paths {
          * Change the plan of the existing subscription
          * @description Moves the organization's EXISTING Stripe subscription onto another plan, in place, with proration — the door for an org that already subscribes, where `POST /api/billing/checkout` would create a second subscription and bill it twice. Admin-only (`billing:manage`). Rate-limited to 5/min per org. Returns the billing snapshot; the new plan itself is applied when Stripe's `customer.subscription.updated` arrives, so the returned `plan` may still name the previous one.
          */
-        post: operations["changeEeBillingPlan"];
+        post: operations["changeBillingPlan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1001,7 +1001,7 @@ export interface paths {
          * Create a Stripe Customer Portal session
          * @description Returns a one-time Stripe Customer Portal URL the dashboard redirects to (manage payment method, cancel subscription, view invoices). Admin-only (`billing:manage`). Rate-limited to 5/min per org.
          */
-        post: operations["createEeBillingPortalSession"];
+        post: operations["createBillingPortalSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1021,7 +1021,7 @@ export interface paths {
          * Stripe webhook receiver
          * @description Stripe-signed webhook receiver. Public path (no platform auth) — verified by `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`. Idempotent via `ee_stripe_events`.
          */
-        post: operations["receiveEeBillingStripeWebhook"];
+        post: operations["receiveBillingStripeWebhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6113,6 +6113,75 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        BillingAccount: {
+            plan: {
+                id: string;
+                name: string;
+            };
+            plans: components["schemas"]["BillingPlan"][];
+            usage_percent: number;
+            credits_used: number;
+            credit_quota: number;
+            /** Format: date-time */
+            period_end: string | null;
+            /**
+             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.
+             * @enum {string}
+             */
+            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "incomplete" | "canceled" | "canceling";
+            /**
+             * @description Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.
+             * @enum {string}
+             */
+            plan_action: "plan-change" | "portal" | "checkout";
+            /** @description Plans the org can upgrade into — empty when on the highest plan. */
+            upgrades: components["schemas"]["BillingUpgradePlan"][];
+        };
+        /**
+         * @description A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `BillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.
+         * @enum {string}
+         */
+        BillingCheckoutPlanId: "starter" | "pro";
+        BillingContact: {
+            /**
+             * Format: email
+             * @description Primary billing address. `null` falls back to the organization's owners, resolved at send time.
+             */
+            billing_email: string | null;
+            /** @description Addresses copied on every billing email. */
+            billing_cc: string[];
+        };
+        BillingManager: {
+            /** @description Platform user id granted `billing:read` + `billing:manage`. */
+            userId: string;
+            /** @description User id that granted it. */
+            added_by: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        BillingManagerList: {
+            /** @enum {string} */
+            object: "list";
+            data: components["schemas"]["BillingManager"][];
+            /** @description Always `false`: the set is never paginated. */
+            hasMore: boolean;
+        };
+        BillingPlan: {
+            /** @enum {string} */
+            id: "free" | "starter" | "pro";
+            /** @description Display name (e.g. "Free", "Starter") */
+            name: string;
+            /** @description Monthly price in dollars */
+            price: number;
+            /** @description Credits granted per billing cycle */
+            credit_quota: number;
+            /** @description Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit. */
+            file_storage_bytes: number;
+        };
+        /** @description A catalog plan the org can upgrade into — an `BillingPlan` whose `id` is narrowed to a checkout target. */
+        BillingUpgradePlan: components["schemas"]["BillingPlan"] & {
+            id: components["schemas"]["BillingCheckoutPlanId"];
+        };
         ChatMessage: {
             /** @description Server-generated message id */
             id: string;
@@ -6156,75 +6225,6 @@ export interface components {
             /** @enum {string} */
             code?: "not_connected" | "must_choose_connection" | "auth_key_mismatch" | "integration_not_active" | "integration_unbound";
         };
-        EeBillingAccount: {
-            plan: {
-                id: string;
-                name: string;
-            };
-            plans: components["schemas"]["EeBillingPlan"][];
-            usage_percent: number;
-            credits_used: number;
-            credit_quota: number;
-            /** Format: date-time */
-            period_end: string | null;
-            /**
-             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.
-             * @enum {string}
-             */
-            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "incomplete" | "canceled" | "canceling";
-            /**
-             * @description Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.
-             * @enum {string}
-             */
-            plan_action: "plan-change" | "portal" | "checkout";
-            /** @description Plans the org can upgrade into — empty when on the highest plan. */
-            upgrades: components["schemas"]["EeBillingUpgradePlan"][];
-        };
-        EeBillingContact: {
-            /**
-             * Format: email
-             * @description Primary billing address. `null` falls back to the organization's owners, resolved at send time.
-             */
-            billing_email: string | null;
-            /** @description Addresses copied on every billing email. */
-            billing_cc: string[];
-        };
-        EeBillingManager: {
-            /** @description Platform user id granted `billing:read` + `billing:manage`. */
-            userId: string;
-            /** @description User id that granted it. */
-            added_by: string;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        EeBillingManagerList: {
-            /** @enum {string} */
-            object: "list";
-            data: components["schemas"]["EeBillingManager"][];
-            /** @description Always `false`: the set is never paginated. */
-            hasMore: boolean;
-        };
-        EeBillingPlan: {
-            /** @enum {string} */
-            id: "free" | "starter" | "pro";
-            /** @description Display name (e.g. "Free", "Starter") */
-            name: string;
-            /** @description Monthly price in dollars */
-            price: number;
-            /** @description Credits granted per billing cycle */
-            credit_quota: number;
-            /** @description Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit. */
-            file_storage_bytes: number;
-        };
-        /** @description A catalog plan the org can upgrade into — an `EeBillingPlan` whose `id` is narrowed to a checkout target. */
-        EeBillingUpgradePlan: components["schemas"]["EeBillingPlan"] & {
-            id: components["schemas"]["EeCheckoutPlanId"];
-        };
-        /**
-         * @description A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `EeBillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.
-         * @enum {string}
-         */
-        EeCheckoutPlanId: "starter" | "pro";
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
             id: string;
@@ -10727,7 +10727,7 @@ export interface operations {
             };
         };
     };
-    getEeBillingAccount: {
+    getBillingAccount: {
         parameters: {
             query?: never;
             header?: {
@@ -10745,7 +10745,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EeBillingAccount"];
+                    "application/json": components["schemas"]["BillingAccount"];
                 };
             };
             /** @description Caller lacks `billing:read` */
@@ -10768,7 +10768,7 @@ export interface operations {
             };
         };
     };
-    createEeBillingCheckoutSession: {
+    createBillingCheckoutSession: {
         parameters: {
             query?: never;
             header?: {
@@ -10781,7 +10781,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                    plan_id: components["schemas"]["BillingCheckoutPlanId"];
                     /** @description Path-relative redirect target (must start with `/`). Defaults to `/org-settings/billing`. */
                     return_url?: string;
                 };
@@ -10856,7 +10856,7 @@ export interface operations {
             };
         };
     };
-    getEeBillingContact: {
+    getBillingContact: {
         parameters: {
             query?: never;
             header?: {
@@ -10874,7 +10874,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EeBillingContact"];
+                    "application/json": components["schemas"]["BillingContact"];
                 };
             };
             /** @description Caller lacks `billing:manage` */
@@ -10897,7 +10897,7 @@ export interface operations {
             };
         };
     };
-    updateEeBillingContact: {
+    updateBillingContact: {
         parameters: {
             query?: never;
             header?: {
@@ -10923,7 +10923,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EeBillingContact"];
+                    "application/json": components["schemas"]["BillingContact"];
                 };
             };
             /** @description Invalid email address, or more than 5 CC addresses */
@@ -10955,7 +10955,7 @@ export interface operations {
             };
         };
     };
-    listEeBillingManagers: {
+    listBillingManagers: {
         parameters: {
             query?: never;
             header?: {
@@ -10973,7 +10973,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EeBillingManagerList"];
+                    "application/json": components["schemas"]["BillingManagerList"];
                 };
             };
             /** @description Caller lacks `billing:manage` */
@@ -10987,7 +10987,7 @@ export interface operations {
             };
         };
     };
-    replaceEeBillingManagers: {
+    replaceBillingManagers: {
         parameters: {
             query?: never;
             header?: {
@@ -11012,7 +11012,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EeBillingManagerList"];
+                    "application/json": components["schemas"]["BillingManagerList"];
                 };
             };
             /** @description A user id is not an org member, or is an owner/admin */
@@ -11035,7 +11035,7 @@ export interface operations {
             };
         };
     };
-    changeEeBillingPlan: {
+    changeBillingPlan: {
         parameters: {
             query?: never;
             header?: {
@@ -11048,7 +11048,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                    plan_id: components["schemas"]["BillingCheckoutPlanId"];
                 };
             };
         };
@@ -11059,7 +11059,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EeBillingAccount"];
+                    "application/json": components["schemas"]["BillingAccount"];
                 };
             };
             /** @description Validation error or invalid Stripe plan configuration */
@@ -11118,7 +11118,7 @@ export interface operations {
             };
         };
     };
-    createEeBillingPortalSession: {
+    createBillingPortalSession: {
         parameters: {
             query?: never;
             header?: {
@@ -11171,7 +11171,7 @@ export interface operations {
             };
         };
     };
-    receiveEeBillingStripeWebhook: {
+    receiveBillingStripeWebhook: {
         parameters: {
             query?: never;
             header: {

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEeDb, type EeDb, type EeTx } from "../db.ts";
+import { getBillingDb, type BillingDb, type BillingTx } from "../db.ts";
 import {
   billingAccounts,
   orgUsageRecords,
-  eeBilledLlmUsage,
+  billedLlmUsage,
   billingCursor,
 } from "../../drizzle/schema.ts";
 import { eq, sql, type SQL } from "drizzle-orm";
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 import { getAppUrl, getPlatformServices } from "../platform.ts";
-import { getEeEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
+import { getBillingEnv, LEDGER_LIST_MAX_LIMIT } from "../env.ts";
 import { dollarsToCredits, CREDITS_PER_DOLLAR } from "../credits.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
@@ -137,7 +137,7 @@ export interface CursorSeedResult {
 /** First id a ledger read may start from (exclusive `afterId`): the replay window reaches
  * back below the watermark for late commits, the floor stops it at the seeded frontier. */
 export function ledgerScanStart(cursor: { lastLlmUsageId: number; floorId: number }): number {
-  const replayWindow = getEeEnv().EE_RECONCILIATION_REPLAY_WINDOW;
+  const replayWindow = getBillingEnv().BILLING_RECONCILIATION_REPLAY_WINDOW;
   return Math.max(cursor.floorId, cursor.lastLlmUsageId - replayWindow);
 }
 
@@ -169,7 +169,7 @@ export function ledgerScanStart(cursor: { lastLlmUsageId: number; floorId: numbe
  */
 export async function ensureCursorSeeded(
   services: PlatformServices,
-  db: EeDb,
+  db: BillingDb,
 ): Promise<CursorSeedResult> {
   const columns = {
     lastLlmUsageId: billingCursor.lastLlmUsageId,
@@ -331,7 +331,7 @@ export interface BillOutcome {
  * obeys the exact same carry-forward rule and loses no remainder.
  */
 export async function billLedgerRows(
-  tx: EeTx,
+  tx: BillingTx,
   billableRows: LlmUsageLedgerRow[],
 ): Promise<BillOutcome> {
   if (billableRows.length === 0) {
@@ -348,10 +348,10 @@ export async function billLedgerRows(
   // Claim the billable rows. `ON CONFLICT (llm_usage_id) DO NOTHING` skips rows
   // an earlier pass already claimed; `RETURNING` yields exactly this call's slice.
   const won = await tx
-    .insert(eeBilledLlmUsage)
+    .insert(billedLlmUsage)
     .values(billableRows.map((r) => ({ llmUsageId: r.id, pricingStatus: claimPricingStatus(r) })))
     .onConflictDoNothing()
-    .returning({ llmUsageId: eeBilledLlmUsage.llmUsageId });
+    .returning({ llmUsageId: billedLlmUsage.llmUsageId });
 
   const billedIds = won.map((w) => w.llmUsageId);
   const billed = won.length;
@@ -520,11 +520,11 @@ function noProgress(args: {
 
 /**
  * One cursor sweep pass over the platform's append-only `llm_usage` ledger,
- * the EE billing consumer.
+ * the billing consumer.
  *
- * EE owns its database, so it cannot SQL-join the platform ledger. It reads
+ * The billing module owns its database, so it cannot SQL-join the platform ledger. It reads
  * the ledger through `services.usage.list({ afterId })` (a serial-`id` cursor)
- * and claims each billable row by inserting a marker into the EE-owned
+ * and claims each billable row by inserting a marker into the module-owned
  * `ee_billed_llm_usage` side-car with `ON CONFLICT (llm_usage_id) DO NOTHING
  * RETURNING`. The `RETURNING` set is exactly the rows THIS pass won, so a
  * re-read of already-processed rows is a cheap no-op. Module boundary
@@ -534,17 +534,17 @@ function noProgress(args: {
  *   - Process the leading run of rows the watermark may safely pass, the
  *     "frontier". A SETTLED row is always in the frontier. An UNSETTLED row
  *     stalls the frontier ONLY when its `credentialSource` is `system` (a row
- *     EE WILL bill once it settles: a runner row's `cost_usd` grows until its
+ *     The billing module WILL bill once it settles: a runner row's `cost_usd` grows until its
  *     run reaches a terminal status, so billing it early would under-count).
  *     An unsettled NON-system row (BYOK / null) is never billed and its
  *     `credentialSource` is fixed at first insert, so the watermark advances
  *     PAST it, and a long BYOK run cannot block billing for every org.
- *   - Scan from `watermark − EE_RECONCILIATION_REPLAY_WINDOW`, not from the
+ *   - Scan from `watermark − BILLING_RECONCILIATION_REPLAY_WINDOW`, not from the
  *     watermark. A serial `id` is taken at INSERT but published at COMMIT, so a
  *     row can appear BELOW an already-advanced watermark and would otherwise be
  *     unreachable — and therefore unbilled and unlogged — forever. The window is
  *     a READ offset only; the committed watermark never moves backwards.
- *   - Advance the watermark to the last frontier row id, in the SAME EE-DB
+ *   - Advance the watermark to the last frontier row id, in the SAME billing DB
  *     transaction as the claims/debits. On any error nothing advances and the
  *     next pass retries from the last committed id. A stalled watermark (first
  *     row an unsettled system row) simply re-reads next pass; the claim table
@@ -576,7 +576,7 @@ export async function sweepLedgerBatch(
   hooks?: SweepHooks,
 ): Promise<SweepResult> {
   const services = getPlatformServices();
-  const db = getEeDb();
+  const db = getBillingDb();
 
   // 1. Load the watermark. Normally `init()` already seeded it at boot (closing
   //    the cutover loss window); this is the safety-net path — a pass that finds
@@ -638,7 +638,7 @@ export async function sweepLedgerBatch(
 
   // 3. Frontier: the leading run of rows the watermark may safely pass. Settled
   //    rows always qualify. An unsettled row stalls the frontier ONLY when it is
-  //    a `system` row (EE will bill it once it settles); an unsettled
+  //    a `system` row (the billing module will bill it once it settles); an unsettled
   //    NON-system row (BYOK / null) is never billed and its `credentialSource`
   //    is immutable from first insert, so we advance past it (it counts as
   //    processed, never billed) instead of letting a long BYOK run wedge billing

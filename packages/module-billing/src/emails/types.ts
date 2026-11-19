@@ -12,7 +12,7 @@ import type { RenderedEmail, SupportedLocale } from "@appstrate/emails";
 export type { RenderedEmail, SupportedLocale };
 
 // ---------------------------------------------------------------------------
-// Billing email types (EE-only — not in @appstrate/emails)
+// Billing email types (billing-only — not in @appstrate/emails)
 // ---------------------------------------------------------------------------
 
 export type BillingEmailType =
