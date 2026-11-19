@@ -10,6 +10,7 @@ import {
   COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
+  NEW_CONVERSATION_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
   READING_TEXT_DENSE_CLASS,
@@ -81,5 +82,17 @@ describe("composer row", () => {
   it("keeps the model picker to a part of the line, so the field keeps the rest", () => {
     expect(COMPOSER_SLOT_CLASS.split(/\s+/)).toContain("max-md:max-w-[40%]");
     expect(COMPOSER_TOOLS_CLASS.split(/\s+/)).toContain("max-md:flex-none");
+  });
+});
+
+describe("the sidebar's search and new-conversation row on a phone", () => {
+  it("shows the search as a filled field with no border", () => {
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:bg-muted");
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:border-transparent");
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:h-11");
+  });
+
+  it("aligns the new-conversation row to the left, as the conversations are", () => {
+    expect(NEW_CONVERSATION_CLASS).toContain("max-md:justify-start");
   });
 });

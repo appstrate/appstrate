@@ -43,9 +43,12 @@ export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
  */
 export const COMPOSER_SLOT_CLASS = "ml-auto min-w-0 max-md:ml-0 max-md:max-w-[40%] max-md:shrink-0";
 
+/** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
+export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
+
 /** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
 export const SEARCH_INPUT_CLASS =
-  "h-10 pr-9 pl-7 text-base md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
+  "h-10 pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-transparent max-md:bg-muted max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
 
 /** The user's bubble. */
 export const USER_MESSAGE_CLASS =

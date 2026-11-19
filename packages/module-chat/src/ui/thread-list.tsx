@@ -81,7 +81,12 @@ import {
 } from "./sessions.ts";
 import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
-import { NOTE_TEXT_CLASS, READING_TEXT_DENSE_CLASS, SEARCH_INPUT_CLASS } from "./phone-text.ts";
+import {
+  NEW_CONVERSATION_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_DENSE_CLASS,
+  SEARCH_INPUT_CLASS,
+} from "./phone-text.ts";
 import { useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -171,6 +176,10 @@ export function ChatConversationList({
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
+  // On a phone the search is a magnifier beside "New conversation" that unfolds the field; from
+  // `md` up the field is always there.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
   const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
   const searching = term !== "";
   // The plain list always runs (same key as the nav badge): it decides whether
@@ -213,24 +222,55 @@ export function ChatConversationList({
         <SidebarGroup className="pb-0">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("threads.new")}>
-                <PlusIcon />
+              <SidebarMenuButton
+                onClick={() => select?.(null)}
+                tooltip={t("threads.new")}
+                className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
+              >
+                {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
+                <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
+                  <PlusIcon />
+                </span>
                 <span>{t("threads.new")}</span>
               </SidebarMenuButton>
+              {showSearch && (
+                <button
+                  type="button"
+                  aria-label={t("threads.search.open")}
+                  aria-expanded={searchOpen || input !== ""}
+                  data-testid="chat-search-toggle"
+                  onClick={() => {
+                    setSearchOpen(true);
+                    // The field is mounted but hidden until this state lands: focus it after.
+                    requestAnimationFrame(() => searchField.current?.focus());
+                  }}
+                  className="text-sidebar-foreground/70 active:bg-sidebar-accent absolute top-0 right-0 flex size-11 items-center justify-center rounded-md md:hidden"
+                >
+                  <SearchIcon className="size-5" />
+                </button>
+              )}
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       )}
       {showSearch && (
-        <div className="relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden max-md:order-first">
-          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2" />
+        <div
+          className={cn(
+            "relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden",
+            !searchOpen && input === "" && "max-md:hidden",
+          )}
+        >
+          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 max-md:left-6 max-md:size-4" />
           <SidebarInput
+            ref={searchField}
             type="search"
             value={input}
             maxLength={SEARCH_MAX_LENGTH}
             placeholder={t("threads.search.placeholder")}
             aria-label={t("threads.search.placeholder")}
             onChange={(event) => setInput(event.target.value)}
+            // An empty field folds back into its magnifier on a phone.
+            onBlur={() => input === "" && setSearchOpen(false)}
             onKeyDown={(event) => {
               if (event.key === "Escape" && input !== "") {
                 event.preventDefault();
@@ -239,15 +279,24 @@ export function ChatConversationList({
             }}
             className={SEARCH_INPUT_CLASS}
           />
-          {input !== "" && (
+          {/* Clears the field; on a phone it also folds it back into its magnifier, and stays there
+              to close an empty one. */}
+          {(input !== "" || searchOpen) && (
             <button
               type="button"
-              aria-label={t("threads.search.clear")}
-              title={t("threads.search.clear")}
-              onClick={() => setInput("")}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5"
+              aria-label={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+              title={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+              data-testid="chat-search-clear"
+              onClick={() => {
+                setInput("");
+                setSearchOpen(false);
+              }}
+              className={cn(
+                "text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5 max-md:right-2 max-md:p-2.5",
+                input === "" && "md:hidden",
+              )}
             >
-              <XIcon className="size-3.5" />
+              <XIcon className="size-3.5 max-md:size-4" />
             </button>
           )}
         </div>
@@ -409,21 +458,31 @@ function ConversationRow({
           "[--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]",
         )}
       >
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 max-md:flex-row max-md:items-center max-md:gap-2">
           <span
             className={cn(
-              "block truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              "block truncate text-left leading-4 max-md:min-w-0 max-md:flex-1 max-md:text-base max-md:leading-5",
               unread && "font-semibold",
             )}
           >
             {session.title ?? t("threads.new")}
           </span>
+          {/* From `md` up the spaces are named on a line of their own... */}
           <span
             data-testid="chat-session-spaces"
-            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:h-5 ${NOTE_TEXT_CLASS}`}
+            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:hidden ${NOTE_TEXT_CLASS}`}
           >
             {sessionSpaces(session, renderSpaces, t)}
           </span>
+          {/* ...and on a phone their tiles close the title's line (the names are in the "…" panel). */}
+          {session.space_ids.length > 0 && (
+            <span
+              data-testid="chat-session-space-tiles"
+              className="hidden shrink-0 items-center max-md:flex"
+            >
+              {renderSpaces(session.space_ids, { tilesOnly: true })}
+            </span>
+          )}
         </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
@@ -508,6 +567,14 @@ function ConversationRow({
             open={menuOpen}
             onOpenChange={setMenuOpen}
             title={t("threads.actions.openFor", { title: session.title ?? t("threads.new") })}
+            header={
+              <div
+                data-testid="chat-menu-spaces"
+                className={`text-muted-foreground flex min-w-0 items-center px-5 pt-3 [--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
+              >
+                {sessionSpaces(session, renderSpaces, t)}
+              </div>
+            }
           >
             <SheetMenuRow
               onClick={() => {

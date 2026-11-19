@@ -150,14 +150,18 @@ export function SpaceTilesOf({
   spaceIds,
   size = "sm",
   className,
+  tilesOnly = false,
 }: {
   spaceIds: readonly string[];
   size?: keyof typeof SIZES;
   className?: string;
+  /** The tiles alone, two at most then « +N »: for a line with no room for the names. */
+  tilesOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const spaces = useSpacesOf(spaceIds);
   if (spaces.length === 0) return null;
+  if (tilesOnly) return <SpaceTileStack spaces={spaces} size={size} max={2} />;
   if (spaces.length === 1)
     return <SpaceName space={spaces[0]!} size={size} className={className} />;
   const names = spaceLabels(spaces, t);

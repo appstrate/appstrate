@@ -164,7 +164,12 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         )}
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
+        {/* The catalogue is Studio's (installing agents and skills): the chat's phone drawer leaves it
+            to the Studio tab, and carries settings as an icon beside the account. */}
+        <SidebarMenu
+          className={cn("px-2 pb-2", product === "chat" && "max-md:hidden")}
+          hidden={!catalogueReachable}
+        >
           <OverlayEntry
             to={catalogueHref("agent")}
             active={catalogueActive}
@@ -172,7 +177,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
             label={t("nav.catalogue")}
           />
         </SidebarMenu>
-        <SidebarMenu className="px-2 pb-2">
+        <SidebarMenu className={cn("px-2 pb-2", product === "chat" && "max-md:hidden")}>
           <OverlayEntry
             to={SETTINGS_ENTRY}
             active={settingsActive}
@@ -180,8 +185,27 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
             label={t("nav.settings")}
           />
         </SidebarMenu>
-        <div className="border-sidebar-border border-t p-2">
-          <NavUser variant="row" />
+        <div className="border-sidebar-border flex items-center gap-1 border-t p-2">
+          <div className="min-w-0 flex-1">
+            <NavUser variant="row" />
+          </div>
+          {product === "chat" && (
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground size-11 shrink-0 md:hidden"
+            >
+              <Link
+                to={SETTINGS_ENTRY}
+                aria-label={t("nav.settings")}
+                data-testid="sidebar-settings"
+                {...overlayIntent(SETTINGS_ENTRY)}
+              >
+                <Settings className="size-5" aria-hidden="true" />
+              </Link>
+            </Button>
+          )}
         </div>
       </SidebarFooter>
     </Sidebar>

@@ -9,4 +9,6 @@ import { SpaceTilesOf } from "../../components/space-name";
  * state (rest, hover, active). A file of its own: a component file exports components only (fast
  * refresh).
  */
-export const renderSpaces: RenderSpaces = (spaceIds) => <SpaceTilesOf spaceIds={spaceIds} />;
+export const renderSpaces: RenderSpaces = (spaceIds, options) => (
+  <SpaceTilesOf spaceIds={spaceIds} tilesOnly={options?.tilesOnly} />
+);
