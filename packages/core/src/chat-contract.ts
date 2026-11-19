@@ -104,7 +104,7 @@ export interface ChatAttachmentRequest {
    */
   spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
   /**
-   * The caller's personal space when the turn reaches it, null under a role preview: where an
+   * The caller's personal space when the caller reaches it (none under a role preview): where an
    * upload is staged, and where the files this conversation holds are read, under `files:read`
    * alone, whether or not the turn acts there.
    */
@@ -112,7 +112,7 @@ export interface ChatAttachmentRequest {
   /**
    * Called with the space the attachment belongs to, once it is one of `spaces` and BEFORE
    * anything is read in it: a rejection refuses the attachment. The conversation records the
-   * space as touched here. A file the conversation holds touches none.
+   * space as touched here. A file the conversation holds in `personalSpaceId` touches none.
    */
   beforeResolve: (spaceId: string) => Promise<void>;
 }

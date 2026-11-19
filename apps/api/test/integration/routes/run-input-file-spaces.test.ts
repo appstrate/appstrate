@@ -418,7 +418,13 @@ describe("run inputs across spaces", () => {
       }),
       "X-Space-Id": teamB,
     };
-    expect((await app.request(`/api/files/${fileId}`, { headers: bearer })).status).toBe(200);
+    const read = await app.request(`/api/files/${fileId}`, { headers: bearer });
+    expect(read.status).toBe(200);
+    // What GET advertises is what the lifecycle doors do.
+    expect(((await read.json()) as { capabilities: unknown }).capabilities).toMatchObject({
+      keep: false,
+      delete: false,
+    });
     // The conversation widens reads only: delete and keep take the file's space grants.
     const keep = await app.request(`/api/files/${fileId}/keep`, {
       method: "POST",

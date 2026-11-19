@@ -59,7 +59,7 @@ export function callerReachableSpaces(
  * spaces its tools may name (`mcpOrgSpaces.reachable`). The same list serves the connection's
  * `skills/list`, its `resources/read` of a `skill://` URI and its agent launch prompts, each read
  * in the space it names with the caller's set there: a skill or a prompt is not a file named by
- * id, and the chat records a skill's space on the conversation before it reads it.
+ * id, and the chat records the space of a skill read through `resources/read` before the read, while a skill injected into the prompt records none.
  */
 export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
   return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));

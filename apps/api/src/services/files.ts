@@ -12,7 +12,7 @@
  *    (`files` on the wire — see {@link FILES_BUCKET}).
  *  - `agent_output` — a deliverable an agent published from a run.
  *
- * Access is never a per-file grant (D2): `getFileForActor` derives it from
+ * Access is never a per-file grant (D2): `resolveFileAcrossSpaces` derives it from
  * the container (run read-ACL, or chat-session owner) at check time.
  * `downloadable` (whether `/content` will serve the bytes to this caller) is
  * derived, not stored: an agent output is downloadable by anyone who can read
@@ -330,7 +330,7 @@ function isFileCreator(
  * caller that does not state its authority gets none.
  *
  * `opts.visible` is the container-ACL outcome (resolved by
- * {@link getFileForActor} / the list SQL / a valid preview token); when
+ * {@link resolveFileAcrossSpaces} / the list SQL / a valid preview token); when
  * false every capability collapses to false.
  */
 export function getFileCapabilities(
@@ -1213,39 +1213,6 @@ const fileSelect = {
   createdAt: files.createdAt,
 } as const;
 
-/**
- * Resolve a file for `actor`, enforcing the container's read-ACL (D2).
- * Returns `null` (→ 404 at the route) when the file does not exist in the
- * caller's org+space, or when the container's ACL rejects the actor — a
- * cross-org, cross-space, or cross-actor id is indistinguishable from a missing
- * one. The full {@link FileCapabilities} are derived once here (the single
- * source) — `permissions` supplies the `files:delete` grant that decides the
- * `keep` / `delete` capabilities, and the `runs:read-all` grant that widens a
- * run container beyond the caller's own runs.
- *
- * `opts.creatorCanManage` is the credential ceiling on the creator's own
- * lifecycle right — see {@link getFileCapabilities}. Defaults to FALSE.
- */
-export async function getFileForActor(
-  scope: SpaceScope,
-  actor: Actor,
-  fileId: string,
-  permissions: ReadonlySet<string>,
-  opts: { creatorCanManage?: boolean } = {},
-): Promise<ResolvedFile | null> {
-  if (!FILE_ID_RE.test(fileId)) return null;
-  const [row] = await db
-    .select(fileSelect)
-    .from(files)
-    .where(
-      and(eq(files.id, fileId), eq(files.orgId, scope.orgId), eq(files.spaceId, scope.spaceId)),
-    )
-    .limit(1);
-  if (!row) return null;
-  const owners = await loadContainerOwners(scope.orgId, [row]);
-  return fileForActor(row as FileRow, actor, permissions, opts, owners);
-}
-
 /** Whom each container of a set of rows belongs to, as the container ACL reads it. */
 interface ContainerOwners {
   runs: ReadonlyMap<string, { spaceId: string; userId: string | null; endUserId: string | null }>;
@@ -1287,7 +1254,7 @@ async function loadContainerOwners(
   };
 }
 
-/** The container ACL of {@link getFileForActor} on a loaded row, its container's owner loaded. */
+/** The container ACL of {@link resolveFileAcrossSpaces} on a loaded row, its container's owner loaded. */
 function fileForActor(
   row: FileRow,
   actor: Actor,
@@ -1337,7 +1304,7 @@ function fileForActor(
 /**
  * Load a file row by id, scoped to `orgId` only — for the cookie-less
  * preview route, whose signed token IS the authorization (no session actor, no
- * container ACL re-check: the token was minted by `getFileForActor` having
+ * container ACL re-check: the token was minted by `resolveFileAcrossSpaces` having
  * already resolved the row for a caller). Binding to the token's `orgId` means a
  * token whose tenant does not match the stored row resolves to null (→ 404).
  * Returns null for a malformed id or a miss.
@@ -1439,10 +1406,10 @@ const CONVERSATION_UPLOAD_GRANT: ReadonlySet<string> = new Set([FILE_CONTENT_GRA
  * it is, not whether this caller reads files at all. `lifecycle` (delete, keep) asks no such
  * grant: its own capability, `files:delete` there or the creator under the ceiling, decides.
  */
-type FileDoor = { door?: "read" | "lifecycle"; creatorCanManage?: boolean };
+type FileResolveOptions = { door?: "read" | "lifecycle"; creatorCanManage?: boolean };
 
 /**
- * Resolve files in their OWN spaces, then the container ACL of {@link getFileForActor}; anything
+ * Resolve files in their OWN spaces, then the container ACL of {@link fileForActor}; anything
  * refused is left out. The conversation widens to its own uploads in the actor's personal space
  * only (a chat upload lives there, outside the spaces a limited turn reaches).
  */
@@ -1451,7 +1418,7 @@ export async function resolveFilesAcrossSpaces(
   actor: Actor,
   fileIds: readonly string[],
   access: FileAccess,
-  opts: FileDoor = {},
+  opts: FileResolveOptions = {},
 ): Promise<ResolvedFile[]> {
   const ids = [...new Set(fileIds)].filter((id) => FILE_ID_RE.test(id));
   if (ids.length === 0) return [];
@@ -1469,18 +1436,26 @@ export async function resolveFilesAcrossSpaces(
       row.chatSessionId === access.conversationId &&
       actor.type === "user" &&
       ownerUserId === actor.id;
-    const permissions =
-      grants.get(row.spaceId) ?? (conversationUpload ? CONVERSATION_UPLOAD_GRANT : undefined);
+    const granted = grants.get(row.spaceId);
+    const permissions = granted ?? (conversationUpload ? CONVERSATION_UPLOAD_GRANT : undefined);
     if (!permissions) return [];
     if (opts.door !== "lifecycle" && !permissions.has(FILE_CONTENT_GRANT)) return [];
-    return [{ row: row as FileRow, permissions }];
+    return [{ row: row as FileRow, permissions, readOnly: granted === undefined }];
   });
   const owners = await loadContainerOwners(
     orgId,
     reached.map(({ row }) => row),
   );
-  return reached.flatMap(({ row, permissions }) => {
-    const file = fileForActor(row, actor, permissions, opts, owners);
+  return reached.flatMap(({ row, permissions, readOnly }) => {
+    // A file reached through the conversation alone is read-only: the lifecycle doors refuse it,
+    // so the capabilities must not advertise keep or delete.
+    const file = fileForActor(
+      row,
+      actor,
+      permissions,
+      readOnly ? { ...opts, creatorCanManage: false } : opts,
+      owners,
+    );
     return file ? [file] : [];
   });
 }
@@ -1491,7 +1466,7 @@ export async function resolveFileAcrossSpaces(
   actor: Actor,
   fileId: string,
   access: FileAccess,
-  opts: FileDoor = {},
+  opts: FileResolveOptions = {},
 ): Promise<ResolvedFile | null> {
   const [file] = await resolveFilesAcrossSpaces(orgId, actor, [fileId], access, opts);
   return file ?? null;
@@ -1709,7 +1684,7 @@ async function chatContextFileFilter(
 
 /**
  * The file gallery of `orgId` across the spaces of `grants`, with
- * container-inherited visibility (D7 — consistent with `getFileForActor`),
+ * container-inherited visibility (D7 — consistent with `resolveFileAcrossSpaces`),
  * decided per row by its space's grant: `runs:read-all` there opens the
  * supervision arms, `files:delete` there the `keep` / `delete` capabilities.
  * Powers `GET /api/files` (one grant, the request's space) and
@@ -1727,7 +1702,7 @@ async function chatContextFileFilter(
  *
  * `opts.fileAccess` is the request's reach by id: a run's inputs resolve under it, and each row's
  * `keep` / `delete` follow `files:delete` in the row's own space there, as a read by id decides
- * them. `opts.creatorCanManage` is the same credential ceiling {@link getFileForActor} applies,
+ * them. `opts.creatorCanManage` is the same credential ceiling {@link resolveFileAcrossSpaces} applies,
  * so a list row's `capabilities` and its enforcement agree.
  */
 export async function listFilesForActor(

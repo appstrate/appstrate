@@ -17,8 +17,7 @@
  *      `agent_output` of the space. The list asks it in the entered space;
  *      every read by id asks it in the FILE's space (`resolveFileAcrossSpaces`,
  *      the rule of every door naming a file by id).
- *   2. The per-file container ACL (`getFileForActor` /
- *      `getFileCapabilities`) — "may this ACTOR touch THIS file",
+ *   2. The per-file container ACL (`resolveFileAcrossSpaces` / *      `getFileCapabilities`) — "may this ACTOR touch THIS file",
  *      inherited from the run read-ACL or the chat-session owner. The
  *      end-user guard lives there.
  *

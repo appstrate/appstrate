@@ -574,16 +574,15 @@ function makeReadResourceExtension(
             );
           }
         }
+        // The file's space is read before the read: a file deleted in between would otherwise be
+        // served with its space unrecorded. The platform reads it in its own space when the
+        // bearer may enter it and refuses any other as missing, so only a read it served records
+        // that space, before its content leaves; a refused one records, and reveals, nothing.
+        const fileSpace = isFileUri(uri) ? await organization.fileSpace(uri) : undefined;
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
-        if (isFileUri(uri)) {
-          // The platform reads a file in its own space when the bearer may enter it, and refuses
-          // any other as missing. Only a read it served is recorded, before its content leaves:
-          // looking the space up first would record, and reveal, where an unreadable id lives.
-          const fileSpace = await organization.fileSpace(uri);
-          if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
-            await organization.touch(fileSpace);
-          }
+        if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
+          await organization.touch(fileSpace);
         }
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
         // Keep the text of skills in the replay so their procedures still apply on later turns.

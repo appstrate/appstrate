@@ -173,6 +173,7 @@ function organizationOf(
     // conversation holds and any other id is missing: both name none.
     fileSpace: async (uri) => {
       lookups.push(uri);
+      events.push("lookup");
       const space = uri.match(/^appfile:\/\/file_(alpha|beta|gamma)/)?.[1];
       return space ? `spc_${space}` : undefined;
     },
@@ -302,7 +303,7 @@ describe("the conversation's forwarded tools and resources", () => {
 
       transport.events.length = 0;
       await tool("read_resource").execute("c2", { uri: "appfile://file_own00001" });
-      expect(transport.events).toEqual(["resources/read"]);
+      expect(transport.events).toEqual(["lookup", "resources/read"]);
     } finally {
       await built.close();
     }
@@ -365,7 +366,7 @@ describe("the files a call names", () => {
     const { built, tool } = await tools(transport);
     try {
       await tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" });
-      expect(transport.events).toEqual(["resources/read", "touch spc_beta"]);
+      expect(transport.events).toEqual(["lookup", "resources/read", "touch spc_beta"]);
     } finally {
       await built.close();
     }
@@ -380,7 +381,27 @@ describe("the files a call names", () => {
       await expect(
         tool("read_resource").execute("c3", { uri: "appfile://file_nowhere01" }),
       ).rejects.toThrow();
-      expect(transport.events).toEqual(["resources/read", "resources/read", "resources/read"]);
+      expect(transport.events).toEqual([
+        "lookup",
+        "resources/read",
+        "lookup",
+        "resources/read",
+        "lookup",
+        "resources/read",
+      ]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("records nothing when the file is gone between the space lookup and the read (not_found)", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      await expect(
+        tool("read_resource").execute("c1", { uri: "appfile://file_beta_private" }),
+      ).rejects.toThrow();
+      expect(transport.events).toEqual(["lookup", "resources/read"]);
     } finally {
       await built.close();
     }
@@ -393,7 +414,7 @@ describe("the files a call names", () => {
       await expect(
         tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" }),
       ).rejects.toThrow("cannot record spc_beta");
-      expect(transport.events).toEqual(["resources/read"]);
+      expect(transport.events).toEqual(["lookup", "resources/read"]);
     } finally {
       await built.close();
     }

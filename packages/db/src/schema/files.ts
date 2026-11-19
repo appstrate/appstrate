@@ -34,7 +34,7 @@ import { chatSessions } from "./chat.ts";
  *  - `agent_output` — a deliverable an agent published from a run.
  *
  * Access is NEVER a per-file grant — it is inherited from the container at
- * check time (`getFileForActor`): a run-container file reuses the run's
+ * check time (`resolveFileAcrossSpaces`): a run-container file reuses the run's
  * read ACL (org+space scope + end-user guard); a chat-session-container file is
  * visible only to the session owner. `downloadable` is derived, not stored:
  * `purpose === 'agent_output' || creator === caller`.
