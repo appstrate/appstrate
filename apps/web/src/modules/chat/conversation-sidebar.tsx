@@ -247,7 +247,7 @@ export function ConversationFiles({
           onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
         >
           <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-            <MimeIcon mime={file.mime} className="text-muted-foreground size-4" />
+            <MimeIcon mime={file.mime} name={file.name} className="text-muted-foreground size-4" />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium">{file.name}</span>

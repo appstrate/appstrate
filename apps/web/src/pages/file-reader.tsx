@@ -68,7 +68,7 @@ function FileReader({ fileId, context }: { fileId: string; context: FileContext 
           title={file.name}
           icon={
             <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
-              <MimeIcon mime={file.mime} className="size-5" />
+              <MimeIcon mime={file.mime} name={file.name} className="size-5" />
             </span>
           }
           trail={[{ label: t("common:nav.files") }]}

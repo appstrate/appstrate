@@ -328,24 +328,20 @@ function ComposerAttachmentChip() {
         name={name}
         file={file}
         preview={preview}
-        trailing={
-          <>
-            {size > 0 && (
-              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
-            )}
-            <AttachmentPrimitive.Remove asChild>
-              <button
-                type="button"
-                aria-label={t("composer.removeAttachment")}
-                className={cn(
-                  "text-muted-foreground hover:text-foreground desktop-pointer:size-3.5",
-                  CHIP_REMOVE_CLASS,
-                )}
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </AttachmentPrimitive.Remove>
-          </>
+        sizeLabel={size > 0 ? formatBytes(size) : undefined}
+        remove={
+          <AttachmentPrimitive.Remove asChild>
+            <button
+              type="button"
+              aria-label={t("composer.removeAttachment")}
+              className={cn(
+                "text-muted-foreground hover:text-foreground desktop-pointer:size-3.5",
+                CHIP_REMOVE_CLASS,
+              )}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </AttachmentPrimitive.Remove>
         }
       />
       {notice && (

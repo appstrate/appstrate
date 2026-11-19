@@ -107,7 +107,13 @@ export function FileArtifact({
     <Artifact ref={frameRef} className={className}>
       <ArtifactHeader>
         <div className="flex min-w-0 items-center gap-2.5">
-          {file && <MimeIcon mime={file.mime} className="text-muted-foreground size-4 shrink-0" />}
+          {file && (
+            <MimeIcon
+              mime={file.mime}
+              name={file.name}
+              className="text-muted-foreground size-4 shrink-0"
+            />
+          )}
           <div className="min-w-0">
             {showName && <ArtifactTitle title={name}>{name}</ArtifactTitle>}
             {file && (
