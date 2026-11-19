@@ -2,24 +2,14 @@
 
 import * as React from "react";
 
-/**
- * What a phone shows once its on-screen keyboard is up, for the browsers that do not resize the
- * layout viewport for it. Safari on iOS never does: the keyboard shrinks and pans the VISUAL
- * viewport only, so a box sized to `100%`, `vh` or `dvh` keeps its full height and the bottom of
- * it (a chat composer) ends up under the keys. Chrome and Firefox for Android do it when the
- * viewport meta says `interactive-widget=resizes-content` (`index.html`); there the layout
- * viewport and the visual one agree and this reports nothing.
- *
- * The hook publishes two CSS variables on `<html>` only while a keyboard is up:
- * `--keyboard-viewport-height` (the visible height) and `--keyboard-viewport-top` (how far iOS
- * panned the visual viewport down the layout one). A screen that must stay above the keyboard
- * sizes itself `h-[var(--keyboard-viewport-height,100dvh)]` and shifts by
- * `top-[var(--keyboard-viewport-top,0px)]`; with the variables absent both fall back to the
- * browser's own unit.
- */
-
+// Some browsers pan and shrink only the visual viewport when the keyboard opens.
+// When the layout viewport already resizes, the chat keeps its CSS height.
 const KEYBOARD_VIEWPORT_HEIGHT = "--keyboard-viewport-height";
 const KEYBOARD_VIEWPORT_TOP = "--keyboard-viewport-top";
+
+/** Shared by the chat shell and its independently positioned sidebar. */
+export const KEYBOARD_VIEWPORT_CLASS =
+  "top-[var(--keyboard-viewport-top,0px)] h-[var(--keyboard-viewport-height,100dvh)]";
 
 /** Under this, the difference is the browser's toolbars sliding, not a keyboard. */
 const KEYBOARD_MIN_PX = 120;

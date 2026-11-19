@@ -214,7 +214,7 @@ function ThreadWelcome({
   const outsideActingSet =
     canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center-safe overflow-y-auto px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight">

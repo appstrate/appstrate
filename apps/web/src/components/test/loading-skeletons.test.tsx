@@ -135,7 +135,7 @@ describe("loading skeletons", () => {
         render(
           <ConversationSkeleton
             label={i18n.t("common:loading")}
-            placeholder={<Skeleton className="h-4 w-48 md:h-3.5" />}
+            placeholder={<Skeleton className="h-4 w-48" />}
             disclaimer={<Skeleton className="mx-auto my-0.5 h-3 w-64" />}
           />,
         ),

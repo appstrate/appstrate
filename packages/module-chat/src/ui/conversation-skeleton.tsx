@@ -77,7 +77,7 @@ export function ComposerSkeleton({
 }) {
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className="text-muted-foreground flex min-h-9 items-center py-1 text-base md:text-sm">
+      <div className="text-muted-foreground flex min-h-9 items-center py-1 text-base">
         {placeholder}
       </div>
       <div className="flex items-center justify-between gap-2">

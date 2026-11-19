@@ -926,10 +926,7 @@ export function ChatPanelSkeleton() {
           </div>
         </div>
         {canWrite ? (
-          <ComposerSkeleton
-            placeholder={<Skeleton className="h-4 w-48 md:h-3.5" />}
-            limited={limited}
-          />
+          <ComposerSkeleton placeholder={<Skeleton className="h-4 w-48" />} limited={limited} />
         ) : (
           // A reader's composer is a read-only note.
           <Skeleton className="h-[46px] w-full rounded-xl" />
@@ -952,7 +949,7 @@ export function ChatConversationSkeleton() {
       <ChatHeaderActionsBlocks conversation />
       <ConversationSkeleton
         label={t("loading")}
-        placeholder={canWrite ? <Skeleton className="h-4 w-48 md:h-3.5" /> : null}
+        placeholder={canWrite ? <Skeleton className="h-4 w-48" /> : null}
         disclaimer={
           i18n.hasLoadedNamespace("chat") ? (
             t("chat:thread.disclaimer")
