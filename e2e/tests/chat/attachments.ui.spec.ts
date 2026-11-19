@@ -83,6 +83,9 @@ test("sends image pixels to the configured provider and reloads the attached fil
     await page.getByRole("option", { name: new RegExp(modelId) }).click();
     await page.keyboard.press("Escape");
     await expect(page.getByTitle("Modèle et génération")).toHaveText(modelId);
+    await expect(
+      page.getByRole("textbox", { name: "Message Appstrate…", exact: true }),
+    ).toHaveAttribute("placeholder", new RegExp(modelId));
     const choosing = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: /^Joindre des fichiers/ }).click();
     await (
@@ -97,7 +100,9 @@ test("sends image pixels to the configured provider and reloads the attached fil
     await expect(page.getByText("contract.pdf", { exact: true })).toBeVisible();
     // A Chat Completions model reads no PDF natively: the chip says so before anything is sent.
     await expect(page.getByText("Ce modèle ne lit pas les PDF.")).toBeVisible();
-    await page.getByPlaceholder("Message Appstrate…").fill("Peux-tu lire ces deux fichiers ?");
+    await page
+      .getByRole("textbox", { name: "Message Appstrate…", exact: true })
+      .fill("Peux-tu lire ces deux fichiers ?");
     await page.getByRole("button", { name: "Envoyer", exact: true }).click();
     await expect(page.getByText(answer, { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/\/chat\/[^/]+$/);
@@ -129,5 +134,68 @@ test("sends image pixels to the configured provider and reloads the attached fil
     await new Promise<void>((resolve, reject) =>
       provider.close((err) => (err ? reject(err) : resolve())),
     );
+  }
+});
+
+test.describe("staged attachment touch targets", () => {
+  test.use({ hasTouch: true });
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 844, height: 390 },
+  ]) {
+    test(`tapping size previews and tapping remove only removes at ${viewport.width}px`, async ({
+      authedPage: page,
+    }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/chat");
+      const choosing = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: /^Joindre des fichiers/ }).tap();
+      const contents = "Compte rendu de la réunion.";
+      await (
+        await choosing
+      ).setFiles([
+        { name: "compte-rendu.txt", mimeType: "text/plain", buffer: Buffer.from(contents) },
+        {
+          name: "présentation.pptx",
+          mimeType: "application/octet-stream",
+          buffer: Buffer.from("Office fixture"),
+        },
+      ]);
+      const preview = page.getByRole("button", { name: "Aperçu de compte-rendu.txt" });
+      const chip = preview.locator("..");
+      const remove = chip.getByRole("button", { name: "Retirer la pièce jointe" });
+      const office = page.getByText("présentation.pptx", { exact: true });
+      await expect(office.locator("..").locator("svg.lucide-presentation")).toBeVisible();
+      await office.tap();
+      await expect(page.getByRole("button", { name: "Aperçu de présentation.pptx" })).toHaveCount(
+        0,
+      );
+      await expect(
+        page.getByRole("button", { name: "Replier le contexte de la conversation", exact: true }),
+      ).toBeHidden();
+      await preview.focus();
+      await page.keyboard.press("Tab");
+      await expect(remove).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(preview).toBeFocused();
+      await expect(remove).toHaveCSS("width", "40px");
+      await expect(remove).toHaveCSS("height", "40px");
+      await page.screenshot({
+        path: testInfo.outputPath("attachments.png"),
+        animations: "disabled",
+      });
+      await preview.getByText(/\d+ o$/).tap();
+      await expect(page.getByText(contents, { exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("preview.png"), animations: "disabled" });
+      await page
+        .getByRole("button", { name: "Replier le contexte de la conversation", exact: true })
+        .last()
+        .tap();
+      await expect(preview).toBeVisible();
+      await remove.tap();
+      await expect(preview).toHaveCount(0);
+      await expect(page.getByText(contents, { exact: true })).toBeHidden();
+      await expect(office).toBeVisible();
+    });
   }
 });

@@ -122,14 +122,14 @@ export async function loadAndVerifyBundle(
   // System packages are write-protected and ship unsigned: the image is their
   // trust root.
   if (policy === "off" || isSystemPackage(packageId)) return null;
-  if (policy === "required") return verifyOrThrow(buffer, packageId, policy);
+  if (policy === "required") return verifyStoredBundleSignature(buffer, packageId, policy);
   // Most archives are unsigned: the zip central directory answers that cheaply.
   if (!mayCarrySignature(buffer)) {
     logger.debug("AFPS bundle is unsigned", { packageId });
     return null;
   }
   try {
-    return await verifyOrThrow(buffer, packageId, policy);
+    return await verifyStoredBundleSignature(buffer, packageId, policy);
   } catch (err) {
     logger.warn("AFPS bundle signature could not be checked", {
       packageId,
@@ -161,7 +161,7 @@ function mayCarrySignature(buffer: Uint8Array): boolean {
   return found;
 }
 
-async function verifyOrThrow(
+export async function verifyStoredBundleSignature(
   buffer: Uint8Array,
   packageId: string,
   policy: "warn" | "required",

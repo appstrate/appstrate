@@ -20,6 +20,7 @@ import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
+import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
 import {
   Sidebar,
@@ -104,7 +105,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   );
 
   return (
-    <Sidebar>
+    <Sidebar
+      className={product === "chat" ? `overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}` : undefined}
+    >
       {/* The brand cell sits at the header's height so the two rules meet across the shell. The
           collapse shows while the pointer is on the sidebar or on focus (`group` is its root). */}
       <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
@@ -116,7 +119,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         </SidebarTrigger>
       </SidebarHeader>
       <ProductTabs />
-      <SidebarContent className={cn("gap-0", product === "chat" && "overflow-hidden")}>
+      {/* Leave room for a search field and its results. In a short viewport the whole sidebar
+          can scroll to the navigation below the list. */}
+      <SidebarContent className={cn("gap-0", product === "chat" && "min-h-64 overflow-hidden")}>
         {product === "chat" ? (
           // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
           !ready ? (

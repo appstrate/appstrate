@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { normalizeMime } from "@appstrate/core/mime";
 import { createElement } from "react";
 import {
   File as FileIcon,
@@ -14,30 +15,25 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/**
- * The MIME an extension stands for, for a file whose MIME is empty or generic (a browser sends
- * `application/octet-stream` for many Office files). A Map: a user-chosen name such as
- * `x.constructor` must not find a key inherited from `Object.prototype`.
- */
-const MIME_BY_EXTENSION = new Map([
-  ["doc", "application/msword"],
-  ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-  ["odt", "application/vnd.oasis.opendocument.text"],
-  ["xls", "application/vnd.ms-excel"],
-  ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
-  ["ods", "application/vnd.oasis.opendocument.spreadsheet"],
-  ["ppt", "application/vnd.ms-powerpoint"],
-  ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
-  ["odp", "application/vnd.oasis.opendocument.presentation"],
-  ["pdf", "application/pdf"],
+/** Use the filename only when no specific MIME is available. */
+const ICON_BY_EXTENSION = new Map<string, LucideIcon>([
+  ["doc", FileText],
+  ["docx", FileText],
+  ["odt", FileText],
+  ["pdf", FileText],
+  ["xls", FileSpreadsheet],
+  ["xlsx", FileSpreadsheet],
+  ["ods", FileSpreadsheet],
+  ["ppt", Presentation],
+  ["pptx", Presentation],
+  ["odp", Presentation],
 ]);
 
-/** A Lucide file icon for a MIME type (small mapping, neutral `File` fallback); `name` tells the type when the MIME does not. */
 function mimeIconFor(mime: string, name?: string | null): LucideIcon {
-  let m = mime.toLowerCase();
+  const m = normalizeMime(mime);
   if (!m || m === "application/octet-stream") {
-    const extension = name?.split(".").pop()?.toLowerCase();
-    m = (extension && MIME_BY_EXTENSION.get(extension)) || m;
+    const extension = name?.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
+    return (extension && ICON_BY_EXTENSION.get(extension)) || FileIcon;
   }
   if (m.startsWith("image/")) return FileImage;
   if (m.startsWith("audio/")) return FileAudio;

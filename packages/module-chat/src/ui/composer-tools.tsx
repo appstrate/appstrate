@@ -45,8 +45,7 @@ import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
-
-const ICON_BUTTON = "text-muted-foreground size-8 shrink-0 rounded-lg";
+import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
 const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
@@ -89,8 +88,10 @@ export function ComposerTools({
   // restore (Radix reads it as a focus-outside): open it once the menu is gone.
   const openSkillsAfterClose = useRef(false);
 
+  // A phone's resting composer is one line, attach and send around the field: every tool after the
+  // attach button shows once the composer is touched (`data-rest` is the composer's).
   const cluster = (
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-1.5 max-md:flex-wrap max-md:group-data-[rest]/composer:[&>:not(:first-child)]:hidden">
       <AttachButton />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -98,7 +99,7 @@ export function ComposerTools({
             type="button"
             variant="ghost"
             size="icon"
-            className={ICON_BUTTON}
+            className={COMPOSER_TOOL_BUTTON_CLASS}
             aria-label={t("composer.settings")}
             data-testid="composer-settings-trigger"
           >
@@ -295,7 +296,7 @@ function AttachButton() {
       variant="ghost"
       size="icon"
       disabled={unavailable}
-      className={ICON_BUTTON}
+      className={COMPOSER_TOOL_BUTTON_CLASS}
       aria-label={label}
     >
       <PaperclipIcon />

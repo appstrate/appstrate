@@ -73,7 +73,7 @@ test("carries the chosen mode and skills with the first message, and writes noth
     (req) => req.method() === "POST" && new URL(req.url()).pathname === chat,
   );
   await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
-  await page.getByPlaceholder("Message Appstrate…").fill("bonjour");
+  await page.getByRole("textbox", { name: "Message Appstrate…", exact: true }).fill("bonjour");
   await page.keyboard.press("Enter");
   const body = (await sent).postDataJSON() as { skill_mode?: string; pinned_skills?: string[] };
   expect(body.skill_mode).toBe("manual");

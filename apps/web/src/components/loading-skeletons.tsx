@@ -11,6 +11,7 @@
  */
 
 import {
+  ComposerSkeleton,
   ConversationRowSkeleton,
   ConversationSkeleton,
 } from "@appstrate/module-chat/conversation-skeleton";
@@ -44,6 +45,7 @@ import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
+import { useChatFilter } from "../modules/chat/use-chat-runtime";
 import { useListView } from "../stores/list-view-store";
 import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 import {
@@ -887,27 +889,6 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
 }
 
 /**
- * The chat's composer (`module-chat` `Composer`): a `min-h-9` line over its tool row, in a card
- * of the thread's width.
- */
-function ComposerBlock() {
-  return (
-    <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className="flex min-h-9 items-center py-1">
-        <Skeleton className="h-3.5 w-48" />
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <Skeleton className="size-8 rounded-lg" />
-          <Skeleton className="h-7 w-32 rounded-md" />
-        </div>
-        <Skeleton className="size-8 rounded-lg" />
-      </div>
-    </div>
-  );
-}
-
-/**
  * The chat's header actions (`ChatModulePage`): the context tabs (one `size-7` tab per readable
  * pane in a `p-1` list), and for a stored conversation the writer's settings button.
  */
@@ -923,33 +904,29 @@ function ChatHeaderActionsBlocks({ conversation }: { conversation: boolean }) {
 }
 
 /**
- * `/chat` while its code loads: `ThreadWelcome` — the title and hint, the composer, then the
- * suggestions (a writer's only), centred in the thread's 42rem column. The module's own wait for
- * a stored conversation is {@link ChatConversationSkeleton}'s shape.
+ * `/chat` while its code loads: `ThreadWelcome` — the greeting and hint over the composer (with
+ * its limit chip when a space is selected), centred in the thread's 42rem column. The module's own wait for a stored conversation is
+ * {@link ChatConversationSkeleton}'s shape.
  */
 export function ChatPanelSkeleton() {
   const canWrite = usePermissions().can("chat:write");
+  // A new conversation is limited to the selected space, and its composer shows the chip.
+  const limited = useChatFilter().spaceId !== null;
   return (
-    <Waiting className="flex h-full flex-col items-center justify-center px-4">
+    <Waiting className="flex h-full min-h-0 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
       <ChatHeaderActionsBlocks conversation={false} />
-      <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
-        <div className="flex flex-col items-center">
-          <div className="flex h-7 items-center">
-            <Skeleton className="h-5 w-40" />
+      <div className="flex w-full max-w-2xl flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
+        <div className="flex flex-1 flex-col items-center justify-center md:flex-none">
+          {/* The `text-2xl` greeting's 32px line. */}
+          <div className="flex h-8 items-center">
+            <Skeleton className="h-6 w-44" />
           </div>
-          <div className="mt-1 flex h-5 items-center">
-            <Skeleton className="h-3.5 w-72 max-w-full" />
+          <div className="mt-1 flex h-6 items-center md:h-5">
+            <Skeleton className="h-3.5 w-96 max-w-full" />
           </div>
         </div>
         {canWrite ? (
-          <>
-            <ComposerBlock />
-            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-              {Array.from({ length: 4 }, (_, i) => (
-                <Skeleton key={i} className="h-[38px] rounded-lg" />
-              ))}
-            </div>
-          </>
+          <ComposerSkeleton placeholder={<Skeleton className="h-4 w-48" />} limited={limited} />
         ) : (
           // A reader's composer is a read-only note.
           <Skeleton className="h-[46px] w-full rounded-xl" />
@@ -964,14 +941,22 @@ export function ChatPanelSkeleton() {
  * draws it (`ConversationSkeleton`) — turns at the top, the composer and its line at the bottom.
  */
 export function ChatConversationSkeleton() {
-  const { t } = useTranslation("common");
+  // The chat namespace loads with the module: its disclaimer text once loaded, a line until then.
+  const { t, i18n } = useTranslation("common");
   const canWrite = usePermissions().can("chat:write");
   return (
     <>
       <ChatHeaderActionsBlocks conversation />
       <ConversationSkeleton
         label={t("loading")}
-        placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
+        placeholder={canWrite ? <Skeleton className="h-4 w-48" /> : null}
+        disclaimer={
+          i18n.hasLoadedNamespace("chat") ? (
+            t("chat:thread.disclaimer")
+          ) : (
+            <Skeleton className="mx-auto my-0.5 h-3 w-64" />
+          )
+        }
       />
     </>
   );
@@ -998,7 +983,7 @@ export function ChatSidebarSkeleton() {
         </SidebarMenu>
       </SidebarGroup>
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
+        <SidebarGroupLabel className="text-sm md:text-xs">{t("threads.title")}</SidebarGroupLabel>
         <SidebarMenu>
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>

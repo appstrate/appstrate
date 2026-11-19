@@ -6,13 +6,11 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
-import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { resolveListingViewAs } from "../lib/view-as.ts";
+import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
-  getUserOrganizations,
   getOrgById,
   updateOrganization,
   reserveOrgDeletion,
@@ -29,7 +27,7 @@ import {
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX, isReservedScope } from "@appstrate/core/naming";
-import { ApiError, forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
   isVersionSupported,
@@ -149,41 +147,7 @@ const router = new Hono<AppEnv>();
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
-  const user = c.get("user");
-  // A delegate sees only its bound org — filter at the DB level so a
-  // compromised key cannot cause enumeration queries across every org the
-  // creator belongs to. No binding is an auth-pipeline bug, and the unfiltered
-  // listing is the very enumeration above: fail closed.
-  const orgId = c.get("orgId");
-  if (!isUserPrincipal(c) && !orgId) {
-    throw unauthorized("Credential is missing its organization binding");
-  }
-  const orgIdFilter = isUserPrincipal(c) ? undefined : orgId;
-  const orgs = await getUserOrganizations(user.id, orgIdFilter);
-  // A persona naming an org this listing cannot place is refused, not ignored.
-  await resolveListingViewAs(c, orgs);
-
-  return c.json(
-    listResponse(
-      await Promise.all(
-        orgs.map(async (o) => {
-          // Ceiling-applied, per org, the persona's under a preview (RBAC spec §6.5).
-          const identity = await listedOrgIdentityForCaller(c, o.id, o.role);
-          return {
-            id: o.id,
-            name: o.name,
-            slug: o.slug,
-            icon: o.icon,
-            color: o.color,
-            role: identity.role,
-            permissions: identity.permissions,
-            createdAt: o.createdAt,
-            deleting_at: o.deletingAt,
-          };
-        }),
-      ),
-    ),
-  );
+  return c.json(listResponse(await listCallerOrganizations(c)));
 });
 
 // POST /api/orgs — create an organization (no org context needed)

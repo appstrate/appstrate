@@ -1662,8 +1662,8 @@ const requireAnyPackageWrite = requireAnyPermission(PACKAGE_WRITE_PERMISSIONS);
 /** The skills of the space the request entered, as the platform serves them. */
 function requestServedSkills(c: Context<AppEnv>) {
   return buildServedSkills(
-    servedSkillsContext(c, [
-      { orgId: c.get("orgId"), spaceId: c.get("space")!.id, permissions: c.get("permissions")! },
+    servedSkillsContext(c, c.get("orgId"), [
+      { spaceId: c.get("space")!.id, permissions: c.get("permissions")! },
     ]),
   );
 }

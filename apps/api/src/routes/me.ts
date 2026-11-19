@@ -57,10 +57,9 @@ import {
 import { meConnectionAuthorityFilter } from "../services/connection-reach.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
-import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
+import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
-import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -148,46 +147,8 @@ router.get("/orgs", async (c) => {
     );
   }
 
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-
-  // A delegate is bound to a single org — filter at the DB level so a
-  // compromised key cannot enumerate every org the creator belongs to. No
-  // binding is an auth-pipeline bug, and the unfiltered listing is the very
-  // enumeration above: fail closed. Same rule as `GET /api/orgs` keeps the two
-  // paths in lockstep.
-  const orgId = c.get("orgId");
-  if (!isUserPrincipal(c) && !orgId) {
-    throw unauthorized("Credential is missing its organization binding");
-  }
-  const orgIdFilter = isUserPrincipal(c) ? undefined : orgId;
-  const orgs = await getUserOrganizations(user.id, orgIdFilter);
-  // Once for the listing: the persona names one org, and one this listing
-  // cannot place is refused rather than ignored.
-  await resolveListingViewAs(c, orgs);
-
-  return c.json(
-    listResponse(
-      await Promise.all(
-        orgs.map(async (o) => {
-          // Role and org-level effective set in THAT org, ceiling-applied — same
-          // fields and same helper as `GET /api/orgs` (RBAC spec §6.5). Absent
-          // from the end-user branch above: an end-user holds no org role.
-          const identity = await listedOrgIdentityForCaller(c, o.id, o.role);
-          return {
-            id: o.id,
-            name: o.name,
-            slug: o.slug,
-            icon: o.icon,
-            color: o.color,
-            role: identity.role,
-            permissions: identity.permissions,
-            createdAt: o.createdAt,
-          };
-        }),
-      ),
-    ),
-  );
+  const orgs = await listCallerOrganizations(c);
+  return c.json(listResponse(orgs.map(({ deleting_at: _deletingAt, ...org }) => org)));
 });
 
 /**

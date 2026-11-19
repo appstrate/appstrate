@@ -20,6 +20,7 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { fileActivation } from "./file-activation.ts";
 import { UNNAMED_FILE } from "./run-events.ts";
 import { useCanIn, useChatHost } from "./runtime-context.ts";
+import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 /** The chip: one 32px height (the toolbar's) whatever it carries — sent, produced or staged file. */
@@ -46,75 +47,58 @@ export function AttachmentThumbnail({ src }: { src: string }) {
   return <img src={src} alt="" className={CHIP_THUMBNAIL_CLASS} />;
 }
 
-/**
- * THE attachment chip (shadcn AI Elements « inline attachment » anatomy): a
- * leading media square (`media`, else the mime's icon), the truncated name,
- * then `trailing` (a staged upload's size and remove button). With `action`,
- * the media and name are the button that opens the file; `trailing` stays
- * outside it. `stopPropagation` keeps a click from also firing an enclosing
- * card's full-surface click target (the run-progress card).
- */
+/** The file action owns the icon, name and size. A staged file's remove button is its sibling. */
 export function AttachmentChip({
   name,
   mime,
   media,
   title,
   action,
-  trailing,
+  sizeLabel,
+  remove,
 }: {
   name: string;
   mime?: string | null;
   media?: ReactNode;
   title?: string;
   action?: { label: string; onActivate: () => void } | null;
-  trailing?: ReactNode;
+  sizeLabel?: string;
+  remove?: ReactNode;
 }) {
   const content = (
     <>
       {media ?? <MimeMedia mime={mime} name={name} />}
       <span className="text-foreground truncate text-xs font-medium">{name || UNNAMED_FILE}</span>
+      {sizeLabel && <span className="text-muted-foreground shrink-0">{sizeLabel}</span>}
     </>
   );
-  if (!action) {
-    return (
-      <div className={ATTACHMENT_CHIP_CLASS} title={title}>
-        {content}
-        {trailing}
-      </div>
-    );
-  }
-  const activate = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    action.onActivate();
-  };
-  if (!trailing) {
-    return (
-      <button
-        type="button"
-        onClick={activate}
-        title={action.label}
-        aria-label={action.label}
-        className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted/50 cursor-pointer`}
-      >
-        {content}
-      </button>
-    );
-  }
-  // With a trailing control (size, remove), the same look: the whole chip answers to the hover and
-  // a click anywhere on it opens the file, except on `trailing`, which sits above the button's
-  // stretched hit area (`after:absolute after:inset-0`) and keeps its own click.
+  const bodyClass = remove
+    ? "inline-flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-l-lg px-1 text-xs"
+    : ATTACHMENT_CHIP_CLASS;
+  const body = action ? (
+    <button
+      type="button"
+      title={action.label}
+      aria-label={action.label}
+      onClick={(event) => {
+        // Run cards have their own click action.
+        event.stopPropagation();
+        action.onActivate();
+      }}
+      className={cn(bodyClass, "hover:bg-muted/50 cursor-pointer")}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className={bodyClass} title={title}>
+      {content}
+    </div>
+  );
+  if (!remove) return body;
   return (
-    <div className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted/50 relative`}>
-      <button
-        type="button"
-        onClick={activate}
-        title={action.label}
-        aria-label={action.label}
-        className="text-foreground inline-flex min-w-0 cursor-pointer items-center gap-1.5 text-xs after:absolute after:inset-0 after:content-['']"
-      >
-        {content}
-      </button>
-      <span className="relative z-10 inline-flex shrink-0 items-center gap-1.5">{trailing}</span>
+    <div className={cn(ATTACHMENT_CHIP_CLASS, "desktop-pointer:h-8 h-10 gap-0 px-0")}>
+      {body}
+      {remove}
     </div>
   );
 }
@@ -141,19 +125,20 @@ function LocalImageMedia({ file }: { file: File }) {
 /**
  * A pending composer file: the chip, its media an image's own thumbnail (from
  * the picked File) or the mime's icon. `preview` (the host's panel on the
- * picked file) makes the media and name its button; `trailing` (size, remove
- * button) stays outside it.
+ * picked file) makes the media, name and size its button.
  */
 export function PendingAttachmentChip({
   name,
   file,
   preview,
-  trailing,
+  sizeLabel,
+  remove,
 }: {
   name: string;
   file: File | undefined;
   preview: { label: string; onActivate: () => void } | null;
-  trailing: ReactNode;
+  sizeLabel?: string;
+  remove: ReactNode;
 }) {
   return (
     <AttachmentChip
@@ -161,7 +146,8 @@ export function PendingAttachmentChip({
       mime={file?.type}
       media={file && isImageMime(file.type) ? <LocalImageMedia file={file} /> : undefined}
       action={preview}
-      trailing={trailing}
+      sizeLabel={sizeLabel}
+      remove={remove}
     />
   );
 }

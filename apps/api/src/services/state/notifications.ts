@@ -88,32 +88,6 @@ export async function notifyRunFinished(
 }
 
 /**
- * Read the caller's failure notices of one run (`runId`), or of every run: the
- * run page is where a `run_failed` leads. Every other kind is read on its own page.
- */
-export async function markRunFailureNotificationsRead(
-  scope: SpaceScope,
-  actor: Actor,
-  runId?: string,
-): Promise<void> {
-  await db
-    .update(notifications)
-    .set({ readAt: sql`now()` })
-    .where(
-      scopedWhere(notifications, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [
-          recipientFilter(actor),
-          eq(notifications.type, "run_failed"),
-          isNull(notifications.readAt),
-          ...(runId ? [eq(notifications.runId, runId)] : []),
-        ],
-      }),
-    );
-}
-
-/**
  * Write the notification an agent sends from inside its run (`notify`, a tool
  * of `@appstrate/platform`), one row per recipient of the run
  * (`resolveRunRecipients`, the same people its read state and failure notice

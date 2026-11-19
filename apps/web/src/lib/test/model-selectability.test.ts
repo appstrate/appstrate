@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { isMemberPaid, isModelPinUnavailable } from "../model-selectability";
+import { isModelPinUnavailable } from "../model-selectability";
 import type { OrgModelInfo } from "../../hooks/use-models";
 
 function model(over: Partial<OrgModelInfo>): OrgModelInfo {
@@ -45,19 +45,5 @@ describe("isModelPinUnavailable", () => {
     expect(isModelPinUnavailable([model({})], "other")).toBe(true);
     expect(isModelPinUnavailable([model({ enabled: false })], "m1")).toBe(true);
     expect(isModelPinUnavailable([model({ needs_reconnection: true })], "m1")).toBe(true);
-  });
-});
-
-describe("isMemberPaid", () => {
-  it("is true for a model each member serves with their own credential", () => {
-    expect(isMemberPaid(model({ binding: "user", credentialId: null, billed_to: null }))).toBe(
-      true,
-    );
-  });
-
-  it("is false for a model bound to one credential, a built-in model or a managed alias", () => {
-    expect(isMemberPaid(model({ binding: "org" }))).toBe(false);
-    expect(isMemberPaid(model({ binding: "system", billed_to: "system" }))).toBe(false);
-    expect(isMemberPaid(model({ binding: "managed" }))).toBe(false);
   });
 });

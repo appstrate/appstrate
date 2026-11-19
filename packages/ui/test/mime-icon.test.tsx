@@ -38,6 +38,8 @@ describe("MimeIcon", () => {
 
   it("reads the extension when the MIME is empty or generic, and only then", () => {
     expect(iconOf("application/octet-stream", "ventes.XLSX")).toBe("file-spreadsheet");
+    expect(iconOf("application/octet-stream; charset=binary", "deck.pptx")).toBe("presentation");
+    expect(iconOf("", "pdf")).toBe("file");
     expect(iconOf("", "deck.pptx")).toBe("presentation");
     expect(iconOf("", "contrat.docx")).toBe("file-text");
     expect(iconOf("image/png", "faux.pdf")).toBe("file-image");

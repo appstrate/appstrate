@@ -7,7 +7,6 @@ import { runs } from "@appstrate/db/schema";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { parseListLimit } from "@appstrate/core/list-query";
 import type { AppEnv } from "../types/index.ts";
-import { GLOBAL_RUN_KINDS, type GlobalRunListFilters } from "../services/state/runs.ts";
 import { invalidRequest } from "./errors.ts";
 import { closedSet, packageIdFilter, parseStrictQuery } from "./list-query.ts";
 import { likeContains } from "./like-pattern.ts";
@@ -63,26 +62,58 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
   return conditions;
 }
 
-// Built on first use: `services/state/runs.ts` imports this module, so `GLOBAL_RUN_KINDS` is not
-// initialised yet while it loads.
-const runListQuerySchema = () =>
-  z
-    .object({
-      user: closedSet(["me"]),
-      kind: closedSet(GLOBAL_RUN_KINDS),
-      unread: closedSet(["true", "false"]),
-      // Checked by `parseRunListFilters`.
-      status: z.string().optional(),
-      q: z.string().optional(),
-      start_date: z.string().optional(),
-      end_date: z.string().optional(),
-      chat_session_id: z.string().optional(),
-      packageId: packageIdFilter,
-      // Checked by `parseListLimit` (anything but 1..100 is a 400).
-      limit: z.string().optional(),
-      startingAfter: z.string().optional(),
-    })
-    .strict();
+/**
+ * The closed set `?kind=` accepts, as a value — the route validates the query
+ * parameter against it, so the tuple and the type cannot drift.
+ */
+const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
+type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
+
+/** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
+export interface GlobalRunListFilters {
+  limit?: number;
+  startingAfter?: string;
+  kind?: GlobalRunKind;
+  /**
+   * Any of these statuses — "everything that broke" is `["failed", "timeout"]`.
+   * `RunStatus`, not `string`: the route refuses an unknown value with a 400,
+   * and the narrow type keeps a caller from turning a typo into no filter.
+   */
+  status?: RunStatus[];
+  startDate?: Date;
+  endDate?: Date;
+  chatSessionId?: string;
+  /** Only the runs of this package; one the grants do not reach yields no row. */
+  packageId?: string;
+  /**
+   * Free text: the agent a run executed (its scope and name, as stamped on the
+   * run) and the error it ended on; digits also match the run number
+   * (`runSearchCondition`). A substring match, unindexed.
+   */
+  search?: string;
+  /** Only the runs the actor has not read (`unreadRunCondition`). */
+  unread?: boolean;
+  /** `?user=me`: the actor's own runs in every space, even where they read all. */
+  ownOnly?: boolean;
+}
+
+const runListQuerySchema = z
+  .object({
+    user: closedSet(["me"]),
+    kind: closedSet(GLOBAL_RUN_KINDS),
+    unread: closedSet(["true", "false"]),
+    // Checked by `parseRunListFilters`.
+    status: z.string().optional(),
+    q: z.string().optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    chat_session_id: z.string().optional(),
+    packageId: packageIdFilter,
+    // Checked by `parseListLimit` (anything but 1..100 is a 400).
+    limit: z.string().optional(),
+    startingAfter: z.string().optional(),
+  })
+  .strict();
 
 /** `start_date` / `end_date`: an ISO date, a 400 otherwise. */
 function parseDate(raw: string | undefined, name: string): Date | undefined {
@@ -101,7 +132,7 @@ function parseDate(raw: string | undefined, name: string): Date | undefined {
 export function parseGlobalRunListQuery(
   c: Context<AppEnv>,
 ): GlobalRunListFilters & { limit: number } {
-  const query = parseStrictQuery(c, runListQuerySchema());
+  const query = parseStrictQuery(c, runListQuerySchema);
   const { status, search } = parseRunListFilters({ status: query.status, q: query.q });
   return {
     limit: parseListLimit(c, { defaultLimit: 20 }),

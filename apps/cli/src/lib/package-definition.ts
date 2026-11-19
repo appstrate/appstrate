@@ -2,9 +2,7 @@
 
 /**
  * Every file of one definition of a package — its draft, or one published
- * version — as ONE archive download. The one code path `code sync` and
- * `packages pull | status | push` read a package through, so the two cannot
- * disagree about what a definition contains.
+ * version — as one archive download for the packages commands.
  *
  * Both archives are unpacked by `unzipArtifact` under the package bounds, which
  * drops every entry `isSafeArchivePath` refuses. Entries come back unfiltered
@@ -56,8 +54,6 @@ type DefinitionRef =
       source: "published";
       /** `latest`, an exact version or a range. */
       version: string;
-      /** Expected SRI when the caller resolved it first; the response header wins. */
-      integrity?: string;
     };
 
 /**
@@ -107,9 +103,7 @@ export async function fetchPackageDefinition(
   }
   const bytes = new Uint8Array(await res.arrayBuffer());
   if (ref.source === "published") {
-    // The header is what THIS response claims about THESE bytes; the resolved
-    // value keeps the check meaningful on an instance that omits it.
-    const advertised = res.headers.get("x-integrity") ?? ref.integrity;
+    const advertised = res.headers.get("x-integrity");
     if (!advertised) {
       throw new PackageDefinitionError(
         `Download of ${what} carries no integrity to verify it against.`,

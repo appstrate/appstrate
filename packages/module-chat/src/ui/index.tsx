@@ -332,6 +332,8 @@ export function ChatPage({
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
   // between renders and consumers re-render no more than with a context each.
+  const selectedPreset = models.find((model) => model.id === selectedModel);
+  const modelLabel = selectedPreset?.label ?? selectedPreset?.modelId ?? null;
   const host = useMemo<ChatHost>(
     () => ({
       openFile: onOpenFile ?? null,
@@ -346,6 +348,7 @@ export function ChatPage({
       formatBytes,
       onPackagesChanged,
       firstName,
+      modelLabel,
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
@@ -364,6 +367,7 @@ export function ChatPage({
       formatBytes,
       onPackagesChanged,
       firstName,
+      modelLabel,
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
@@ -553,6 +557,7 @@ const Conversation = memo(function Conversation({
       <ConversationSkeleton
         label={t("conversation.loading")}
         placeholder={canWrite ? t("composer.placeholder") : null}
+        disclaimer={t("thread.disclaimer")}
       />
     );
   }

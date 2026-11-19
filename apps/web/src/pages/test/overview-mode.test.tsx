@@ -522,12 +522,22 @@ describe("the dashboard in the mode", () => {
     queryClient.setQueryData(["schedules", "org_1", "across-spaces"], []);
   };
 
-  it("reads its three lists from the org routes, nothing of the working space", () => {
+  it("requests the recent runs and filtered active count across the organization", () => {
     const { asked } = renderIn(true, <DashboardPage />, "/", seed);
     expect(asked("agents")).toEqual([["agents", "org_1", "across-spaces"]]);
     expect(asked("schedules")).toEqual([["schedules", "org_1", "across-spaces"]]);
-    expect(asked("paginated-runs").map((key) => key.slice(1, 3))).toEqual([
-      ["org_1", "across-spaces"],
+    const runRequests = asked("paginated-runs").map(
+      ([, orgId, scope, endpoint, , , status, , , limit]) => ({
+        orgId,
+        scope,
+        endpoint,
+        status,
+        limit,
+      }),
+    );
+    expect(runRequests).toEqual([
+      { orgId: "org_1", scope: "across-spaces", endpoint: "/runs", status: undefined, limit: 15 },
+      { orgId: "org_1", scope: "across-spaces", endpoint: "/runs", status: "running", limit: 1 },
     ]);
   });
 

@@ -11,7 +11,7 @@
  * they resolve it from `packages/ui`, not from here.
  *
  * Only the sizing survives the move: chat details are wide and tall, hence the
- * `max-w-2xl` / `max-h-[85vh]` override on the design system's `max-w-lg`.
+ * `max-w-2xl` / `max-h-[85dvh]` override on the design system's `max-w-lg`.
  */
 
 import * as React from "react";
@@ -24,7 +24,7 @@ export function Modal({
 }: React.PropsWithChildren<{ title: React.ReactNode; onClose: () => void }>) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent className="flex max-h-[85dvh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
           <DialogTitle className="min-w-0 truncate text-sm font-medium">{title}</DialogTitle>
         </DialogHeader>

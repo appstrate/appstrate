@@ -22,7 +22,7 @@ describe("PendingAttachmentChip", () => {
   it("shows a staged image as a thumbnail in the media square", () => {
     const file = new File(["x"], "a.png", { type: "image/png" });
     const html = renderToStaticMarkup(
-      <PendingAttachmentChip name="a.png" file={file} preview={null} trailing={null} />,
+      <PendingAttachmentChip name="a.png" file={file} preview={null} remove={null} />,
     );
     expect(html).toContain("<img");
     expect(html).not.toContain("<svg");
@@ -31,48 +31,25 @@ describe("PendingAttachmentChip", () => {
   it("shows any other staged file as its type's icon", () => {
     const file = new File(["x"], "a.pdf", { type: "application/pdf" });
     const html = renderToStaticMarkup(
-      <PendingAttachmentChip name="a.pdf" file={file} preview={null} trailing={null} />,
+      <PendingAttachmentChip name="a.pdf" file={file} preview={null} remove={null} />,
     );
     expect(html).not.toContain("<img");
     expect(html).toContain("lucide-file-text");
   });
 
-  it("keeps the trailing remove button outside the preview button", () => {
-    const file = new File(["x"], "a.pdf", { type: "application/pdf" });
+  it("places the size inside the preview button and remove in a separate button", () => {
     const html = renderToStaticMarkup(
       <PendingAttachmentChip
         name="a.pdf"
-        file={file}
+        file={new File(["x"], "a.pdf", { type: "application/pdf" })}
         preview={preview}
-        trailing={<button type="button">remove</button>}
+        sizeLabel="32 Ko"
+        remove={<button type="button">remove</button>}
       />,
     );
-    // `trailing` is not inside the button, and sits in a wrapper above its stretched hit area.
     expect(html).toMatch(
-      /aria-label="Aperçu de a"[^]*<\/button><span class="[^"]*z-10[^"]*"><button type="button">remove/,
+      /aria-label="Aperçu de a"[^]*32 Ko<\/span><\/button><button type="button">remove/,
     );
-  });
-
-  it("answers to the hover as a whole chip, with the pointer cursor and no underline", () => {
-    const file = new File(["x"], "a.pdf", { type: "application/pdf" });
-    const withTrailing = renderToStaticMarkup(
-      <PendingAttachmentChip
-        name="a.pdf"
-        file={file}
-        preview={preview}
-        trailing={<button type="button">remove</button>}
-      />,
-    );
-    const alone = renderToStaticMarkup(
-      <AttachmentChip name="a.pdf" mime="application/pdf" action={preview} />,
-    );
-    for (const html of [withTrailing, alone]) {
-      expect(html).toContain("hover:bg-muted/50");
-      expect(html).toContain("cursor-pointer");
-      expect(html).not.toContain("hover:underline");
-    }
-    // A click anywhere on the chip opens the file: the button's hit area covers it.
-    expect(withTrailing).toContain("after:inset-0");
   });
 });
 
