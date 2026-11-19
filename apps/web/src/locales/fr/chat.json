@@ -6,6 +6,7 @@
   "file.noAccessIn": "Votre rôle ne donne pas accès aux fichiers de {{name}}.",
   "composer.readOnly": "Votre rôle permet de relire vos conversations, pas d’en démarrer ni d’y répondre.",
   "composer.placeholder": "Message Appstrate…",
+  "composer.placeholderModel": "Discuter avec {{model}}",
   "composer.attach": "Joindre des fichiers",
   "composer.attachIn": "Joindre des fichiers dans {{name}}",
   "composer.attach.choose": "Joindre dans…",

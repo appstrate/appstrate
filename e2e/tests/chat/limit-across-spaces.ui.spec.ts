@@ -100,7 +100,7 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     await expect(chip).toBeVisible();
     // Both attachments were picked in Beta. The rejected send keeps the draft and names
     // the space on each attachment, including the image thumbnail.
-    const message = page.getByPlaceholder("Message Appstrate…");
+    const message = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
     await message.fill("Voici les fichiers.");
     await page.getByRole("button", { name: "Envoyer", exact: true }).click();
     for (const name of ["beta.txt", "beta.png"]) {
@@ -159,7 +159,9 @@ test("the overview attach button stages the file in the chosen space", async ({
     const upload = page.waitForResponse(
       (res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/api/uploads",
     );
-    await page.getByPlaceholder("Message Appstrate…").fill("Voici le fichier.");
+    await page
+      .getByRole("textbox", { name: "Message Appstrate…", exact: true })
+      .fill("Voici le fichier.");
     await page.getByRole("button", { name: "Envoyer", exact: true }).click();
     const response = await upload;
     expect(await response.request().headerValue("X-Space-Id")).toBe(destination.id);

@@ -910,10 +910,20 @@ reachable only by hover**: an action that appears on `:hover` shows without it b
 (`md:opacity-0 md:group-hover:opacity-100`, as `SidebarMenuAction` does) or lives in a menu a tap
 opens.
 
+- Keep the chat composer and conversation search at 1rem in both orientations. A landscape
+  phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
+  `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
+- Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
+  The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
+  sheet. `interactive-widget=resizes-content` lets supporting browsers resize the layout.
+  When the keyboard only resizes the visual viewport, `useKeyboardViewport` supplies its height
+  and offset. Preserve pinch zoom.
+
 ## Checklist before handing UI work over
 
 - [ ] Uses the pattern of this file for each need; a new pattern added here.
 - [ ] Every role: same tabs, locked content explained, no 403 toast.
-- [ ] Light, dark, 1440 px and 390 px; nominal, empty, heavy and error states.
+- [ ] Light, dark, 1440 px and 390 px (and 360 px); nominal, empty, heavy and error states.
+- [ ] A screen with a field or a bottom bar: checked with the keyboard open on a phone.
 - [ ] fr and en, no literal string, no raw server text.
 - [ ] `bun test` and `bun run typecheck` in `apps/web`, `bun run check` from the root.

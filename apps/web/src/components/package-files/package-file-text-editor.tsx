@@ -49,7 +49,7 @@ function ApplyEditor({
         onChange={setValue}
         language={languageForPath(path)}
         // Fits a short window: the modal must never push Appliquer off screen.
-        height="min(60vh, 560px)"
+        height="min(60dvh, 560px)"
       />
       <div className="flex justify-end">
         <Button type="button" onClick={() => onApply(value)}>
