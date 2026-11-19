@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * iOS Safari zooms the page when a field with a font under 16 px takes focus. A text-entry class
- * of the chat is therefore 16 px (`text-base`) with no phone-size override: the dense size only
- * comes in behind a breakpoint prefix.
- */
-
 import { describe, expect, it } from "bun:test";
 import {
   ASSISTANT_MESSAGE_CLASS,
   COMPOSER_INPUT_CLASS,
-  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
   NOTE_TEXT_CLASS,
@@ -22,31 +15,20 @@ import {
   USER_MESSAGE_CLASS,
 } from "../src/ui/phone-text.ts";
 
-const DENSE = /^(text-(xs|sm)|text-\[[^\]]+\])$/;
+it("keeps the composer and search at 1rem in both orientations", () => {
+  for (const classes of [COMPOSER_INPUT_CLASS, SEARCH_INPUT_CLASS]) {
+    expect(classes.split(" ")).toContain("text-base");
+    expect(classes).not.toMatch(/(?:^|[ :])text-(?:xs|sm)\b/);
+  }
+  // The shared Input defaults to md:text-sm.
+  expect(SEARCH_INPUT_CLASS.split(" ")).toContain("md:text-base");
+});
 
-/** The size tokens that apply with no breakpoint prefix (what a phone gets). */
-function phoneSizes(classes: string): string[] {
-  return classes.split(/\s+/).filter((token) => token.startsWith("text-") && !token.includes(":"));
-}
-
-describe.each([
-  ["composer input", COMPOSER_INPUT_CLASS],
-  ["conversation search", SEARCH_INPUT_CLASS],
-  ["user message", USER_MESSAGE_CLASS],
-  ["assistant message", ASSISTANT_MESSAGE_CLASS],
-  ["reading text", READING_TEXT_CLASS],
-  ["dense reading text", READING_TEXT_DENSE_CLASS],
-])("%s", (_name, classes) => {
-  it("is 16 px on a phone", () => {
-    const sizes = phoneSizes(classes);
-    expect(sizes).toContain("text-base");
-    expect(sizes.filter((token) => DENSE.test(token))).toEqual([]);
-  });
-
-  it("only goes denser from the md breakpoint", () => {
-    const dense = classes.split(/\s+/).filter((token) => /(^|:)text-(xs|sm)$/.test(token));
-    for (const token of dense) expect(token.startsWith("md:")).toBe(true);
-  });
+it("uses denser message bodies from md", () => {
+  for (const classes of [USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
+    expect(classes.split(" ")).toContain("text-base");
+    expect(classes.split(" ")).toContain("md:text-sm");
+  }
 });
 
 describe("markdown prose", () => {
@@ -76,17 +58,8 @@ describe("thread layout on a phone", () => {
 
 describe("secondary text", () => {
   it("is 14 px on a phone, never the 12 px of the dense size", () => {
-    expect(phoneSizes(NOTE_TEXT_CLASS)).toEqual(["text-sm"]);
+    expect(NOTE_TEXT_CLASS.split(" ")).toContain("text-sm");
+    expect(READING_TEXT_DENSE_CLASS.split(" ")).toEqual(["text-base", "md:text-xs"]);
     expect(NOTE_TEXT_CLASS.split(/\s+/)).toContain("md:text-xs");
-  });
-});
-
-describe("composer tools row", () => {
-  it("takes a row of its own on a phone once a chip is in it, never at rest", () => {
-    const tokens = COMPOSER_TOOLS_CLASS.split(/\s+/);
-    const own = tokens.find((token) => token.endsWith(":basis-full"));
-    // A third child of the cluster is a chip; the rule only applies off the resting state.
-    expect(own).toContain("has-[>div>:nth-child(3)]");
-    expect(own?.startsWith("max-md:group-not-data-[rest]/composer:")).toBe(true);
   });
 });

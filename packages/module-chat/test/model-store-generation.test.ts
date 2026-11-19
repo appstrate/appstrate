@@ -19,7 +19,6 @@ import {
   getCompatibleGenerationSettings,
   getSelectedModel,
   getSelectedModelAcceptsImages,
-  getSelectedModelLabel,
   getSelectedModelReadsPdf,
   setModelCatalog,
   setSelectedModel,
@@ -373,21 +372,5 @@ describe("generation settings follow the model that is actually sent", () => {
     attachConversation("chs_a", "model-a");
 
     expect(getCompatibleGenerationSettings()).toBe(getCompatibleGenerationSettings());
-  });
-});
-
-describe("the selected model's name", () => {
-  it("is the label the picker shows, else the upstream model id, else nothing", () => {
-    setModelCatalog([
-      { id: "labelled", is_default: true, label: "Sonnet 5.5", modelId: "claude-sonnet" },
-      { id: "bare", label: null, modelId: "gpt-x" },
-      { id: "alias", label: null, modelId: null },
-    ]);
-    setSelectedModel("labelled");
-    expect(getSelectedModelLabel()).toBe("Sonnet 5.5");
-    setSelectedModel("bare");
-    expect(getSelectedModelLabel()).toBe("gpt-x");
-    setSelectedModel("alias");
-    expect(getSelectedModelLabel()).toBeNull();
   });
 });

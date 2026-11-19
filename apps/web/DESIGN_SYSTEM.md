@@ -903,18 +903,14 @@ becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
-On a phone, two more rules, because a desktop browser shows none of them:
-
-- **16 px where a thumb types or reads.** A field's font is `text-base md:text-sm` (what `Input`
-  and `Textarea` do): iOS Safari zooms the page on focus of a field under 16 px and never zooms
-  back. A raw `<textarea>` or `<input>` (the chat composer, a search field) carries the same
-  classes. Running text a user reads at length (a chat message) is `text-base` below `md` too.
-- **Heights in `dvh`, never `vh`, `h-screen` or `min-h-screen`** (`test/viewport-units.test.ts`
-  fails on them): `vh` ignores the browser's toolbars. A screen that must stay above the
-  on-screen keyboard sizes itself `h-[var(--keyboard-viewport-height,100dvh)]` and shifts by
-  `top-[var(--keyboard-viewport-top,0px)]` (`useKeyboardViewport`, mounted by `MainLayout` for the
-  chat). Android is handled by `interactive-widget=resizes-content` in `index.html`; never add
-  `maximum-scale`, which blocks the user's zoom.
+- Keep the chat composer and conversation search at 1rem in both orientations. A landscape
+  phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
+  `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
+- Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
+  The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
+  sheet. `interactive-widget=resizes-content` lets supporting browsers resize the layout.
+  When the keyboard only resizes the visual viewport, `useKeyboardViewport` supplies its height
+  and offset. Preserve pinch zoom.
 
 ## Checklist before handing UI work over
 

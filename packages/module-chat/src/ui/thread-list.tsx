@@ -251,7 +251,7 @@ export function ChatConversationList({
           </div>
         )}
         {(searching || groups.length === 0) && (
-          <SidebarGroupLabel>
+          <SidebarGroupLabel className={NOTE_TEXT_CLASS}>
             {t(searching ? "threads.results" : "threads.title")}
           </SidebarGroupLabel>
         )}

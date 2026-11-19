@@ -58,7 +58,7 @@ import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
-import { useKeyboardViewport } from "@appstrate/ui/use-keyboard-viewport";
+import { KEYBOARD_VIEWPORT_CLASS, useKeyboardViewport } from "@appstrate/ui/use-keyboard-viewport";
 import { AppToaster } from "./components/app-toaster";
 import {
   isOverlayPath,
@@ -467,15 +467,12 @@ function MainLayout({ search }: { search: string }) {
 
   return (
     <ShellFrameProvider>
-      {/* Chat: the whole shell is as tall as what the keyboard leaves visible (iOS never resizes
-          the layout viewport for it; `useKeyboardViewport` says what is left). Without a keyboard
-          both variables are absent and this is `100dvh`. */}
       <SidebarProvider
         open={sidebar.open}
         onOpenChange={sidebar.setOpen}
         className={
           product === "chat"
-            ? "relative top-[var(--keyboard-viewport-top,0px)] h-[var(--keyboard-viewport-height,100dvh)] min-h-0 overflow-hidden"
+            ? `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`
             : undefined
         }
       >
