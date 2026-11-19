@@ -406,13 +406,14 @@ describe("run inputs across spaces", () => {
     await launchedRunId(await launch(previewing, teamB, [await runOutput(teamB, ctx.user.id)]));
   });
 
-  it("a chat turn bound to space B reads its own personal upload by id, and cannot delete or keep it", async () => {
+  it("a chat turn bound to space B sees its own personal upload as read-only by id and in a run", async () => {
     const sessionId = `chs_${crypto.randomUUID()}`;
-    const fileId = (await chatUpload(ctx.user.id, sessionId)).replace("appfile://", "");
+    const uri = await chatUpload(ctx.user.id, sessionId);
+    const fileId = uri.replace("appfile://", "");
     const bearer = {
       ...loopbackHeaders(ctx, ctx.orgId, {
         orgRole: "owner",
-        permissions: [...LAUNCHES_HERE, "files:delete"],
+        permissions: [...LAUNCHES_HERE, "models:read", "files:delete"],
         spaceIds: [teamB],
         chatSessionId: sessionId,
       }),
@@ -425,6 +426,13 @@ describe("run inputs across spaces", () => {
       keep: false,
       delete: false,
     });
+    const runId = await launchedRunId(await launch(bearer, teamB, [uri]));
+    const list = await app.request(`/api/files?runId=${runId}`, { headers: bearer });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      data: [{ id: fileId, capabilities: { keep: false, delete: false } }],
+    });
+
     // The conversation widens reads only: delete and keep take the file's space grants.
     const keep = await app.request(`/api/files/${fileId}/keep`, {
       method: "POST",

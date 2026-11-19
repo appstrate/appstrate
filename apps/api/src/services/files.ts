@@ -1802,20 +1802,20 @@ export async function listFilesForActor(
     .orderBy(desc(files.createdAt), desc(files.id))
     .limit(fetchLimit);
 
-  const managed = new Set(
-    opts.fileAccess.grants.filter((g) => g.permissions.has("files:delete")).map((g) => g.spaceId),
+  const permissionsBySpace = new Map(
+    opts.fileAccess.grants.map((grant) => [grant.spaceId, grant.permissions]),
   );
-  const { creatorCanManage } = opts;
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {
     const row = r as FileRow;
+    const permissions = permissionsBySpace.get(row.spaceId);
     // Every row passed the visibility SQL, so `visible: true`. No `mintPreview` —
     // list rows carry only the `previewable` boolean; the signed preview token is
     // minted on the single-file GET.
     const capabilities = getFileCapabilities(row, actor, {
       visible: true,
-      canManage: managed.has(row.spaceId),
-      creatorCanManage,
+      canManage: permissions?.has("files:delete"),
+      creatorCanManage: permissions !== undefined && opts.creatorCanManage,
     });
     return toFileDto(row, actor, capabilities);
   });
