@@ -22,7 +22,8 @@ const MAX_HOST_LENGTH = 255;
 export interface ConnectionCall {
   orgId: string;
   spaceId: string;
-  connectionId: string;
+  /** NULL when the integration binds no connection (unauthenticated, AFPS §7.2): no owner either. */
+  connectionId: string | null;
   integrationId: string;
   /** Who acted; under an API key, the principal acting through it. */
   actor: Actor;
@@ -39,23 +40,26 @@ export interface ConnectionCall {
   requestId: string;
 }
 
+async function connectionOwner(orgId: string, connectionId: string): Promise<Actor | null> {
+  const [connection] = await db
+    .select({
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+    })
+    .from(integrationConnections)
+    .where(
+      and(eq(integrationConnections.id, connectionId), eq(integrationConnections.orgId, orgId)),
+    )
+    .limit(1);
+  return connection ? actorFromIds(connection.userId, connection.endUserId) : null;
+}
+
 /** Never throws: a database fault is logged and the row is lost. */
 export async function recordConnectionCall(input: ConnectionCall): Promise<void> {
   try {
-    const [connection] = await db
-      .select({
-        userId: integrationConnections.userId,
-        endUserId: integrationConnections.endUserId,
-      })
-      .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.id, input.connectionId),
-          eq(integrationConnections.orgId, input.orgId),
-        ),
-      )
-      .limit(1);
-    const owner = connection ? actorFromIds(connection.userId, connection.endUserId) : null;
+    const owner = input.connectionId
+      ? await connectionOwner(input.orgId, input.connectionId)
+      : null;
     await db.insert(connectionCalls).values({
       orgId: input.orgId,
       spaceId: input.spaceId,

@@ -764,6 +764,13 @@
       "when": 1794900000000,
       "tag": "0108_drop_space_packages_chat_enforced",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0109_connection_calls_without_connection",
+      "breakpoints": true
     }
   ]
 }
