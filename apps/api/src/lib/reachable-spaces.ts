@@ -144,10 +144,26 @@ export async function reachAcrossSpaces(
   c: Context<AppEnv>,
   orgId: string,
 ): Promise<ReachableSpace[]> {
+  refuseEndUserAcrossSpaces(c);
+  return callerReachableSpaces(c, orgId);
+}
+
+/**
+ * {@link enterableSpaces} for a route that serves the organization as a whole: what a module
+ * builds a caller's surface from (a credential bound to a set gets all of it, flagged confined).
+ */
+export async function enterableAcrossSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
+  refuseEndUserAcrossSpaces(c);
+  return enterableSpaces(c, orgId);
+}
+
+function refuseEndUserAcrossSpaces(c: Context<AppEnv>): void {
   if (c.get("principalKind") === "end_user") {
     throw forbidden("An end-user cannot list across spaces");
   }
-  return callerReachableSpaces(c, orgId);
 }
 
 /**
