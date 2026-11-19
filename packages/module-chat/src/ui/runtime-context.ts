@@ -60,7 +60,11 @@ export interface ChatTransport {
  * The host's rendering of spaces by id (its tile and name, every space shown). The module
  * names the spaces a conversation touched, and the space of a tool call, through it.
  */
-export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
+export type RenderSpaces = (
+  spaceIds: readonly string[],
+  /** `tilesOnly`: the tiles alone, no name (two at most, then « +N »), for a line with no room for it. */
+  options?: { tilesOnly?: boolean },
+) => ReactNode;
 
 /** The host's space picker, opened from an entry in a menu. */
 export type SpaceChoiceMenu = ComponentType<{

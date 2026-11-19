@@ -19,6 +19,7 @@ export function SheetMenu({
   open,
   onOpenChange,
   title,
+  header,
   children,
   className,
 }: {
@@ -26,6 +27,8 @@ export function SheetMenu({
   onOpenChange: (open: boolean) => void;
   /** The panel's accessible name (it draws no title of its own). */
   title: string;
+  /** A line shown above the rows, when the rows need saying what they act on. */
+  header?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -44,6 +47,7 @@ export function SheetMenu({
         <SheetDescription className="sr-only">{title}</SheetDescription>
         {/* The grabber says it is a panel one can drag away, as on every phone. */}
         <div aria-hidden className="bg-border mx-auto mt-2 h-1 w-9 rounded-full" />
+        {header}
         <div className="flex flex-col py-2">{children}</div>
       </SheetContent>
     </Sheet>

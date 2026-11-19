@@ -58,7 +58,9 @@ function render(granted: string[]): string {
               activeId={null}
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
-              renderSpaces={(ids) => ids.join(", ")}
+              renderSpaces={(ids, options) =>
+                options?.tilesOnly ? `tiles:${ids.join(",")}` : ids.join(", ")
+              }
               formatAge={() => "age"}
             />
           </ChatTransportProvider>
@@ -91,5 +93,42 @@ describe("a conversation row on a phone", () => {
   it("gives a reader no menu", () => {
     const html = render(["chat:read"]);
     expect(html).not.toContain("threads.actions.openFor");
+  });
+});
+
+describe("the conversation search on a phone", () => {
+  const html = render(["chat:read", "chat:write"]);
+
+  it("is a magnifier beside « New conversation », shown below md only", () => {
+    const toggle = html.match(/<button[^>]*data-testid="chat-search-toggle"[^>]*>/)?.[0];
+    expect(toggle).toBeDefined();
+    expect(toggle).toContain("md:hidden");
+    expect(toggle).toContain("size-11");
+    expect(toggle).toContain('aria-expanded="false"');
+  });
+
+  it("keeps its field folded below md until the magnifier is tapped, always there from md", () => {
+    const field = html.match(/<div class="[^"]*max-md:hidden[^"]*"><svg[^>]*lucide-search/)?.[0];
+    expect(field).toBeDefined();
+  });
+
+  it("puts the field after « New conversation », never above it", () => {
+    expect(html.indexOf("threads.new")).toBeLessThan(html.indexOf('type="search"'));
+  });
+});
+
+describe("a conversation's spaces on a phone", () => {
+  const html = render(["chat:read", "chat:write"]);
+
+  it("closes the title's line with their tiles, and keeps the names line for md and up", () => {
+    const tiles = html.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>[^<]*/)?.[0];
+    expect(tiles).toContain("max-md:flex");
+    expect(tiles).toContain("tiles:spc_a");
+    const names = html.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
+    expect(names).toContain("max-md:hidden");
+  });
+
+  it("puts the title and the tiles on one line below md", () => {
+    expect(html).toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
   });
 });
