@@ -643,7 +643,7 @@ function Composer({
           }}
           className={COMPOSER_INPUT_CLASS}
         />
-        <div className="min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
+        <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
           {slot}
         </div>
         <div className="flex items-center gap-2 [grid-area:send]">

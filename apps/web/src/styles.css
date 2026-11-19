@@ -26,6 +26,7 @@
   grid-template-areas: "input input input" "tools model send";
 
   @media (width < 48rem) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
     &:has([data-composer-chip]) {
       grid-template-areas: "input input input" "tools tools tools" ". model send";
     }
@@ -38,7 +39,6 @@
   }
   @media (width < 48rem) {
     &[data-rest] {
-      grid-template-columns: auto minmax(0, 1fr) auto;
       grid-template-areas: "tools input send";
     }
   }

@@ -59,7 +59,7 @@ export function RemovableChip({
           data-testid={open.testId}
           onClick={open.onClick}
           // The base layer sets every button to `text-sm font-medium`: the body keeps the chip's type.
-          className={cn("flex min-w-0 items-center gap-1.5 [font:inherit]", ICON)}
+          className={cn("flex h-full min-w-0 items-center gap-1.5 [font:inherit]", ICON)}
         >
           {body}
         </button>

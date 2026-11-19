@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
+import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
 import { DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
 
 /**
@@ -76,18 +77,18 @@ export function ComposerSkeleton({
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
       <div className="group/composer chat-composer-grid" data-rest="">
-        <div className="text-muted-foreground flex min-h-9 min-w-0 items-center overflow-hidden py-1 text-base [grid-area:input]">
+        <div className="text-muted-foreground desktop-pointer:min-h-9 flex min-h-10 min-w-0 items-center overflow-hidden py-1 text-base [grid-area:input]">
           {placeholder}
         </div>
         <div className="min-w-0 [grid-area:tools]">
           <div className="flex items-center gap-1.5 max-md:[&>:not(:first-child)]:hidden">
-            <Skeleton className="size-8 rounded-lg" />
-            <Skeleton className="size-8 rounded-lg" />
-            {limited && <Skeleton className="h-7 w-44 rounded-full" />}
+            <Skeleton className={COMPOSER_BUTTON_CLASS} />
+            <Skeleton className={COMPOSER_BUTTON_CLASS} />
+            {limited && <Skeleton className="desktop-pointer:h-7 h-10 w-44 rounded-full" />}
           </div>
         </div>
-        <Skeleton className="h-[30px] w-32 rounded-md [grid-area:model] max-md:hidden" />
-        <Skeleton className="size-8 rounded-lg [grid-area:send]" />
+        <Skeleton className="desktop-pointer:h-[30px] h-10 w-32 rounded-md [grid-area:model] max-md:hidden" />
+        <Skeleton className={cn(COMPOSER_BUTTON_CLASS, "[grid-area:send]")} />
       </div>
     </div>
   );

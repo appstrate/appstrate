@@ -70,14 +70,14 @@ test.describe("chat actions on a touchscreen", () => {
     await page.getByRole("button", { name: "Enregistrer", exact: true }).tap();
     const renamed = page.getByRole("button", { name: "Actions de « Budget validé »" });
     await expect(renamed).toBeFocused();
-    await page.screenshot({ path: testInfo.outputPath("landscape.png") });
+    await page.screenshot({ path: testInfo.outputPath("landscape.png"), animations: "disabled" });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('header [data-sidebar="trigger"]:visible').tap();
     await renamed.tap();
     const remove = page.getByRole("menuitem", { name: "Supprimer" });
     await expect(remove).toHaveCSS("min-height", "44px");
-    await page.screenshot({ path: testInfo.outputPath("menu.png") });
+    await page.screenshot({ path: testInfo.outputPath("menu.png"), animations: "disabled" });
     await remove.tap();
     const dialog = page.getByRole("alertdialog");
     const cancel = dialog.getByRole("button", { name: "Annuler" });
