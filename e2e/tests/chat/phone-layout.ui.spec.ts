@@ -98,14 +98,17 @@ test("a fresh phone composer keeps attach, input and send on one line until the 
   await expect(input).toBeVisible();
   await expect(input).not.toBeFocused();
   await expect(grid).toHaveAttribute("data-rest", "");
-  const row = await Promise.all([attach, input, send].map((control) => control.boundingBox()));
-  if (row.some((box) => !box)) throw new Error("Missing resting controls");
-  const [a, b, c] = row.map((box) => box!);
-  expect(Math.max(a.y, b.y, c.y)).toBeLessThan(
-    Math.min(a.y + a.height, b.y + b.height, c.y + c.height),
+  const [left, field, right] = await Promise.all([
+    attach.boundingBox(),
+    input.boundingBox(),
+    send.boundingBox(),
+  ]);
+  if (!left || !field || !right) throw new Error("Missing resting controls");
+  expect(Math.max(left.y, field.y, right.y)).toBeLessThan(
+    Math.min(left.y + left.height, field.y + field.height, right.y + right.height),
   );
-  expect(a.x + a.width).toBeLessThanOrEqual(b.x + 1);
-  expect(b.x + b.width).toBeLessThanOrEqual(c.x + 1);
+  expect(left.x + left.width).toBeLessThanOrEqual(field.x + 1);
+  expect(field.x + field.width).toBeLessThanOrEqual(right.x + 1);
   const choosing = page.waitForEvent("filechooser");
   await attach.tap();
   await (await choosing).setFiles([]);
