@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.70] - 2026-11-19
+
+The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.
+
 ## [1.0.0-beta.69] - 2026-11-18
 
 ### Client upgrade from beta.68
