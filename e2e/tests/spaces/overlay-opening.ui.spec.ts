@@ -15,6 +15,7 @@
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { createSpace } from "../../helpers/seed.ts";
 
 test("a cold catalogue address keeps one dialog and one backdrop from skeleton to page", async ({
   authedPage: page,
@@ -68,4 +69,27 @@ test("a cold catalogue address keeps one dialog and one backdrop from skeleton t
         .__overlayAdded,
   );
   expect(added).toEqual({ dialogs: 1, backdrops: 1 });
+});
+
+/**
+ * An overlay address naming another space (`?enterSpace=`, how a row of a list spanning spaces
+ * links): the space is entered, the parameter dropped, and the overlay opens — not a skeleton
+ * waiting for good.
+ */
+test("a catalogue address naming another space enters it and opens the catalogue", async ({
+  authedPage: page,
+  orgOnlyClient,
+}) => {
+  const other = await createSpace(orgOnlyClient, `Elsewhere ${Date.now()}`);
+  await page.goto(`/catalogue/agent?enterSpace=${other.id}`);
+
+  await expect(page).toHaveURL(/\/catalogue\/agent$/);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator("aside nav").first()).toBeVisible();
+  await expect(dialog.getByRole("status")).toHaveCount(0);
+  // The space it named is the one now worked in.
+  await expect(page.getByTestId("org-switcher-button").first()).toHaveAttribute(
+    "aria-label",
+    new RegExp(`${other.name}\\)$`),
+  );
 });

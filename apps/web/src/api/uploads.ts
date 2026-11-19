@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Authed uploader for `<SchemaForm upload={...} />`, typed against the spec.
+ * Authed uploader behind `<SchemaForm upload={...} />` (`useUploadClient`), typed against the spec.
  * Step 1 (descriptor) goes through the typed client so `/api/uploads` gets the
  * same org/app headers and ApiError semantics as every other call; step 2 PUTs
  * the raw bytes to the returned pre-signed URL (S3/MinIO/FS sink — raw fetch
  * by design, no platform headers).
  */
-import type { UploadFn } from "@appstrate/ui/schema-form";
 import { client } from "./client";
+import { spaceHeader } from "../lib/scoping-headers";
 
 /**
- * Test seam, third and defaulted so `uploadClient` still satisfies `UploadFn`.
+ * Test seam, last and defaulted.
  * The spec paths are relative (`/api/uploads`) because the SPA is served
  * same-origin, and a relative URL only resolves against a document — outside a
  * browser the typed client cannot even construct its Request, so the descriptor
@@ -29,13 +29,24 @@ const defaultDeps: UploadDeps = {
   fetch: (input, init) => globalThis.fetch(input, init),
 };
 
-export const uploadClient = (async (file, signal, deps: UploadDeps = defaultDeps) => {
+/**
+ * Stages `file` and returns its `upload://` URI. `spaceId` names the space the upload lands in
+ * (the chat, which attaches in a space it chose); absent, the working space, as the client's
+ * middleware fills it.
+ */
+export async function uploadInSpace(
+  file: File,
+  spaceId: string | undefined,
+  signal?: AbortSignal,
+  deps: UploadDeps = defaultDeps,
+): Promise<string> {
   const { data: desc } = await deps.client.POST("/api/uploads", {
     body: {
       name: file.name,
       size: file.size,
       mime: file.type || "application/octet-stream",
     },
+    ...spaceHeader(spaceId),
     signal,
   });
   if (!desc) throw new Error("upload failed: empty descriptor response");
@@ -50,4 +61,4 @@ export const uploadClient = (async (file, signal, deps: UploadDeps = defaultDeps
     throw new Error(`upload failed: ${putRes.status} ${putRes.statusText}`);
   }
   return desc.uri;
-}) satisfies UploadFn;
+}

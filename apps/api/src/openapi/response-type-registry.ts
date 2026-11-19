@@ -330,16 +330,16 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // of its own (packages/module-billing/drizzle/schema.ts), so none of these has a
   // shared-type in this repo at all; the dashboard consumes the generated spec
   // type.
-  EeBillingAccount: "module-billing billing wire DTO; the row lives in a table of the module's own",
-  EeBillingPlan: "module-billing plan catalog wire DTO, built from `config.ts`; no persisted row",
-  EeBillingUpgradePlan:
-    "module-billing EeBillingPlan narrowed to the plans checkout accepts; an allOf intersection, no persisted row",
-  EeCheckoutPlanId:
+  BillingAccount: "module-billing billing wire DTO; the row lives in a table of the module's own",
+  BillingPlan: "module-billing plan catalog wire DTO, built from `config.ts`; no persisted row",
+  BillingUpgradePlan:
+    "module-billing BillingPlan narrowed to the plans checkout accepts; an allOf intersection, no persisted row",
+  BillingCheckoutPlanId:
     "module-billing checkout plan-id enum shared by the request body and `upgrades[].id`",
-  EeBillingManager:
+  BillingManager:
     "module-billing billing-manager wire DTO; the row lives in a table of the module's own",
-  EeBillingManagerList: "module-billing list envelope around EeBillingManager",
-  EeBillingContact:
+  BillingManagerList: "module-billing list envelope around BillingManager",
+  BillingContact:
     "module-billing billing-contact wire DTO; the row lives in a table of the module's own",
   // File-explorer wire DTOs. Derived from ZIP entries, not from any table, so
   // there is no Drizzle shared-type to compare against; the canonical TS shape

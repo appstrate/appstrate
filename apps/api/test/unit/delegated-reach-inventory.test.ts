@@ -132,7 +132,7 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "public",
     reason: "verifyFsUploadToken HMAC minted by createUpload",
   },
-  receiveEeBillingStripeWebhook: {
+  receiveBillingStripeWebhook: {
     category: "public",
     reason: "Stripe webhook, stripe-signature verified",
     module: "billing",

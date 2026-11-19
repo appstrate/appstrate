@@ -3,7 +3,8 @@
 /**
  * `connection_calls` holds the principal kinds `Actor` admits: `actor_type` is
  * `user` or `end_user`, `owner_type` the same or NULL (the connection was gone
- * at call time).
+ * at call time); a row without a connection (an unauthenticated integration) has
+ * no owner either.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -24,11 +25,15 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
 
 describe("connection_calls — principal kinds", () => {
   let ctx: TestContext;
-  const call = (fields: { actorType?: string; ownerType?: string | null }) =>
+  const call = (fields: {
+    actorType?: string;
+    ownerType?: string | null;
+    connectionId?: string | null;
+  }) =>
     db.insert(connectionCalls).values({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      connectionId: crypto.randomUUID(),
+      connectionId: fields.connectionId === undefined ? crypto.randomUUID() : fields.connectionId,
       integrationId: "@test/integration",
       ownerType: fields.ownerType === undefined ? "user" : fields.ownerType,
       ownerId: fields.ownerType === null ? null : ctx.user.id,
@@ -56,6 +61,16 @@ describe("connection_calls — principal kinds", () => {
   it("refuses an actor_type outside user / end_user", async () => {
     expect(await refusal(call({ actorType: "api_key" }))).toContain(
       "connection_calls_actor_type_valid",
+    );
+  });
+
+  it("accepts a row without a connection and without an owner", async () => {
+    await call({ connectionId: null, ownerType: null });
+  });
+
+  it("refuses a row without a connection that names an owner", async () => {
+    expect(await refusal(call({ connectionId: null, ownerType: "user" }))).toContain(
+      "connection_calls_no_connection_no_owner",
     );
   });
 

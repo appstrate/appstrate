@@ -1,6 +1,6 @@
 # Stripe live contract suite.
 #
-# The EE billing tests run against a hand-written mock. The mock proves what
+# The billing tests run against a hand-written mock. The mock proves what
 # the module SENDS; it cannot prove what Stripe RETURNS, because we wrote those
 # responses ourselves. This job closes that half: it runs
 # `packages/module-billing/test/live` against real Stripe in TEST MODE and fails

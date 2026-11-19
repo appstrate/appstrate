@@ -326,7 +326,7 @@ describe("findPassThroughGaps", () => {
  * "name the variable and let the schema default apply", is not merely unnecessary there: it is
  * unavailable.
  *
- * 2026-09-18, measured. `EE_RECONCILIATION_BATCH_SIZE` arrived as `''`, `z.coerce.number("")` is
+ * 2026-09-18, measured. `BILLING_RECONCILIATION_BATCH_SIZE` arrived as `''`, `z.coerce.number("")` is
  * 0, the module's `.min(1)` refused it, the platform crash-looped. Seven of that block's bare
  * names would have refused to boot and four more would have degraded in SILENCE — a zero
  * interval pauses metering, a zero replay window disables the scan that keeps usage from going

@@ -2,7 +2,8 @@
 
 /**
  * Which door a page of the Runs list asks: the current space's `GET /api/runs` unless it spans
- * spaces, then `GET /api/orgs/{orgId}/runs`, naming no space.
+ * spaces, then `GET /api/orgs/{orgId}/runs`, naming no space. An agent's runs are the same list
+ * narrowed by `packageId`, on either door.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
@@ -75,6 +76,20 @@ describe("fetchRunPage", () => {
           },
         },
       ],
+    ]);
+  });
+
+  it("narrows either door to one agent with packageId", async () => {
+    for (const acrossOrgId of [null, "org_1"]) {
+      await fetchRunPage({ packageId: "@acme/reporter", acrossOrgId, limit: 25 });
+    }
+    expect(
+      (get.mock.calls as [string, { params: { query: { packageId?: string } } }][]).map(
+        ([path, init]) => [path, init.params.query.packageId],
+      ),
+    ).toEqual([
+      ["/api/runs", "@acme/reporter"],
+      ["/api/orgs/{orgId}/runs", "@acme/reporter"],
     ]);
   });
 });

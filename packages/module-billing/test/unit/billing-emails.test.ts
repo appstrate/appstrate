@@ -37,7 +37,7 @@ describe("billing email templates", () => {
       expect(result.html).toContain("Starter");
     });
 
-    it("wraps in EE layout", () => {
+    it("wraps in billing layout", () => {
       const result = renderSubscriptionConfirmedEmail(baseProps);
       expect(result.html).toContain("<!DOCTYPE html");
       expect(result.html).toContain("appstrate.com");

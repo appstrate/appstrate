@@ -52,6 +52,7 @@ import { TextSkeleton } from "../loading-skeletons";
 
 interface IntegrationToolPickerProps {
   packageId: string;
+  spaceId?: string;
   entry: ResourceEntry;
   onChange: (next: ResourceEntry) => void;
 }
@@ -98,9 +99,9 @@ function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationTo
   );
 }
 
-function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPickerProps) {
+function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
-  const { data: detail, isLoading } = useIntegrationDetail(packageId);
+  const { data: detail, isLoading } = useIntegrationDetail(packageId, spaceId);
 
   if (isLoading) {
     return <TextSkeleton lines={2} className="mt-2" />;

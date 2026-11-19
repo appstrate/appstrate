@@ -189,7 +189,9 @@ describe("package storage: deletion outbox + orphan reconciliation", () => {
     await seedPackageVersion({ packageId: pkg.id, version: "1.0.0" });
     await seedPackageVersion({ packageId: pkg.id, version: "1.1.0" });
 
-    expect(await deletePackageVersion(pkg.id, "1.0.0")).toBe(true);
+    expect(
+      await deletePackageVersion({ id: pkg.id, type: pkg.type, orgId: ctx.orgId }, "1.0.0"),
+    ).toBe(true);
 
     const jobs = await db
       .select()

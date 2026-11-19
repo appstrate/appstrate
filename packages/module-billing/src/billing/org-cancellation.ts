@@ -8,22 +8,22 @@
  */
 
 import { eq, isNotNull } from "drizzle-orm";
-import { getEeDb } from "../db.ts";
+import { getBillingDb } from "../db.ts";
 import { billingAccounts, orgUsageRecords } from "../../drizzle/schema.ts";
 import { cancelSubscription } from "../stripe/cancel.ts";
 import { logger } from "../logger.ts";
 import { deleteBillingManagers } from "./managers.ts";
 
-/** Remove the org's EE-owned rows: no EE table FKs the platform, so nothing cascades. */
+/** Remove the org's module-owned rows: no billing table FKs the platform, so nothing cascades. */
 async function deleteOrgBillingRows(orgId: string): Promise<void> {
-  const db = getEeDb();
+  const db = getBillingDb();
   await deleteBillingManagers(orgId);
   await db.delete(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
   await db.delete(billingAccounts).where(eq(billingAccounts.orgId, orgId));
 }
 
 /**
- * Cancel the org's subscription and delete its EE rows — the terminal half of
+ * Cancel the org's subscription and delete its billing rows — the terminal half of
  * `onOrgDelete`, and the body the sweeper's retry re-runs. On failure everything stays
  * put, which is what makes the retry possible.
  */
@@ -32,7 +32,7 @@ export async function cancelSubscriptionAndCleanUp(
   subscriptionId: string | null,
 ): Promise<boolean> {
   if (subscriptionId !== null) {
-    await getEeDb()
+    await getBillingDb()
       .update(billingAccounts)
       .set({ cancelRequestedAt: new Date(), updatedAt: new Date() })
       .where(eq(billingAccounts.orgId, orgId));
@@ -54,7 +54,7 @@ interface PendingCancellationResult {
 
 /** Retry every cancellation `onOrgDelete` could not confirm. Rides the billing tick. */
 export async function retryPendingCancellations(): Promise<PendingCancellationResult> {
-  const pending = await getEeDb()
+  const pending = await getBillingDb()
     .select({
       orgId: billingAccounts.orgId,
       stripeSubscriptionId: billingAccounts.stripeSubscriptionId,

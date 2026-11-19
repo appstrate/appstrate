@@ -26,6 +26,7 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import { lockIdleAgent } from "../state/runs.ts";
 import { activeInSpaces, activeSpaceIds } from "../space-packages.ts";
 
 export class PackageAlreadyExistsError extends Error {
@@ -422,6 +423,7 @@ export async function deleteOrgItem(
   }
 
   await db.transaction(async (tx) => {
+    if (cfg.type === "agent") await lockIdleAgent(tx, { orgId }, itemId);
     // Enumerate BEFORE the delete: `ON DELETE CASCADE` on `package_versions`
     // makes every published artifact's key unrecoverable the moment the
     // `packages` row goes. A bare delete followed by a best-effort

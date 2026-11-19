@@ -49,7 +49,7 @@ function RunDeliverable({ fileId }: { fileId: string }) {
         file={data}
         isLoading={isLoading}
         error={error}
-        className="h-[max(28rem,calc(100vh-20rem))]"
+        className="h-[max(28rem,calc(100dvh-20rem))]"
       />
     </section>
   );

@@ -221,11 +221,11 @@ export function findPassThroughGaps(
  * everywhere else — name the variable, omit the value, let the schema's default apply — is not
  * merely unnecessary there, it is UNAVAILABLE: "unset" cannot be expressed.
  *
- * Measured 2026-09-18, after it took production down. `EE_RECONCILIATION_BATCH_SIZE` arrived as
+ * Measured 2026-09-18, after it took production down. `BILLING_RECONCILIATION_BATCH_SIZE` arrived as
  * `''`, `z.coerce.number("")` is 0, the module's own `.min(1)` refused it and the platform
  * crash-looped. Of the 19 bare names in that block, 12 were unsafe: 7 refused to boot and 4 more
- * would have degraded in SILENCE — a zero `EE_RECONCILIATION_INTERVAL_SECONDS` pauses metering, a
- * zero `EE_RECONCILIATION_REPLAY_WINDOW` disables the scan that keeps usage from going unbilled.
+ * would have degraded in SILENCE — a zero `BILLING_RECONCILIATION_INTERVAL_SECONDS` pauses metering, a
+ * zero `BILLING_RECONCILIATION_REPLAY_WINDOW` disables the scan that keeps usage from going unbilled.
  * The `.min(1)` floor is the only reason any of it was visible at all.
  *
  * A LIST, not a heuristic. "Uses `env_file`" would select the same file today and would stop

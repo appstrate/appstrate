@@ -127,7 +127,7 @@ describe("reviewModuleSql — the platform schema import", () => {
     const { problems } = reviewModuleSql(
       "billing",
       file(
-        'import { getEeDb } from "../db.ts";\n' +
+        'import { getBillingDb } from "../db.ts";\n' +
           'import { logger } from "@appstrate/core/logger";\n' +
           'import * as schema from "../../drizzle/schema.ts";\n',
       ),

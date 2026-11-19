@@ -737,6 +737,7 @@ export async function listSchedules(
   orgId: string,
   grants: readonly SpaceGrant[],
   viewer: Actor | null,
+  { packageId }: { packageId?: string } = {},
 ): Promise<EnrichedSchedule[]> {
   if (grants.length === 0) return [];
   const rows = await db
@@ -749,6 +750,7 @@ export async function listSchedules(
           schedules.spaceId,
           grants.map((g) => g.spaceId),
         ),
+        packageId ? eq(schedules.packageId, packageId) : undefined,
       ),
     )
     .orderBy(asc(schedules.createdAt), asc(schedules.id));

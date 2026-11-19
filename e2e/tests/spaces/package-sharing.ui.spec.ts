@@ -51,7 +51,7 @@ function catalogueCard(page: Page, displayName: string): Locator {
   return page
     .locator("div")
     .filter({ has: page.getByRole("button", { name: displayName, exact: true }) })
-    .filter({ has: page.getByRole("button", { name: /^Ajouter à / }) })
+    .filter({ has: page.getByRole("button", { name: "Ajouter", exact: true }) })
     .last();
 }
 
@@ -327,7 +327,7 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${personalId}/packages`),
     );
-    await card.getByRole("button", { name: "Ajouter à Mon espace", exact: true }).click();
+    await card.getByRole("button", { name: "Ajouter", exact: true }).click();
     // 201: this call is what switched the existing placement on.
     expect((await activated).status()).toBe(201);
 
@@ -385,7 +385,7 @@ test("a guest finds a placement shared OFF in the catalogue and switches it on",
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
     );
-    await card.getByRole("button", { name: "Ajouter à Mon espace", exact: true }).click();
+    await card.getByRole("button", { name: "Ajouter", exact: true }).click();
     expect((await activated).status()).toBe(201);
 
     // Off again from the space's switch, and back on. Deactivating keeps the placement: the

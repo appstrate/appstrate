@@ -4,13 +4,16 @@
  * assistant-ui `AttachmentAdapter` for the chat composer (pinned
  * `@assistant-ui/react` 0.14.27). Its three methods:
  *
- *  - `add({file})` — register a picked file as a pending attachment (a chip);
- *    the client-side size guard rejects an over-cap file here, before any upload.
- *  - `send(pending)` — on composer submit, stage the bytes through the host's
- *    uploader and return a complete attachment whose `file` content part carries
- *    the `upload://upl_x` URI. react-ai-sdk's `toCreateMessage` maps that part to
- *    an ai-SDK file part (`url: upload://…`) on the outgoing UIMessage; the
- *    server then materializes it into a durable `appfile://` file.
+ *  - `add({file})` — register a picked file as a pending attachment (a chip), stamped with the
+ *    space it goes to (`spaceOf`, the user's choice then). A file added while there is none is
+ *    refused, and the client-side size guard rejects an over-cap file here, before any upload.
+ *  - `send(pending)` — on composer submit, stage the bytes through the host's uploader into the
+ *    stamped space, and return a complete attachment whose `file` content part carries the
+ *    `upload://upl_x` URI. A stamped space the turn no longer reads (`turnSpaces`: the limit or
+ *    the acting set changed since) fails that attachment, naming the space, before any upload:
+ *    the server resolves an upload only among the turn's spaces. react-ai-sdk's
+ *    `toCreateMessage` maps the part to an ai-SDK file part (`url: upload://…`); the server then
+ *    materializes it into a durable `appfile://` file.
  *  - `remove()` — no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
  *
@@ -46,8 +49,14 @@ function uploadFailureKey(err: unknown): string {
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
+  /** The space a file added now goes to (`attachSpaceOf`), `null` for none. */
+  spaceOf: () => string | null;
+  /** The spaces the turn being sent reads (`turnSpacesOf`), `null` while not known. */
+  turnSpaces: () => readonly string[] | null;
+  /** The host's name of a space, `undefined` when it cannot name it. */
+  spaceLabelOf: (spaceId: string) => string | undefined;
 }): AttachmentAdapter {
-  const { upload, t } = deps;
+  const { upload, t, spaceOf, turnSpaces, spaceLabelOf } = deps;
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
@@ -55,10 +64,13 @@ export function createChatAttachmentAdapter(deps: {
     // Any file type — the composer accepts arbitrary files (the agent's
     // input schema, not the composer, decides what a run will accept).
     accept: "*",
-    add({ file }): Promise<PendingAttachment> {
+    add({ file }): Promise<PendingAttachment & { spaceId: string }> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
+      const spaceId = spaceOf();
+      if (spaceId === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
       return Promise.resolve({
         id: crypto.randomUUID(),
+        spaceId,
         type: "file",
         name: file.name,
         contentType: file.type || "application/octet-stream",
@@ -68,9 +80,24 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
+      const readable = turnSpaces();
+      if (
+        !("spaceId" in attachment) ||
+        typeof attachment.spaceId !== "string" ||
+        readable === null
+      ) {
+        throw new Error(t("composer.attachUnavailable"));
+      }
+      const { spaceId, ...pending } = attachment;
+      if (!readable.includes(spaceId)) {
+        const space = spaceLabelOf(spaceId);
+        throw new Error(
+          space ? t("upload.spaceNotRead", { space }) : t("upload.spaceNotReadUnnamed"),
+        );
+      }
       let uri: string;
       try {
-        uri = await stageComposerFile(upload, attachment.file);
+        uri = await stageComposerFile(upload, attachment.file, spaceId);
       } catch (err) {
         // The host uploader's message is technical (status codes, English) and
         // ends up in the composer chip — surface the translated one instead.
@@ -83,7 +110,7 @@ export function createChatAttachmentAdapter(deps: {
         throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
       return {
-        ...attachment,
+        ...pending,
         status: { type: "complete" },
         content: [
           {

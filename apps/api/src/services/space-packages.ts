@@ -29,7 +29,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
-import { placementRowJoin } from "./package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
 import {
   activeHereSql,
@@ -384,6 +384,31 @@ export function activeInSpaces<Q extends PgSelect>(
     .groupBy(packages.id, ...groupBy);
 }
 
+/** Readable placements, including switched-off ones, in home-first space listing order. */
+export async function packagePlacementsInSpaces(
+  orgId: string,
+  packageId: string,
+  spaceIds: readonly string[],
+  type: PackageType,
+) {
+  if (!spaceIds.length) return [];
+  return db
+    .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
+    .from(packages)
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+    .where(
+      and(
+        eq(packages.id, packageId),
+        eq(packages.type, type),
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        placementReadFilter(spaces.id),
+      ),
+    )
+    .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
+}
+
 /**
  * The spaces of {@link activeInSpaces} where a package is active: its home first
  * when it is one of them, then in the order of a space listing
@@ -443,6 +468,39 @@ export async function listActivePackages(
   );
 }
 
+/** Active skill placements and their non-yanked latest archive in one statement.
+ * Only shipped trees need the overlay here. An org draft is read under its draft lock.
+ */
+export async function listServedSkillPlacements(orgId: string, spaceIds: readonly string[]) {
+  if (!spaceIds.length) return [];
+  const query = db
+    .select({
+      id: packages.id,
+      spaceIds: activeSpaceIds(),
+      type: packages.type,
+      source: packages.source,
+      orgId: packages.orgId,
+      draftManifest: sql<unknown>`CASE WHEN ${packages.source} = 'system' THEN ${packages.draftManifest} END`,
+      draftContent: sql<
+        string | null
+      >`CASE WHEN ${packages.source} = 'system' THEN ${packages.draftContent} END`,
+      latest: {
+        version: packageVersions.version,
+        integrity: packageVersions.integrity,
+        yanked: packageVersions.yanked,
+      },
+    })
+    .from(packages)
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .leftJoin(packageVersions, eq(packageVersions.id, packageDistTags.versionId))
+    .$dynamic();
+  return activeInSpaces(query, orgId, spaceIds, "skill", [packageVersions.id]).orderBy(
+    ...packageListingOrder(),
+  );
+}
+
+export type ServedSkillPlacement = Awaited<ReturnType<typeof listServedSkillPlacements>>[number];
+
 // ---------------------------------------------------------------------------
 // Active-package hints — caller-context for the get_me payload
 // ---------------------------------------------------------------------------
@@ -487,7 +545,11 @@ function latestTagJoin(packageIdColumn: AnyPgColumn) {
         .select({ one: sql`1` })
         .from(packageVersions)
         .where(
-          and(eq(packageVersions.id, packageDistTags.versionId), eq(packageVersions.yanked, false)),
+          and(
+            eq(packageVersions.id, packageDistTags.versionId),
+            eq(packageVersions.packageId, packageIdColumn),
+            eq(packageVersions.yanked, false),
+          ),
         ),
     ),
   );

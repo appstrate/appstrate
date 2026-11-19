@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import {
   resetStripeMock,
@@ -11,9 +11,9 @@ import {
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -28,7 +28,7 @@ describe("webhook billing emails", () => {
   const sentEmails: Array<{ to: string; subject: string; html: string }> = [];
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
     sentEmails.length = 0;
 

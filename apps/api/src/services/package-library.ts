@@ -107,12 +107,10 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgSpaces = visibleSpaces
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
     .map(({ id, name, isDefault }) => ({ id, name, isDefault }));
-  // A PERSONAL space is its owner's, and an integration placed there runs on
-  // their credentials — so the deployment's own integrations, which every team
-  // space gets by construction, are not proposed in one. Nobody puts an
-  // integration in somebody's private workspace, the platform included; the
-  // owner reaches it through a team space. Every other system package stays
-  // placed everywhere.
+  // A PERSONAL space is its owner's: nobody places a package there on their
+  // behalf, so it never makes an unplaced package a candidate (below). What the
+  // space RUNS is not narrowed here: a system package is placed in every space,
+  // personal ones included, and its `state` is the activation rule's answer.
   const personalSpaceIds = new Set(
     accessible.filter((space) => space.ownerUserId !== null).map((space) => space.id),
   );
@@ -211,21 +209,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
 
     const placements: Placement[] = [];
     for (const space of readable) {
-      // The deployment's integrations are not PROPOSED in a personal space (see
-      // `personalSpaceIds` above) — but a row is not a proposal, it is a
-      // decision somebody already made there. Only the placement that exists by
-      // construction alone is skipped; once the space holds a
-      // `space_packages` row, the map must show it, or it hides a state the
-      // owner set and can no longer see.
       const placementRow = rowsBySpace?.get(space);
-      if (
-        placementRow === undefined &&
-        row.source === "system" &&
-        type === "integration" &&
-        personalSpaceIds.has(space)
-      ) {
-        continue;
-      }
       const via: PlacementVia | null =
         row.source === "system"
           ? "system"

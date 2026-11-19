@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { UIMessage } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
@@ -177,7 +177,7 @@ function stubSession(abortSettles: boolean): StubSession {
 }
 
 /** Drive one turn against the stub session and collect what teardown released. */
-async function runStubbedTurn(abortSettles: boolean) {
+async function runStubbedTurn(abortSettles: boolean, leadingChunks?: UIMessageChunk[]) {
   const transport = mcpTransport();
   const stub = stubSession(abortSettles);
   const binding = createPiProxyModelBinding({
@@ -221,6 +221,7 @@ async function runStubbedTurn(abortSettles: boolean) {
     recordUsage: () => {},
     createSession,
     windDownGraceMs: WIND_DOWN_GRACE_MS,
+    ...(leadingChunks ? { leadingChunks } : {}),
   });
 
   // Press stop only once the session exists and its prompt is in flight —
@@ -288,6 +289,23 @@ describe("pi chat turn teardown", () => {
       expect(types.at(0)).toBe("start");
       expect(types.at(-1)).toBe("finish");
       expect(types).not.toContain("error");
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    "writes the route's leading chunks right after the turn opens",
+    async () => {
+      const leading: UIMessageChunk = { type: "data-probe", data: [1], transient: true };
+      const { text } = await runStubbedTurn(true, [leading]);
+      const chunks: unknown[] = [];
+      for (const line of text.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data && data !== "[DONE]") chunks.push(JSON.parse(data));
+      }
+      expect((chunks[0] as { type: string }).type).toBe("start");
+      expect(chunks[1]).toEqual(leading);
     },
     TURN_TIMEOUT_MS,
   );

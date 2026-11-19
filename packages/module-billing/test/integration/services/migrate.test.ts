@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import postgres from "postgres";
-import { migrateEeDb, getEeDb } from "../../../src/db.ts";
+import { migrateBillingDb, getBillingDb } from "../../../src/db.ts";
 import * as schema from "../../../drizzle/schema.ts";
 import EE_TABLES from "../../tables.ts";
 
@@ -16,7 +16,7 @@ import EE_TABLES from "../../tables.ts";
  * schema to force a replay, which against `appstrate_test` would take the live
  * `ee_*` tables and the platform's own `__drizzle_migrations` with it.
  *
- * A throwaway SCHEMA would not do. `migrateEeDb` pins its journal to
+ * A throwaway SCHEMA would not do. `migrateBillingDb` pins its journal to
  * `drizzle.ee_migrations` (`migrationsSchema` defaults to `drizzle`), which no
  * `search_path` moves — the replay would find that journal already applied, and
  * a crash mid-file would leave the live database's journal emptied while its
@@ -92,7 +92,7 @@ async function applyMigration(tag: string): Promise<void> {
 /** Apply the journal in order through `lastTag`, which must be one of its entries. */
 async function applyThrough(lastTag: string): Promise<void> {
   const end = JOURNAL_TAGS.indexOf(lastTag);
-  if (end < 0) throw new Error(`ee journal has no entry tagged ${lastTag}`);
+  if (end < 0) throw new Error(`ee_migrations journal has no entry tagged ${lastTag}`);
   for (const tag of JOURNAL_TAGS.slice(0, end + 1)) await applyMigration(tag);
 }
 
@@ -102,7 +102,7 @@ async function resetToBlankSlate(): Promise<void> {
   await db.execute(sql.raw("DROP SCHEMA IF EXISTS drizzle CASCADE"));
 }
 
-describe("migrateEeDb", () => {
+describe("migrateBillingDb", () => {
   it("serializes two concurrent migrations on a FRESH schema without crashing", async () => {
     // Reset to a pre-migration state so the two runs actually RACE to create the
     // schema (the advisory lock is what's under test). Drop the module's tables
@@ -112,7 +112,7 @@ describe("migrateEeDb", () => {
     // Without the pg_advisory_lock one of these would crash with
     // "relation already exists"; with it they serialize (loser no-ops).
     await expect(
-      Promise.all([migrateEeDb(THROWAWAY_URL), migrateEeDb(THROWAWAY_URL)]),
+      Promise.all([migrateBillingDb(THROWAWAY_URL), migrateBillingDb(THROWAWAY_URL)]),
     ).resolves.toBeArray();
 
     // Schema is back and usable (table exists, empty).
@@ -396,7 +396,7 @@ describe("migration chain upgrades", () => {
 // file at `appstrate_test` would trip over it.
 describe("isolation from the platform test database", () => {
   it("leaves the live ee_* tables and their journal standing", async () => {
-    const live = getEeDb();
+    const live = getBillingDb();
     const [tables] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM pg_class
       WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relname LIKE 'ee\\_%'

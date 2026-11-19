@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cursor-based billing sweep — the EE metering consumer.
+ * Cursor-based billing sweep — the billing metering consumer.
  *
- * EE consumes the platform's append-only `llm_usage` ledger by serial-`id`
+ * The billing module consumes the platform's append-only `llm_usage` ledger by serial-`id`
  * watermark (`ee_billing_cursor`). Each pass reads the next batch through
  * the mock `PlatformServices.usage.list`, bills the leading run of consecutive
  * SETTLED rows (the "frontier"), claims platform-provided ("system") rows into
@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
-import { truncateEeTables, getEeDb } from "../../helpers/db.ts";
+import { truncateBillingTables, getBillingDb } from "../../helpers/db.ts";
 import {
   seedBillingAccount,
   seedLlmUsage,
@@ -40,24 +40,24 @@ import {
   type CursorSeedResult,
   type SweepResult,
 } from "../../../src/billing/usage-recorder.ts";
-import { _resetEeEnvForTests } from "../../../src/env.ts";
+import { _resetBillingEnvForTests } from "../../../src/env.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
 import { logger } from "../../../src/logger.ts";
 import {
   billingAccounts,
   orgUsageRecords,
   billingCursor,
-  eeBilledLlmUsage,
+  billedLlmUsage,
 } from "../../../drizzle/schema.ts";
-import { useEeReconciliationEnv, useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingReconciliationEnv, useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
-useEeReconciliationEnv();
+useBillingTestSeams();
+useBillingReconciliationEnv();
 
 const orgId = "00000000-0000-4000-a000-000000000010";
 
 async function creditsUsed(org = orgId): Promise<number> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [account] = await db
     .select({ creditsUsed: billingAccounts.creditsUsed })
     .from(billingAccounts)
@@ -66,7 +66,7 @@ async function creditsUsed(org = orgId): Promise<number> {
 }
 
 async function cursorUpdatedAt(): Promise<Date> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [row] = await db
     .select({ updatedAt: billingCursor.updatedAt })
     .from(billingCursor)
@@ -75,7 +75,7 @@ async function cursorUpdatedAt(): Promise<Date> {
 }
 
 async function cursorValue(): Promise<number> {
-  const db = getEeDb();
+  const db = getBillingDb();
   const [row] = await db
     .select({ lastLlmUsageId: billingCursor.lastLlmUsageId })
     .from(billingCursor)
@@ -85,14 +85,14 @@ async function cursorValue(): Promise<number> {
 
 describe("billing sweep — cursor consumer", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    _resetBillingEnvForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
 
   it("initializes the cursor at the current max id and bills nothing (cutover)", async () => {
-    // Historical rows exist before EE ever swept.
+    // Historical rows exist before the billing module ever swept.
     seedLlmUsage({ orgId, costUsd: 0.25 });
     seedLlmUsage({ orgId, costUsd: 0.5 });
 
@@ -120,7 +120,7 @@ describe("billing sweep — cursor consumer", () => {
     expect(result.cursorTo).toBe(1);
     expect(await creditsUsed()).toBe(50);
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(1);
     expect(records[0]!.contextType).toBe("run");
@@ -218,7 +218,7 @@ describe("billing sweep — cursor consumer", () => {
 
     expect(await creditsUsed()).toBe(50); // debited
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(1);
     expect(records[0]!.contextType).toBe("unattributed");
@@ -238,7 +238,7 @@ describe("billing sweep — cursor consumer", () => {
     // Cumulative $0.0008 → round(0.8) = 1. The old per-pass conversion
     // rounded both $0.0004 rows to zero and lost them permanently.
     expect(await creditsUsed()).toBe(1);
-    const db = getEeDb();
+    const db = getBillingDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -271,7 +271,7 @@ describe("billing sweep — cursor consumer", () => {
     // Only the DELTA is debited — the $3M already on the record is not re-billed.
     expect(await creditsUsed()).toBe(50);
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -292,7 +292,7 @@ describe("billing sweep — cursor consumer", () => {
 
     await runBillingSweep();
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -312,7 +312,7 @@ describe("billing sweep — cursor consumer", () => {
     expect(await creditsUsed()).toBe(0); // 0.0004 → round(0.4) = 0 credits
     // The context record still exists, carrying the raw dollars forward so a
     // later pass for the same context can cross the whole-credit boundary.
-    const db = getEeDb();
+    const db = getBillingDb();
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(1);
     expect(records[0]!.costCredits).toBe(0);
@@ -332,7 +332,7 @@ describe("billing sweep — cursor consumer", () => {
 
     expect(await creditsUsed()).toBe(1); // aggregated, not floored to 0 per row
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -416,11 +416,11 @@ describe("billing sweep — cursor consumer", () => {
     // Its debt is NOT lost: the row is claimed (so it can never be double-billed
     // later) and the exact credits are durable in ee_usage_records, which is
     // what `repair:account` replays.
-    const db = getEeDb();
+    const db = getBillingDb();
     const claims = await db
       .select()
-      .from(eeBilledLlmUsage)
-      .where(eq(eeBilledLlmUsage.llmUsageId, orphanUsageId));
+      .from(billedLlmUsage)
+      .where(eq(billedLlmUsage.llmUsageId, orphanUsageId));
     expect(claims).toHaveLength(1);
     const records = await db
       .select()
@@ -455,7 +455,7 @@ describe("billing sweep — cursor consumer", () => {
 
     await runBillingSweep();
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const records = await db
       .select()
       .from(orgUsageRecords)
@@ -624,8 +624,8 @@ describe("billing sweep — cursor consumer", () => {
     // is the only caller of `retryPendingCancellations()` — so a deleted org whose
     // Stripe cancel failed kept being charged for as long as metering stayed paused.
     _resetBillingSweeperForTests();
-    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "0";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_INTERVAL_SECONDS = "0";
+    _resetBillingEnvForTests();
 
     const warnSpy = spyOn(logger, "warn");
     try {
@@ -639,7 +639,7 @@ describe("billing sweep — cursor consumer", () => {
       warnSpy.mockRestore();
       stopBillingSweeper();
       _resetBillingSweeperForTests();
-      _resetEeEnvForTests();
+      _resetBillingEnvForTests();
     }
   });
 
@@ -715,7 +715,7 @@ describe("billing sweep — cursor consumer", () => {
 
     expect(await creditsUsed()).toBe(3); // NOT 4
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -740,7 +740,7 @@ describe("billing sweep — cursor consumer", () => {
 
     // Account debits sum to exactly 3, and the usage record agrees.
     expect(await creditsUsed()).toBe(3);
-    const db = getEeDb();
+    const db = getBillingDb();
     const [record] = await db
       .select()
       .from(orgUsageRecords)
@@ -766,11 +766,8 @@ describe("billing sweep — cursor consumer", () => {
     // Cursor unchanged, credits unchanged, and no claim persisted.
     expect(await cursorValue()).toBe(0);
     expect(await creditsUsed()).toBe(0);
-    const db = getEeDb();
-    const claims = await db
-      .select()
-      .from(eeBilledLlmUsage)
-      .where(eq(eeBilledLlmUsage.llmUsageId, id));
+    const db = getBillingDb();
+    const claims = await db.select().from(billedLlmUsage).where(eq(billedLlmUsage.llmUsageId, id));
     expect(claims).toHaveLength(0);
     const records = await db.select().from(orgUsageRecords).where(eq(orgUsageRecords.orgId, orgId));
     expect(records).toHaveLength(0);
@@ -779,16 +776,16 @@ describe("billing sweep — cursor consumer", () => {
 
 describe("billing cursor — init-time seed (cutover loss window)", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
 
   it("seeds an absent cursor at the settled frontier and reports it seeded", async () => {
     // Empty ledger at boot → frontier 0.
-    const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const seed = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
     expect(seed).toMatchObject({ seeded: true, lastLlmUsageId: 0, floorId: 0 });
     expect(await cursorValue()).toBe(0);
   });
@@ -799,7 +796,7 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
     seedLlmUsage({ orgId, costUsd: 0.25 });
     seedLlmUsage({ orgId, costUsd: 0.5 });
 
-    const seed = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const seed = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
 
     expect(seed).toMatchObject({ seeded: true, lastLlmUsageId: 2, floorId: 2 });
   });
@@ -809,7 +806,7 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
     // at THAT moment's frontier, so rows recorded between boot and the tick fell
     // below the initial watermark and were never billed. Seeding at init closes
     // the window: the first tick is a normal pass that bills these rows.
-    await ensureCursorSeeded(mockPlatformServices, getEeDb()); // boot: frontier 0
+    await ensureCursorSeeded(mockPlatformServices, getBillingDb()); // boot: frontier 0
     expect(await cursorValue()).toBe(0);
 
     // Usage recorded after boot, before the first tick.
@@ -826,14 +823,14 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
 
   it("is idempotent — a second call leaves an existing watermark untouched (no rewind)", async () => {
     await seedBillingCursor(7); // an already-advanced watermark
-    const first = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const first = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
     expect(first).toMatchObject({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
     expect(await cursorValue()).toBe(7);
 
     // Even with a higher frontier now available, a second call never reseeds or
     // rewinds — it is a pure no-op on an existing cursor.
     seedLlmUsage({ orgId, costUsd: 0.5 }); // would move the frontier if reseeded
-    const second = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const second = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
     expect(second).toMatchObject({ seeded: false, lastLlmUsageId: 7, floorId: 0 });
     expect(await cursorValue()).toBe(7);
   });
@@ -841,9 +838,9 @@ describe("billing cursor — init-time seed (cutover loss window)", () => {
 
 describe("billing sweep — backlog drain within one tick", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "4";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "4";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 20000 });
   });
@@ -895,8 +892,8 @@ describe("billing sweep — backlog drain within one tick", () => {
 
   it("bounds a tick at the drain cap and rides the remainder onto the next tick", async () => {
     // batch 1, cap 50 → a tick drains at most 50 rows. Seed 60 settled rows.
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "1";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "1";
+    _resetBillingEnvForTests();
     await seedBillingCursor(0);
     for (let i = 0; i < 60; i++) seedLlmUsage({ orgId, costUsd: 0.01 });
 
@@ -907,8 +904,8 @@ describe("billing sweep — backlog drain within one tick", () => {
     expect(await cursorValue()).toBe(60);
     expect(await creditsUsed()).toBe(600); // all 60 eventually billed
 
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    _resetBillingEnvForTests();
   });
 });
 
@@ -917,8 +914,8 @@ describe("billing sweep — quota warning email", () => {
   const sentEmails: Array<{ to: string; subject: string }> = [];
 
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
     sentEmails.length = 0;
     initBillingEmail({
       sendMail: async (to, subject) => {
@@ -976,16 +973,16 @@ describe("billing sweep — quota warning email", () => {
  */
 describe("billing sweep — real concurrent passes", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
   });
 
   async function claimCount(): Promise<number> {
-    const db = getEeDb();
-    return (await db.select().from(eeBilledLlmUsage)).length;
+    const db = getBillingDb();
+    return (await db.select().from(billedLlmUsage)).length;
   }
 
   it("bills each row exactly once when two passes race on the same backlog", async () => {
@@ -1015,7 +1012,7 @@ describe("billing sweep — real concurrent passes", () => {
 
     await Promise.all([sweepLedgerBatch(100), sweepLedgerBatch(100)]);
 
-    const db = getEeDb();
+    const db = getBillingDb();
     const records = await db
       .select()
       .from(orgUsageRecords)
@@ -1050,17 +1047,17 @@ describe("billing sweep — real concurrent passes", () => {
  * advances the watermark past 100 — and a `WHERE id > watermark` cursor can then
  * never return row 100 again. It is never billed, and nothing logs it.
  *
- * Every case below models that interleaving the way EE actually experiences
+ * Every case below models that interleaving the way the billing module actually experiences
  * it: the ledger lives behind `PlatformServices.usage.list`, so "a row committed
- * late" IS "a row `usage.list` did not return before and returns now". The EE
+ * late" IS "a row `usage.list` did not return before and returns now". The billing
  * side — cursor, claims, usage records, account debits — is the real database.
  */
 describe("billing sweep — serial-visibility replay window", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = "200";
+    _resetBillingEnvForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
   });
 
@@ -1087,11 +1084,8 @@ describe("billing sweep — serial-visibility replay window", () => {
     expect(second.replayBilled).toBe(1);
     expect(second.billed).toBe(1);
     expect(await creditsUsed()).toBe(210); // 120 + 90 — nothing lost
-    const db = getEeDb();
-    const claims = await db
-      .select()
-      .from(eeBilledLlmUsage)
-      .where(eq(eeBilledLlmUsage.llmUsageId, 2));
+    const db = getBillingDb();
+    const claims = await db.select().from(billedLlmUsage).where(eq(billedLlmUsage.llmUsageId, 2));
     expect(claims).toHaveLength(1);
     // The window is a READ offset: the watermark did not move to reach id 2.
     expect(await cursorValue()).toBe(3);
@@ -1102,8 +1096,8 @@ describe("billing sweep — serial-visibility replay window", () => {
     // window existed, and what `REPLAY_WINDOW=0` still opts back into. It pins
     // WHY the window is not redundant work: delete the replay and this is the
     // behaviour you get back, silently.
-    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "0";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = "0";
+    _resetBillingEnvForTests();
 
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05, id: 1, contextId: "run-1" });
@@ -1254,7 +1248,7 @@ describe("billing sweep — serial-visibility replay window", () => {
 
     // (b) Below-watermark stall: rows 10 and 12 bill and carry the watermark to
     //     12, then row 11 commits late and is still in flight.
-    await truncateEeTables();
+    await truncateBillingTables();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05, id: 10, contextId: "run-10" });
@@ -1308,8 +1302,8 @@ describe("billing sweep — serial-visibility replay window", () => {
     // The window is read IN ADDITION to the batch, never out of it — otherwise
     // every pass would lose `REPLAY_WINDOW` rows of forward throughput, and a
     // window at or above the batch size would stall the sweeper outright.
-    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "10";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = "10";
+    _resetBillingEnvForTests();
     await seedBillingCursor(0);
     for (let i = 0; i < 9; i++) seedLlmUsage({ orgId, costUsd: 0.01, contextId: `run-${i}` });
 
@@ -1349,23 +1343,23 @@ describe("billing sweep — serial-visibility replay window", () => {
   });
 
   async function claimCount(): Promise<number> {
-    const db = getEeDb();
-    return (await db.select().from(eeBilledLlmUsage)).length;
+    const db = getBillingDb();
+    return (await db.select().from(billedLlmUsage)).length;
   }
 
   async function claimedIds(): Promise<number[]> {
-    const db = getEeDb();
-    const rows = await db.select({ id: eeBilledLlmUsage.llmUsageId }).from(eeBilledLlmUsage);
+    const db = getBillingDb();
+    const rows = await db.select({ id: billedLlmUsage.llmUsageId }).from(billedLlmUsage);
     return rows.map((r) => r.id).sort((a, b) => a - b);
   }
 });
 
 describe("billing sweep — cutover exclusion floor", () => {
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = "200";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
   });
@@ -1410,13 +1404,13 @@ describe("billing sweep — cutover exclusion floor", () => {
   });
 
   async function claimCount(): Promise<number> {
-    const db = getEeDb();
-    return (await db.select().from(eeBilledLlmUsage)).length;
+    const db = getBillingDb();
+    return (await db.select().from(billedLlmUsage)).length;
   }
 
   async function claimedIds(): Promise<number[]> {
-    const db = getEeDb();
-    const rows = await db.select({ id: eeBilledLlmUsage.llmUsageId }).from(eeBilledLlmUsage);
+    const db = getBillingDb();
+    const rows = await db.select({ id: billedLlmUsage.llmUsageId }).from(billedLlmUsage);
     return rows.map((r) => r.id).sort((a, b) => a - b);
   }
 });
@@ -1425,10 +1419,10 @@ describe("billing sweep — rows the platform could not price", () => {
   const otherOrgId = "00000000-0000-4000-a000-000000000011";
 
   beforeEach(async () => {
-    await truncateEeTables();
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
-    _resetEeEnvForTests();
+    await truncateBillingTables();
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = "200";
+    _resetBillingEnvForTests();
     _resetBillingSweeperForTests();
     await seedBillingAccount({ orgId, creditsUsed: 0, creditQuota: 2_000_000 });
     await seedBillingAccount({ orgId: otherOrgId, creditsUsed: 0, creditQuota: 2_000_000 });
@@ -1436,11 +1430,11 @@ describe("billing sweep — rows the platform could not price", () => {
   });
 
   async function claimStamp(llmUsageId: number): Promise<string> {
-    const db = getEeDb();
+    const db = getBillingDb();
     const [row] = await db
-      .select({ pricingStatus: eeBilledLlmUsage.pricingStatus })
-      .from(eeBilledLlmUsage)
-      .where(eq(eeBilledLlmUsage.llmUsageId, llmUsageId));
+      .select({ pricingStatus: billedLlmUsage.pricingStatus })
+      .from(billedLlmUsage)
+      .where(eq(billedLlmUsage.llmUsageId, llmUsageId));
     return row!.pricingStatus;
   }
 
@@ -1535,14 +1529,14 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
   const DRAIN_CAPACITY = 5000;
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     // The suite pins metering to paused; this block is about what happens when a
-    // sweep is armed, so it un-pauses. `useEeReconciliationEnv` restores both.
-    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "300";
-    process.env.EE_RECONCILIATION_BATCH_SIZE = "100";
-    process.env.EE_RECONCILIATION_REPLAY_WINDOW = "200";
-    delete process.env.EE_RECONCILIATION_MAX_GAP_SECONDS;
-    _resetEeEnvForTests();
+    // sweep is armed, so it un-pauses. `useBillingReconciliationEnv` restores both.
+    process.env.BILLING_RECONCILIATION_INTERVAL_SECONDS = "300";
+    process.env.BILLING_RECONCILIATION_BATCH_SIZE = "100";
+    process.env.BILLING_RECONCILIATION_REPLAY_WINDOW = "200";
+    delete process.env.BILLING_RECONCILIATION_MAX_GAP_SECONDS;
+    _resetBillingEnvForTests();
   });
 
   /** A cursor left behind `absentHours` ago, with `backlog` settled rows above it. */
@@ -1552,7 +1546,7 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
     for (let i = 1; i <= backlog; i++) {
       seedLlmUsage({ orgId, costUsd: 0.05, id: watermark + i });
     }
-    return ensureCursorSeeded(mockPlatformServices, getEeDb());
+    return ensureCursorSeeded(mockPlatformServices, getBillingDb());
   }
 
   it("refuses to boot over a gap the sweeper was absent for", async () => {
@@ -1569,7 +1563,7 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
     // The message IS the runbook — an operator reads it in a crashed boot log.
     const message = await assertCursorResumable(cursor).catch((err: Error) => err.message);
     expect(message).toContain("DELETE FROM ee_billing_cursor;");
-    expect(message).toMatch(/EE_RECONCILIATION_MAX_GAP_SECONDS above 1728\d\d/);
+    expect(message).toMatch(/BILLING_RECONCILIATION_MAX_GAP_SECONDS above 1728\d\d/);
     expect(message).toContain("repair:account");
   });
 
@@ -1620,7 +1614,7 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
   it("bounds reads to one tick plus one forward row and the replay window", async () => {
     await seedBillingCursor(200, 0, new Date(Date.now() - 48 * HOUR_MS));
     for (let id = 1; id <= DRAIN_CAPACITY * 2; id++) seedLlmUsage({ orgId, costUsd: 0.05, id });
-    const cursor = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const cursor = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
     const listSpy = spyOn(mockPlatformServices.usage, "list");
     const frontierSpy = spyOn(mockPlatformServices.usage, "settledFrontier");
     try {
@@ -1643,14 +1637,14 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
     // the watermark was confirmed a minute ago.
     await seedBillingCursor(1, 0, new Date(Date.now() - 60_000));
     seedLlmUsage({ orgId, costUsd: 0.05, id: 100_000 });
-    const cursor = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const cursor = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
 
     expect(await assertCursorResumable(cursor)).toBeUndefined();
   });
 
   it("stays out of the way while metering is deliberately paused", async () => {
-    process.env.EE_RECONCILIATION_INTERVAL_SECONDS = "0";
-    _resetEeEnvForTests();
+    process.env.BILLING_RECONCILIATION_INTERVAL_SECONDS = "0";
+    _resetBillingEnvForTests();
     const cursor = await seedGap(48, DRAIN_CAPACITY + 1);
 
     // Nothing resumes under a paused sweep; the gap is checked at the boot that
@@ -1658,9 +1652,9 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
     expect(await assertCursorResumable(cursor)).toBeUndefined();
   });
 
-  it("resumes over any gap at EE_RECONCILIATION_MAX_GAP_SECONDS=0", async () => {
-    process.env.EE_RECONCILIATION_MAX_GAP_SECONDS = "0";
-    _resetEeEnvForTests();
+  it("resumes over any gap at BILLING_RECONCILIATION_MAX_GAP_SECONDS=0", async () => {
+    process.env.BILLING_RECONCILIATION_MAX_GAP_SECONDS = "0";
+    _resetBillingEnvForTests();
     const cursor = await seedGap(48 * 30, DRAIN_CAPACITY + 1);
 
     expect(await assertCursorResumable(cursor)).toBeUndefined();
@@ -1668,7 +1662,7 @@ describe("billing cursor — resuming after the sweeper was absent", () => {
 
   it("boots the cutover it just seeded, whatever the ledger holds", async () => {
     seedLlmUsage({ orgId, costUsd: 0.05, id: 100_000 });
-    const cursor = await ensureCursorSeeded(mockPlatformServices, getEeDb());
+    const cursor = await ensureCursorSeeded(mockPlatformServices, getBillingDb());
 
     expect(cursor.seeded).toBe(true);
     expect(await assertCursorResumable(cursor)).toBeUndefined();

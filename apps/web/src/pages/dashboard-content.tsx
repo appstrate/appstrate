@@ -19,7 +19,7 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { ScheduleStateBadges } from "../components/schedule-status-badge";
 import { PackageCard } from "../components/package-card";
 import { CardList } from "../components/card-list";
-import { RunRow } from "../components/run-row";
+import { RowSpaceName, RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { spacesWhere } from "../lib/space-lists";
@@ -47,6 +47,7 @@ export interface DashboardData {
   agents: AgentListItem[];
   runs: EnrichedRun[];
   runTotal: number;
+  runningTotal: number | null | undefined;
   /** Every schedule: the active ones are counted, the soonest listed. */
   schedules: EnrichedSchedule[];
   agentName: (run: EnrichedRun) => string;
@@ -77,7 +78,7 @@ export function DashboardHeader({
   runningCount,
 }: {
   firstName: string;
-  runningCount?: number;
+  runningCount?: number | null;
 }) {
   const { t, i18n } = useTranslation("agents");
   const canReach = useCanReach();
@@ -118,7 +119,9 @@ export function DashboardHeader({
             <SkeletonLine className="w-56 text-sm" />
           ) : (
             <span className="block first-letter:uppercase">
-              {t("dashboard.subtitle", { date, count: runningCount })}
+              {runningCount === null
+                ? date
+                : t("dashboard.subtitle", { date, count: runningCount })}
             </span>
           )
         }
@@ -214,11 +217,14 @@ function RecentRuns({
   runs,
   agentName,
   agentById,
+  spanning,
   limit = 7,
 }: {
   runs: EnrichedRun[];
   agentName: (run: EnrichedRun) => string;
   agentById: Map<string, AgentListItem>;
+  /** « Tous les espaces »: each row names its space. */
+  spanning: boolean;
   limit?: number;
 }) {
   return (
@@ -229,6 +235,7 @@ function RecentRuns({
           run={run}
           agentName={agentName(run)}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
+          spanning={spanning}
         />
       ))}
     </CardList>
@@ -238,9 +245,11 @@ function RecentRuns({
 function DashboardScheduleRow({
   schedule,
   agent,
+  spanning,
 }: {
   schedule: EnrichedSchedule;
   agent?: AgentListItem;
+  spanning: boolean;
 }) {
   const { t } = useTranslation("agents");
   const linkInSpace = useSpaceLink();
@@ -262,6 +271,7 @@ function DashboardScheduleRow({
         <p className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</p>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">{schedule.agent_name}</p>
       </div>
+      {spanning && <RowSpaceName spaceId={schedule.spaceId} />}
       <div className="shrink-0 text-right">
         <ScheduleStateBadges schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
@@ -275,9 +285,12 @@ function DashboardScheduleRow({
 function UpcomingSchedules({
   schedules,
   agentById,
+  spanning,
 }: {
   schedules: EnrichedSchedule[];
   agentById: Map<string, AgentListItem>;
+  /** « Tous les espaces »: each row names its space. */
+  spanning: boolean;
 }) {
   return (
     <CardList>
@@ -286,6 +299,7 @@ function UpcomingSchedules({
           key={schedule.id}
           schedule={schedule}
           agent={agentById.get(schedule.packageId)}
+          spanning={spanning}
         />
       ))}
     </CardList>
@@ -318,7 +332,6 @@ function dashboardMetrics(
     .map(({ schedule }) => schedule);
 
   return {
-    running,
     upcomingSchedules,
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
@@ -382,7 +395,7 @@ export function DashboardContent(data: DashboardData) {
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
       <div>
-        <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+        <DashboardHeader firstName={data.firstName} runningCount={data.runningTotal} />
         <EmptyState
           message={t("dashboard.empty")}
           hint={t("dashboard.emptyHint")}
@@ -394,7 +407,7 @@ export function DashboardContent(data: DashboardData) {
 
   return (
     <>
-      <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+      <DashboardHeader firstName={data.firstName} runningCount={data.runningTotal} />
       <div className="flex flex-col gap-8">
         {metrics.cards.length > 0 && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -433,7 +446,12 @@ export function DashboardContent(data: DashboardData) {
                 href="/runs"
                 action={t("dashboard.seeAll")}
               />
-              <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
+              <RecentRuns
+                runs={data.runs}
+                agentName={data.agentName}
+                agentById={agentById}
+                spanning={data.spanning}
+              />
             </section>
           )}
           {shown.schedules && (
@@ -443,7 +461,11 @@ export function DashboardContent(data: DashboardData) {
                 href="/schedules"
                 action={t("common:nav.schedules")}
               />
-              <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
+              <UpcomingSchedules
+                schedules={metrics.upcomingSchedules}
+                agentById={agentById}
+                spanning={data.spanning}
+              />
             </section>
           )}
         </div>

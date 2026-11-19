@@ -4,7 +4,7 @@ import Stripe from "stripe";
 import { z } from "zod";
 import { getStripe } from "./client.ts";
 import { cancelSubscription } from "./cancel.ts";
-import { getEeDb, type EeTx } from "../db.ts";
+import { getBillingDb, type BillingTx } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
 import { and, eq, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { logger } from "../logger.ts";
@@ -16,7 +16,7 @@ import {
   type Plans,
   type PlanDefinition,
 } from "../config.ts";
-import { getEeEnv } from "../env.ts";
+import { getBillingEnv } from "../env.ts";
 import { sendBillingEmail } from "../emails/send.ts";
 import { billingSettingsUrl } from "../emails/layout.ts";
 import { getAppUrl } from "../platform.ts";
@@ -170,7 +170,7 @@ function logEndedSubscription(
  * after a refused attach means the org has no billing row at all (every other shape
  * satisfies {@link attachableSubscription}).
  */
-async function heldSubscriptionId(db: EeTx, orgId: string): Promise<string | null> {
+async function heldSubscriptionId(db: BillingTx, orgId: string): Promise<string | null> {
   const [account] = await db
     .select({ stripeSubscriptionId: billingAccounts.stripeSubscriptionId })
     .from(billingAccounts)
@@ -191,7 +191,7 @@ async function heldSubscriptionId(db: EeTx, orgId: string): Promise<string | nul
  * Stripe's redelivery retry, and a cancel of an already-gone subscription is a no-op.
  */
 async function reconcileSupersededCheckout(
-  db: EeTx,
+  db: BillingTx,
   event: Stripe.Event,
   orgId: string,
   subscriptionId: string,
@@ -238,13 +238,13 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
   const event = await getStripe().webhooks.constructEventAsync(
     body,
     signature,
-    getEeEnv().STRIPE_WEBHOOK_SECRET,
+    getBillingEnv().STRIPE_WEBHOOK_SECRET,
   );
 
   // Idempotency via atomic claim: INSERT ... ON CONFLICT DO NOTHING.
   // If INSERT succeeds → exclusive right to process this event.
   // If INSERT fails (duplicate) → another handler already claimed it.
-  const db = getEeDb();
+  const db = getBillingDb();
 
   const [inserted] = await db
     .insert(stripeEvents)
@@ -341,7 +341,7 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
 
 async function processEvent(
   event: Stripe.Event,
-  db: EeTx,
+  db: BillingTx,
   afterCommit: AfterCommit,
 ): Promise<void> {
   const plans = getPlans();

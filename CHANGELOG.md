@@ -6,7 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.69] - 2026-11-18
+
+### Client upgrade from beta.68
+
+Chat now belongs to the organization. Substitute the organization ID in these routes, keeping the same HTTP verb and session ID. Existing conversations migrate with `restricted=false`. Clients that need to limit a conversation to one accessible origin space can set `restricted: true` on the session. Supply `spaceId` when assigning an origin to a session that has none.
+
+| Operation                       | beta.68                                      | beta.69                                                   |
+| ------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| POST turn                       | `/api/chat`                                  | `/api/orgs/{orgId}/chat`                                  |
+| GET, POST sessions              | `/api/chat/sessions`                         | `/api/orgs/{orgId}/chat/sessions`                         |
+| GET, PATCH, DELETE session      | `/api/chat/sessions/{id}`                    | `/api/orgs/{orgId}/chat/sessions/{id}`                    |
+| PUT read, POST stop, GET stream | `/api/chat/sessions/{id}/{read,stop,stream}` | `/api/orgs/{orgId}/chat/sessions/{id}/{read,stop,stream}` |
+| GET enforced skills             | `/api/chat/enforced-skills`                  | Removed. Remove this request when opening a conversation. |
+
+The run, schedule, notification, file and agent-persistence list handlers validate their query parameters, including the corresponding organization-wide reads. Undeclared keys now return HTTP 400. Send only the parameters declared for that operation in the assembled OpenAPI spec. For example, filter the file gallery with `runId` and schedules with `packageId`.
+
+If an active skill archive becomes unavailable, the served skill catalogue returns an error. Retry the sync after restoring the archive. A successful listing still removes genuinely withdrawn skills from managed CLI directories.
+
 ### Operators
+
+Follow the [beta.68 to beta.69 maintenance procedure](docs/deployment/BETA_69.md) for the ordering of package publication, database and object backups, signatures and schema migrations.
 
 - **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
   `0103` creates `run_reads` and renames the stored run notifications to
@@ -62,11 +82,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   resolves, and the platform refuses to boot with
   `Module "@appstrate/module-ee" could not be loaded`. Nothing maps the old
   name to the new one. The module's id in logs changes from `ee` to `billing`
-  (`Module loaded {"id":"billing"}`). Nothing else changes for a deployment: the
-  `ee_*` tables, the `drizzle.ee_migrations` journal, the `STRIPE_*` and
-  `EE_RECONCILIATION_*` variables and the `/api/billing/*` routes keep their
-  names, and no migration runs. `verify:license-boundary` now reserves the
-  root `ee/` directory for code under a commercial licence.
+  (`Module loaded {"id":"billing"}`). **The four `EE_RECONCILIATION_*`
+  variables are now `BILLING_RECONCILIATION_*`** (`_INTERVAL_SECONDS`,
+  `_BATCH_SIZE`, `_REPLAY_WINDOW`, `_MAX_GAP_SECONDS`): nothing reads the old
+  spelling, so a value left under it is silently ignored and the setting falls
+  back to its default. Rename them in the same window as `MODULES`. **The billing operation ids
+  and schema names drop their `Ee` prefix** (`getEeBillingAccount` →
+  `getBillingAccount`, `EeBillingPlan` → `BillingPlan`: nine operation ids and seven
+  schemas):
+  a client that calls an operation by id, an MCP `invoke_operation` included,
+  must use the new id; paths and payloads are unchanged. Nothing else changes
+  for a deployment: the `ee_*` tables, the `drizzle.ee_migrations` journal, the
+  `STRIPE_*` variables and the `/api/billing/*` routes keep their names, and no
+  migration runs. `verify:license-boundary` is now `verify:license-headers`:
+  every source file must declare `Apache-2.0`.
 
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
@@ -190,9 +219,8 @@ entry_point, mcp_config, tools? }` and ships the server payload (`server/**`)
   in its own archive, next to `manifest.json`. `mcp_config.env` holds literal
   values merged into the runner env; the auth's `delivery.env` wins on
   conflict.
-  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (a
-    manifest that still carries it is refused on every write path, naming the
-    key), `delivery.env.*.user_config_key`, `source.server.{name, version,
+  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (the
+    engine ignores this key. Use `dependencies.integrations` to declare the integration), `delivery.env.*.user_config_key`, `source.server.{name, version,
 vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
     permissions, the `createMcpServerPackage` chat operation,
     `@appstrate/core/mcp-server-bundle` and the `afps bundle` CLI command.
@@ -216,9 +244,8 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   - System packages `@appstrate/ssh` and `@appstrate/github-git` 1.1.0 carry
     their servers; the `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp`
     packages are removed.
-  - The `package_type` Postgres enum keeps its `mcp-server` label for now
-    (Postgres cannot drop a value in place); application code never produces
-    it.
+  - Drizzle migration `0106` rebuilds the PostgreSQL `package_type` enum and removes
+    its `mcp-server` label. Run operator script `0054` before applying the DDL.
 
 - **The integrations page lists every integration in one list with a Source
   column and filter** (API, remote MCP, local MCP). On an instance running

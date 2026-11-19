@@ -187,8 +187,8 @@ export function removeOrgScopedQueries(qc: QueryClient) {
 /** Per-actor agent persistence (memories + pinned slots). */
 export const persistenceKeys = {
   all: ["agent-persistence"] as const,
-  list: (scopeTag: string, orgId: Id, spaceId: Id, packageId: Id, query: unknown) =>
-    ["agent-persistence", scopeTag, orgId, spaceId, packageId, query] as const,
+  list: (orgId: Id, spaceId: Id, scopeTag: string, packageId: Id, query: unknown) =>
+    ["agent-persistence", orgId, spaceId, scopeTag, packageId, query] as const,
 };
 
 /** A stored file's bytes as an object URL (`useFileImageSrc`); `query-client.ts` revokes the URL when the entry leaves the cache. */

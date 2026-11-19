@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { getEeDb, truncateEeTables } from "../../helpers/db.ts";
+import { getBillingDb, truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import {
   generateWebhookEvent,
@@ -10,9 +10,9 @@ import {
 } from "../../helpers/stripe.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
 import { billingAccounts } from "../../../drizzle/schema.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 const orgId = "00000000-0000-4000-a000-000000143888";
 const subscriptionId = "sub_rereview_stale";
 const quota = { starter: 20000, pro: 80000 };
@@ -42,11 +42,11 @@ async function deliver(type: string, object: object, suffix: string, created: nu
   await handleWebhook(signed.body, signed.signature);
 }
 async function account() {
-  return (await getEeDb().select().from(billingAccounts))[0]!;
+  return (await getBillingDb().select().from(billingAccounts))[0]!;
 }
 describe("current quota survives older delivery for the same subscription", () => {
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
   });
   for (const [current, previous] of [

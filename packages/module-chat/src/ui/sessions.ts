@@ -178,16 +178,16 @@ export async function renameSession(
   await transport.request(chatPath(transport, `/sessions/${id}`), jsonInit("PATCH", { title }));
 }
 
-/** Limit (`true`) or lift (`false`) the conversation's confinement to its origin space. */
-export async function setSessionRestricted(
+/**
+ * Limit (`restricted: true`) or lift (`false`) the conversation's confinement to its origin space;
+ * `spaceId` gives a conversation without an origin the one it is limited to.
+ */
+export async function setSessionLimit(
   transport: ChatTransport,
   id: string,
-  restricted: boolean,
+  limit: { restricted: boolean; spaceId?: string },
 ): Promise<void> {
-  await transport.request(
-    chatPath(transport, `/sessions/${id}`),
-    jsonInit("PATCH", { restricted }),
-  );
+  await transport.request(chatPath(transport, `/sessions/${id}`), jsonInit("PATCH", limit));
 }
 
 export async function deleteSession(transport: ChatTransport, id: string): Promise<void> {

@@ -50,16 +50,39 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
+import {
+  getSelectedModelAcceptsImages,
+  getSelectedModelReadsPdf,
+  subscribeModel,
+} from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
-import { stagedImagePreviewUrl } from "./upload.ts";
+import {
+  resolvedUploadsSnapshot,
+  stagedImagePreviewUrl,
+  subscribeResolvedUploads,
+} from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useAttachAvailability } from "./conversation-scope.ts";
-import { sentenceWithName } from "./sentence-with-name.tsx";
+import { useAttachTarget, useConversationScope, useSpaceName } from "./conversation-scope.ts";
+import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
-import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
-import { isImageMime } from "@appstrate/core/mime";
+import {
+  AttachmentChip,
+  AttachmentThumbnail,
+  FileAttachment,
+  PendingAttachmentChip,
+} from "./file-attachment.tsx";
+import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
+import {
+  ASSISTANT_MESSAGE_CLASS,
+  COMPOSER_GRID_CLASS,
+  COMPOSER_INPUT_CLASS,
+  DISCLAIMER_CLASS,
+  THREAD_FOOTER_CLASS,
+  THREAD_VIEWPORT_CLASS,
+  USER_MESSAGE_CLASS,
+} from "./phone-text.ts";
 import {
   flushDecision,
   joinQueued,
@@ -85,13 +108,16 @@ export function Thread({
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
-  const attach = useAttachAvailability();
+  // A drop cannot ask for a space: it goes to the one decided, or to the one last picked.
+  const dropSpaceId = useAttachTarget().spaceId;
+  const shownSpaceId = useChatTransport()?.spaceId ?? null;
+  const dropSpace = useSpaceName(dropSpaceId !== shownSpaceId ? dropSpaceId : null);
   return (
     // The whole thread is the drop target, welcome screen and transcript alike;
     // dropped files take the same adapter path as the picker. A reader gets no
     // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || !attach.available}
+      disabled={!can("chat:write") || dropSpaceId === null}
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -129,12 +155,12 @@ export function Thread({
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-          <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+          <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
             <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
             <div className="min-h-6 flex-grow" />
 
-            <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+            <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
               <ScrollToBottom />
               <Composer
                 tools={composerTools}
@@ -157,7 +183,11 @@ export function Thread({
       >
         <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
           <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+          <p className="text-sm font-medium">
+            {dropSpace
+              ? sentenceWithNode(t, "composer.dropzoneIn", dropSpace.node)
+              : t("composer.dropzone")}
+          </p>
         </div>
       </div>
     </ComposerPrimitive.AttachmentDropzone>
@@ -180,11 +210,12 @@ function ThreadWelcome({
   const { can, t, firstName: name, actingSpaceIds } = useChatHost();
   const canWrite = can("chat:write");
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
-  // still runs, in the caller's other spaces, and touches none of this one.
+  // still runs, in the caller's other spaces, and touches none of this one. Unsaid until known.
   const spaceId = useChatTransport()?.spaceId;
-  const outsideActingSet = canWrite && !!spaceId && !actsIn(actingSpaceIds, spaceId);
+  const outsideActingSet =
+    canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center-safe overflow-y-auto px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -217,9 +248,7 @@ function ThreadWelcome({
 function Disclaimer() {
   const { can, t } = useChatHost();
   if (!can("chat:write")) return null;
-  return (
-    <p className="text-muted-foreground/70 px-4 text-center text-xs">{t("thread.disclaimer")}</p>
-  );
+  return <p className={DISCLAIMER_CLASS}>{t("thread.disclaimer")}</p>;
 }
 
 function ScrollToBottom() {
@@ -240,86 +269,91 @@ function ScrollToBottom() {
 }
 
 /**
- * A pending image's thumbnail. The object URL lives exactly as long as the
- * element (React 19 ref cleanup), with no state round-trip. Not the staged
- * cache of `upload.ts`: that one is filled at send time, after the chip is gone.
+ * A pending composer attachment: the one chip (an image's thumbnail or the file type's icon,
+ * name, size, remove button). Its media and name open the host's panel on the picked file when
+ * the browser can show its own copy (`localPreviewKind`); the remove button never does.
  */
-function PendingImage({ file, name }: { file: File; name: string }) {
-  const attach = React.useCallback(
-    (img: HTMLImageElement | null) => {
-      if (!img) return;
-      const url = URL.createObjectURL(file);
-      img.src = url;
-      return () => URL.revokeObjectURL(url);
-    },
-    [file],
-  );
-  return (
-    <img
-      ref={attach}
-      alt={name || "image"}
-      title={name}
-      className="size-12 shrink-0 rounded-md border object-cover"
-    />
-  );
-}
-
-/** A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both removable. */
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const file = useAuiState((s) => s.attachment.file);
+  const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
-  const { formatBytes, t } = useChatHost();
-  const previewFile = file && isImageMime(file.type) ? file : undefined;
-  const remove = (
-    <AttachmentPrimitive.Remove asChild>
-      <button
-        type="button"
-        aria-label={t("composer.removeAttachment")}
-        className={
-          previewFile
-            ? "bg-foreground/70 text-background hover:bg-foreground absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full"
-            : "text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
-        }
-      >
-        <XIcon className={previewFile ? "size-3" : "size-3.5"} />
-      </button>
-    </AttachmentPrimitive.Remove>
+  const { formatBytes, openFile, t } = useChatHost();
+  // A model known not to read images only gets the file's pointer: say so under the chip.
+  const acceptsImages = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelAcceptsImages,
+    getSelectedModelAcceptsImages,
   );
-  if (previewFile) {
-    return (
-      <AttachmentPrimitive.Root className="relative inline-flex">
-        <PendingImage file={previewFile} name={name} />
-        {remove}
-      </AttachmentPrimitive.Root>
-    );
-  }
+  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
+  const readsPdf = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelReadsPdf,
+    getSelectedModelReadsPdf,
+  );
+  const notice =
+    file && isImageMime(file.type) && acceptsImages === false
+      ? t("composer.imageNotSeen")
+      : file?.type === "application/pdf" && readsPdf === false
+        ? t("composer.pdfNotRead")
+        : undefined;
+  const preview =
+    openFile && file && localPreviewKind(file.type)
+      ? {
+          label: t("file.previewOf", { name: name || t("file.unnamed") }),
+          onActivate: () => openFile({ local: file }),
+        }
+      : null;
   return (
-    <AttachmentPrimitive.Root className="inline-flex">
-      <InertAttachmentChip
+    <AttachmentPrimitive.Root
+      className="inline-flex min-w-0 flex-col items-start gap-1"
+      title={notice}
+    >
+      <PendingAttachmentChip
         name={name}
+        file={file}
+        preview={preview}
         trailing={
           <>
             {size > 0 && (
               <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
             )}
-            {remove}
+            <AttachmentPrimitive.Remove asChild>
+              <button
+                type="button"
+                aria-label={t("composer.removeAttachment")}
+                className="text-muted-foreground hover:text-foreground shrink-0"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </AttachmentPrimitive.Remove>
           </>
         }
       />
+      {notice && (
+        <span role="status" className="text-muted-foreground max-w-56 text-xs">
+          {notice}
+        </span>
+      )}
+      {status.type === "incomplete" && status.reason === "error" && status.message && (
+        <span role="alert" className="text-destructive text-xs">
+          <span className="sr-only">{name}. </span>
+          {status.message}
+        </span>
+      )}
     </AttachmentPrimitive.Root>
   );
 }
 
 /**
  * A sent file attachment, rendered from a message `file` part. The wire part
- * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + icon
- * only (the composer chip shows the size, read from the picked File).
+ * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + the
+ * type's icon only (the composer chip shows the size, read from the picked File).
  */
-function FileAttachmentPart({ filename }: { filename?: string }) {
+function FileAttachmentPart({ filename, mimeType }: { filename?: string; mimeType?: string }) {
   return (
     <div className="mt-1">
-      <InertAttachmentChip name={filename ?? ""} />
+      <AttachmentChip name={filename ?? ""} mime={mimeType} />
     </div>
   );
 }
@@ -332,12 +366,12 @@ function FileAttachmentPart({ filename }: { filename?: string }) {
 // the attachments channel instead (`MessagePrimitive.Attachments`).
 
 /**
- * One sent attachment on a user message. An `appfile://` (server-persisted, or a
- * reloaded conversation) is interactive: image mime → thumbnail, else a
- * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
- * unparseable URI shows the local File as a thumbnail when it's an image still
- * held by the runtime, else an inert chip — the content route serves files
- * only.
+ * One sent attachment on a user message, as the composer's chip. An `appfile://`
+ * (server-persisted, or a reloaded conversation) is interactive (preview or
+ * download). So is a just-sent optimistic `upload://` once the turn's stream
+ * named the file it became. Before that instant, or for an unparseable URI, the
+ * chip is inert, its media the staged local copy when it was an image — the
+ * content route serves files only.
  */
 function SentAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
@@ -345,21 +379,31 @@ function SentAttachmentChip() {
   // The content array reference is stable for a settled attachment, so this
   // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
   const content = useAuiState((s) => s.attachment.content);
-  const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
+  // Re-resolves when the stream reports what a sent `upload://` became.
+  const resolutions = React.useSyncExternalStore(subscribeResolvedUploads, resolvedUploadsSnapshot);
+  const resolved = React.useMemo(
+    () => resolveAttachmentContent(content, resolutions),
+    [content, resolutions],
+  );
 
   if (resolved.kind !== "file") {
-    // Just-sent optimistic attachment (`upload://`, not yet materialized): the
-    // staged-image cache still holds a local preview of the picked file. Not
-    // interactive — there is no file id to preview or download yet; the
-    // persisted `appfile://` part takes over on reload.
+    // Just-sent optimistic attachment (`upload://`) whose file the stream has not
+    // named yet: the staged-image cache still holds a local preview of the picked
+    // file. Not interactive for that instant — there is no file id yet.
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
-    if (localSrc && isImageMime(contentType))
-      return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
-    return <InertAttachmentChip name={name} />;
+    return (
+      <AttachmentChip
+        name={name}
+        mime={contentType}
+        media={
+          localSrc && isImageMime(contentType) ? <AttachmentThumbnail src={localSrc} /> : undefined
+        }
+      />
+    );
   }
 
-  // A resolved `appfile://` is interactive: the unified renderer shows an image
-  // thumbnail or a download/preview chip, resolving the opener-vs-download action.
+  // A resolved `appfile://` is interactive: the unified renderer's chip, resolving
+  // the opener-vs-download action.
   return (
     <FileAttachment
       file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
@@ -498,6 +542,8 @@ function Composer({
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
+  const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
   const canQueue = running && !hasAttachments && composer.value.trim() !== "";
   const enqueue = () => {
@@ -521,7 +567,12 @@ function Composer({
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
-    <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+    <ComposerPrimitive.Root
+      className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      onSubmit={(e) => {
+        if (limitPending) e.preventDefault();
+      }}
+    >
       {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
       <QueuedMessages
@@ -534,26 +585,29 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
-      <ComposerPrimitive.Input
-        rows={1}
-        autoFocus
-        addAttachmentOnPaste
-        placeholder={t("composer.placeholder")}
-        onKeyDown={(e) => {
-          // While the agent answers the primitive ignores Enter; it queues instead.
-          if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-          if (e.nativeEvent.isComposing) return;
-          e.preventDefault();
-          enqueue();
-        }}
-        className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
-      />
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">{tools}</div>
-        <div className="flex shrink-0 items-center gap-2">
+      <div className={COMPOSER_GRID_CLASS}>
+        <ComposerPrimitive.Input
+          rows={1}
+          autoFocus
+          enterKeyHint="send"
+          addAttachmentOnPaste
+          placeholder={t("composer.placeholder")}
+          onKeyDown={(e) => {
+            // While the agent answers the primitive ignores Enter; it queues instead.
+            if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
+            if (e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            enqueue();
+          }}
+          className={COMPOSER_INPUT_CLASS}
+        />
+        <div className="flex min-w-0 items-center justify-between gap-2 [grid-area:tools]">
+          <div className="min-w-0">{tools}</div>
           <div className="min-w-0">{slot}</div>
+        </div>
+        <div className="flex items-center gap-2 [grid-area:send]">
           <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send asChild>
+            <ComposerPrimitive.Send asChild disabled={limitPending}>
               <Button
                 type="button"
                 size="icon"
@@ -653,7 +707,7 @@ function UserMessage() {
         {/* A white card on the canvas, like every other surface in the thread
             (the composer, the tool cards). `bg-muted` was a hollow on white and
             reads as a smudge on grey — 3 points of luminance from the page. */}
-        <div className="bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-sm whitespace-pre-wrap shadow-sm">
+        <div className={USER_MESSAGE_CLASS}>
           <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
         </div>
       </MessagePrimitive.If>
@@ -775,7 +829,7 @@ function AssistantMessage() {
   const { t } = useChatHost();
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
-      <div className="text-foreground text-sm leading-relaxed">
+      <div className={ASSISTANT_MESSAGE_CLASS}>
         <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         <TurnLimitNotice />
         <MessageError />

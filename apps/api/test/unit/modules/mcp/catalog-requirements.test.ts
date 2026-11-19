@@ -234,6 +234,21 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   { path: "/api/profile/password", why: "the person's own account (`isUserPrincipal`)" },
   { path: "/api/notifications", why: "filtered by the caller's actor; another's is a 404" },
   { path: "/api/notifications/*", why: "filtered by the caller's actor; another's is a 404" },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/notifications",
+    why: "filtered by the caller's actor, in each space the caller holds a role in",
+  },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/notifications/unread-count",
+    why: "filtered by the caller's actor, in each space the caller holds a role in",
+  },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/notifications/{id}",
+    why: "filtered by the caller's actor, in each space the caller holds a role in; another's is a 404",
+  },
   { path: "/api/uploads", why: "mints an upload token into the caller's own space, nothing else" },
   { path: "/api/welcome/setup", why: "onboarding, on the person's own credential only" },
   // Exact: every other route under `/api/orgs/…` IS guarded.
@@ -257,6 +272,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ]),
   ...rowDecided("the run-read grant of each space the caller reaches, read in the handler", [
     [["GET"], "/api/orgs/{orgId}/runs"],
+    [["GET"], "/api/orgs/{orgId}/runs/{id}"],
   ]),
   ...rowDecided(
     "`schedules:read` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
@@ -269,6 +285,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ...rowDecided(
     "`agents:read` or `agents:run` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
     [[["GET"], "/api/orgs/{orgId}/agents"]],
+  ),
+  ...rowDecided(
+    "`persistence:read` in each space the caller reaches that reads the agent, and `persistence:delete` there for every actor's rows, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/agents/{scope}/{name}/persistence"]],
   ),
   ...rowDecided("`<type>:read` in each space the caller reaches, read in the handler", [
     [["GET"], "/api/orgs/{orgId}/packages/skills"],

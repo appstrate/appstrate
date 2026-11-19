@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context, Next } from "hono";
-import { getEeRedis } from "./redis.ts";
+import { getBillingRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
 import { problemJson, rateLimited } from "./http-errors.ts";
 
@@ -19,7 +19,7 @@ return count
 `;
 
 /**
- * Rate limiter for EE billing routes.
+ * Rate limiter for billing routes.
  *
  * Posture: **fail-open**. When Redis is unconfigured OR errors, the request is
  * allowed. These routes are admin-gated (`billing:manage`) and Stripe-side
@@ -28,9 +28,9 @@ return count
  * absent but failed closed (500) when Redis was down; this makes both paths
  * consistent.
  */
-export function eeRateLimit(maxPerMinute: number, keyFn: (c: Context) => string) {
+export function billingRateLimit(maxPerMinute: number, keyFn: (c: Context) => string) {
   return async (c: Context, next: Next) => {
-    const redis = getEeRedis();
+    const redis = getBillingRedis();
     if (!redis) return next(); // No Redis — fail open
 
     const key = `ratelimit:${keyFn(c)}`;

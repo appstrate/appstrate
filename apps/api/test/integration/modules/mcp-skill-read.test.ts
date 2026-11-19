@@ -35,6 +35,7 @@ import {
   seedSpaceMember,
   seedSpacePackage,
   seedSpaceRole,
+  seedSystemSkill,
 } from "../../helpers/seed.ts";
 import { mcpRpc, inSpace, mcpAuthHeaders } from "../../helpers/mcp.ts";
 import { skillFileUri } from "@appstrate/core/skill-uri";
@@ -457,14 +458,7 @@ describe("skill:// — a skill the chat turn injected", () => {
 
   it("maps a system skill's published definition to the tree the platform ships", async () => {
     const system = "@appstrate/system-tone";
-    await seedPackage({
-      id: system,
-      orgId: null,
-      source: "system",
-      type: "skill",
-      draftManifest: { name: system, version: "1.0.0", type: "skill" },
-      draftContent: skillMd(system, "system tone"),
-    });
+    await seedSystemSkill(system, skillMd(system, "system tone"));
     const headers = turnHeaders({ [system]: { definition: "published", version: null } });
     expect((await readResource(headers, uriOf(system))).text).toContain("system tone");
   });
@@ -561,14 +555,7 @@ describe("skill:// — a skill read with the caller's own skills:read", () => {
 
   it("serves a system skill as the platform ships it, at its published URI", async () => {
     const system = "@appstrate/system-tone";
-    await seedPackage({
-      id: system,
-      orgId: null,
-      source: "system",
-      type: "skill",
-      draftManifest: { name: system, version: "1.0.0", type: "skill" },
-      draftContent: skillMd(system, "system tone"),
-    });
+    await seedSystemSkill(system, skillMd(system, "system tone"));
     const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
     expect((await readResource(viewer, uriOf(system))).text).toContain("system tone");
     expect(await readResource(viewer, uriOf(system, "SKILL.md", { draft: true }))).toEqual(

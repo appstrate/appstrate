@@ -6,9 +6,9 @@ import type {
   ModuleInitContext,
   UsageRejection,
 } from "@appstrate/core/module";
-import { initEeDb, migrateEeDb, closeEeDb, getEeDb } from "./db.ts";
-import { initEeRedis, getEeRedis } from "./redis.ts";
-import { describeEnvIssues, getEeEnv } from "./env.ts";
+import { initBillingDb, migrateBillingDb, closeBillingDb, getBillingDb } from "./db.ts";
+import { initBillingRedis, getBillingRedis } from "./redis.ts";
+import { describeEnvIssues, getBillingEnv } from "./env.ts";
 import { getAppUrl, setAppUrl, setPlatformServices } from "./platform.ts";
 import { setOrgQueries } from "./platform-org-queries.ts";
 import { checkQuota, QuotaExceededError } from "./billing/quota-check.ts";
@@ -30,10 +30,10 @@ import {
   planBodySchema,
 } from "./routes/billing.ts";
 import { openApiPaths, openApiTags, openApiComponentSchemas } from "./openapi.ts";
-import { renderEeVerificationEmail } from "./emails/templates/verification.ts";
-import { renderEeInvitationEmail } from "./emails/templates/invitation.ts";
-import { renderEeMagicLinkEmail } from "./emails/templates/magic-link.ts";
-import { renderEeResetPasswordEmail } from "./emails/templates/reset-password.ts";
+import { renderBillingVerificationEmail } from "./emails/templates/verification.ts";
+import { renderBillingInvitationEmail } from "./emails/templates/invitation.ts";
+import { renderBillingMagicLinkEmail } from "./emails/templates/magic-link.ts";
+import { renderBillingResetPasswordEmail } from "./emails/templates/reset-password.ts";
 import { initBillingEmail } from "./emails/send.ts";
 import { resolveBillingRecipients } from "./emails/recipients.ts";
 import { BILLING_MANAGER_PERMISSIONS, isBillingManager } from "./billing/managers.ts";
@@ -47,7 +47,7 @@ import { z } from "zod";
 // declared via `permissionsContribution` on the module export below. Both
 // surfaces MUST stay in sync (compile-time vocabulary === runtime grants).
 //
-// Zero-footprint: when EE is absent from `MODULES`, `billing` disappears
+// Zero-footprint: when the billing module is absent from `MODULES`, `billing` disappears
 // from `CoreResources ∪ ModuleResources`, role sets, and the API-key
 // allowlist. An OSS deployment carries no `billing:*` scope string at all.
 declare module "@appstrate/core/permissions" {
@@ -62,17 +62,17 @@ declare module "@appstrate/core/permissions" {
 // reaches. Core's `emailOverrides` slot stays `Record<string, any>` — core cannot depend
 // on a workspace-only package.
 const emailOverrides: Partial<{ [K in EmailType]: EmailRenderer<K> }> = {
-  verification: renderEeVerificationEmail,
-  invitation: renderEeInvitationEmail,
-  "magic-link": renderEeMagicLinkEmail,
-  "reset-password": renderEeResetPasswordEmail,
+  verification: renderBillingVerificationEmail,
+  invitation: renderBillingInvitationEmail,
+  "magic-link": renderBillingMagicLinkEmail,
+  "reset-password": renderBillingResetPasswordEmail,
 };
 
 // ---------------------------------------------------------------------------
 // AppstrateModule — native contract implementation
 // ---------------------------------------------------------------------------
 
-const eeModule: AppstrateModule = {
+const billingModule: AppstrateModule = {
   manifest: {
     id: "billing",
     name: "Appstrate Billing",
@@ -80,11 +80,11 @@ const eeModule: AppstrateModule = {
   },
 
   async init(ctx: ModuleInitContext) {
-    // Fail-fast: validate all EE env vars first. The rethrow names the offending
+    // Fail-fast: validate all billing env vars first. The rethrow names the offending
     // variables — an operator reading a boot crash needs to know WHICH of the
     // module's env vars is wrong, not that one is.
     try {
-      getEeEnv();
+      getBillingEnv();
     } catch (cause) {
       throw new Error(`Invalid billing module environment: ${describeEnvIssues(cause)}`, { cause });
     }
@@ -102,11 +102,11 @@ const eeModule: AppstrateModule = {
     }
 
     setAppUrl(ctx.appUrl);
-    // Capture the platform handle — EE's ONLY platform reads are the
+    // Capture the platform handle — The billing module's ONLY platform reads are the
     // append-only `llm_usage` ledger cursor (`services.usage.list` /
     // `services.usage.settledFrontier`), never a SQL join against a platform table.
     setPlatformServices(ctx.services);
-    // The org queries answer what EE's own tables cannot: who owns this
+    // The org queries answer what the billing module's own tables cannot: who owns this
     // org, and whether a user id is a member of it. Read directly — the
     // workspace `ModuleInitContext` type is what guarantees they exist, and
     // `tsc` is what checks it.
@@ -115,11 +115,11 @@ const eeModule: AppstrateModule = {
     // Connect + self-migrate. The `ee_*` tables land beside the platform's own
     // under a separate journal (`drizzle.ee_migrations`, see `db.ts`); platform
     // ROWS are still read through `ctx.services`, not through this pool.
-    initEeDb(databaseUrl);
-    await migrateEeDb(databaseUrl);
+    initBillingDb(databaseUrl);
+    await migrateBillingDb(databaseUrl);
 
     if (ctx.redisUrl) {
-      initEeRedis(ctx.redisUrl);
+      initBillingRedis(ctx.redisUrl);
     }
 
     // Initialize billing email transport. `getOrgName` is a required member of
@@ -137,13 +137,13 @@ const eeModule: AppstrateModule = {
     // usage recorded between boot and the first sweep tick (~5 min) is billed by
     // that first tick instead of falling below a watermark only set at the tick.
     // Idempotent + race-safe (ON CONFLICT DO NOTHING); a warm boot is a no-op.
-    const cursor = await ensureCursorSeeded(ctx.services, getEeDb());
+    const cursor = await ensureCursorSeeded(ctx.services, getBillingDb());
 
     // Fatal boot rather than silently resume an abandoned watermark — the
     // reasoning and the operator's two options live on `assertCursorResumable`.
     await assertCursorResumable(cursor);
 
-    // Billing sweeper — the EE metering consumer. Sweeps the platform's
+    // Billing sweeper — the billing metering consumer. Sweeps the platform's
     // append-only `llm_usage` ledger by serial-`id` cursor, claims the
     // platform-provided rows into `ee_billed_llm_usage`, and debits credits.
     // A failed pass advances nothing and the next tick retries. INTERVAL=0
@@ -311,15 +311,15 @@ const eeModule: AppstrateModule = {
     // cleared FIRST so nothing new starts while we drain.
     stopBillingSweeper();
     await drainBillingSweeper();
-    const redis = getEeRedis();
+    const redis = getBillingRedis();
     if (redis) {
       await redis.quit();
     }
-    await closeEeDb();
+    await closeBillingDb();
   },
 };
 
-export default eeModule;
+export default billingModule;
 
 // ---------------------------------------------------------------------------
 // Named exports — direct access for tests + custom integrations

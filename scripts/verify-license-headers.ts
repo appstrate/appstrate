@@ -2,13 +2,12 @@
 /// <reference types="bun" />
 
 /**
- * Verify that every source file states the licence that actually governs it:
- *   ee/**             →  // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
- *   everything else   →  // SPDX-License-Identifier: Apache-2.0
- * within the first 3 lines, so a shebang or `/// <reference>` may precede it. A
- * file on the wrong side is a licensing defect no compiler, linter or test can
- * see. THE TRAP: the set comes from `git ls-files`, so a file not yet `git
- * add`ed passes here and fails the moment it is staged.
+ * Verify that every source file states its licence,
+ * `// SPDX-License-Identifier: Apache-2.0`, within the first 3 lines, so a
+ * shebang or `/// <reference>` may precede it. The whole repository is
+ * Apache-2.0; a file under a second licence would be a deliberate change to
+ * this gate, not a header to add. THE TRAP: the set comes from `git ls-files`,
+ * so a file not yet `git add`ed passes here and fails the moment it is staged.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -19,9 +18,7 @@ const REPO_ROOT = join(import.meta.dir, "..");
 
 const HEADER_LINES = 3;
 
-const COMMERCIAL_PREFIX = "ee/";
-
-export type ExpectedLicense = "Apache-2.0" | "LicenseRef-Appstrate-Commercial";
+const EXPECTED_HEADER = "// SPDX-License-Identifier: Apache-2.0";
 
 // Exempt: a hand-added header is erased on the next regeneration and
 // `verify:api-types` then fails on the diff. Explicit paths, never a directory.
@@ -56,22 +53,17 @@ export function generatorOf(lines: readonly string[]): string | null {
   return null;
 }
 
-export function expectedLicenseFor(path: string): ExpectedLicense {
-  return path.startsWith(COMMERCIAL_PREFIX) ? "LicenseRef-Appstrate-Commercial" : "Apache-2.0";
-}
-
 /** The violation `path` commits given the top of its content, or `null`. Pure. */
 export function checkLicenseHeader(path: string, lines: readonly string[]): string | null {
-  const expected = expectedLicenseFor(path);
   const header = lines
     .slice(0, HEADER_LINES)
     .find((line) => line.includes("SPDX-License-Identifier"));
 
   if (header === undefined) {
-    return `${path} — no SPDX header in the first ${HEADER_LINES} lines. Add \`// SPDX-License-Identifier: ${expected}\`.`;
+    return `${path} — no SPDX header in the first ${HEADER_LINES} lines. Add \`${EXPECTED_HEADER}\`.`;
   }
-  if (header.trim() !== `// SPDX-License-Identifier: ${expected}`) {
-    return `${path} — declares \`${header.trim()}\`, expected \`// SPDX-License-Identifier: ${expected}\`.`;
+  if (header.trim() !== EXPECTED_HEADER) {
+    return `${path} — declares \`${header.trim()}\`, expected \`${EXPECTED_HEADER}\`.`;
   }
   return null;
 }
@@ -79,7 +71,7 @@ export function checkLicenseHeader(path: string, lines: readonly string[]): stri
 /**
  * Everything eslint has an opinion about, plus the two TypeScript module
  * extensions its config omits. Not `.sql`/`.json`/`.md`: applied migrations are
- * immutable, and the LICENSE files at the two roots cover data and prose.
+ * immutable, and the root LICENSE covers data and prose.
  */
 export const LICENSED_GLOBS: readonly string[] = [...SOURCE_GLOBS, "*.mts", "*.cts"];
 
@@ -116,26 +108,17 @@ if (import.meta.main) {
     }
   }
 
-  let apache = 0;
-  let commercial = 0;
-
   for (const path of files) {
     const lines = readFileSync(join(REPO_ROOT, path), "utf8").split("\n", HEADER_LINES);
     const problem = checkLicenseHeader(path, lines);
-    if (problem) {
-      problems.push(problem);
-      continue;
-    }
-    if (expectedLicenseFor(path) === "Apache-2.0") apache++;
-    else commercial++;
+    if (problem) problems.push(problem);
   }
 
   if (problems.length > 0) {
     for (const problem of problems) console.error(`❌ ${problem}`);
     console.error(
       `\n${problems.length} file(s) with a wrong or missing licence header. ` +
-        `The repository is Apache-2.0 except \`${COMMERCIAL_PREFIX}\`, which is under the ` +
-        `commercial licence in that directory.\n` +
+        `The repository is Apache-2.0.\n` +
         `Note: this gate reads \`git ls-files\`, so a file you have not \`git add\`ed yet is ` +
         `not listed above — stage it and re-run.`,
     );
@@ -143,7 +126,7 @@ if (import.meta.main) {
   }
 
   console.log(
-    `✅ licence boundary clean — ${files.length} files checked, ${apache} Apache-2.0, ` +
-      `${commercial} commercial, ${GENERATED_ALLOWLIST.length} generated file(s) exempt.`,
+    `✅ licence headers clean — ${files.length} files checked, all Apache-2.0, ` +
+      `${GENERATED_ALLOWLIST.length} generated file(s) exempt.`,
   );
 }

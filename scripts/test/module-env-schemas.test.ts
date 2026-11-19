@@ -16,7 +16,7 @@ describe("moduleEnvSchemas over this repository", () => {
     expect(billing!.file).toBe("packages/module-billing/src/env.ts");
     expect(Object.keys(billing!.shape)).toContain("STRIPE_SECRET_KEY");
     expect(typeof billing!.shape.STRIPE_SECRET_KEY!.safeParse).toBe("function");
-    expect(billing!.exportName).toContain("eeEnvSchema");
+    expect(billing!.exportName).toContain("billingEnvSchema");
   });
 
   it("finds every module env.ts structured — none reads process.env by hand", () => {

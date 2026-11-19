@@ -28,7 +28,7 @@ const orgLabels: Record<SupportedLocale, string> = {
  * plain-text `appstrate.com` link. No image, so nothing depends on a client loading
  * remote content, and the transparent body works in light and dark mail clients.
  */
-export function wrapEeLayout({ locale, content, footer, orgName }: LayoutProps): string {
+export function wrapBillingLayout({ locale, content, footer, orgName }: LayoutProps): string {
   const trimmedOrgName = orgName?.trim();
   const orgLine = trimmedOrgName
     ? `<p style="margin:0 0 16px;font-size:13px;color:#737373;">${orgLabels[locale] ?? orgLabels.fr} <strong style="color:#525252;">${escapeHtml(trimmedOrgName)}</strong></p>

@@ -33,6 +33,13 @@ export type FakeMcpTool =
       result?: CallToolResult;
     };
 
+/** A 1×1 transparent PNG as an MCP `image` content block. */
+export const PNG_IMAGE_CONTENT = {
+  type: "image" as const,
+  data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  mimeType: "image/png",
+};
+
 export interface FakeMcpServerOptions {
   tools?: FakeMcpTool[];
   /** Tools per `tools/list` page; omitted = one page. */
@@ -133,4 +140,77 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
     reverseTools: () => void tools.reverse(),
     stop: () => http.stop(true),
   };
+}
+
+/**
+ * A loopback relay to `upstream` (raw HTTP/1.1, one small request per connection) whose answer to
+ * `method` is a 200 event stream cut `afterMs` later, without its last chunk: before any event,
+ * or, `afterResult`, after the event carrying the upstream's answer. Cut at the socket, so no
+ * stream errors on this side.
+ */
+export function startBreakingEventStreamRelay(
+  upstream: string,
+  opts: { method?: string; afterResult?: boolean; afterMs?: number } = {},
+) {
+  const method = opts.method ?? "tools/call";
+  const encoder = new TextEncoder();
+  const chunk = (text: string) => `${encoder.encode(text).byteLength.toString(16)}\r\n${text}\r\n`;
+  /** The request `head`/`body` asks, answered on `socket`. */
+  const answer = async (
+    socket: { write(data: string): number; end(): void },
+    head: string,
+    body: string,
+  ) => {
+    const [requestLine = "", ...lines] = head.split("\r\n");
+    const [verb = "POST", path = "/"] = requestLine.split(" ");
+    const headers = new Headers();
+    for (const line of lines) {
+      const colon = line.indexOf(":");
+      if (colon > 0 && !/^(host|content-length|connection)$/i.test(line.slice(0, colon))) {
+        headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+      }
+    }
+    const res = await fetch(new URL(path, upstream), {
+      method: verb,
+      headers,
+      ...(body ? { body } : {}),
+    });
+    const text = await res.text();
+    if (!body.includes(`"${method}"`)) {
+      const type = res.headers.get("content-type") ?? "application/json";
+      socket.write(
+        `HTTP/1.1 ${res.status} OK\r\ncontent-type: ${type}\r\n` +
+          `content-length: ${encoder.encode(text).byteLength}\r\nconnection: close\r\n\r\n${text}`,
+      );
+      return socket.end();
+    }
+    socket.write(
+      "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n" +
+        "transfer-encoding: chunked\r\nconnection: close\r\n\r\n" +
+        // A comment sends the headers and opens the stream; the answer, when asked, follows.
+        chunk(opts.afterResult ? `event: message\ndata: ${text}\n\n` : ": open\n\n"),
+    );
+    setTimeout(() => socket.end(), opts.afterMs ?? 50);
+  };
+  const server = Bun.listen<{ received: string; handled: boolean }>({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      open: (socket) => void (socket.data = { received: "", handled: false }),
+      data(socket, data) {
+        if (socket.data.handled) return;
+        socket.data.received += new TextDecoder().decode(data);
+        const end = socket.data.received.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const head = socket.data.received.slice(0, end);
+        const length = Number(/content-length:\s*(\d+)/i.exec(head)?.[1] ?? 0);
+        const body = socket.data.received.slice(end + 4);
+        if (encoder.encode(body).byteLength < length) return;
+        socket.data.handled = true;
+        void answer(socket, head, body).catch(() => socket.end());
+      },
+    },
+  });
+  const origin = `http://127.0.0.1:${server.port}`;
+  return { url: `${origin}/mcp`, origin, stop: () => server.stop(true) };
 }

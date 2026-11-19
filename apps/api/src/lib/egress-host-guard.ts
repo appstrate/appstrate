@@ -111,11 +111,7 @@ export async function checkEgressUrl(
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     return { ok: false, reason: "blocked-scheme", hostname };
   }
-  if (
-    opts?.requireHttpsForUntrustedHost &&
-    parsed.protocol === "http:" &&
-    !isAllowedInternalIdpHost(hostname)
-  ) {
+  if (opts?.requireHttpsForUntrustedHost && isCleartextToUntrustedHost(parsed)) {
     return { ok: false, reason: "blocked-scheme", hostname };
   }
 
@@ -128,6 +124,14 @@ export async function checkEgressUrl(
     return { ok: false, reason: "blocked-host", hostname, detail: hostCheck.reason };
   }
   return { ok: true, hostname, pinnedAddress: hostCheck.pinnedAddress };
+}
+
+/**
+ * What `requireHttpsForUntrustedHost` refuses: plain `http://` to a host outside the operator's
+ * internal-host allowlist.
+ */
+export function isCleartextToUntrustedHost(url: URL): boolean {
+  return url.protocol === "http:" && !isAllowedInternalIdpHost(url.hostname);
 }
 
 /**

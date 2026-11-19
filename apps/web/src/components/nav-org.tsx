@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { useUnreadRunCount } from "../hooks/use-run-reads";
-import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
 import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
@@ -35,23 +34,17 @@ import {
 } from "@appstrate/ui/components/sidebar";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
+/** A run in flight: queued or running, inline runs included. */
+const IN_FLIGHT = ["pending", "running"] as const;
+
 /**
- * Whether a run is in flight in the working space, asked only while `enabled`. Inline runs live
- * on ephemeral shadow packages that are not in `agents`, so they do not count in `running_runs`:
- * they are asked separately.
+ * Whether a run is in flight where the reader stands: the working space, or in « Tous les
+ * espaces » any space reached. One definition in both modes: the first page of the runs in flight,
+ * which the realtime stream refreshes (`broadRunKeys`) and the mode polls.
  */
-function useWorkingSpaceRunning(enabled: boolean): boolean {
-  const { data: agents } = useAgents({ enabled });
-  const { data: runningInline } = useFirstRunsPage({
-    kind: "inline",
-    status: ["running"],
-    limit: 1,
-    enabled,
-  });
-  return (
-    enabled &&
-    ((agents?.some((agent) => agent.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0)
-  );
+function useRunning(overview: boolean): boolean {
+  const { data } = useFirstRunsPage({ status: [...IN_FLIGHT], spanning: overview, limit: 1 });
+  return (data?.total ?? 0) > 0;
 }
 
 type NavItem = {
@@ -69,12 +62,11 @@ export function NavOrg() {
   const overlayPath = useOverlayPath();
   const trailRootHref = useStore(breadcrumbStore, (s) => s.page.entries[0]?.href);
   const location = navLocation({ overlayPath, trailRootHref, pathname });
-  // The badge and the running spinner are the working space's: « Tous les espaces » neither
-  // shows nor asks what feeds them (no list it already holds counts every space's unread and
-  // running runs, inline ones included).
+  // The badge and the running spinner count the working space's runs, or in « Tous les espaces »
+  // every reached space's: the runs page's own unread count, one query shared with it.
   const { on: overview } = useOverviewMode();
-  const unread = useUnreadRunCount({ enabled: !overview });
-  const hasRunning = useWorkingSpaceRunning(!overview);
+  const unread = useUnreadRunCount({ spanning: overview });
+  const hasRunning = useRunning(overview);
   const canReach = useCanReach();
   const ready = useReachReady();
 
@@ -164,7 +156,7 @@ export function NavOrg() {
                     <span>{t("nav.runs")}</span>
                   </Link>
                 </SidebarMenuButton>
-                {!overview && unread > 0 && (
+                {unread > 0 && (
                   <SidebarMenuBadge>
                     <CountBadge
                       count={unread}

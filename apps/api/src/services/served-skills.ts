@@ -22,7 +22,7 @@
  * semver of a published definition, none for a draft.
  *
  * A published version is immutable, so the skill served for it is kept in the
- * `ServedSkillCache` of `./served-skill-cache.ts`, by space, package, version
+ * `ServedSkillCache` of `./served-skill-cache.ts`, by package, version
  * and archive integrity. The access rule runs on every call, before the cache:
  * the cache holds served content only, never an access decision. A draft is
  * read on every call.
@@ -47,7 +47,7 @@ import {
   type SkillRead,
   type SkillReadSpace,
 } from "./skill-read.ts";
-import { listActivePackages } from "./space-packages.ts";
+import { listServedSkillPlacements, type ServedSkillPlacement } from "./space-packages.ts";
 import {
   createServedSkillCache,
   servedSkillCacheKey,
@@ -67,8 +67,12 @@ const LIST_CONCURRENCY = 8;
 export interface ServedSkillsContext {
   /** The spaces reached, in listing order. */
   spaceIds: readonly string[];
-  /** Ids of the skills active in a space that have `definition` (a draft, or a published version). */
-  listActiveSkillIds: (spaceId: string, definition: SkillDefinitionSelector) => Promise<string[]>;
+  listActiveSkills: (definition: SkillDefinitionSelector) => Promise<
+    {
+      spaceId: string;
+      read: () => Promise<SkillRead | null>;
+    }[]
+  >;
   /** `resolveSkillRead` in a space, bound to the request; `null` or an `ApiError` when refused. */
   readSkill: (
     spaceId: string,
@@ -141,32 +145,32 @@ export function buildServedSkills(ctx: ServedSkillsContext): ServedSkills {
   /** The skill served at `definition`, `null` when refused, unknown or unservable. */
   async function load(
     spaceId: string,
-    packageId: string,
     definition: SkillDefinitionSelector,
+    resolveRead: () => Promise<SkillRead | null>,
   ): Promise<Served | null> {
-    const address = { spaceId, packageId, definition };
     try {
-      const read = await ctx.readSkill(spaceId, packageId, definition);
+      const read = await resolveRead();
       if (!read || read.definition !== definition) return null;
+      const { packageId } = read;
+      const address = { spaceId, packageId, definition };
       // Only a published archive is immutable: a draft or a system skill's
       // stored tree is read on every call.
-      const key =
-        read.version !== null && read.integrity !== null
-          ? servedSkillCacheKey(spaceId, packageId, read.version, read.integrity)
-          : null;
-      const cached = key === null ? undefined : ctx.cache.get(key);
-      if (cached) return { skill: cached, address, lockVersion: null };
-      const { files, lockVersion } = await read.readSnapshot();
-      const served = serveSkill(packageId, files, servedVersion(read, files));
-      if (!served.ok) {
+      const readContent = async () => {
+        const snapshot = await read.readSnapshot();
+        const served = serveSkill(packageId, snapshot.files, servedVersion(read, snapshot.files));
+        if (served.ok) return { skill: served.skill, address, lockVersion: snapshot.lockVersion };
         ctx.logUnservable({ ...address, reason: served.reason });
         return null;
-      }
-      if (key !== null) ctx.cache.set(key, served.skill);
-      return { skill: served.skill, address, lockVersion };
+      };
+      if (read.version === null || read.integrity === null) return await readContent();
+      const skill = await ctx.cache.load(
+        servedSkillCacheKey(packageId, read.version, read.integrity),
+        async () => (await readContent())?.skill ?? null,
+      );
+      return skill ? { skill, address, lockVersion: null } : null;
     } catch (err) {
       if (isInjectedDraftChanged(err)) throw err;
-      if (err instanceof ApiError) return null;
+      if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return null;
       throw err;
     }
   }
@@ -174,7 +178,9 @@ export function buildServedSkills(ctx: ServedSkillsContext): ServedSkills {
   /** The skill a URI of a reached space names, with the served name it carries. */
   async function resolve(address: SkillAddress | null): Promise<Served | null> {
     if (!address || !ctx.spaceIds.includes(address.spaceId)) return null;
-    const served = await load(address.spaceId, address.packageId, address.definition);
+    const served = await load(address.spaceId, address.definition, () =>
+      ctx.readSkill(address.spaceId, address.packageId, address.definition),
+    );
     return served?.skill.name === address.name ? served : null;
   }
 
@@ -200,22 +206,17 @@ export function buildServedSkills(ctx: ServedSkillsContext): ServedSkills {
   };
 
   const list = async (definition: SkillDefinitionSelector): Promise<SkillEntry[]> => {
-    const listed = await Promise.all(
-      ctx.spaceIds.map(async (spaceId) =>
-        (await ctx.listActiveSkillIds(spaceId, definition)).map((packageId) => ({
-          spaceId,
-          packageId,
-        })),
-      ),
-    );
-    const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
-      // A changed injected draft refuses its own reads explicitly; the list leaves it out.
-      load(skill.spaceId, skill.packageId, definition).catch((err: unknown) => {
+    const listed = await ctx.listActiveSkills(definition);
+    const entries = await mapWithConcurrency(listed, LIST_CONCURRENCY, async (skill) => {
+      try {
+        const served = await load(skill.spaceId, definition, skill.read);
+        return served ? servedEntry(served) : null;
+      } catch (err) {
         if (isInjectedDraftChanged(err)) return null;
         throw err;
-      }),
-    );
-    return loaded.filter((served): served is Served => served !== null).map(servedEntry);
+      }
+    });
+    return entries.filter((entry): entry is SkillEntry => entry !== null);
   };
 
   return { list, entry, file, skillFiles };
@@ -231,21 +232,31 @@ const servedSkillCache = createServedSkillCache(4 * SKILL_MAX_TOTAL_BYTES);
 /** The context of the skills of `spaces`, each read with the caller's permissions in that space. */
 export function servedSkillsContext(
   c: Context<AppEnv>,
-  spaces: readonly SkillReadSpace[],
+  orgId: string,
+  spaces: readonly Omit<SkillReadSpace, "orgId">[],
 ): ServedSkillsContext {
-  const bySpace = new Map(spaces.map((space) => [space.spaceId, space]));
+  const bySpace = new Map(spaces.map((space) => [space.spaceId, { ...space, orgId }]));
   return {
     spaceIds: [...bySpace.keys()],
-    // Published: a system skill's stored tree, or a `latest` dist-tag. Draft: any
-    // organization skill (a system skill has none).
-    listActiveSkillIds: async (spaceId, definition) =>
-      (await listActivePackages(bySpace.get(spaceId)!.orgId, [spaceId], "skill"))
-        .filter((row) =>
-          definition === "draft"
-            ? row.source !== "system"
-            : row.source === "system" || row.latestVersionId !== null,
+    listActiveSkills: async (definition) => {
+      const placements = new Map(
+        spaces.map(({ spaceId }) => [spaceId, [] as ServedSkillPlacement[]]),
+      );
+      const active = await listServedSkillPlacements(orgId, [...placements.keys()]);
+      for (const row of active) {
+        if (
+          definition === "draft" ? row.source === "system" : row.source !== "system" && !row.latest
         )
-        .map((row) => row.id),
+          continue;
+        for (const spaceId of row.spaceIds) placements.get(spaceId)!.push(row);
+      }
+      return [...placements].flatMap(([spaceId, rows]) =>
+        rows.map((row) => ({
+          spaceId,
+          read: () => resolveSkillRead(c, bySpace.get(spaceId)!, row, definition),
+        })),
+      );
+    },
     readSkill: (spaceId, packageId, definition) =>
       resolveSkillRead(c, bySpace.get(spaceId)!, packageId, definition),
     cache: servedSkillCache,

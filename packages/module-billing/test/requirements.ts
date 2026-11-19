@@ -13,8 +13,8 @@ export default {
     STRIPE_PRICE_ID_STARTER: "price_starter_test",
     STRIPE_PRICE_ID_PRO: "price_pro_test",
     // A sweep firing mid-suite would bill rows a test seeded into the ledger. This
-    // pauses METERING only — `useEeTestSeams()` disarms the maintenance tick that
+    // pauses METERING only — `useBillingTestSeams()` disarms the maintenance tick that
     // keeps running under it.
-    EE_RECONCILIATION_INTERVAL_SECONDS: "0",
+    BILLING_RECONCILIATION_INTERVAL_SECONDS: "0",
   },
 } as const;

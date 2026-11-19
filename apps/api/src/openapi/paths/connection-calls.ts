@@ -10,9 +10,10 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 const connectionCallSchema = {
   type: "object",
   description:
-    "One call the credential proxy made with a connection's credential. The journal outlives what " +
-    "it describes: every id is a plain value and may name a connection, space, run, key or " +
-    "principal that no longer exists.",
+    "One call or MCP operation the credential proxy dispatched (so it may have reached its " +
+    "upstream) outside a run or for a remote run, with or without a " +
+    "connection's credential. The journal outlives what it describes: every id is a plain value " +
+    "and may name a connection, space, run, key or principal that no longer exists.",
   required: [
     "id",
     "createdAt",
@@ -36,12 +37,20 @@ const connectionCallSchema = {
     id: { type: "integer", description: "Monotonic row id; the pagination cursor." },
     createdAt: { type: "string", format: "date-time" },
     spaceId: { type: "string", description: "The space the call was made in." },
-    connection_id: { type: "string", format: "uuid" },
+    connection_id: {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "The connection the call used; null when the integration binds none (unauthenticated, " +
+        "AFPS §7.2), and then `owner_type` and `owner_id` are null too.",
+    },
     integration_package_id: { type: "string", description: "The integration (`@scope/name`)." },
     owner_type: {
       type: ["string", "null"],
       enum: ["user", "end_user", null],
-      description: "The connection's owner when the call was made; null when it was gone by then.",
+      description:
+        "The connection's owner when the call was made; null when it was gone by then, or when " +
+        "the call used no connection.",
     },
     owner_id: { type: ["string", "null"] },
     actor_type: {
@@ -131,23 +140,41 @@ const PAGINATION =
   "Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown " +
   "query parameter is a 400, never an ignored filter. Rate-limited to 60/min.";
 
-const callsPage = {
-  description: "A page of calls, newest first.",
-  headers: { ...STD_RESPONSE_HEADERS, Link: { $ref: "#/components/headers/Link" } },
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        required: ["object", "data", "hasMore"],
-        properties: {
-          object: { type: "string", enum: ["list"] },
-          data: { type: "array", items: connectionCallSchema },
-          hasMore: { type: "boolean" },
+/** A call of one connection: the owner door lists no call without a connection. */
+const ownConnectionCallSchema = {
+  allOf: [
+    connectionCallSchema,
+    {
+      type: "object",
+      properties: {
+        connection_id: {
+          type: "string",
+          format: "uuid",
+          description: "The connection the call used: never null here, the caller owns it.",
         },
       },
     },
-  },
+  ],
 } as const;
+
+const callsPage = <Item>(item: Item) =>
+  ({
+    description: "A page of calls, newest first.",
+    headers: { ...STD_RESPONSE_HEADERS, Link: { $ref: "#/components/headers/Link" } },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: { type: "array", items: item },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  }) as const;
 
 export const connectionCallsPaths = {
   "/api/me/connections/{connectionId}/calls": {
@@ -156,11 +183,12 @@ export const connectionCallsPaths = {
       tags: ["Profile"],
       summary: "The credential proxy's calls made with one of the caller's connections",
       description:
-        "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of " +
-        "`POST /api/integrations/{packageId}/discover`) made with a connection " +
-        "the caller owns, whoever made it and from whichever space: a colleague using a " +
-        "connection shared into a space, a run, an API key. One row per call that may have sent " +
-        "the credential, successful or not. Authorized by ownership, capped by a delegated " +
+        "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` " +
+        "and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) " +
+        "made with a connection the caller owns, whoever made it and from whichever space: a " +
+        "colleague using a connection shared into a space, a run, an API key. One row per call " +
+        "or MCP operation dispatched to the upstream, and so may have sent the credential, " +
+        "successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated " +
         "credential's `integrations:read` ceiling. A delegated or end-user credential reads " +
         "inside its bound organization (and space, when it pins one) only. Ownership is read on " +
         "the connection itself: once it is deleted this route answers 404, and its calls remain " +
@@ -176,7 +204,7 @@ export const connectionCallsPaths = {
         ...filterParameters,
       ],
       responses: {
-        "200": callsPage,
+        "200": callsPage(ownConnectionCallSchema),
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
@@ -199,11 +227,13 @@ export const connectionCallsPaths = {
       tags: ["Integrations"],
       summary: "The credential proxy's calls made in the current space",
       description:
-        "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of " +
-        "`POST /api/integrations/{packageId}/discover`) made in the current " +
+        "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and " +
+        "`/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and " +
+        "every direct MCP operation toward an unauthenticated integration's server, made in the current " +
         "space, whatever the connection and whoever owns it: who used which connection, against " +
-        "which host, with what outcome. One row per call that may have sent a " +
-        "credential, successful or not. Requires `integrations:configure`, the permission that " +
+        "which host, with what outcome. One row per call or MCP operation dispatched to an " +
+        "upstream (and so may have reached it), with or without a credential " +
+        "(`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that " +
         "governs which credential the space resolves to; it is session-only, so no API key " +
         "reads this journal. Calls made in another space are never listed, including those made " +
         "with a connection shared into both. " +
@@ -221,7 +251,7 @@ export const connectionCallsPaths = {
         ...filterParameters,
       ],
       responses: {
-        "200": callsPage,
+        "200": callsPage(connectionCallSchema),
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

@@ -24,7 +24,7 @@ const defaultRenderers: { [K in EmailType]: EmailRenderer<K> } = {
 let registry: { [K in EmailType]: EmailRenderer<K> } = { ...defaultRenderers };
 
 /**
- * Merge a module's (or custom) overrides into the email registry — the ee
+ * Merge a module's (or custom) overrides into the email registry — the billing
  * module (`@appstrate/module-billing`) is the one that ships branded templates.
  * Only overrides provided keys; others keep the OSS default.
  * Called once at boot, before any email is sent.

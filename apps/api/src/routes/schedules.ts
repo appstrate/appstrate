@@ -36,7 +36,6 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
-import { parseListLimit } from "@appstrate/core/list-query";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
@@ -65,7 +64,6 @@ import {
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import {
-  agentReadIsSummary,
   assertDraftSelectorAllowed,
   assertDependencyDraftOverridesAllowed,
 } from "../lib/package-access.ts";
@@ -73,10 +71,9 @@ import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
 import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
-import { setCursorLinkHeader } from "../lib/pagination-link.ts";
-import { parseRunListFilters } from "../lib/run-list-filters.ts";
+import { respondScopedRunList } from "./runs.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { parseEmptyQuery } from "../lib/list-query.ts";
+import { packageIdFilter, parseStrictQuery } from "../lib/list-query.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
@@ -448,14 +445,17 @@ function scheduleVersion(schedule: { updatedAt: string }): number {
   return Date.parse(schedule.updatedAt);
 }
 
+/** The query of `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`: strict, an unknown parameter is a 400. */
+const scheduleListQuerySchema = z.object({ packageId: packageIdFilter }).strict();
+
 /**
  * The schedule list over `grants`: `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`. The
  * caller is the VIEWER of the run counters (`unread_count` is recipient-scoped), never the
  * schedules' own execution actor.
  */
 export async function respondScheduleList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
-  parseEmptyQuery(c);
-  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c))));
+  const { packageId } = parseStrictQuery(c, scheduleListQuerySchema);
+  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c), { packageId })));
 }
 
 export function createSchedulesRouter() {
@@ -972,29 +972,8 @@ export function createSchedulesRouter() {
   // is a legal, grantable scope set, so without the run gate a credential with
   // no run permission at all reads the full enriched run projection — input,
   // result, checkpoint, error, context snapshot, cost.
-  router.get(
-    "/schedules/:id/runs",
-    requirePermission("schedules", "read"),
-    requireRunsRead,
-    async (c) => {
-      const scheduleId = c.req.param("id")!;
-      const scope = getSpaceScope(c);
-      const limit = parseListLimit(c, { defaultLimit: 20 });
-      // `schedules:read` is space-wide, so the schedule itself is readable to
-      // every member — but its RUNS are runs, and follow the run predicate:
-      // without `runs:read-all` a colleague's schedule lists nothing.
-      const filters = parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") });
-      const result = await listScheduleRuns(scope, scheduleId, {
-        ...filters,
-        limit,
-        startingAfter: c.req.query("startingAfter") || undefined,
-        actor: getActor(c),
-        visibility: runVisibilityFilter(c),
-        canReadAgentInput: !agentReadIsSummary(c),
-      });
-      setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
-      return c.json(result);
-    },
+  router.get("/schedules/:id/runs", requirePermission("schedules", "read"), requireRunsRead, (c) =>
+    respondScopedRunList(c, c.req.param("id")!, listScheduleRuns),
   );
 
   return router;

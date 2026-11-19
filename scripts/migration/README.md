@@ -1518,7 +1518,7 @@ the schema of either release. The app stays stopped from step 1 to step 6:
 1. `pg_dump` the database.
 2. **Snapshot object storage.** `--apply` overwrites in place the archive of every rewritten
    integration, agent and skill version (bucket `agent-packages`, keys `{packageId}/{version}.afps`)
-   and every rewritten integration draft (bucket `library-packages`, `{org}/integrations/{id}.afps`),
+   and changed draft archives (bucket `library-packages`, `{org}/{agents|skills|integrations}/{id}.afps`),
    and queues the deletion of the server archives (`agent-packages` `{packageId}/{version}.afps`,
    `library-packages` `{org or system}/mcp-servers/{id}.afps`). `pg_dump` cannot undo any of that:
    copy both buckets whole (S3: `aws s3 sync` or the provider's bucket versioning; filesystem: the
@@ -1529,12 +1529,24 @@ the schema of either release. The app stays stopped from step 1 to step 6:
    server versions exist and no server archive is readable). Read the table, every `note`, `orphan
 server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` line must be
    resolved before `--apply`, which refuses anyway (prints them, writes nothing, exits 1).
-   `UNFOLDED` means a draft or version would still read `source.server = { name, version }`: server
-   not found, pin matching no version, server archive or draft payload missing, the integration's
-   own archive missing, a `${user_config.K}` embedded in a larger value with no matching entry, or a
-   path both hold with different bytes. The last one is cured on the integration's side: remove or
+   `UNFOLDED` identifies a draft or published version the script cannot convert. Restore any missing
+   version archive that needs rewriting, including for an agent or skill whose only change is the
+   removal of `dependencies.mcp_servers`. The migration needs that archive to establish whether
+   the publisher must sign its replacement. Other causes include a missing server or draft payload,
+   a pin matching no version, a `${user_config.K}` embedded in a larger value with no matching entry,
+   and a path both packages hold with different bytes. For a conflicting path, remove or
    rename its own differing file (draft files, or publish a new version of a published one), then
    re-run; the script never picks between the two copies.
+   For a signed version, or when `AFPS_SIGNATURE_POLICY=required`, run the dry run with
+   `--signing-dir <private-directory>`. It writes the exact prospective unsigned bundles there,
+   named by their canonical content digest. Give each request to the publisher for inspection.
+   The publisher signs it on their own machine with
+   `afps sign <digest>.afps-bundle --key <trusted-key.json> --out <digest>.signed.afps-bundle`.
+   Place the returned bundle alongside its request and repeat the dry run and apply with the same
+   directory. Only its signature is imported. The platform verifies it against the actual migrated
+   content under the configured trust root before any write. Keep the directory for retries. A
+   note identifies each embedded server signature. It covers the server alone. An integration
+   subject to the required policy still needs the publisher to sign its converted content.
 4. `0054 --apply`. Per ORG integration still reading `source.server = { name, version }`, the server
    is resolved as the runtime did: a system server is its highest version; an org server goes by
    the pin, exact version (yanked included), then dist-tag name, then semver range, a missing pin
@@ -1546,9 +1558,11 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    value of the auth entry whose `user_config_key ?? envKey` is `K` (`sensitive` if any is), and
    `user_config_key` is dropped everywhere. A whole-value placeholder matching no entry is dropped
    with a note (the old runtime delivered nothing); an existing `delivery.env[V]` is kept. The
-   server's files (every file but `manifest.json`) join the integration's draft files and version archive
-   (identical bytes at a shared path: a note); each rewritten version's `integrity` and
-   `artifact_size` are recomputed. Every org agent, skill and integration draft or version carrying
+   server's payload files join the integration's draft files and version archive. The migration
+   excludes the server manifest and signature, reports identical bytes at a shared path, and
+   recomputes each rewritten version's `integrity` and `artifact_size`. Changed working drafts
+   drop any imported publisher signature. Agent and skill draft manifests stay in the database.
+   Every org agent, skill and integration draft or version carrying
    `dependencies.mcp_servers` loses it, with archive and integrity. Then every `mcp-server` package,
    system ones included, is deleted with its versions, dist tags, `space_packages` rows and
    `mcp-server` dependency rows; its storage objects are queued on the deletion outbox in the same
@@ -1576,9 +1590,11 @@ carrying `dependencies.mcp_servers`) keeps in its archive the manifest `0054` wr
 Ordering of the writes: the database changes run in one transaction and the rewritten archives are
 uploaded inside it, just before the commit, so the transaction (and its locks) stays open for the
 whole upload: check `idle_in_transaction_session_timeout` on the database role. A failure before the
-commit rolls the database back but may leave rewritten archives in storage under the same keys;
-re-running recomputes from the unchanged rows and writes byte-identical archives, so a re-run
-repairs it. A second `--apply` on a folded database writes nothing.
+commit rolls the database back but may leave rewritten archives in storage under the same keys.
+Keep the application stopped, restore storage availability and repeat the dry run with the same
+signing directory. Once it shows zero `UNFOLDED` lines, repeat `--apply` using that directory.
+The script recomputes the same archive bytes from the unchanged rows and the publisher's signed
+bundles. A second `--apply` on a folded database writes nothing.
 
 Rollback: restore the `pg_dump` AND the storage snapshot of step 2, together. The archives are
 overwritten in place, so restoring the database alone leaves rewritten archives under rows whose
@@ -1640,3 +1656,4 @@ queued for deletion are gone once the outbox has run.
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0053 | not yet             | every stored agent manifest carrying `runtime_tools`, or predating `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added and indexed in `package_version_dependencies`, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, open `output.schema` for an agent selecting `output` without one, `runtime_tools` removed), malformed manifests listed and left, exit 1 — **rehearse on a production dump first; run in the release window, app stopped, after the schema migrations, before the app serves traffic**; `.ts`, `--before <RFC 3339 instant>` required, dry run by default, `--apply` to write    | prints the mode and the target database, then per store rewritten / of which `output.schema` added / malformed and left / after: carrying `runtime_tools` / after: before `--before` without `@appstrate/platform` — how many manifests still carry `runtime_tools` and how many written before `--before` still lack the dependency: each is one of those listed; a second run rewrites 0                                                                                                                                                                                                                                                                                                                   |
 | 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, BEFORE the migrations** (drizzle `0106` drops the `mcp-server` enum label and fails while a row of that type remains); also removes stored `mcp-servers:*` grants                                                                                                                                                                                                                                     | dry run lists the `mcp-server` packages, the integrations folded, the `note` / `UNFOLDED` lines and the storage target; `--apply` refuses (exit 1, nothing written) on any `UNFOLDED` line, else commits in one transaction after verifying none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 0055 | not yet             | chat `read_file` / `read_resource` calls on an `appfile://` persisted before #2280 (the file's text, or its bytes as a base64 resource) rewritten as the receipt the chat now persists (`{ uri, mimeType?, size?, note }`, no content); receipts, platform metadata and `skill://` reads untouched — model replay keeps only the file reference — **run in the release window with the app stopped**: until it has run, loading an old thread can return its stored file contents to the browser                                                                                                                                                                                             | dry run prints the messages and file reads to rewrite; `--apply` rewrites them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

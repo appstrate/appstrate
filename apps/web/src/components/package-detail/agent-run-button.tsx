@@ -6,6 +6,7 @@ import { RunAgentButton } from "../run-agent-button";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useAgentRunBlocker } from "../../hooks/use-agent-readiness";
 import { blockingIntegrationIds, useAgentConnectionReadiness } from "../../hooks/use-integrations";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
 
 /** The launch control of the agent page: header and empty runs list render this one. */
 export function AgentRunButton({
@@ -21,10 +22,13 @@ export function AgentRunButton({
 } & Pick<ComponentProps<typeof RunAgentButton>, "variant" | "size" | "className">) {
   const { t } = useTranslation("agents");
   const { data: detail } = usePackageDetail("agent", packageId);
-  const blocker = useAgentRunBlocker(packageId, detail);
-  // The same server resolver as the launch's 409. Each integration says whether
-  // it blocks the run, so a switched-off agent is not read as a connection gap.
-  const { data: connections } = useAgentConnectionReadiness(packageId);
+  // In « Tous les espaces » the run is judged in the space the reader picks: the detail's own
+  // space is hidden, so only what holds in every space blocks, and the launch answers the rest.
+  const { on: spanning } = useOverviewMode();
+  const blocker = useAgentRunBlocker(packageId, detail, { spanning });
+  // The same server resolver as the launch's 409, in the space the page reads. Each integration
+  // says whether it blocks the run, so a switched-off agent is not read as a connection gap.
+  const { data: connections } = useAgentConnectionReadiness(spanning ? undefined : packageId);
   const connectionGap = connections ? blockingIntegrationIds(connections).length > 0 : false;
 
   if (!detail) return null;
@@ -33,6 +37,9 @@ export function AgentRunButton({
     <RunAgentButton
       packageId={packageId}
       detail={detail}
+      // In « Tous les espaces » the reader picks the space among the agent's: the page names none.
+      spaceIds={detail.space_ids}
+      preferWorkingSpace={false}
       version={versionLabel}
       disabled={blocker !== null || !!unsavedReason}
       disabledTitle={blocker ? t(blocker) : unsavedReason}

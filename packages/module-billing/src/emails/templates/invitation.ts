@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EmailPropsMap, RenderedEmail } from "@appstrate/emails";
-import { ctaButton, escapeHtml, interpolate, wrapEeLayout } from "../layout.ts";
+import { ctaButton, escapeHtml, interpolate, wrapBillingLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -22,7 +22,7 @@ const strings = {
   },
 } as const;
 
-export function renderEeInvitationEmail(props: EmailPropsMap["invitation"]): RenderedEmail {
+export function renderBillingInvitationEmail(props: EmailPropsMap["invitation"]): RenderedEmail {
   const { inviteUrl, orgName, inviterName, role, locale } = props;
   const s = strings[locale] ?? strings.fr;
 
@@ -42,6 +42,6 @@ ${ctaButton(s.button, inviteUrl)}
 
   return {
     subject,
-    html: wrapEeLayout({ locale, content, footer: s.footer }),
+    html: wrapBillingLayout({ locale, content, footer: s.footer }),
   };
 }

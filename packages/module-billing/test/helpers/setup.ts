@@ -4,7 +4,7 @@
 // queries, so its tests seed those two seams in memory instead of platform rows.
 
 import { afterAll, beforeAll } from "bun:test";
-import { _resetEeEnvForTests } from "../../src/env.ts";
+import { _resetBillingEnvForTests } from "../../src/env.ts";
 import {
   getAppUrl,
   getPlatformServices,
@@ -12,7 +12,11 @@ import {
   setPlatformServices,
 } from "../../src/platform.ts";
 import type { PlatformServices } from "@appstrate/core/module";
-import { getOrgQueries, setOrgQueries, type EeOrgQueries } from "../../src/platform-org-queries.ts";
+import {
+  getOrgQueries,
+  setOrgQueries,
+  type BillingOrgQueries,
+} from "../../src/platform-org-queries.ts";
 import { mockPlatformServices } from "./mock-platform.ts";
 import { orgQueries } from "./org-queries.ts";
 import { startStripeMock } from "./stripe.ts";
@@ -24,9 +28,9 @@ import { stopBillingSweeper } from "../../src/billing/billing-sweeper.ts";
  * and walks away leaves every later file running through them. Call this at the top level
  * of a test file: it installs in `beforeAll` and restores in `afterAll`.
  */
-export function useEeTestSeams(): void {
+export function useBillingTestSeams(): void {
   let previousServices: PlatformServices;
-  let previousQueries: EeOrgQueries;
+  let previousQueries: BillingOrgQueries;
   let previousAppUrl: string;
   const previousEnv: Record<string, string | undefined> = {};
 
@@ -34,7 +38,7 @@ export function useEeTestSeams(): void {
 
   beforeAll(() => {
     // `init()` armed the module's periodic tick at boot — maintenance-only, since
-    // `test/requirements.ts` pins EE_RECONCILIATION_INTERVAL_SECONDS=0, but still a
+    // `test/requirements.ts` pins BILLING_RECONCILIATION_INTERVAL_SECONDS=0, but still a
     // timer. Disarm it: a maintenance tick firing mid-suite would clear the pending
     // cancellations a test seeded. Idempotent, like the rest of this helper.
     stopBillingSweeper();
@@ -73,17 +77,17 @@ export function useEeTestSeams(): void {
 }
 
 /**
- * Scope the reconciliation knobs a sweep test rewrites (`EE_RECONCILIATION_*`) to ONE
+ * Scope the reconciliation knobs a sweep test rewrites (`BILLING_RECONCILIATION_*`) to ONE
  * test file, then hand them back and drop the cached env. `test/requirements.ts` pins
- * `EE_RECONCILIATION_INTERVAL_SECONDS` to `"0"` on purpose — a timer firing mid-suite
+ * `BILLING_RECONCILIATION_INTERVAL_SECONDS` to `"0"` on purpose — a timer firing mid-suite
  * bills rows a later file seeded into the ledger.
  */
-export function useEeReconciliationEnv(): void {
+export function useBillingReconciliationEnv(): void {
   const KNOBS = [
-    "EE_RECONCILIATION_INTERVAL_SECONDS",
-    "EE_RECONCILIATION_BATCH_SIZE",
-    "EE_RECONCILIATION_REPLAY_WINDOW",
-    "EE_RECONCILIATION_MAX_GAP_SECONDS",
+    "BILLING_RECONCILIATION_INTERVAL_SECONDS",
+    "BILLING_RECONCILIATION_BATCH_SIZE",
+    "BILLING_RECONCILIATION_REPLAY_WINDOW",
+    "BILLING_RECONCILIATION_MAX_GAP_SECONDS",
   ] as const;
 
   const previous: Record<string, string | undefined> = {};
@@ -98,6 +102,6 @@ export function useEeReconciliationEnv(): void {
       if (before === undefined) delete process.env[key];
       else process.env[key] = before;
     }
-    _resetEeEnvForTests();
+    _resetBillingEnvForTests();
   });
 }

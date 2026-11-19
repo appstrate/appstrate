@@ -7,10 +7,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { renderEeVerificationEmail } from "../../src/emails/templates/verification.ts";
-import { renderEeInvitationEmail } from "../../src/emails/templates/invitation.ts";
-import { renderEeMagicLinkEmail } from "../../src/emails/templates/magic-link.ts";
-import { renderEeResetPasswordEmail } from "../../src/emails/templates/reset-password.ts";
+import { renderBillingVerificationEmail } from "../../src/emails/templates/verification.ts";
+import { renderBillingInvitationEmail } from "../../src/emails/templates/invitation.ts";
+import { renderBillingMagicLinkEmail } from "../../src/emails/templates/magic-link.ts";
+import { renderBillingResetPasswordEmail } from "../../src/emails/templates/reset-password.ts";
 import type { RenderedEmail, SupportedLocale } from "../../src/emails/types.ts";
 
 // The `&` is what makes the escaping assertion discriminate: an unescaped body
@@ -22,14 +22,14 @@ const LOCALES: readonly SupportedLocale[] = ["fr", "en"];
 
 const renderers: Record<string, (locale: SupportedLocale) => RenderedEmail> = {
   verification: (locale) =>
-    renderEeVerificationEmail({
+    renderBillingVerificationEmail({
       user: { name: "Ada", email: "ada@example.com" },
       url: URL_WITH_AMPERSAND,
       expiresInMinutes: 60,
       locale,
     }),
   invitation: (locale) =>
-    renderEeInvitationEmail({
+    renderBillingInvitationEmail({
       email: "ada@example.com",
       inviteUrl: URL_WITH_AMPERSAND,
       orgName: "Acme Corp",
@@ -38,14 +38,14 @@ const renderers: Record<string, (locale: SupportedLocale) => RenderedEmail> = {
       locale,
     }),
   "magic-link": (locale) =>
-    renderEeMagicLinkEmail({
+    renderBillingMagicLinkEmail({
       email: "ada@example.com",
       url: URL_WITH_AMPERSAND,
       expiresInMinutes: 15,
       locale,
     }),
   "reset-password": (locale) =>
-    renderEeResetPasswordEmail({
+    renderBillingResetPasswordEmail({
       email: "ada@example.com",
       url: URL_WITH_AMPERSAND,
       expiresInMinutes: 60,
@@ -53,7 +53,7 @@ const renderers: Record<string, (locale: SupportedLocale) => RenderedEmail> = {
     }),
 };
 
-describe("EE platform email overrides", () => {
+describe("billing platform email overrides", () => {
   for (const [name, render] of Object.entries(renderers)) {
     describe(name, () => {
       for (const locale of LOCALES) {

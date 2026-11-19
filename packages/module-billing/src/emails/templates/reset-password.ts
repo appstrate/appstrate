@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { linkValiditySentence, type EmailPropsMap, type RenderedEmail } from "@appstrate/emails";
-import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
+import { wrapBillingLayout, ctaButton, escapeHtml } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -22,7 +22,9 @@ const strings = {
   },
 } as const;
 
-export function renderEeResetPasswordEmail(props: EmailPropsMap["reset-password"]): RenderedEmail {
+export function renderBillingResetPasswordEmail(
+  props: EmailPropsMap["reset-password"],
+): RenderedEmail {
   const { url, locale, expiresInMinutes } = props;
   const s = strings[locale] ?? strings.fr;
 
@@ -35,7 +37,7 @@ ${ctaButton(s.button, url)}
 
   return {
     subject: s.subject,
-    html: wrapEeLayout({
+    html: wrapBillingLayout({
       locale,
       content,
       footer: `${linkValiditySentence(expiresInMinutes, locale)} ${s.footer}`,

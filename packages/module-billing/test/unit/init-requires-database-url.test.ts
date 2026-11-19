@@ -8,10 +8,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import eeModule from "../../src/index.ts";
-import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+import billingModule from "../../src/index.ts";
+import { applyBillingFixtureEnv } from "../helpers/fixture-env.ts";
 
-applyEeFixtureEnv();
+applyBillingFixtureEnv();
 
 describe("billing init without DATABASE_URL", () => {
   it("refuses with a message naming DATABASE_URL", async () => {
@@ -21,7 +21,7 @@ describe("billing init without DATABASE_URL", () => {
       // The refusal precedes every side effect, so a context that carries none
       // of the platform's handles is enough to reach it.
       await expect(
-        eeModule.init!({} as unknown as Parameters<NonNullable<typeof eeModule.init>>[0]),
+        billingModule.init!({} as unknown as Parameters<NonNullable<typeof billingModule.init>>[0]),
       ).rejects.toThrow(
         "The billing module requires PostgreSQL: set DATABASE_URL (the module stores its tables in the platform database)",
       );

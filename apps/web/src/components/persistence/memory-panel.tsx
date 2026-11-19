@@ -19,12 +19,14 @@ import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
   useAgentMemories,
   useAgentPinned,
-  useDeletePinnedSlot,
+  useDeletePersistenceRow,
   useRunMemories,
   useRunPinned,
+  type PersistenceRowRef,
 } from "../../hooks/use-persistence";
-import { useDeleteMemory } from "../../hooks/use-mutations";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useRowSpaceGrants } from "../../hooks/use-permissions";
+import { useSpacesFor } from "../../hooks/use-space-action";
+import { SpaceNameOf } from "../space-name";
 import { authStore } from "../../stores/auth-store";
 
 interface MemoryPanelProps {
@@ -33,6 +35,8 @@ interface MemoryPanelProps {
   runId?: string;
   /** Optional entry filter used by overview deep links. */
   initialTypes?: Array<"pinned" | "archive">;
+  /** The agent's memory in every space the reader reaches, each row naming its space (agent view only). */
+  spanning?: boolean;
 }
 
 const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
@@ -44,15 +48,16 @@ export function MemoryPanel({
   packageId,
   runId,
   initialTypes = EMPTY_MEMORY_TYPES,
+  spanning = false,
 }: MemoryPanelProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isRunView = !!runId;
 
   // The hook union narrows nicely if we just call both forms conditionally
   // and pick the active one — they share the same shape under the hood.
-  const agentPinnedQ = useAgentPinned(isRunView ? undefined : packageId);
+  const agentPinnedQ = useAgentPinned(isRunView ? undefined : packageId, { spanning });
   const runPinnedQ = useRunPinned(isRunView ? packageId : undefined, runId);
-  const agentMemoriesQ = useAgentMemories(isRunView ? undefined : packageId);
+  const agentMemoriesQ = useAgentMemories(isRunView ? undefined : packageId, { spanning });
   const runMemoriesQ = useRunMemories(isRunView ? packageId : undefined, runId);
 
   const pinnedQ = isRunView ? runPinnedQ : agentPinnedQ;
@@ -60,15 +65,14 @@ export function MemoryPanel({
   const pinned = pinnedQ.data;
   const memories = memoriesQ.data;
 
-  const deleteMemory = useDeleteMemory(packageId);
-  const deletePinned = useDeletePinnedSlot(packageId);
-  const { can } = usePermissions();
-  // `persistence:delete` is also what lets the API return other actors' rows.
-  const readsEveryActor = can("persistence:delete");
-  const canDelete = !isRunView && readsEveryActor;
+  const deletion = useDeletePersistenceRow(packageId);
+  // `persistence:delete` is also what lets the API return other actors' rows: in the working
+  // space, or in some space when the list spans them.
+  const readsEveryActor = useSpacesFor({ permission: "persistence:delete" }).offered;
+  // A row is deleted in its own space, where that space grants it.
+  const grantsInRowSpace = useRowSpaceGrants();
   const userId = useStore(authStore, (s) => s.user?.id);
-  const [toDelete, setToDelete] = useState<{ kind: "pinned" | "archive"; id: number } | null>(null);
-  const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
+  const [toDelete, setToDelete] = useState<PersistenceRowRef | null>(null);
 
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
 
@@ -134,7 +138,11 @@ export function MemoryPanel({
     isDeleting: (item) =>
       deletion.isPending && toDelete?.kind === item.kind && toDelete.id === item.id,
     onCopy: (item) => void copy(memoryText(item.content)),
-    onDelete: canDelete ? (item) => setToDelete({ kind: item.kind, id: item.id }) : undefined,
+    onDelete: (item) =>
+      !isRunView && grantsInRowSpace(item.spaceId, "persistence:delete")
+        ? () => setToDelete({ kind: item.kind, id: item.id, spaceId: item.spaceId })
+        : undefined,
+    spanning,
   });
 
   const selectedTypeLabel =
@@ -194,13 +202,16 @@ export function MemoryPanel({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-muted-foreground text-sm">{selectedTypeLabel}</span>
               <ActorBadge actor_type={selected.actor_type} actor_id={selected.actor_id} />
+              {spanning && (
+                <SpaceNameOf spaceId={selected.spaceId} className="text-muted-foreground" />
+              )}
               {selected.updatedAt && (
                 <span className="text-muted-foreground ml-auto text-xs">
                   {formatDateField(selected.updatedAt, "datetime")}
                 </span>
               )}
             </div>
-            <pre className="bg-muted/40 max-h-[60vh] overflow-auto rounded-md p-4 text-sm whitespace-pre-wrap">
+            <pre className="bg-muted/40 max-h-[60dvh] overflow-auto rounded-md p-4 text-sm whitespace-pre-wrap">
               {memoryText(selected.content)}
             </pre>
           </div>
@@ -210,7 +221,7 @@ export function MemoryPanel({
         open={toDelete !== null}
         onClose={() => setToDelete(null)}
         onConfirm={() => {
-          if (toDelete) deletion.mutate(toDelete.id, { onSuccess: () => setToDelete(null) });
+          if (toDelete) deletion.mutate(toDelete, { onSuccess: () => setToDelete(null) });
         }}
         title={t("detail.memoryDeleteTitle")}
         description={t("detail.memoryDeleteConfirm")}

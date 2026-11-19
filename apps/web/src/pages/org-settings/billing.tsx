@@ -28,9 +28,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 // Keyed on the status enum the spec declares, not on `string`: a status added
-// to `EeBillingAccount.status` without an i18n key fails to compile here
+// to `BillingAccount.status` without an i18n key fails to compile here
 // instead of rendering the raw key.
-const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], string> = {
+const STATUS_I18N: Record<components["schemas"]["BillingAccount"]["status"], string> = {
   past_due: "billing.statusPastDue",
   unpaid: "billing.statusUnpaid",
   paused: "billing.statusPaused",

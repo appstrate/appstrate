@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OpenAPI 3.1 contribution for the EE module.
+ * OpenAPI 3.1 contribution for the billing module.
  *
  * Surfaced through `AppstrateModule.openApiPaths()` / `openApiTags()` /
  * `openApiComponentSchemas()` so the assembled platform spec exposes the
- * billing endpoints when EE is loaded. Disabled deployments contribute
+ * billing endpoints when the billing module is loaded. Disabled deployments contribute
  * nothing — the zero-footprint invariant holds.
  */
 
 import { CHECKOUT_PLAN_IDS, PLAN_IDS } from "./config.ts";
 
-const billingAccountSchemaRef = { $ref: "#/components/schemas/EeBillingAccount" } as const;
-const billingPlanSchemaRef = { $ref: "#/components/schemas/EeBillingPlan" } as const;
-const billingUpgradePlanRef = { $ref: "#/components/schemas/EeBillingUpgradePlan" } as const;
-const checkoutPlanIdRef = { $ref: "#/components/schemas/EeCheckoutPlanId" } as const;
-// EE errors use the platform's shared RFC 9457 Problem Details schema
+const billingAccountSchemaRef = { $ref: "#/components/schemas/BillingAccount" } as const;
+const billingPlanSchemaRef = { $ref: "#/components/schemas/BillingPlan" } as const;
+const billingUpgradePlanRef = { $ref: "#/components/schemas/BillingUpgradePlan" } as const;
+const checkoutPlanIdRef = { $ref: "#/components/schemas/BillingCheckoutPlanId" } as const;
+// Billing errors use the platform's shared RFC 9457 Problem Details schema
 // (contributed by core), so the billing surface matches the rest of the API.
 const errorProblemRef = { $ref: "#/components/schemas/ProblemDetail" } as const;
-const billingManagerSchemaRef = { $ref: "#/components/schemas/EeBillingManager" } as const;
-const billingManagerListRef = { $ref: "#/components/schemas/EeBillingManagerList" } as const;
-const billingContactSchemaRef = { $ref: "#/components/schemas/EeBillingContact" } as const;
+const billingManagerSchemaRef = { $ref: "#/components/schemas/BillingManager" } as const;
+const billingManagerListRef = { $ref: "#/components/schemas/BillingManagerList" } as const;
+const billingContactSchemaRef = { $ref: "#/components/schemas/BillingContact" } as const;
 
 export function openApiTags() {
   return [
@@ -33,13 +33,13 @@ export function openApiTags() {
 
 export function openApiComponentSchemas(): Record<string, unknown> {
   return {
-    EeCheckoutPlanId: {
+    BillingCheckoutPlanId: {
       type: "string",
       enum: [...CHECKOUT_PLAN_IDS],
       description:
-        "A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `EeBillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.",
+        "A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `BillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.",
     },
-    EeBillingPlan: {
+    BillingPlan: {
       type: "object",
       required: ["id", "name", "price", "credit_quota", "file_storage_bytes"],
       properties: {
@@ -57,15 +57,15 @@ export function openApiComponentSchemas(): Record<string, unknown> {
     // The intersection is what carries the narrowing to a client: a caller that
     // reads `upgrades[i].id` gets a checkout id, not a catalog id, so handing
     // it to `POST /api/billing/checkout` needs no guard on the way.
-    EeBillingUpgradePlan: {
+    BillingUpgradePlan: {
       allOf: [
         billingPlanSchemaRef,
         { type: "object", required: ["id"], properties: { id: checkoutPlanIdRef } },
       ],
       description:
-        "A catalog plan the org can upgrade into — an `EeBillingPlan` whose `id` is narrowed to a checkout target.",
+        "A catalog plan the org can upgrade into — an `BillingPlan` whose `id` is narrowed to a checkout target.",
     },
-    EeBillingManager: {
+    BillingManager: {
       type: "object",
       required: ["userId", "added_by", "createdAt"],
       properties: {
@@ -77,7 +77,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         createdAt: { type: "string", format: "date-time" },
       },
     },
-    EeBillingManagerList: {
+    BillingManagerList: {
       type: "object",
       required: ["object", "data", "hasMore"],
       properties: {
@@ -86,7 +86,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         hasMore: { type: "boolean", description: "Always `false`: the set is never paginated." },
       },
     },
-    EeBillingContact: {
+    BillingContact: {
       type: "object",
       required: ["billing_email", "billing_cc"],
       properties: {
@@ -104,7 +104,7 @@ export function openApiComponentSchemas(): Record<string, unknown> {
         },
       },
     },
-    EeBillingAccount: {
+    BillingAccount: {
       type: "object",
       required: [
         "plan",
@@ -167,7 +167,7 @@ export function openApiPaths(): Record<string, unknown> {
   return {
     "/api/billing": {
       get: {
-        operationId: "getEeBillingAccount",
+        operationId: "getBillingAccount",
         tags: ["Billing"],
         summary: "Get the current org's billing account",
         description:
@@ -191,7 +191,7 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/checkout": {
       post: {
-        operationId: "createEeBillingCheckoutSession",
+        operationId: "createBillingCheckoutSession",
         tags: ["Billing"],
         summary: "Create a Stripe Checkout session",
         description:
@@ -260,7 +260,7 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/plan": {
       post: {
-        operationId: "changeEeBillingPlan",
+        operationId: "changeBillingPlan",
         tags: ["Billing"],
         summary: "Change the plan of the existing subscription",
         description:
@@ -314,7 +314,7 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/portal": {
       post: {
-        operationId: "createEeBillingPortalSession",
+        operationId: "createBillingPortalSession",
         tags: ["Billing"],
         summary: "Create a Stripe Customer Portal session",
         description:
@@ -350,7 +350,7 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/managers": {
       get: {
-        operationId: "listEeBillingManagers",
+        operationId: "listBillingManagers",
         tags: ["Billing"],
         summary: "List the organization's billing managers",
         description:
@@ -368,7 +368,7 @@ export function openApiPaths(): Record<string, unknown> {
         },
       },
       put: {
-        operationId: "replaceEeBillingManagers",
+        operationId: "replaceBillingManagers",
         tags: ["Billing"],
         summary: "Replace the organization's billing managers",
         description:
@@ -411,7 +411,7 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/contact": {
       get: {
-        operationId: "getEeBillingContact",
+        operationId: "getBillingContact",
         tags: ["Billing"],
         summary: "Get the billing contact",
         description:
@@ -433,7 +433,7 @@ export function openApiPaths(): Record<string, unknown> {
         },
       },
       patch: {
-        operationId: "updateEeBillingContact",
+        operationId: "updateBillingContact",
         tags: ["Billing"],
         summary: "Update the billing contact",
         description:
@@ -480,7 +480,7 @@ export function openApiPaths(): Record<string, unknown> {
     },
     "/api/billing/webhooks": {
       post: {
-        operationId: "receiveEeBillingStripeWebhook",
+        operationId: "receiveBillingStripeWebhook",
         tags: ["Billing"],
         summary: "Stripe webhook receiver",
         description:

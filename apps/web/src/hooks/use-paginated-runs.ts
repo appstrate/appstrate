@@ -3,7 +3,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
-import { splitPackageRef } from "../lib/package-paths";
 import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
@@ -18,29 +17,26 @@ interface UseRunsOptions {
   scheduleId?: string;
   user?: "me";
   kind?: RunKindFilter;
-  /** `RunStatus`, not `string`: `GET /api/runs` answers 400 on a value outside the enum. Several travel as one comma-separated value. */
+  /** Several travel as one comma-separated value; the route refuses a value outside the enum. */
   status?: RunStatus[];
-  /** Free text, matched server-side against the agent, the error and the run number. */
+  /** Free text matched against the agent, the error and the run number. */
   search?: string;
-  /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
+  /** The caller's unread runs only (the runs page). */
   unread?: boolean;
-  /** Every space the reader reaches instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
+  /** Every space the reader reaches (`GET /api/orgs/{orgId}/runs`); ignored for a schedule's list. */
   spanning?: boolean;
-  /** `false` keeps the query from asking (a badge the shell does not show). */
   enabled?: boolean;
   limit?: number;
 }
 
-/** One page of runs everywhere (runs page, agent tab, schedule tab). */
 const RUNS_PAGE_SIZE = 25;
 
-/** What a runs query holds: the envelopes of the pages loaded so far, newest run first. */
+/** One page of runs, newest first. */
 export type RunsPage = ListEnvelope<EnrichedRun> & { total: number };
 
 /**
- * Whether the previous rows stay on screen while a new key loads: yes while SEARCHING, no when a
- * filter changed. The key ends with `search, limit` (`paginatedRunsKeys.list`); the segments
- * before them are the filters.
+ * Whether the previous rows stay on screen while `currentKey` loads: when only the search
+ * (the key's second-to-last segment, `paginatedRunsKeys.list`) changed.
  */
 export function keepsRunRows(previousKey: readonly unknown[], currentKey: readonly unknown[]) {
   const filters = (key: readonly unknown[]) => [...key.slice(0, -2), key[key.length - 1]];
@@ -51,7 +47,7 @@ export function keepsRunRows(previousKey: readonly unknown[], currentKey: readon
   );
 }
 
-/** The list: every page loaded so far, loaded on with `fetchNextPage`. */
+/** The runs list, paged with `fetchNextPage`. */
 export function useRuns({
   packageId,
   scheduleId,
@@ -65,14 +61,11 @@ export function useRuns({
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
   const { can } = usePermissions();
-  // Every door guards on `requireRunsRead`; a schedule's runs also on `schedules:read`.
   const canRead = canReadRuns(can) && (!scheduleId || can("schedules:read"));
-  // The org route serves the global view only; inside an agent or a schedule the space is theirs.
-  const acrossSpaces = !scheduleId && !packageId && !!spanning;
+  const acrossSpaces = !scheduleId && !!spanning;
   const scope = useListScope(acrossSpaces, canRead);
   const { orgId, keySpace } = scope;
 
-  // One value in the key: an array keys on identity, so a fresh `["failed"]` each render is a new entry.
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
 
@@ -82,7 +75,6 @@ export function useRuns({
       ? `/agents/${packageId}/runs`
       : `/runs`;
 
-  // use-global-run-sync and the run mutations invalidate by the key prefix.
   const currentKey = paginatedRunsKeys.list(
     orgId,
     keySpace,
@@ -121,23 +113,49 @@ export function useRuns({
   });
 }
 
-/** Only the first page (a count, the latest run); the same cache entry as the list of the same shape. */
+/** The first page only; the same cache entry as the list of the same options. */
 export function useFirstRunsPage(options: UseRunsOptions) {
   const query = useRuns(options);
   return { ...query, data: query.data?.pages[0] };
 }
 
-/** One page's question: the hook's filters, the cursor, and the org when it spans its spaces. */
+/** An agent's latest run in every space the reader reaches. */
+export function useAgentLatestRunAcross(packageId: string, { enabled }: { enabled: boolean }) {
+  return useFirstRunsPage({ packageId, spanning: true, limit: 1, enabled });
+}
+
+const IN_FLIGHT_PAGE = 25;
+const IN_FLIGHT: RunStatus[] = ["pending", "running"];
+
+/**
+ * An agent's runs in flight (`pending`, `running`) in every space the reader reaches, and their
+ * `total`. `busyIn(spaceId)`: a run of that space is on the first page, or the page is loading.
+ * Past the first page the delete route refuses, atomically, what this offers.
+ */
+export function useAgentRunsInFlightAcross(packageId: string, { enabled }: { enabled: boolean }) {
+  const query = useFirstRunsPage({
+    packageId,
+    spanning: true,
+    status: IN_FLIGHT,
+    limit: IN_FLIGHT_PAGE,
+    enabled,
+  });
+  const page = query.data;
+  return {
+    ...query,
+    total: page?.total,
+    busyIn: (spaceId: string) => !page || page.data.some((run) => run.spaceId === spaceId),
+  };
+}
+
+/** One page's request: the filters, the cursor, and the org when it spans its spaces. */
 type RunPageRequest = Omit<UseRunsOptions, "spanning" | "enabled"> & {
   limit: number;
   startingAfter?: string;
   acrossOrgId: string | null;
 };
 
-/**
- * One page, from the door the request names. `user`/`kind`/`unread` exist only on the global
- * view; `acrossOrgId` moves it to the org route. Exported for its test.
- */
+/** One page: a schedule's runs, else the current space's runs, or the org's with `acrossOrgId`. Exported for its test. */
 export async function fetchRunPage(
   {
     packageId,
@@ -161,17 +179,10 @@ export async function fetchRunPage(
     });
     return data!;
   }
-  if (packageId) {
-    const { scope, name } = splitPackageRef(packageId);
-    const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-      params: { path: { scope, name }, query: { limit, startingAfter, status, q } },
-      signal,
-    });
-    return data!;
-  }
   const query = {
     limit,
     startingAfter,
+    packageId,
     user,
     kind: kind && kind !== "all" ? kind : undefined,
     status,

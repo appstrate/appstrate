@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaymentReceiptProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { ctaButton, formatDate, interpolate, wrapEeLayout } from "../layout.ts";
+import { ctaButton, formatDate, interpolate, wrapBillingLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -49,6 +49,6 @@ ${invoiceSection}`;
 
   return {
     subject: interpolate(s.subject, vars).replace(/[\r\n]/g, ""),
-    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapBillingLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

@@ -113,7 +113,8 @@ describe("full persona invariants", () => {
     expect(FULL).toMatch(/call `read_file` first/);
     expect(FULL).toMatch(/answer directly from that content/);
     expect(FULL).toMatch(/do NOT launch a run merely to read or analyse it/);
-    expect(FULL).toMatch(/metadata only or binary\/blob data/);
+    expect(FULL).toContain("Use files already supplied to your model directly");
+    expect(FULL).toContain("metadata or a format the model cannot read");
     expect(FULL).toMatch(/When a run is justified.*`context_files`/s);
   });
 
@@ -451,6 +452,14 @@ describe("the integration tools", () => {
     turnCapabilities((p) => PROXY.includes(p), [space(PROXY, true)]),
   );
 
+  it("explains temporary file reads and requires a reproducible source to retain an exact revision", () => {
+    expect(withTools).toContain("read_as_file: true");
+    expect(withTools).toContain("same strong ETag using If-Match");
+    expect(withTools).toContain("ask before saving another version");
+    expect(withTools).toContain("Use a run for Office formats");
+    expect(FULL).not.toContain("read_as_file: true");
+  });
+
   it("are offered only where a turn space holds `mcp:invoke` and a proxy grant and leaves the proxy open", () => {
     const offered = (turn: string[], spaces: ReturnType<typeof space>[]) =>
       turnCapabilities((p) => turn.includes(p), spaces).callsIntegrationTools;
@@ -679,7 +688,7 @@ describe("the persona and the spaces", () => {
 
   describe("the origin space", () => {
     const sentence = (space: string, id: string) =>
-      `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
+      `This conversation's space is ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
 
     it("is a default for a request naming no space, never a pin", () => {
       const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
@@ -694,7 +703,7 @@ describe("the persona and the spaces", () => {
 
     it("is absent from the overview, where the model asks when the request does not say", () => {
       const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
-      expect(out).not.toContain("This conversation was started in");
+      expect(out).not.toContain("This conversation's space is");
       expect(out).toContain(
         "Ask the user which space when the request does not say; never guess it.",
       );

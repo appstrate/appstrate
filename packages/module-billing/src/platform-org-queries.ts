@@ -12,15 +12,15 @@
 import type { ModuleInitContext } from "@appstrate/core/module";
 
 /** The slice of the platform's init context this module keeps after `init()`. */
-export type EeOrgQueries = Pick<ModuleInitContext, "getOrgOwnerEmails" | "getOrgMembers">;
+export type BillingOrgQueries = Pick<ModuleInitContext, "getOrgOwnerEmails" | "getOrgMembers">;
 
-let _queries: EeOrgQueries | null = null;
+let _queries: BillingOrgQueries | null = null;
 
-export function setOrgQueries(queries: EeOrgQueries): void {
+export function setOrgQueries(queries: BillingOrgQueries): void {
   _queries = queries;
 }
 
-export function getOrgQueries(): EeOrgQueries {
-  if (!_queries) throw new Error("EE not initialized. Call init() first.");
+export function getOrgQueries(): BillingOrgQueries {
+  if (!_queries) throw new Error("Billing module not initialized. Call init() first.");
   return _queries;
 }

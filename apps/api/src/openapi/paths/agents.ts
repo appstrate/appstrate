@@ -3,6 +3,129 @@
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 import { ORG_READ_REACH } from "../parameters.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
+
+const persistenceActorId = {
+  name: "actor_id",
+  in: "query",
+  required: false,
+  schema: { type: "string", minLength: 1 },
+  description:
+    "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected.",
+};
+
+/** The query of both persistence reads: one space's, and the one spanning spaces. */
+const PERSISTENCE_QUERY = [
+  {
+    name: "kind",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["pinned", "memory"] },
+    description: "Limit the response to one kind. Omitted → both.",
+  },
+  {
+    name: "actor_type",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["user", "end_user", "shared"] },
+    description:
+      "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
+  },
+  persistenceActorId,
+  {
+    name: "runId",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Narrow `memories` and `pinned` to rows touched during a specific run.",
+  },
+];
+
+/** The `spaceId` every persistence row carries, on both reads. */
+const persistenceRowSpace = {
+  spaceId: {
+    type: "string",
+    pattern: SPACE_ID_RE.source,
+    description: "The space this row belongs to.",
+  },
+};
+
+/** Both persistence reads return the same snapshot and refusals. */
+const persistenceResponses = {
+  "200": {
+    description:
+      "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object"],
+          properties: {
+            object: { type: "string", enum: ["agent_persistence"] },
+            pinned: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "key",
+                  "content",
+                  "runId",
+                  "actor_type",
+                  "actor_id",
+                  "createdAt",
+                  "updatedAt",
+                  "spaceId",
+                ],
+                properties: {
+                  id: { type: "integer" },
+                  key: { type: "string" },
+                  content: {},
+                  runId: { type: ["string", "null"] },
+                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                  actor_id: { type: ["string", "null"] },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  updatedAt: { type: ["string", "null"], format: "date-time" },
+                  ...persistenceRowSpace,
+                },
+              },
+            },
+            memories: {
+              type: "array",
+              items: {
+                type: "object",
+                required: [
+                  "id",
+                  "content",
+                  "runId",
+                  "actor_type",
+                  "actor_id",
+                  "createdAt",
+                  "spaceId",
+                ],
+                properties: {
+                  id: { type: "integer" },
+                  content: { type: "string" },
+                  runId: { type: ["string", "null"] },
+                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                  actor_id: { type: ["string", "null"] },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  pinned: { type: "boolean" },
+                  ...persistenceRowSpace,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "404": { $ref: "#/components/responses/NotFound" },
+};
 
 /** The responses of both agent indexes: one space's, and the one spanning spaces. */
 const agentListResponses = {
@@ -306,112 +429,22 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote. Every row names its `spaceId`. An unknown query parameter, or a `kind` / `actor_type` outside its set, is a `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "kind",
-          in: "query",
-          required: false,
-          schema: { type: "string", enum: ["pinned", "memory"] },
-          description: "Limit the response to one kind. Omitted → both.",
-        },
-        {
-          name: "actor_type",
-          in: "query",
-          required: false,
-          schema: { type: "string", enum: ["user", "end_user", "shared"] },
-          description:
-            "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
-        },
-        {
-          name: "actor_id",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Required when `actor_type` is `user` or `end_user`.",
-        },
-        {
-          name: "runId",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Narrow `memories` and `pinned` to rows touched during a specific run.",
-        },
+        ...PERSISTENCE_QUERY,
       ],
-      responses: {
-        "200": {
-          description:
-            "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object"],
-                properties: {
-                  object: { type: "string", enum: ["agent_persistence"] },
-                  pinned: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: [
-                        "id",
-                        "key",
-                        "content",
-                        "runId",
-                        "actor_type",
-                        "actor_id",
-                        "createdAt",
-                        "updatedAt",
-                      ],
-                      properties: {
-                        id: { type: "integer" },
-                        key: { type: "string" },
-                        content: {},
-                        runId: { type: ["string", "null"] },
-                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actor_id: { type: ["string", "null"] },
-                        createdAt: { type: ["string", "null"], format: "date-time" },
-                        updatedAt: { type: ["string", "null"], format: "date-time" },
-                      },
-                    },
-                  },
-                  memories: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["id", "content", "runId", "actor_type", "actor_id", "createdAt"],
-                      properties: {
-                        id: { type: "integer" },
-                        content: { type: "string" },
-                        runId: { type: ["string", "null"] },
-                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actor_id: { type: ["string", "null"] },
-                        createdAt: { type: ["string", "null"], format: "date-time" },
-                        pinned: { type: "boolean" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
+      responses: persistenceResponses,
     },
     delete: {
       operationId: "deleteAgentPersistence",
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204. An unknown query parameter, or a `kind` / `actor_type` outside its set, is a `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -429,12 +462,7 @@ export const agentsPaths = {
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
         },
-        {
-          name: "actor_id",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-        },
+        persistenceActorId,
       ],
       responses: {
         "200": {
@@ -459,10 +487,28 @@ export const agentsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
+    },
+  },
+  "/api/orgs/{orgId}/agents/{scope}/{name}/persistence": {
+    get: {
+      operationId: "listOrgAgentPersistence",
+      tags: ["Agents"],
+      summary: "List an agent's persistence across the organization's spaces",
+      description:
+        "Read-only: the agent's pinned slots and memories in every space of the organization where the caller holds `persistence:read` and the space reads the agent (homed, placed or shipped with the deployment), each row naming its `spaceId`. The query and the actor partition are those of `GET /api/agents/{scope}/{name}/persistence`, judged per space: where the caller holds `persistence:delete` they see every actor's rows (or the `actor_type` they name), elsewhere their own actor scope plus the shared rows. Pinned slots come newest update first and memories oldest first, across spaces. `404` when no such space reads the agent. An inline run's shadow agent is not served here. " +
+        ORG_READ_REACH,
+      parameters: [
+        { $ref: "#/components/parameters/OrgIdPath" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        ...PERSISTENCE_QUERY,
+      ],
+      responses: persistenceResponses,
     },
   },
   "/api/agents/{scope}/{name}/persistence/memories/{id}": {

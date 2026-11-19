@@ -11,7 +11,7 @@ import { describe, expect, it } from "bun:test";
 
 const SCRIPT = new URL("../../src/scripts/repair-account.ts", import.meta.url).pathname;
 
-const EE_ENV_KEYS = [
+const BILLING_ENV_KEYS = [
   "DATABASE_URL",
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
@@ -19,10 +19,10 @@ const EE_ENV_KEYS = [
   "STRIPE_PRICE_ID_PRO",
 ];
 
-function envWithoutEeVars(): Record<string, string> {
+function envWithoutBillingVars(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !EE_ENV_KEYS.includes(key)) env[key] = value;
+    if (value !== undefined && !BILLING_ENV_KEYS.includes(key)) env[key] = value;
   }
   return env;
 }
@@ -32,7 +32,7 @@ describe("repair:account CLI", () => {
     const proc = Bun.spawn([process.execPath, "run", SCRIPT], {
       stdout: "pipe",
       stderr: "pipe",
-      env: envWithoutEeVars(),
+      env: envWithoutBillingVars(),
     });
 
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -49,7 +49,7 @@ describe("repair:account CLI", () => {
     const proc = Bun.spawn([process.execPath, "run", SCRIPT, "org-without-an-email"], {
       stdout: "pipe",
       stderr: "pipe",
-      env: envWithoutEeVars(),
+      env: envWithoutBillingVars(),
     });
 
     expect(await proc.exited).toBe(2);

@@ -27,7 +27,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
@@ -35,6 +35,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { useLatest } from "./use-latest.ts";
+import { recordUploadResolutions } from "./upload.ts";
 import { Thread } from "./thread.tsx";
 import { createMessageQueue } from "./message-queue.ts";
 import {
@@ -61,8 +62,10 @@ export type {
   ChatTransport,
   GetHeaders,
   OpenFile,
+  OpenFileTarget,
   RenderSpaces,
   SelectConversation,
+  SpaceChoiceMenu,
 } from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
@@ -90,7 +93,14 @@ import {
   type ConversationCreation,
 } from "./chat-route.ts";
 import { useConversationLimit } from "./conversation-limit.ts";
-import { ConversationScopeProvider, useConversationScope } from "./conversation-scope.ts";
+import {
+  AttachTargetProvider,
+  ConversationScopeProvider,
+  useAttachTarget,
+  useConversationAttachTarget,
+  turnSpacesOf,
+  useConversationScope,
+} from "./conversation-scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -187,10 +197,8 @@ export interface ChatPageProps {
   can: ChatCan;
   /** The caller's grants in a named space (see `ChatHost`). Pass a stable function. */
   canIn: ChatHost["canIn"];
-  /** The spaces the chat acts in (see `ChatHost`). Pass a stable array. */
+  /** The spaces the chat acts in, `null` until known (see `ChatHost`). Pass a stable array. */
   actingSpaceIds: ChatHost["actingSpaceIds"];
-  /** The host's working space, where an upload lands (see `ChatHost`). */
-  workingSpaceId: ChatHost["workingSpaceId"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -207,6 +215,8 @@ export interface ChatPageProps {
   linkInSpace: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
   useSpaceLabelOf: ChatHost["useSpaceLabelOf"];
+  /** The host's menu of spaces (see `ChatHost`). Pass a stable component. */
+  SpaceChoiceMenu: ChatHost["SpaceChoiceMenu"];
 }
 
 export function ChatPage({
@@ -223,7 +233,6 @@ export function ChatPage({
   can,
   canIn,
   actingSpaceIds,
-  workingSpaceId,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -232,6 +241,7 @@ export function ChatPage({
   renderSpaces,
   linkInSpace,
   useSpaceLabelOf,
+  SpaceChoiceMenu,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -331,7 +341,6 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
-      workingSpaceId,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -340,6 +349,7 @@ export function ChatPage({
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
+      SpaceChoiceMenu,
     }),
     [
       onOpenFile,
@@ -349,7 +359,6 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
-      workingSpaceId,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -358,17 +367,8 @@ export function ChatPage({
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
+      SpaceChoiceMenu,
     ],
-  );
-
-  // File attachments: the composer stages picked files through the HOST uploader
-  // and sends them as `upload://` file parts the server materializes into
-  // durable files. Built HERE (where the host props land) and handed down as
-  // a single prop — its only consumer is the runtime mounted two components
-  // below, in this same file, so it needs no context hop.
-  const attachments = useMemo(
-    () => createChatAttachmentAdapter({ upload: uploadFile, t }),
-    [uploadFile, t],
   );
 
   // Built once per catalog/selection change, NOT per `ChatPage` render: this
@@ -420,7 +420,7 @@ export function ChatPage({
               isPersisted={isPersisted}
               initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
               onConversationChange={onConversationChange}
-              attachments={attachments}
+              uploadFile={uploadFile}
               composerSlot={composerSlot}
               authorsPackages={authorsPackages}
               canPinSkills={canPinSkills(can)}
@@ -443,8 +443,8 @@ interface ConversationProps {
   isPersisted: boolean;
   initialComposerDraft?: string;
   onConversationChange?: SelectConversation;
-  /** Composer attachment adapter, built once by `ChatPage` from the host props. */
-  attachments: AttachmentAdapter;
+  /** The host's uploader, which the conversation's attachment adapter stages files through. */
+  uploadFile: UploadFile;
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
   canPinSkills: boolean;
@@ -470,9 +470,9 @@ interface ConversationProps {
  * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
  * `isPersisted`, the `server*` / `stored*` fields of the active row), a host
- * value the host memoises (`onConversationChange`, and `transport`, rebuilt
- * when the list filter changes), or a `useMemo` product of `ChatPage`
- * (`attachments`, `composerSlot`), so a list refetch that leaves the active row
+ * value the host memoises (`onConversationChange`, `uploadFile`, and `transport`,
+ * rebuilt when the list filter changes), or a `useMemo` product of `ChatPage`
+ * (`composerSlot`), so a list refetch that leaves the active row
  * untouched is a no-op here.
  */
 const Conversation = memo(function Conversation({
@@ -515,6 +515,8 @@ const Conversation = memo(function Conversation({
     selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
     generating: rest.serverGenerating === true,
   });
+  // The space a file goes to (`attachAvailability`).
+  const attachTarget = useConversationAttachTarget(scope, transport?.spaceId ?? null);
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
@@ -551,6 +553,7 @@ const Conversation = memo(function Conversation({
       <ConversationSkeleton
         label={t("conversation.loading")}
         placeholder={canWrite ? t("composer.placeholder") : null}
+        disclaimer={t("thread.disclaimer")}
       />
     );
   }
@@ -562,17 +565,19 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <ConversationInner
-        id={id}
-        transport={transport}
-        isPersisted={persistedAtMount}
-        initialMessages={initialMessages}
-        composerTools={tools}
-        composerSlot={composerSlot}
-        getChosenSkills={getChosenSkills}
-        getCreation={getCreation}
-        {...rest}
-      />
+      <AttachTargetProvider value={attachTarget}>
+        <ConversationInner
+          id={id}
+          transport={transport}
+          isPersisted={persistedAtMount}
+          initialMessages={initialMessages}
+          composerTools={tools}
+          composerSlot={composerSlot}
+          getChosenSkills={getChosenSkills}
+          getCreation={getCreation}
+          {...rest}
+        />
+      </AttachTargetProvider>
     </ConversationScopeProvider>
   );
 });
@@ -609,7 +614,7 @@ function ConversationInner({
   isPersisted,
   initialComposerDraft,
   onConversationChange,
-  attachments,
+  uploadFile,
   composerTools,
   composerSlot,
   serverGenerating,
@@ -627,9 +632,30 @@ function ConversationInner({
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
+  const { t, actingSpaceIds, useSpaceLabelOf } = useChatHost();
+  const scope = useConversationScope();
+  // File attachments: the composer stages picked files through the HOST uploader, into the
+  // space each was added in, as `upload://` file parts the server materializes into durable
+  // files. A file whose space the turn no longer reads fails instead (`turnSpacesOf`).
+  const attachTarget = useAttachTarget();
+  const forgetAttachPick = attachTarget.forget;
+  const getAttachSpaceId = useLatest(attachTarget.spaceId);
+  const getTurnSpaces = useLatest(turnSpacesOf(scope, actingSpaceIds));
+  const getSpaceLabelOf = useLatest(useSpaceLabelOf());
+  const attachments = useMemo(
+    () =>
+      createChatAttachmentAdapter({
+        upload: uploadFile,
+        t,
+        spaceOf: getAttachSpaceId,
+        turnSpaces: getTurnSpaces,
+        spaceLabelOf: (spaceId) => getSpaceLabelOf()(spaceId),
+      }),
+    [uploadFile, t, getAttachSpaceId, getTurnSpaces, getSpaceLabelOf],
+  );
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
-  const getScope = useLatest(useConversationScope());
+  const getScope = useLatest(scope);
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
   // The seed, frozen: `useChat` reads it once.
@@ -664,8 +690,10 @@ function ConversationInner({
         getTransport,
         headers: buildHeaders,
         // Read at request time, like the model above, for the same reason.
-        body: ({ id: chatId, messages, body }) =>
-          turnBody({
+        body: ({ id: chatId, messages, body }) => {
+          // The turn is sent: a space picked for its files does not carry into the next one.
+          forgetAttachPick();
+          return turnBody({
             body,
             id: chatId,
             messages,
@@ -674,9 +702,10 @@ function ConversationInner({
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
             skills: getChosenSkills(),
             creation: getCreation(),
-          }),
+          });
+        },
       }),
-    [buildHeaders, getChosenSkills, getCreation, getTransport],
+    [buildHeaders, getChosenSkills, getCreation, getTransport, forgetAttachPick],
   );
 
   const chat = useChat({
@@ -705,6 +734,8 @@ function ConversationInner({
     // (`ReactChatState.replaceMessage`) — this only bounds how often the
     // thread re-renders and re-parses on top of that.
     throttle: 16,
+    // The stored file each just-sent attachment became, so its chip opens before a reload.
+    onData: recordUploadResolutions,
   });
 
   // History ↔ resume self-heal: the history GET and the resume GET are both

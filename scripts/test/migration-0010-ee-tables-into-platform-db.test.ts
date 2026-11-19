@@ -41,11 +41,11 @@ const SUFFIX = Math.random().toString(36).slice(2, 10);
  * script under test uses. This file is Apache-2.0 and the module is not: it
  * runs the module's code, it does not name it in a literal specifier.
  */
-async function migrateEeDb(url: string): Promise<void> {
+async function migrateBillingDb(url: string): Promise<void> {
   const db = (await import(resolve(MODULE_ROOT, "src/db.ts"))) as {
-    migrateEeDb: (databaseUrl: string) => Promise<void>;
+    migrateBillingDb: (databaseUrl: string) => Promise<void>;
   };
-  await db.migrateEeDb(url);
+  await db.migrateBillingDb(url);
 }
 
 const ORG_A = "00000000-0000-4000-a000-00000000aa01";
@@ -187,7 +187,7 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
     bootedTargetUrl = await createDatabase("ee_booted_dst");
     bootedDataTargetUrl = await createDatabase("ee_booted_data_dst");
 
-    await migrateEeDb(sourceUrl);
+    await migrateBillingDb(sourceUrl);
     source = new SQL(sourceUrl);
     target = new SQL(targetUrl);
     legacy = new SQL(legacyUrl);
@@ -195,11 +195,11 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
     refusalTarget = new SQL(refusalTargetUrl);
     unmigrated = new SQL(unmigratedUrl);
 
-    // Two targets the module has already booted against: `migrateEeDb` ran and
+    // Two targets the module has already booted against: `migrateBillingDb` ran and
     // `ensureCursorSeeded` INSERTed the singleton watermark. The second also
     // holds a billing account, which is data no copy may walk over.
-    await migrateEeDb(bootedTargetUrl);
-    await migrateEeDb(bootedDataTargetUrl);
+    await migrateBillingDb(bootedTargetUrl);
+    await migrateBillingDb(bootedDataTargetUrl);
     bootedTarget = new SQL(bootedTargetUrl);
     bootedDataTarget = new SQL(bootedDataTargetUrl);
     for (const db of [bootedTarget, bootedDataTarget]) {

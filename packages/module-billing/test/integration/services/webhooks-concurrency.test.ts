@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { billingAccounts, stripeEvents } from "../../../drizzle/schema.ts";
 import { handleWebhook } from "../../../src/stripe/webhooks.ts";
-import { getEeDb, truncateEeTables } from "../../helpers/db.ts";
+import { getBillingDb, truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { mockStorageLimitCalls, resetMockStorageLimits } from "../../helpers/mock-platform.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 import {
   defaultSubscriptionResponse,
   generateWebhookEvent,
@@ -17,7 +17,7 @@ import {
   setNextError,
 } from "../../helpers/stripe.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000041";
 const subscriptionId = "sub_concurrent_cancellation";
@@ -53,7 +53,7 @@ function attachObject(type: string) {
 }
 
 async function expectCancelled() {
-  const [account] = await getEeDb()
+  const [account] = await getBillingDb()
     .select()
     .from(billingAccounts)
     .where(eq(billingAccounts.orgId, orgId));
@@ -67,7 +67,7 @@ async function expectCancelled() {
 
 describe("Stripe cancellation versus subscription attachment", () => {
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
     resetMockStorageLimits();
     await seedBillingAccount({
@@ -116,7 +116,7 @@ describe("Stripe cancellation versus subscription attachment", () => {
         // committing (the regression), or its real PostgreSQL advisory-lock wait.
         const deadline = Date.now() + 5000;
         while (!deleted) {
-          const [row] = await getEeDb().execute<{ waiting: boolean }>(sql`
+          const [row] = await getBillingDb().execute<{ waiting: boolean }>(sql`
             SELECT EXISTS (SELECT 1 FROM pg_locks
               WHERE locktype = 'advisory' AND NOT granted
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())) AS waiting
@@ -131,7 +131,7 @@ describe("Stripe cancellation versus subscription attachment", () => {
         await Promise.all([attach, deletion]);
       }
       await expectCancelled();
-      const claims = await getEeDb().select().from(stripeEvents);
+      const claims = await getBillingDb().select().from(stripeEvents);
       expect(claims).toHaveLength(2);
       expect(claims.every((claim) => claim.status === "done")).toBe(true);
     });
@@ -146,14 +146,14 @@ describe("Stripe cancellation versus subscription attachment", () => {
     it(`${type}: failed retrieval releases the transaction lock and allows redelivery`, async () => {
       setNextError(400, { error: { type: "invalid_request_error", message: "retrieve failed" } });
       await expect(deliver(type, attachObject(type))).rejects.toThrow("retrieve failed");
-      expect(await getEeDb().select().from(stripeEvents)).toHaveLength(0);
+      expect(await getBillingDb().select().from(stripeEvents)).toHaveLength(0);
       expect(mockStorageLimitCalls).toHaveLength(0);
 
       await deliver("customer.subscription.deleted", { ...subscription(), status: "canceled" });
       setSubscriptionResponse({ ...subscription(), status: "canceled" });
       await deliver(type, attachObject(type));
       await expectCancelled();
-      const claims = await getEeDb().select().from(stripeEvents);
+      const claims = await getBillingDb().select().from(stripeEvents);
       expect(claims).toHaveLength(2);
       expect(claims.every((claim) => claim.status === "done")).toBe(true);
     });

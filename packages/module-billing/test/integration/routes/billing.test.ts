@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import { truncateEeTables } from "../../helpers/db.ts";
+import { truncateBillingTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import {
   resetStripeMock,
@@ -10,12 +10,12 @@ import {
   setSubscriptionResponse,
   requests,
 } from "../../helpers/stripe.ts";
-import { flushEeRedis } from "../../helpers/redis.ts";
+import { flushBillingRedis } from "../../helpers/redis.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { getPlans } from "../../../src/config.ts";
-import { useEeTestSeams } from "../../helpers/setup.ts";
+import { useBillingTestSeams } from "../../helpers/setup.ts";
 
-useEeTestSeams();
+useBillingTestSeams();
 
 const WEBHOOK_SECRET = "whsec_test_secret_for_webhook_verification";
 
@@ -32,9 +32,9 @@ describe("billing routes", () => {
   }
 
   beforeEach(async () => {
-    await truncateEeTables();
+    await truncateBillingTables();
     resetStripeMock();
-    await flushEeRedis();
+    await flushBillingRedis();
   });
 
   describe("GET /api/billing", () => {

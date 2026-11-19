@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaymentFailedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { ctaButton, interpolate, wrapEeLayout } from "../layout.ts";
+import { ctaButton, interpolate, wrapBillingLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -65,6 +65,6 @@ ${ctaButton(s.button, updateUrl)}`;
 
   return {
     subject: s.subject,
-    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapBillingLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

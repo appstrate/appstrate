@@ -65,7 +65,7 @@ export function OnboardingMembersStep() {
 
         {/* Pending invitations — scrollable */}
         {invitations.length > 0 && (
-          <div className="flex max-h-[30vh] flex-col gap-2 overflow-y-auto">
+          <div className="flex max-h-[30dvh] flex-col gap-2 overflow-y-auto">
             <div className="text-muted-foreground text-sm font-medium">
               {t("onboarding.pendingInvitations")}
             </div>

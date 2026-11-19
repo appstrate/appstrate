@@ -201,7 +201,7 @@ appstrate/
 │   ├── emails/               # @appstrate/emails — email template registry + module overrides
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
-│   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, ee are opt-in
+│   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, billing are opt-in
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
 ├── system-packages/           # System package `.afps` archives — integrations (a local integration carries its MCP server), loaded at boot
@@ -397,4 +397,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, conventions, and
 
 ## License
 
-[Apache License 2.0](./LICENSE). Everything in this repository is Apache-2.0; the root `ee/` directory is reserved for future enterprise features under a commercial licence. What may go there, and the commitments that hold either way: [Licensing](https://docs.appstrate.com/resources/licensing).
+[Apache License 2.0](./LICENSE). Everything in this repository is Apache-2.0. What a future enterprise edition may contain, and the commitments that hold either way: [Licensing](https://docs.appstrate.com/resources/licensing).

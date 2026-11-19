@@ -44,28 +44,12 @@ describe("verify-module-isolation as a process", () => {
     expect(verbose.out).toContain("scanned: scripts/test/verify-module-isolation.test.ts");
   });
 
-  it("keeps the three directions apart in its count line", () => {
-    const counts =
-      /— (\d+) files across (\d+) modules, (\d+) platform files[^,]*, (\d+) tracked files/.exec(
-        verbose.out,
-      );
+  it("keeps the two directions apart in its count line", () => {
+    const counts = /— (\d+) files across (\d+) modules, (\d+) platform files/.exec(verbose.out);
     expect(counts).not.toBeNull();
     expect(Number(counts![1])).toBeGreaterThan(0);
     expect(Number(counts![2])).toBeGreaterThan(0);
     expect(Number(counts![3])).toBeGreaterThan(0);
-    // The commercial pass reads every tracked source file, so it is necessarily
-    // the widest of the three — a narrowing edit shows up here as an inversion.
-    expect(Number(counts![4])).toBeGreaterThan(Number(counts![3]));
-  });
-
-  it("reads the trees the other two directions skip — a test tree and the SPA", () => {
-    // The blind spot #1373 named: `apps/api/test/**` sits under no platform
-    // scan root at all, and `apps/web` is waived from the core→module rule, so
-    // a static `@appstrate/module-billing` import in either passed every gate.
-    expect(verbose.out).toContain(
-      "scanned: apps/api/test/unit/module-isolation-acceptances.test.ts",
-    );
-    expect(verbose.out).toContain("scanned: apps/web/src/hooks/use-billing.ts");
   });
 
   it("names each file once, however many passes read it", () => {

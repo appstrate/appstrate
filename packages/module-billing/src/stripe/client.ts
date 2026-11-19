@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Stripe from "stripe";
-import { getEeEnv } from "../env.ts";
+import { getBillingEnv } from "../env.ts";
 
 /**
  * The Stripe API version every request in this module is rendered at.
@@ -19,7 +19,7 @@ let _stripe: Stripe | null = null;
 
 export function getStripe(): Stripe {
   if (!_stripe) {
-    _stripe = new Stripe(getEeEnv().STRIPE_SECRET_KEY, {
+    _stripe = new Stripe(getBillingEnv().STRIPE_SECRET_KEY, {
       apiVersion: STRIPE_API_VERSION,
       // Mock-host redirect is a TEST-ONLY hook. Gating on NODE_ENV keeps an
       // operator-set STRIPE_MOCK_HOST from silently rerouting production Stripe

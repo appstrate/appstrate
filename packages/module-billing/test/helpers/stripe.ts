@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Stripe mock server and webhook helpers for EE module tests.
+ * Stripe mock server and webhook helpers for billing module tests.
  *
  * Uses Bun.serve on port 0 (OS-assigned) to mock all Stripe API endpoints
- * used by the EE billing module. Supports response overrides, error
+ * used by the billing module. Supports response overrides, error
  * injection, and request recording for assertions.
  */
 

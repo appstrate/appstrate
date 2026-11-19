@@ -12,7 +12,11 @@ import {
   VERSION_SELECTOR_PUBLISHED,
 } from "../services/agent-version-resolver.ts";
 import { getLatestVersionId } from "../services/package-versions.ts";
-import { isPackageActiveHere, type PlacementAuthority } from "../services/space-packages.ts";
+import {
+  isPackageActiveHere,
+  packagePlacementsInSpaces,
+  type PlacementAuthority,
+} from "../services/space-packages.ts";
 import { activeHereSql } from "../services/package-activation.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import {
@@ -35,7 +39,7 @@ import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./v
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import { callerReachableSpaces, unnameableSpace, type ReachableSpace } from "./reachable-spaces.ts";
-import { placementRowJoin } from "../services/package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
@@ -152,31 +156,45 @@ export function placementGrantsRead(
   return false;
 }
 
-/**
- * "Is this package readable from THIS space?" — VISIBILITY, not authorization:
- * the caller's `<type>:read` is a separate guard (the route's `readGuard`, or
- * `requirePackageReadPermission` where the type comes from the row). System
- * packages are readable from every space, and like `isPackageActiveHere` this does
- * not filter `orgId`: its callers add the org boundary on the row they read next.
- */
+/** Placement only. The caller checks the org boundary and the required permission. */
 export async function isPackageReadableInSpace(
   spaceId: string,
   packageId: string,
 ): Promise<boolean> {
   const [row] = await db
-    .select({
-      source: packages.source,
-      homeSpaceId: packages.homeSpaceId,
-      rowHere: spacePackages.packageId,
-    })
+    .select({ id: packages.id })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-    .where(and(eq(packages.id, packageId), notEphemeralFilter()))
+    .where(and(eq(packages.id, packageId), notEphemeralFilter(), placementReadFilter(spaceId)))
     .limit(1);
-  if (!row) return false;
-  if (row.source === "system") return true;
-  const here = new Set([spaceId]);
-  return placementGrantsRead(row, row.rowHere ? here : [], here);
+  return !!row;
+}
+
+/** The permission half of package reach, shared by the catalog, home and typed detail. */
+function spaceIdsWithSight(type: PackageType, accessible: readonly PackageAccessSpace[]) {
+  const sight = packageSightPermissions(type);
+  return accessible
+    .filter((space) => sight.some((permission) => space.permissions.has(permission)))
+    .map((space) => space.id);
+}
+
+/** All detail placements the caller can read, and the active subset. */
+export async function packageDetailSpaces(
+  orgId: string,
+  packageId: string,
+  type: PackageType,
+  accessible: readonly PackageAccessSpace[],
+) {
+  const rows = await packagePlacementsInSpaces(
+    orgId,
+    packageId,
+    spaceIdsWithSight(type, accessible),
+    type,
+  );
+  return {
+    read_space_ids: rows.map((row) => row.id),
+    space_ids: rows.filter((row) => row.active).map((row) => row.id),
+  };
 }
 
 /**
@@ -333,28 +351,12 @@ function assertPackageIsReachable(
   placedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): void {
-  if (packageReadSpaces(pkg, placedIn, accessible).length === 0) {
+  const readable = new Set(spaceIdsWithSight(pkg.type, accessible));
+  if (
+    !(isSystemPackageRow(pkg) ? readable.size > 0 : placementGrantsRead(pkg, placedIn, readable))
+  ) {
     throw notFound(`Package '${packageId}' not found`);
   }
-}
-
-/**
- * Every space of the caller's reach this package is READ from — the type's
- * sight permission held there (`packageSightPermissions`) and the placement
- * granting it there ({@link placementGrantsRead}); every such space for a
- * system package, which the platform places everywhere. Reachable = non-empty.
- */
-function packageReadSpaces(
-  pkg: PackageAccessRow,
-  placedIn: readonly string[],
-  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): PackageAccessSpace[] {
-  const opens = packageSightPermissions(pkg.type);
-  return accessible.filter(
-    (space) =>
-      opens.some((permission) => space.permissions.has(permission)) &&
-      (isSystemPackageRow(pkg) || placementGrantsRead(pkg, placedIn, new Set([space.id]))),
-  );
 }
 
 /**
@@ -377,18 +379,20 @@ export async function resolvePackageHome(
   packageId: string,
 ): Promise<PackageHome | null> {
   const orgId = c.get("orgId");
-  const [pkg, accessible, placedIn] = await Promise.all([
+  const [pkg, accessible] = await Promise.all([
     findPackageRow(packageId, orgId),
     packageAccessSpaces(c),
-    loadPlacementSpaces(packageId, orgId),
   ]);
   if (!pkg) return null;
-  const readSpaces = packageReadSpaces(pkg, placedIn, accessible);
-  if (readSpaces.length === 0) return null;
+  const { read_space_ids: readSpaceIds } = await packageDetailSpaces(
+    orgId,
+    packageId,
+    pkg.type,
+    accessible,
+  );
+  if (!readSpaceIds.length) return null;
   const rank = (id: string) => (id === pkg.homeSpaceId ? 0 : 1);
-  const readSpaceIds = readSpaces
-    .map((space) => space.id)
-    .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
+  readSpaceIds.sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
   return {
     id: pkg.id,
     type: pkg.type,

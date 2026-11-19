@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CancellationConfirmedProps, RenderedEmail, BillingEmailContext } from "../types.ts";
-import { formatDate, interpolate, wrapEeLayout } from "../layout.ts";
+import { formatDate, interpolate, wrapBillingLayout } from "../layout.ts";
 
 const strings = {
   fr: {
@@ -38,6 +38,6 @@ export function renderCancellationConfirmedEmail(
 
   return {
     subject: s.subject,
-    html: wrapEeLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
+    html: wrapBillingLayout({ locale, content, footer: s.footer, orgName: context?.orgName }),
   };
 }

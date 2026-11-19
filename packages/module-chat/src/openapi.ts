@@ -259,7 +259,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Rename a chat session or change its limit",
       description:
-        "`title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with. At least one field is required.",
+        "`title` renames the conversation. `restricted: true` limits it to its origin space, which the caller must be able to act in; `false` lifts the limit and keeps the origin. `spaceId` sets the origin of a conversation without one: once, only together with `restricted: true`, and only to a space the conversation can act in. The conversation is then listed under that space; the spaces it touched before stay recorded. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with.",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -273,8 +273,22 @@ export const chatPaths = {
               properties: {
                 title: { type: "string", minLength: 1, maxLength: 200 },
                 restricted: { type: "boolean" },
+                spaceId: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "The origin space of a conversation without one (with `restricted: true` only).",
+                },
               },
-              minProperties: 1,
+              // `title` or `restricted` (a top-level `anyOf` would read as a union of shapes).
+              if: { not: { properties: { title: {} }, required: ["title"] } },
+              then: { properties: { restricted: {} }, required: ["restricted"] },
+              dependentSchemas: {
+                spaceId: {
+                  properties: { restricted: { const: true } },
+                  required: ["restricted"],
+                },
+              },
               additionalProperties: false,
             },
           },
