@@ -13,6 +13,9 @@ export const KEYBOARD_VIEWPORT_CLASS =
 
 /** Under this, the difference is the browser's toolbars sliding, not a keyboard. */
 const KEYBOARD_MIN_PX = 120;
+// Landscape Safari with its tab and keyboard accessory bars can report even a negative height.
+// Below one editable row, let Safari pan the layout to the caret.
+const MIN_EDITABLE_HEIGHT = 36;
 /** Above this the page is pinch-zoomed, and the visual viewport is smaller on purpose. */
 const ZOOMED_SCALE = 1.01;
 
@@ -32,7 +35,7 @@ export function keyboardViewport(
   viewport: VisualViewportSample,
   layoutHeight: number,
 ): KeyboardViewport | null {
-  if (viewport.scale > ZOOMED_SCALE) return null;
+  if (viewport.scale > ZOOMED_SCALE || viewport.height < MIN_EDITABLE_HEIGHT) return null;
   if (layoutHeight - viewport.height < KEYBOARD_MIN_PX) return null;
   return { height: Math.round(viewport.height), top: Math.max(0, Math.round(viewport.offsetTop)) };
 }

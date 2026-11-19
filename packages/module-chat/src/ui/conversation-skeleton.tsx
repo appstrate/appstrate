@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
-import { DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
+import { COMPOSER_GRID_CLASS, DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
 
 /**
  * A saved conversation while its history loads: the turns it will show, in
@@ -77,19 +77,19 @@ export function ComposerSkeleton({
 }) {
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className="text-muted-foreground flex min-h-9 items-center py-1 text-base">
-        {placeholder}
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          <Skeleton className="size-8 rounded-lg" />
-          <Skeleton className="size-8 rounded-lg" />
-          {limited && <Skeleton className="h-7 w-44 rounded-full" />}
+      <div className={COMPOSER_GRID_CLASS}>
+        <div className="text-muted-foreground flex min-h-9 items-center py-1 text-base [grid-area:input]">
+          {placeholder}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center justify-between gap-2 [grid-area:tools]">
+          <div className="flex items-center gap-1.5">
+            <Skeleton className="size-8 rounded-lg" />
+            <Skeleton className="size-8 rounded-lg" />
+            {limited && <Skeleton className="h-7 w-44 rounded-full" />}
+          </div>
           <Skeleton className="h-[30px] w-32 rounded-md" />
-          <Skeleton className="size-8 rounded-lg" />
         </div>
+        <Skeleton className="size-8 rounded-lg [grid-area:send]" />
       </div>
     </div>
   );

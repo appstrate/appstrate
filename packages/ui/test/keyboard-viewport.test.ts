@@ -33,6 +33,10 @@ describe("keyboardViewport", () => {
     expect(keyboardViewport({ height: 406, offsetTop: 0, scale: 2 }, 812)).toBeNull();
   });
 
+  it.each([-16, 16])("leaves native focus panning in charge when only %i px remain", (height) => {
+    expect(keyboardViewport({ height, offsetTop: 60, scale: 1 }, 292)).toBeNull();
+  });
+
   it("never returns a negative offset", () => {
     expect(keyboardViewport({ height: 478, offsetTop: -3, scale: 1 }, 812)?.top).toBe(0);
   });

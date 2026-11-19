@@ -2,6 +2,8 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 
+test.use({ hasTouch: true });
+
 test("chat fields stay legible in both orientations and the search sheet fits the visual viewport", async ({
   authedPage: page,
   orgOnlyClient,
@@ -38,6 +40,12 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   await expect(composer).toHaveCSS("font-size", "16px");
   await expect(search).toHaveCSS("font-size", "16px");
   await expect(code).toHaveCSS("font-size", "12px");
+  const send = page.getByRole("button", { name: "Envoyer", exact: true });
+  const fieldBox = await composer.boundingBox();
+  const sendBox = await send.boundingBox();
+  if (!fieldBox || !sendBox) throw new Error("Composer controls are missing");
+  expect(sendBox.y).toBeGreaterThanOrEqual(fieldBox.y);
+  expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(fieldBox.y + fieldBox.height);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(code).toHaveCSS("font-size", "14px");

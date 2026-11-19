@@ -2,9 +2,13 @@
 
 // A landscape phone can cross md. Keep both editable fields at 1rem at every width.
 
+// Safari's accessory bar can leave just one line visible in landscape.
+export const COMPOSER_GRID_CLASS =
+  "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 [grid-template-areas:'input_input'_'tools_send'] [@media(pointer:coarse)_and_(orientation:landscape)_and_(max-height:32rem)]:[grid-template-areas:'input_send'_'tools_tools']";
+
 /** The composer's `<textarea>`: compact, borderless, inside the composer card. */
 export const COMPOSER_INPUT_CLASS =
-  "placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
+  "placeholder:text-muted-foreground [grid-area:input] max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
 
 /** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
 export const SEARCH_INPUT_CLASS =

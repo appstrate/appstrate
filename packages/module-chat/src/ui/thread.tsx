@@ -76,6 +76,7 @@ import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
+  COMPOSER_GRID_CLASS,
   COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
   THREAD_FOOTER_CLASS,
@@ -584,25 +585,27 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
-      <ComposerPrimitive.Input
-        rows={1}
-        autoFocus
-        enterKeyHint="send"
-        addAttachmentOnPaste
-        placeholder={t("composer.placeholder")}
-        onKeyDown={(e) => {
-          // While the agent answers the primitive ignores Enter; it queues instead.
-          if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-          if (e.nativeEvent.isComposing) return;
-          e.preventDefault();
-          enqueue();
-        }}
-        className={COMPOSER_INPUT_CLASS}
-      />
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">{tools}</div>
-        <div className="flex shrink-0 items-center gap-2">
+      <div className={COMPOSER_GRID_CLASS}>
+        <ComposerPrimitive.Input
+          rows={1}
+          autoFocus
+          enterKeyHint="send"
+          addAttachmentOnPaste
+          placeholder={t("composer.placeholder")}
+          onKeyDown={(e) => {
+            // While the agent answers the primitive ignores Enter; it queues instead.
+            if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
+            if (e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            enqueue();
+          }}
+          className={COMPOSER_INPUT_CLASS}
+        />
+        <div className="flex min-w-0 items-center justify-between gap-2 [grid-area:tools]">
+          <div className="min-w-0">{tools}</div>
           <div className="min-w-0">{slot}</div>
+        </div>
+        <div className="flex items-center gap-2 [grid-area:send]">
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild disabled={limitPending}>
               <Button
