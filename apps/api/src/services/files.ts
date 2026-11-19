@@ -63,7 +63,7 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { canReadEveryRun, readsRun } from "../lib/run-visibility.ts";
 import type { SpaceGrant } from "../lib/permissions.ts";
-import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
+import { isUniqueViolation, olderThanTimestampCursor, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "@appstrate/core/list-query";
@@ -1781,29 +1781,17 @@ export async function listFilesForActor(
   }
   if (filters.search) conditions.push(ilike(files.name, likeContains(filters.search)));
 
-  if (filters.startingAfter) {
-    const [cursor] = await db
-      .select({ createdAt: files.createdAt, id: files.id })
-      .from(files)
-      .where(and(eq(files.id, filters.startingAfter), readable))
-      .limit(1);
-    // Next page (older rows), DESC order: (createdAt, id) < (cursor.createdAt, cursor.id).
-    // A cursor id that no longer exists, or that the caller cannot read, drops
-    // its clause — the page just starts at the head rather than erroring.
-    if (cursor) {
-      conditions.push(
-        or(
-          lt(files.createdAt, cursor.createdAt),
-          and(eq(files.createdAt, cursor.createdAt), lt(files.id, cursor.id)),
-        )!,
-      );
-    }
-  }
+  const boundary = await olderThanTimestampCursor(
+    files.createdAt,
+    files.id,
+    filters.startingAfter,
+    readable,
+  );
 
   const rows = await db
     .select(fileSelect)
     .from(files)
-    .where(and(...conditions))
+    .where(and(...conditions, boundary))
     .orderBy(desc(files.createdAt), desc(files.id))
     .limit(fetchLimit);
 

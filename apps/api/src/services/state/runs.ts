@@ -49,7 +49,7 @@ import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { scopedWhere } from "../../lib/db-helpers.ts";
+import { olderThanTimestampCursor, scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runReadCondition } from "../../lib/run-visibility.ts";
@@ -1713,26 +1713,13 @@ async function listRunsWithFilter(
   canReadAgentInput: (spaceId: string) => boolean,
 ): Promise<RunListPage> {
   const { limit, startingAfter } = page;
-  // Keyset on the sort tuple `(startedAt DESC, id DESC)`, so rows inserted while
-  // paging never shift a page. A cursor that no longer exists drops its clause:
-  // the page starts at the head instead of erroring.
-  let pageFilter = filter;
-  if (startingAfter) {
-    const [cursor] = await db
-      .select({ startedAt: runs.startedAt, id: runs.id })
-      .from(runs)
-      .where(and(eq(runs.id, startingAfter), cursorScope))
-      .limit(1);
-    if (cursor) {
-      pageFilter = and(
-        filter,
-        or(
-          lt(runs.startedAt, cursor.startedAt),
-          and(eq(runs.startedAt, cursor.startedAt), lt(runs.id, cursor.id)),
-        ),
-      )!;
-    }
-  }
+  const boundary = await olderThanTimestampCursor(
+    runs.startedAt,
+    runs.id,
+    startingAfter,
+    cursorScope,
+  );
+  const pageFilter = and(filter, boundary);
   // `total` counts the whole filtered list (not the part after the cursor); it
   // and the page are independent reads, issued concurrently. Both are
   // tenant-indexed; neither is a seq scan.
