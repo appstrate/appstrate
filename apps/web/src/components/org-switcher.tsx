@@ -184,7 +184,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const enterSpace = useEnterSpace();
   const { isMobile, setOpenMobile } = useSidebar();
   const canCreateOrg = useCanCreateOrg();
-  const viewer = useViewer();
   const overview = useOverviewMode();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -281,18 +280,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     : currentSpace
       ? spaceLabel(currentSpace, t)
       : undefined;
-  // The space's tile is a badge on the organization's, ringed in the trigger's background.
-  // « Tous les espaces » is no space: no badge, its name on the second line says it.
-  const spaceBadge: ReactNode =
-    currentSpace && !overview.on ? (
-      <IdentityTile
-        {...spaceTile(currentSpace, viewer)}
-        className={cn(
-          "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
-          variant === "mobile" ? "ring-background" : "ring-sidebar",
-        )}
-      />
-    ) : null;
   const spaceName: ReactNode = currentContextLabel ? (
     <span className="truncate" title={currentContextLabel}>
       {currentContextLabel}
@@ -330,10 +317,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
           )}
         >
           {/* The organization's tile, the space's as a badge on its corner. */}
-          <span className="relative mr-1 shrink-0">
-            <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
-            {spaceBadge}
-          </span>
+          <OrgSpaceTile
+            ring={variant === "mobile" ? "ring-background" : "ring-sidebar"}
+            className="mr-1"
+          />
           {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
             <span className="truncate font-semibold" title={currentOrg.name}>
@@ -539,5 +526,32 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The organization's tile with the space's as a badge on its corner, ringed in `ring` (the
+ * background it sits on). The switcher's trigger and the chat's phone header draw it alike.
+ * « Tous les espaces » is no space: no badge, the name beside it says it.
+ */
+export function OrgSpaceTile({ ring, className }: { ring: string; className?: string }) {
+  const { currentOrg, loading } = useOrg();
+  const { data: spaces } = useSpaces();
+  const currentSpaceId = useCurrentSpaceId();
+  const viewer = useViewer();
+  const overview = useOverviewMode();
+  if (loading) return <Skeleton className={cn("size-8 shrink-0 rounded-lg", className)} />;
+  if (!currentOrg) return null;
+  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
+  return (
+    <span className={cn("relative shrink-0", className)} aria-hidden="true">
+      <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
+      {currentSpace && !overview.on && (
+        <IdentityTile
+          {...spaceTile(currentSpace, viewer)}
+          className={cn("absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2", ring)}
+        />
+      )}
+    </span>
   );
 }

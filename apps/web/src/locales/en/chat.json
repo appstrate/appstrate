@@ -161,6 +161,7 @@
   "threads.unread": "Unread reply",
   "conversation.notFound.title": "Conversation not found",
   "conversation.notFound.hint": "It does not exist or no longer exists, or it belongs to another account or another space.",
+  "conversation.rename": "Rename the conversation",
   "conversation.loading": "Loading…",
   "threads.empty": "No conversations yet",
   "threads.emptyReadOnly": "You have no conversation to reread.",

@@ -85,3 +85,21 @@ describe("the sidebar in « Tous les espaces »", () => {
     expect(sidebar(true, true)).toContain('href="/catalogue/agent"');
   });
 });
+
+describe("the notification bell on a phone", () => {
+  const render = (product: "studio" | "chat") =>
+    renderInSpace(
+      <SidebarProvider>
+        <AppSidebar product={product} />
+      </SidebarProvider>,
+      { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
+    );
+
+  it("is in the chat's drawer, which has no bell in its header to carry one, and only there", () => {
+    const chat = render("chat");
+    expect(chat).toContain('aria-label="Notifications"');
+    expect(chat).toMatch(/<div class="shrink-0 md:hidden"><[^>]*aria-label="Notifications"/);
+    // Studio's header keeps its own.
+    expect(render("studio")).not.toContain('aria-label="Notifications"');
+  });
+});

@@ -29,12 +29,14 @@ import { createPortal } from "react-dom";
  *   (`ShellHeaderLead`).
  * - `tabs`: the page's tab bar, a second row inside the same band
  *   (`ShellHeaderTabs`).
+ * - `phone`: the chat's own phone header, which replaces the shell's below `md`
+ *   (`ShellHeaderPhone`).
  */
-type HeaderSlotName = "actions" | "lead" | "tabs";
+type HeaderSlotName = "actions" | "lead" | "tabs" | "phone";
 type HeaderSlots = Record<HeaderSlotName, HTMLElement | null>;
 type HeaderSlotSetters = Record<HeaderSlotName, (node: HTMLElement | null) => void>;
 
-const NO_SLOTS: HeaderSlots = { actions: null, lead: null, tabs: null };
+const NO_SLOTS: HeaderSlots = { actions: null, lead: null, tabs: null, phone: null };
 const HeaderSlotsContext = createContext<HeaderSlots>(NO_SLOTS);
 const HeaderSlotSettersContext = createContext<HeaderSlotSetters | null>(null);
 
@@ -43,8 +45,12 @@ export function ShellFrameProvider({ children }: { children: ReactNode }) {
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [lead, setLead] = useState<HTMLElement | null>(null);
   const [tabs, setTabs] = useState<HTMLElement | null>(null);
-  const slots = useMemo(() => ({ actions, lead, tabs }), [actions, lead, tabs]);
-  const setters = useMemo(() => ({ actions: setActions, lead: setLead, tabs: setTabs }), []);
+  const [phone, setPhone] = useState<HTMLElement | null>(null);
+  const slots = useMemo(() => ({ actions, lead, tabs, phone }), [actions, lead, tabs, phone]);
+  const setters = useMemo(
+    () => ({ actions: setActions, lead: setLead, tabs: setTabs, phone: setPhone }),
+    [],
+  );
   return (
     <HeaderSlotSettersContext.Provider value={setters}>
       <HeaderSlotsContext.Provider value={slots}>{children}</HeaderSlotsContext.Provider>
@@ -60,6 +66,14 @@ function HeaderPortal({ slot, children }: { slot: HeaderSlotName; children: Reac
 /** A page's controls for the header's right end, left of the notification bell. */
 export function ShellHeaderActions({ children }: { children: ReactNode }) {
   return <HeaderPortal slot="actions">{children}</HeaderPortal>;
+}
+
+/**
+ * What a page puts in the chat's phone header, between the burger and the right edge (below `md`
+ * only: from `md` up the header is the shell's own, filled through the other slots).
+ */
+export function ShellHeaderPhone({ children }: { children: ReactNode }) {
+  return <HeaderPortal slot="phone">{children}</HeaderPortal>;
 }
 
 /** A page's title block, in the row under the trail. */
