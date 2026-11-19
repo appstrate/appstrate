@@ -110,7 +110,7 @@ export function NotificationContent({
       ) : notifications.length === 0 ? (
         <EmptyState compact icon={Bell} message={t("notifications.empty")} />
       ) : (
-        <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
+        <div className="max-h-[60dvh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
             const { title, status, message, meta, target } = notificationRow(
               notification,
