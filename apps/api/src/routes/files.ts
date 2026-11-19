@@ -70,7 +70,9 @@ export async function respondFileList(c: Context<AppEnv>, orgId: string, grants:
   return c.json(
     await listFilesForActor(orgId, grants, getActor(c), filters, {
       ...fileLifecycleCeiling(c),
-      fileAccess: await requestFileAccess(c),
+      // Only a run's inputs leave the listed spaces; every other row is in `grants`, which then
+      // decides its capabilities as the request's reach would.
+      fileAccess: filters.runId ? await requestFileAccess(c) : { grants },
     }),
   );
 }

@@ -181,7 +181,7 @@ const fileListQueryParameters = [
     required: false,
     schema: { type: "string" },
     description:
-      "Filter to the files of this run: those it produced, plus, for a caller who reads the run, the inputs it consumed, each resolved as a file read by id.",
+      "Filter to the files of this run, for a caller who reads it as its container (its launcher, or `runs:read-all`): those it produced and the inputs it consumed, each input resolved as a file read by id. Anyone else is listed nothing.",
   },
   {
     name: "packageId",

@@ -43,7 +43,7 @@ import { ConversationContextToggle, ConversationSidebar } from "./conversation-s
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
-import { SpaceChoiceDropdown, SpaceChoiceSubmenu } from "../../components/space-choice-menu";
+import { SpaceChoiceSubmenu } from "../../components/space-choice-menu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -239,22 +239,12 @@ export function ChatModulePage() {
   );
 }
 
-/** The chat's « in which space? » menu: the app's own, from a button or a menu entry. */
-const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({
-  variant,
-  label,
-  spaceIds,
-  onPick,
-  trigger,
-  testId,
-}) => {
+/** The chat's « in which space? » menu: the app's own, from a menu entry. */
+const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({ label, spaceIds, onPick, trigger, testId }) => {
   const spaces = useSpacesOf(spaceIds);
-  const choice = { label, spaces, onPick };
-  return variant === "dropdown" ? (
-    <SpaceChoiceDropdown choice={choice}>{trigger}</SpaceChoiceDropdown>
-  ) : (
+  return (
     <SpaceChoiceSubmenu
-      choice={choice}
+      choice={{ label, spaces, onPick }}
       trigger={trigger}
       marks={testId ? { "data-testid": testId } : undefined}
     />

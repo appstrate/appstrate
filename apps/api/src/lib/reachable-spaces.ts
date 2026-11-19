@@ -55,8 +55,11 @@ export function callerReachableSpaces(
 
 /**
  * The spaces a request may still enter: a credential bound to a set reaches all of it here. Read
- * by the MCP admission alone, which picks the space a request enters and builds from this list the
- * spaces its tools may name.
+ * by the MCP admission, which picks the space a request enters and builds from this list the
+ * spaces its tools may name (`mcpOrgSpaces.reachable`). The same list serves the connection's
+ * `skills/list`, its `resources/read` of a `skill://` URI and its agent launch prompts, each read
+ * in the space it names with the caller's set there: a skill or a prompt is not a file named by
+ * id, and the chat records a skill's space on the conversation before it reads it.
  */
 export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
   return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));

@@ -157,13 +157,15 @@ export async function createSession(input: {
 
 /**
  * The space of the file `fileId` names in `orgId`, undefined for a missing file and for one the
- * conversation `chatSessionId` holds: that one is reached through its container, not a space.
+ * conversation holds in the caller's personal space: that one is reached through its container,
+ * not a space. A file the conversation holds in any other space names that space.
  */
 export async function fileSpaceId(
   orgId: string,
   fileId: string,
-  chatSessionId: string | null,
+  conversation: { chatSessionId: string | null; personalSpaceId: string | null },
 ): Promise<string | undefined> {
+  const { chatSessionId, personalSpaceId } = conversation;
   const [row] = await db
     .select({ spaceId: files.spaceId })
     .from(files)
@@ -171,8 +173,12 @@ export async function fileSpaceId(
       and(
         eq(files.id, fileId),
         eq(files.orgId, orgId),
-        chatSessionId
-          ? or(isNull(files.chatSessionId), ne(files.chatSessionId, chatSessionId))
+        chatSessionId && personalSpaceId
+          ? or(
+              isNull(files.chatSessionId),
+              ne(files.chatSessionId, chatSessionId),
+              ne(files.spaceId, personalSpaceId),
+            )
           : undefined,
       ),
     )

@@ -175,13 +175,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     are what delete and keep do, from any `X-Space-Id`. Reading by id needs `files:read` in
     the file's space (a credential whose scopes omit it still gets `403` on `GET`); `DELETE`
     and `keep` need what they always did, `files:delete` there or being the file's creator.
-    A run's file list (`GET /api/files?runId=`) lists nothing of a run the caller may not
-    read (inputs, launch uploads, outputs), and a reader its inputs each under the same rule.
+    A run's file list (`GET /api/files?runId=`) follows the run-container rule of a read by
+    id (its launcher, or `runs:read-all`; `runs:read` is not asked): anyone else is listed
+    nothing of the run (inputs, launch uploads, outputs), and a reader its inputs each under
+    the same rule.
   - The chat's MCP credential acts in one space per request for reads too: a file named by id
     (`read_file`, `invoke_operation getFile`, a run input of `run_and_wait`, `GET /api/files/{id}`)
     is read in the space the call names, never in another space the conversation acts in; its
     own uploads are read from any of them. Sessions and MCP tokens keep reading a file in any
-    space where you hold a role.
+    space where you hold a role. Its package tools (`import_package_file`,
+    `validate_package_file`) authorise and place packages in that one space too: a bundle
+    naming a package homed in another space of the conversation answers that package
+    `not found`, as a credential pinned to the entered space does.
   - Space-pinned MCP endpoint (`/api/mcp/o/{org}/s/{space}`): every tool of the request, its
     dispatched operations included, reaches that space only (file reads, package authorisation
     and placement), so a package homed in another space is out of reach there.
@@ -189,7 +194,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
   the chat goes to « Mon espace » from every screen, private to you, and adds no space to the
   conversation: a conversation limited to one space stays limited and still reads its
-  attachments. They are deleted with the conversation.
+  attachments. They are deleted with the conversation, except one a run of the same space
+  consumed: that run keeps it, detached from the conversation.
 
 - **The chat no longer lists your connected integrations and runnable agents in
   its system prompt.** It used to read them from `GET /api/me/context` on every

@@ -406,6 +406,33 @@ describe("run inputs across spaces", () => {
     await launchedRunId(await launch(previewing, teamB, [await runOutput(teamB, ctx.user.id)]));
   });
 
+  it("a chat turn bound to space B reads its own personal upload by id, and cannot delete or keep it", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    const fileId = (await chatUpload(ctx.user.id, sessionId)).replace("appfile://", "");
+    const bearer = {
+      ...loopbackHeaders(ctx, ctx.orgId, {
+        orgRole: "owner",
+        permissions: [...LAUNCHES_HERE, "files:delete"],
+        spaceIds: [teamB],
+        chatSessionId: sessionId,
+      }),
+      "X-Space-Id": teamB,
+    };
+    expect((await app.request(`/api/files/${fileId}`, { headers: bearer })).status).toBe(200);
+    // The conversation widens reads only: delete and keep take the file's space grants.
+    const keep = await app.request(`/api/files/${fileId}/keep`, {
+      method: "POST",
+      headers: bearer,
+    });
+    expect(keep.status).toBe(404);
+    const removed = await app.request(`/api/files/${fileId}`, {
+      method: "DELETE",
+      headers: bearer,
+    });
+    expect(removed.status).toBe(404);
+    expect((await app.request(`/api/files/${fileId}`, { headers: bearer })).status).toBe(200);
+  });
+
   it("a run's file list shows a consumed input by its own space's rule", async () => {
     const uri = await chatUpload(ctx.user.id, `chs_${crypto.randomUUID()}`);
     const fileId = uri.replace("appfile://", "");
@@ -499,7 +526,7 @@ describe("run inputs across spaces", () => {
     expect(audit).toMatchObject({ spaceId: ctx.defaultSpaceId });
   });
 
-  it("a launcher who lost runs:read sees nothing of the run, inputs and launch uploads alike", async () => {
+  it("a launcher who lost runs:read still lists the files of its run, their container", async () => {
     const member = await memberContext(ctx, "member");
     await seedSpaceGrant({
       orgId: ctx.orgId,
@@ -540,16 +567,26 @@ describe("run inputs across spaces", () => {
       await launchedRunId(await launch(authHeaders(member), teamB, [uri])),
       await launchedRunId(withUpload),
     ];
-    const listed = async (runId: string) => {
+    const listed = async (runId: string, caller: TestContext = member) => {
       const res = await app.request(`/api/files?runId=${runId}`, {
-        headers: { ...authHeaders(member), "X-Space-Id": teamB },
+        headers: { ...authHeaders(caller), "X-Space-Id": teamB },
       });
       return ((await res.json()) as { data: { id: string }[] }).data.map((file) => file.id);
     };
-    expect(await listed(runIds[0]!)).toEqual([uri.replace("appfile://", "")]);
-    expect(await listed(runIds[1]!)).toHaveLength(1);
-    // Its role in B keeps `files:read` and loses `runs:read`: the run detail is refused, and so
-    // is everything the run lists, though the launcher still reads the file itself in A.
+    const before = [await listed(runIds[0]!), await listed(runIds[1]!)];
+    expect(before[0]).toEqual([uri.replace("appfile://", "")]);
+    expect(before[1]).toHaveLength(1);
+    // A colleague reading only their own runs in B is listed nothing of the member's runs.
+    const colleague = await memberContext(ctx, "member");
+    await seedSpaceGrant({
+      orgId: ctx.orgId,
+      spaceId: teamB,
+      userId: colleague.user.id,
+      permissions: ["runs:read", "files:read"],
+    });
+    for (const runId of runIds) expect(await listed(runId, colleague)).toEqual([]);
+    // Its role in B keeps `files:read` and loses `runs:read`: the files of a run follow the run
+    // as their container (its launcher), as a read by id does, so the lists are unchanged.
     const [membership] = await db
       .select({ roleId: spaceMembers.customRoleId })
       .from(spaceMembers)
@@ -558,7 +595,7 @@ describe("run inputs across spaces", () => {
       .update(spaceRoles)
       .set({ permissions: ["files:read"] })
       .where(eq(spaceRoles.id, membership!.roleId!));
-    for (const runId of runIds) expect(await listed(runId)).toEqual([]);
+    expect([await listed(runIds[0]!), await listed(runIds[1]!)]).toEqual(before);
   });
 
   it("a creator without files:read still deletes and keeps their own upload", async () => {

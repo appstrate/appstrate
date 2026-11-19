@@ -63,7 +63,6 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { canReadEveryRun, readsRun } from "../lib/run-visibility.ts";
 import type { SpaceGrant } from "../lib/permissions.ts";
-import { canReadRuns } from "@appstrate/core/permissions";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
@@ -1463,7 +1462,9 @@ export async function resolveFilesAcrossSpaces(
     .where(and(eq(files.orgId, orgId), inArray(files.id, ids)));
   const grants = new Map(access.grants.map((grant) => [grant.spaceId, grant.permissions]));
   const reached = rows.flatMap(({ ownerUserId, ...row }) => {
+    // A read widening only: a lifecycle door (delete, keep) takes the file's space grants alone.
     const conversationUpload =
+      opts.door !== "lifecycle" &&
       access.conversationId !== undefined &&
       row.chatSessionId === access.conversationId &&
       actor.type === "user" &&
@@ -1513,12 +1514,22 @@ async function resolveStoredChatFile(
   });
 }
 
-/** Touch a resolved file's space, one of the turn's; the conversation's own file touches none. */
+/**
+ * Touch a resolved file's space, one of the turn's. The conversation's own file in the caller's
+ * personal space touches none: it is reached through the conversation, as
+ * {@link resolveFilesAcrossSpaces} reads it. Held in any other space, it touches that space.
+ */
 async function touchFileSpace(
-  request: Pick<ChatAttachmentRequest, "beforeResolve"> & { chatSessionId: string | null },
+  request: Pick<ChatAttachmentRequest, "beforeResolve" | "personalSpaceId"> & {
+    chatSessionId: string | null;
+  },
   file: Pick<FileRow, "spaceId" | "chatSessionId">,
 ): Promise<void> {
-  if (request.chatSessionId !== null && file.chatSessionId === request.chatSessionId) return;
+  const heldInPersonalSpace =
+    request.chatSessionId !== null &&
+    file.chatSessionId === request.chatSessionId &&
+    file.spaceId === request.personalSpaceId;
+  if (heldInPersonalSpace) return;
   await request.beforeResolve(file.spaceId);
 }
 
@@ -1580,9 +1591,10 @@ export interface ListFilesFilters {
  * The rows of one run in the file gallery. A run's files are not only the ones it PRODUCED
  * (`files.run_id = run`, under the gallery's `visible`) — it also CONSUMES files passed as input
  * (`appfile://file_xxx` references in `runs.input`), which may live in another space (a team
- * run reading its launcher's personal upload). A caller who may not read the run in its space as
- * the run routes decide (`runs:read` for its own runs, `runs:read-all` for any) is listed nothing
- * of it, inputs, launch uploads and outputs alike; for a reader each input resolves in its own
+ * run reading its launcher's personal upload). The run is the container of its files, so the
+ * rule is the run-container ACL of a read by id (`readsRun`: its launcher, or `runs:read-all`);
+ * `runs:read` governs the run resources, not their files. A caller who does not read the run is
+ * listed nothing of it, inputs, launch uploads and outputs alike; for a reader each input resolves in its own
  * space under the rule of every read by id (`resolveFilesAcrossSpaces`), so whoever may read it
  * there sees it and nobody else does.
  *
@@ -1618,14 +1630,7 @@ async function runFilesFilter(
     )
     .limit(1);
   const permissions = run && grants.find((grant) => grant.spaceId === run.spaceId)?.permissions;
-  if (
-    !run ||
-    !permissions ||
-    !canReadRuns((permission) => permissions.has(permission)) ||
-    !readsRun(permissions, actor, run)
-  ) {
-    return sql`false`;
-  }
+  if (!run || !permissions || !readsRun(permissions, actor, run)) return sql`false`;
   const inputs = await resolveFilesAcrossSpaces(orgId, actor, extractFileIds(run.input), access);
   if (inputs.length === 0) return produced;
   return or(

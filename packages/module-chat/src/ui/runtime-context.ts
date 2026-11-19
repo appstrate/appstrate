@@ -61,11 +61,8 @@ export interface ChatTransport {
  */
 export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
 
-/**
- * The host's space picker, opened from a button or from an entry in a menu.
- */
+/** The host's space picker, opened from an entry in a menu. */
 export type SpaceChoiceMenu = ComponentType<{
-  variant: "dropdown" | "submenu";
   label: string;
   spaceIds: readonly string[];
   onPick: (spaceId: string) => void;

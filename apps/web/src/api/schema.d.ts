@@ -12918,7 +12918,7 @@ export interface operations {
             query?: {
                 /** @description Filter by file purpose. */
                 purpose?: "user_upload" | "agent_output";
-                /** @description Filter to the files of this run: those it produced, plus, for a caller who reads the run, the inputs it consumed, each resolved as a file read by id. */
+                /** @description Filter to the files of this run, for a caller who reads it as its container (its launcher, or `runs:read-all`): those it produced and the inputs it consumed, each input resolved as a file read by id. Anyone else is listed nothing. */
                 runId?: string;
                 /** @description Filter to files produced by this agent package. */
                 packageId?: string;
@@ -21031,7 +21031,7 @@ export interface operations {
             query?: {
                 /** @description Filter by file purpose. */
                 purpose?: "user_upload" | "agent_output";
-                /** @description Filter to the files of this run: those it produced, plus, for a caller who reads the run, the inputs it consumed, each resolved as a file read by id. */
+                /** @description Filter to the files of this run, for a caller who reads it as its container (its launcher, or `runs:read-all`): those it produced and the inputs it consumed, each input resolved as a file read by id. Anyone else is listed nothing. */
                 runId?: string;
                 /** @description Filter to files produced by this agent package. */
                 packageId?: string;

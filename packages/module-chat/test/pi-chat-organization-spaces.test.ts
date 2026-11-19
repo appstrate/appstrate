@@ -360,12 +360,12 @@ describe("the files a call names", () => {
     }
   });
 
-  it("records the space of a file resource of the turn before reading it", async () => {
+  it("records the space of a file resource of the turn once it is read", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
       await tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" });
-      expect(transport.events).toEqual(["touch spc_beta", "resources/read"]);
+      expect(transport.events).toEqual(["resources/read", "touch spc_beta"]);
     } finally {
       await built.close();
     }
@@ -386,14 +386,14 @@ describe("the files a call names", () => {
     }
   });
 
-  it("fails a file read whose space cannot be recorded: nothing is read", async () => {
+  it("fails a file read whose space cannot be recorded: its content is not returned", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport, "spc_beta");
     try {
       await expect(
         tool("read_resource").execute("c1", { uri: "appfile://file_beta0001" }),
       ).rejects.toThrow("cannot record spc_beta");
-      expect(transport.events).toEqual([]);
+      expect(transport.events).toEqual(["resources/read"]);
     } finally {
       await built.close();
     }

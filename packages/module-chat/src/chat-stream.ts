@@ -289,6 +289,8 @@ export async function handleChatStream(
   // origin space narrow it once its row is known (`turn` below).
   const reachable = c.get("reachable");
   const acting = actingSpaces(reachable);
+  // Where the conversation's own uploads live, reached through it rather than through a space.
+  const personalSpaceId = reachable.find((space) => space.personal)?.id ?? null;
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
@@ -460,7 +462,7 @@ export async function handleChatStream(
       },
       fileSpace: async (uri) => {
         const fileId = parseFileUri(uri);
-        return fileId ? fileSpaceId(orgId, fileId, chatSessionId) : undefined;
+        return fileId ? fileSpaceId(orgId, fileId, { chatSessionId, personalSpaceId }) : undefined;
       },
     };
     return {
@@ -711,7 +713,6 @@ export async function handleChatStream(
     id: space.id,
     permissions: new Set(space.permissions),
   }));
-  const personalSpaceId = reachable.find((space) => space.personal)?.id ?? null;
   // What the browser's optimistic `upload://` parts became, for the stream to tell it.
   let uploadResolutions: UIMessageChunk | null = null;
   if (chatSessionId && lastMessage) {

@@ -22,6 +22,8 @@ import { orgPermissions, presetPermissions } from "../../../apps/api/src/lib/per
 import { createFileFromStream } from "../../../apps/api/src/services/files.ts";
 import { ensurePersonalSpaceFor } from "../../../apps/api/src/services/spaces.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
+import { db } from "@appstrate/db/client";
+import { chatSessions, files } from "@appstrate/db/schema";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { fileSpaceId } from "../src/persistence.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
@@ -78,7 +80,9 @@ async function fileTools(touched: string[]) {
     },
     fileSpace: async (uri) => {
       const fileId = parseFileUri(uri);
-      return fileId ? fileSpaceId(colleague.orgId, fileId, null) : undefined;
+      return fileId
+        ? fileSpaceId(colleague.orgId, fileId, { chatSessionId: null, personalSpaceId: null })
+        : undefined;
     },
   };
   const token = mintMcpLoopbackToken({
@@ -137,15 +141,56 @@ describe("a chat call reads a file in the one space it entered", () => {
     }
   });
 
-  it("reads a file resource in its own space after recording it", async () => {
+  it("records the space of a file resource it read, and nothing for one it is refused", async () => {
     const touched: string[] = [];
     const { built, readResource } = await fileTools(touched);
     try {
+      // A colleague's private output in a turn space: refused, and its space is not recorded.
+      const refused = await readResource(await runOutput(colleague)).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(refused).toBeInstanceOf(Error);
+      expect(touched).toEqual([]);
       const read = await readResource(await runOutput(caller));
       expect(read.content.map((block) => block.text).join("")).toContain("x");
       expect(touched).toEqual([colleague.defaultSpaceId]);
     } finally {
       await built.close();
     }
+  });
+});
+
+describe("fileSpaceId", () => {
+  /** A file `chatSessionId` holds in `spaceId`. */
+  async function heldFile(spaceId: string, chatSessionId: string): Promise<string> {
+    const id = `file_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    await db.insert(files).values({
+      id,
+      orgId: colleague.orgId,
+      spaceId,
+      purpose: "user_upload",
+      chatSessionId,
+      userId: caller.user.id,
+      storageKey: `files/${spaceId}/${id}/a.txt`,
+      name: "a.txt",
+      mime: "text/plain",
+      size: 1,
+      sha256: "0".repeat(64),
+    });
+    return id;
+  }
+
+  it("names no space for the conversation's own file in the personal space, and the team space of one held there", async () => {
+    const personalSpaceId = (await ensurePersonalSpaceFor(caller.orgId, caller.user.id)).id;
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db
+      .insert(chatSessions)
+      .values({ id: chatSessionId, orgId: colleague.orgId, userId: caller.user.id });
+    const conversation = { chatSessionId, personalSpaceId };
+    const personal = await heldFile(personalSpaceId, chatSessionId);
+    const team = await heldFile(colleague.defaultSpaceId, chatSessionId);
+    expect(await fileSpaceId(colleague.orgId, personal, conversation)).toBeUndefined();
+    expect(await fileSpaceId(colleague.orgId, team, conversation)).toBe(colleague.defaultSpaceId);
   });
 });

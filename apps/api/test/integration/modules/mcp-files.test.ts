@@ -691,6 +691,59 @@ describe("mcp file-backed package workflow", () => {
     ]);
   });
 
+  it("the chat bearer imports in the one space it entered: a root homed in another is out of reach", async () => {
+    const packageId = "@mcppkgdoc/file-server";
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedPackage({
+      id: packageId,
+      orgId: ctx.orgId,
+      type: "integration",
+      homeSpaceId: elsewhere.id,
+    });
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "server.afps",
+      "application/zip",
+      packageArchive(true),
+    );
+    // Bound to both spaces with the owner's grants: a session would place the root, as above.
+    const bearer = loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "owner",
+      permissions: [
+        "mcp:read",
+        "mcp:invoke",
+        "files:read",
+        "integrations:read",
+        "integrations:write",
+        "integrations:share",
+        "integrations:install",
+      ],
+      spaceIds: [ctx.defaultSpaceId, elsewhere.id],
+    });
+    const { envelope } = await rpc(bearer, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "import_package_file",
+        arguments: { file_uri: `appfile://${docId}`, space_id: ctx.defaultSpaceId },
+      },
+    });
+    const result = toolData(envelope);
+    // The refusal of a package outside the caller's reach: the opaque not-found.
+    expect(result).toEqual({
+      isError: true,
+      data: { error: `Package '${packageId}' not found` },
+    });
+    const rows = await db
+      .select({ spaceId: spacePackages.spaceId })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, packageId));
+    expect(rows).toEqual([]);
+  });
+
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
     const packageId = "@mcppkgdoc/file-server";
     const manifest = localIntegrationManifest({

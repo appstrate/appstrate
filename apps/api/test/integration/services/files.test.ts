@@ -526,14 +526,54 @@ describe("files service + routes", () => {
     });
 
     const runId = await seedRunRow(scope, { input: { a: { b: [`appfile://${docA.id}`] } } });
-    const readsOwnRuns = new Set(["runs:read", "files:read"]);
-    const page = await listFilesIn(scope, userActor, { runId }, readsOwnRuns);
+    // The launcher reads its run's files as their container, `runs:read` or not.
+    const page = await listFilesIn(scope, userActor, { runId }, new Set(["files:read"]));
     expect(page.data.map((d) => d.id)).toContain(docA.id);
-    // Its launcher without `runs:read` no longer reads the run, nor its inputs.
-    const withoutRuns = await listFilesIn(scope, userActor, { runId }, new Set(["files:read"]));
-    expect(withoutRuns.data.map((d) => d.id)).not.toContain(docA.id);
     // Without `files:read` in its space, an input is as absent as a missing one.
     expect((await listFilesIn(scope, userActor, { runId }, NO_GRANTS)).data).toEqual([]);
+  });
+
+  it("run_id filter lists nothing of a run to a member who neither launched it nor reads every run", async () => {
+    const member = await createTestUser({ email: "nonlauncher@list.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const memberActor: Actor = { type: "user", id: member.id };
+    // The member's own file, readable by them on its own, so only the run gate can hide it.
+    const ownUpload = await stageUpload(
+      scope,
+      member.id,
+      "own.txt",
+      new TextEncoder().encode("own"),
+    );
+    const memberSession = `chs_${crypto.randomUUID()}`;
+    await db
+      .insert(chatSessions)
+      .values({ id: memberSession, orgId: ctx.orgId, userId: member.id });
+    const ownFile = await createFileFromUpload(scope, memberActor, ownUpload, {
+      chatSessionId: memberSession,
+    });
+    const runId = await seedRunRow(scope, { input: { file: `appfile://${ownFile.id}` } });
+    // A launch upload (`upload://` materialized into the run's container) and an output.
+    const launchUpload = await stageUpload(
+      scope,
+      ctx.user.id,
+      "l.txt",
+      new TextEncoder().encode("l"),
+    );
+    const launchFile = await createFileFromUpload(scope, userActor, launchUpload, { runId });
+    const { row: output } = await publishStream(scope, runId, "out.txt", "produced");
+
+    const readsOwnRuns = new Set(["files:read", "runs:read"]);
+    expect((await listFilesIn(scope, memberActor, { runId }, readsOwnRuns)).data).toEqual([]);
+    // `runs:read-all` reads the run: its launch upload, output and the member's input.
+    const supervising = await listFilesIn(
+      scope,
+      memberActor,
+      { runId },
+      new Set([...READS_EVERY_RUN, "files:read"]),
+    );
+    expect(supervising.data.map((d) => d.id).sort()).toEqual(
+      [ownFile.id, launchFile.id, output.id].sort(),
+    );
   });
 
   it("a file ref in input that belongs to another org is not returned (org scope holds)", async () => {
@@ -1629,6 +1669,46 @@ describe("files service + routes", () => {
     );
     await resolveChatAttachment({ ...request, uri: `appfile://${output.id}` });
     expect(announced).toEqual([personal.id]);
+  });
+
+  it("a conversation's own file in a team space touches that space", async () => {
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Mon espace",
+      ownerUserId: ctx.user.id,
+      visibility: "private",
+    });
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db
+      .insert(chatSessions)
+      .values({ id: chatSessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    // A file the conversation holds in the team space, as an upload staged there.
+    const png = Uint8Array.from(
+      atob(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      ),
+      (char) => char.charCodeAt(0),
+    );
+    const upload = await stageUpload(scope, ctx.user.id, "t.png", png, "image/png");
+    const file = await createFileFromUpload(scope, userActor, upload, { chatSessionId });
+    const announced: string[] = [];
+    const request = {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      chatSessionId,
+      uri: `appfile://${file.id}`,
+      spaces: [{ id: ctx.defaultSpaceId, permissions: new Set(["files:read"]) }],
+      personalSpaceId: personal.id,
+      beforeResolve: async (spaceId: string) => {
+        announced.push(spaceId);
+      },
+    };
+    await resolveChatAttachment(request);
+    expect(announced).toEqual([ctx.defaultSpaceId]);
+    expect(
+      (await readChatAttachment({ ...request, kind: "image", maxBytes: 1024 }))?.bytes,
+    ).toEqual(png);
+    expect(announced).toEqual([ctx.defaultSpaceId, ctx.defaultSpaceId]);
   });
 
   it("a conversation reads its own attachment outside the turn's spaces; nobody else does", async () => {

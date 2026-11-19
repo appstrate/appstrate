@@ -235,7 +235,6 @@ export function LimitMenuEntry() {
   ) : limit.kind === "choose" ? (
     // No origin and several acting spaces: the space picked becomes the origin.
     <SpaceChoiceMenu
-      variant="submenu"
       label={t("composer.limit.choose")}
       spaceIds={limit.spaceIds}
       onPick={scope.limitTo}
