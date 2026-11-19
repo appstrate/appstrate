@@ -20,7 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   EllipsisIcon,
@@ -364,6 +364,15 @@ function ConversationRow({
   const queryClient = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const dialogTrigger = useRef<HTMLButtonElement | null>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const menuAction = useRef<"settings" | "delete" | null>(null);
+  const restoreDialogFocus = (event: Event) => {
+    if (dialogTrigger.current?.isConnected) {
+      event.preventDefault();
+      dialogTrigger.current.focus();
+    }
+  };
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
 
@@ -396,7 +405,10 @@ function ConversationRow({
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
         // ring themselves in `--space-tile-ring`: the row's background in each of its states.
-        className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)] max-md:pr-[4.5rem]"
+        className={cn(
+          canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
+          "[--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]",
+        )}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span
@@ -420,7 +432,11 @@ function ConversationRow({
           every generating↔idle transition. Hover swaps them for the row's
           actions; a reader has none, so for them hover changes nothing. */}
       <div
-        className={`absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md max-md:right-11 max-md:w-6 ${canWrite ? "group-hover/menu-item:bg-sidebar-accent" : ""}`}
+        className={cn(
+          "desktop-pointer:w-14 pointer-events-none absolute top-1 right-1 flex h-6 w-6 items-center justify-end rounded-md",
+          canWrite &&
+            "desktop-pointer:right-1 desktop-pointer:group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-focus-within/menu-item:bg-sidebar-accent right-11",
+        )}
       >
         {session.generating ? (
           <Spinner
@@ -429,29 +445,31 @@ function ConversationRow({
           />
         ) : unread ? (
           <span
-            className={`bg-primary size-2 rounded-full transition-opacity ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
+            className={`bg-primary size-2 rounded-full transition-opacity ${canWrite ? "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0" : ""}`}
             aria-label={t("threads.unread")}
             title={t("threads.unread")}
           />
         ) : (
           <span
-            className={`text-sidebar-foreground/70 text-xs transition-opacity max-md:hidden ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
+            className={`text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity ${canWrite ? "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0" : ""}`}
           >
             {relativeTime(session.updatedAt, now, t)}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the
-            invisible buttons tappable. Below `md` (a phone has no hover) these buttons are
-            gone: the row's actions are the "…" menu after this slot, a 44 px strip. */}
+            invisible buttons tappable. Touchscreens use the separate 44 px menu trigger. */}
         {canWrite && (
-          <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100 max-md:hidden">
+          <div className="desktop-pointer:flex pointer-events-none absolute right-0 hidden items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100 group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
             <button
               type="button"
               aria-label={t("threads.settings.openFor", {
                 title: session.title ?? t("threads.new"),
               })}
               title={t("threads.settings.title")}
-              onClick={() => setSettingsOpen(true)}
+              onClick={(event) => {
+                dialogTrigger.current = event.currentTarget;
+                setSettingsOpen(true);
+              }}
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
             >
               <Settings2Icon className="size-3.5" />
@@ -460,7 +478,8 @@ function ConversationRow({
               type="button"
               aria-label={t("common:btn.delete")}
               title={t("common:btn.delete")}
-              onClick={() => {
+              onClick={(event) => {
+                dialogTrigger.current = event.currentTarget;
                 setDeleteFailed(false);
                 setConfirmingDelete(true);
               }}
@@ -479,21 +498,41 @@ function ConversationRow({
               aria-label={t("threads.actions.openFor", {
                 title: session.title ?? t("threads.new"),
               })}
-              className="text-sidebar-foreground/70 active:bg-sidebar-accent absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md md:hidden"
+              ref={menuTrigger}
+              className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
             >
               <EllipsisIcon className="size-5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-48">
-            <DropdownMenuItem className="min-h-11" onSelect={() => setSettingsOpen(true)}>
+          <DropdownMenuContent
+            align="end"
+            className="min-w-48"
+            onCloseAutoFocus={(event) => {
+              const action = menuAction.current;
+              if (!action) return;
+              event.preventDefault();
+              menuAction.current = null;
+              dialogTrigger.current = menuTrigger.current;
+              if (action === "settings") setSettingsOpen(true);
+              else {
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
+              }
+            }}
+          >
+            <DropdownMenuItem
+              className="min-h-11"
+              onSelect={() => {
+                menuAction.current = "settings";
+              }}
+            >
               <Settings2Icon />
               {t("threads.settings.title")}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-destructive focus:text-destructive min-h-11"
               onSelect={() => {
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
+                menuAction.current = "delete";
               }}
             >
               <Trash2Icon />
@@ -506,7 +545,7 @@ function ConversationRow({
         open={confirmingDelete}
         onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
       >
-        <AlertDialogContent data-testid="chat-delete-confirm">
+        <AlertDialogContent data-testid="chat-delete-confirm" onCloseAutoFocus={restoreDialogFocus}>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -536,6 +575,7 @@ function ConversationRow({
         <ConversationSettingsDialog
           session={session}
           t={t}
+          onCloseAutoFocus={restoreDialogFocus}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -597,10 +637,12 @@ function ConversationSettingsDialog({
   session,
   t,
   onClose,
+  onCloseAutoFocus,
 }: {
   session: SessionSummary;
   t: ChatTranslate;
   onClose: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const transport = useChatTransport();
   const queryClient = useQueryClient();
@@ -630,7 +672,7 @@ function ConversationSettingsDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
-      <DialogContent>
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{t("threads.settings.title")}</DialogTitle>
           <DialogDescription>{t("threads.settings.description")}</DialogDescription>

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A phone has no hover: the row's rename and delete cannot hide behind it. Below `md` each row
- * carries a "…" menu (a 44 px strip); the hover buttons are for `md` and up.
+ * A phone has no hover: the row's rename and delete cannot hide behind it. On touchscreens each row
+ * carries a "…" menu (a 44 px strip); the hover buttons are for wide screens with a fine pointer.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -68,22 +68,23 @@ function render(granted: string[]): string {
 }
 
 describe("a conversation row on a phone", () => {
-  it("has an actions menu named for the conversation, shown below md only", () => {
+  it("has an actions menu named for the conversation, shown on touchscreens", () => {
     const html = render(["chat:read", "chat:write"]);
     const trigger = html.match(/<button[^>]*aria-label="threads\.actions\.openFor"[^>]*>/)?.[0];
     expect(trigger).toBeDefined();
-    expect(trigger).toContain("md:hidden");
+    expect(trigger).toContain("desktop-pointer:hidden");
     expect(trigger).toContain("w-11");
     expect(trigger).toContain("h-12");
   });
 
-  it("hides the hover buttons below md", () => {
+  it("shows the desktop buttons on both hover and keyboard focus", () => {
     const html = render(["chat:read", "chat:write"]);
     const hover = html.match(
       /<div class="[^"]*group-hover\/menu-item:pointer-events-auto[^"]*">/,
     )?.[0];
     expect(hover).toBeDefined();
-    expect(hover).toContain("max-md:hidden");
+    expect(hover).toContain("desktop-pointer:flex");
+    expect(hover).toContain("group-focus-within/menu-item:opacity-100");
   });
 
   it("gives a reader no menu", () => {

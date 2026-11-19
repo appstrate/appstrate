@@ -80,7 +80,7 @@ import {
   COMPOSER_BUTTON_CLASS,
   ICON_BUTTON_CLASS,
   QUEUE_ICON_BUTTON_CLASS,
-  TOUCH_AREA_CLASS,
+  CHIP_REMOVE_CLASS,
 } from "./touch-targets.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
@@ -344,8 +344,8 @@ function ComposerAttachmentChip() {
                 type="button"
                 aria-label={t("composer.removeAttachment")}
                 className={cn(
-                  "text-muted-foreground hover:text-foreground shrink-0",
-                  TOUCH_AREA_CLASS,
+                  "text-muted-foreground hover:text-foreground desktop-pointer:size-3.5",
+                  CHIP_REMOVE_CLASS,
                 )}
               >
                 <XIcon className="size-3.5" />

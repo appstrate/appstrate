@@ -20,6 +20,7 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { fileActivation } from "./file-activation.ts";
 import { UNNAMED_FILE } from "./run-events.ts";
 import { useCanIn, useChatHost } from "./runtime-context.ts";
+import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 /** The chip: one 32px height (the toolbar's) whatever it carries — sent, produced or staged file. */
@@ -75,9 +76,12 @@ export function AttachmentChip({
       <span className="text-foreground truncate text-xs font-medium">{name || UNNAMED_FILE}</span>
     </>
   );
+  const chipClass = trailing
+    ? cn(ATTACHMENT_CHIP_CLASS, "h-10 pr-0 desktop-pointer:h-8 desktop-pointer:pr-2")
+    : ATTACHMENT_CHIP_CLASS;
   if (!action) {
     return (
-      <div className={ATTACHMENT_CHIP_CLASS} title={title}>
+      <div className={chipClass} title={title}>
         {content}
         {trailing}
       </div>
@@ -101,7 +105,7 @@ export function AttachmentChip({
     );
   }
   return (
-    <div className={ATTACHMENT_CHIP_CLASS}>
+    <div className={chipClass}>
       <button
         type="button"
         onClick={activate}

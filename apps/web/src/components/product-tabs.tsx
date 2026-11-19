@@ -97,7 +97,7 @@ export function ProductTabs() {
             to={p.to}
             aria-current={p.active ? "page" : undefined}
             className={cn(
-              "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors max-md:h-10",
+              "desktop-pointer:h-7 flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
               p.active
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -114,7 +114,7 @@ export function ProductTabs() {
             )}
           </Link>
         ))}
-        {chatDeciding && <Skeleton className="h-7 flex-1 rounded-md max-md:h-10" />}
+        {chatDeciding && <Skeleton className="desktop-pointer:h-7 h-10 flex-1 rounded-md" />}
       </nav>
     </div>
   );

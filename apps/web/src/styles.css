@@ -11,6 +11,12 @@
 @source "../../../packages/module-chat/src";
 
 @custom-variant dark (&:is(.dark *));
+/* Only a wide screen with a precise, hovering pointer gets dense chat controls. */
+@custom-variant desktop-pointer {
+  @media (width >= 48rem) and (pointer: fine) and (hover: hover) {
+    @slot;
+  }
+}
 
 /* One field stays mounted as the tools expand. In short landscape viewports Send
    shares the editable line that Safari pans into view above its accessory bar. */

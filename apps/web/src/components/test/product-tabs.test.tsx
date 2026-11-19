@@ -127,7 +127,7 @@ describe("the products toggle", () => {
     const chatter = OTHER_ACTING;
     expect(tabs(false, chatter)).toContain('href="/chat"');
     // A thumb: the toggle is 40 px tall below md.
-    expect(tabs(false, chatter)).toContain("max-md:h-10");
+    expect(tabs(false, chatter)).toContain("desktop-pointer:h-7");
     expect(tabs(true, chatter)).toContain('href="/chat"');
     // The working space opens no chat: offered in either mode, another space opens it and acts.
     expect(tabs(true, ["runs:read"])).toContain('href="/chat"');
