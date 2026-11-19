@@ -1254,14 +1254,27 @@ async function loadContainerOwners(
   };
 }
 
-/** The container ACL of {@link resolveFileAcrossSpaces} on a loaded row, its container's owner loaded. */
-function fileForActor(
+/** Capabilities after the visibility check. A file reached only through its conversation is read-only. */
+function visibleFileCapabilities(
+  row: FileRow,
+  actor: Actor,
+  spacePermissions: ReadonlySet<string> | undefined,
+  creatorCanManage?: boolean,
+): FileCapabilities {
+  return getFileCapabilities(row, actor, {
+    visible: true,
+    canManage: spacePermissions?.has("files:delete"),
+    creatorCanManage: spacePermissions !== undefined && creatorCanManage,
+  });
+}
+
+/** Whether the file's container is visible to the actor under the effective read permissions. */
+function canReadFileContainer(
   row: FileRow,
   actor: Actor,
   permissions: ReadonlySet<string>,
-  opts: { creatorCanManage?: boolean },
   owners: ContainerOwners,
-): ResolvedFile | null {
+): boolean {
   if (row.runId) {
     // Run container: the file inherits its run's read-ACL, so resolving it by
     // id is exactly as narrow as reading the run — a caller without
@@ -1270,10 +1283,10 @@ function fileForActor(
     // Tested on the RUN row rather than the file's own columns; the mirroring
     // invariant in `lib/run-visibility.ts` says why the two agree.
     const run = owners.runs.get(row.runId);
-    if (!run || run.spaceId !== row.spaceId || !readsRun(permissions, actor, run)) return null;
+    return !!run && run.spaceId === row.spaceId && readsRun(permissions, actor, run);
   } else if (row.chatSessionId) {
     // Chat container: sessions are per-dashboard-user; only the owner reads.
-    if (actor.type !== "user" || owners.sessions.get(row.chatSessionId) !== actor.id) return null;
+    return actor.type === "user" && owners.sessions.get(row.chatSessionId) === actor.id;
   } else {
     // Detached (both containers NULL — the legal state under
     // `chk_files_single_container`): there is no container left to inherit an
@@ -1290,15 +1303,8 @@ function fileForActor(
     // never opens it. This intentionally also narrows a run-origin detached
     // upload to creator-only — least surprise.
     const supervises = row.purpose === "agent_output" && canReadEveryRun(permissions);
-    if (!isFileCreator(row, actor) && !supervises) return null;
+    return isFileCreator(row, actor) || supervises;
   }
-
-  const capabilities = getFileCapabilities(row, actor, {
-    visible: true,
-    canManage: permissions.has("files:delete"),
-    creatorCanManage: opts.creatorCanManage,
-  });
-  return { row, capabilities };
 }
 
 /**
@@ -1409,7 +1415,7 @@ const CONVERSATION_UPLOAD_GRANT: ReadonlySet<string> = new Set([FILE_CONTENT_GRA
 type FileResolveOptions = { door?: "read" | "lifecycle"; creatorCanManage?: boolean };
 
 /**
- * Resolve files in their OWN spaces, then the container ACL of {@link fileForActor}; anything
+ * Resolve files in their OWN spaces, then the container ACL of {@link canReadFileContainer}; anything
  * refused is left out. The conversation widens to its own uploads in the actor's personal space
  * only (a chat upload lives there, outside the spaces a limited turn reaches).
  */
@@ -1436,27 +1442,26 @@ export async function resolveFilesAcrossSpaces(
       row.chatSessionId === access.conversationId &&
       actor.type === "user" &&
       ownerUserId === actor.id;
-    const granted = grants.get(row.spaceId);
-    const permissions = granted ?? (conversationUpload ? CONVERSATION_UPLOAD_GRANT : undefined);
+    const spacePermissions = grants.get(row.spaceId);
+    const permissions =
+      spacePermissions ?? (conversationUpload ? CONVERSATION_UPLOAD_GRANT : undefined);
     if (!permissions) return [];
     if (opts.door !== "lifecycle" && !permissions.has(FILE_CONTENT_GRANT)) return [];
-    return [{ row: row as FileRow, permissions, readOnly: granted === undefined }];
+    return [{ row: row as FileRow, permissions, spacePermissions }];
   });
   const owners = await loadContainerOwners(
     orgId,
     reached.map(({ row }) => row),
   );
-  return reached.flatMap(({ row, permissions, readOnly }) => {
-    // A file reached through the conversation alone is read-only: the lifecycle doors refuse it,
-    // so the capabilities must not advertise keep or delete.
-    const file = fileForActor(
+  return reached.flatMap(({ row, permissions, spacePermissions }) => {
+    if (!canReadFileContainer(row, actor, permissions, owners)) return [];
+    const capabilities = visibleFileCapabilities(
       row,
       actor,
-      permissions,
-      readOnly ? { ...opts, creatorCanManage: false } : opts,
-      owners,
+      spacePermissions,
+      opts.creatorCanManage,
     );
-    return file ? [file] : [];
+    return [{ row, capabilities }];
   });
 }
 
@@ -1812,11 +1817,7 @@ export async function listFilesForActor(
     // Every row passed the visibility SQL, so `visible: true`. No `mintPreview` —
     // list rows carry only the `previewable` boolean; the signed preview token is
     // minted on the single-file GET.
-    const capabilities = getFileCapabilities(row, actor, {
-      visible: true,
-      canManage: permissions?.has("files:delete"),
-      creatorCanManage: permissions !== undefined && opts.creatorCanManage,
-    });
+    const capabilities = visibleFileCapabilities(row, actor, permissions, opts.creatorCanManage);
     return toFileDto(row, actor, capabilities);
   });
   return listResponse(data, { hasMore });

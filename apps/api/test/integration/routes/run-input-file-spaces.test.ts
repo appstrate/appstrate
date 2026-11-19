@@ -422,15 +422,13 @@ describe("run inputs across spaces", () => {
     const read = await app.request(`/api/files/${fileId}`, { headers: bearer });
     expect(read.status).toBe(200);
     // What GET advertises is what the lifecycle doors do.
-    expect(((await read.json()) as { capabilities: unknown }).capabilities).toMatchObject({
-      keep: false,
-      delete: false,
-    });
+    const { capabilities } = (await read.json()) as { capabilities: unknown };
+    expect(capabilities).toMatchObject({ keep: false, delete: false });
     const runId = await launchedRunId(await launch(bearer, teamB, [uri]));
     const list = await app.request(`/api/files?runId=${runId}`, { headers: bearer });
     expect(list.status).toBe(200);
     expect(await list.json()).toMatchObject({
-      data: [{ id: fileId, capabilities: { keep: false, delete: false } }],
+      data: [{ id: fileId, capabilities }],
     });
 
     // The conversation widens reads only: delete and keep take the file's space grants.
