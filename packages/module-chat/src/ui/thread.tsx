@@ -84,6 +84,7 @@ import {
   ICON_BUTTON_CLASS,
   QUEUE_ICON_BUTTON_CLASS,
   CHIP_REMOVE_CLASS,
+  USER_ACTION_BAR_CLASS,
 } from "./touch-targets.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
@@ -790,6 +791,20 @@ function UserMessage() {
         <div className={USER_MESSAGE_CLASS}>
           <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
         </div>
+        {/* Under the bubble, as on every chat: copy, always there on a phone. Edit, retry and the
+            time are not features of this product yet. */}
+        <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
+          <ActionBarPrimitive.Copy asChild>
+            <IconButton label={t("common:btn.copy")}>
+              <MessagePrimitive.If copied>
+                <CheckIcon />
+              </MessagePrimitive.If>
+              <MessagePrimitive.If copied={false}>
+                <CopyIcon />
+              </MessagePrimitive.If>
+            </IconButton>
+          </ActionBarPrimitive.Copy>
+        </ActionBarPrimitive.Root>
       </MessagePrimitive.If>
     </MessagePrimitive.Root>
   );
