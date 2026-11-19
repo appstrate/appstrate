@@ -171,6 +171,7 @@
     "e2e": {
       "name": "@appstrate/e2e",
       "devDependencies": {
+        "@appstrate/mcp-transport": "workspace:*",
         "@playwright/test": "^1.65.1",
       },
     },

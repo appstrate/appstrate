@@ -581,6 +581,12 @@ describe("inline images from remote integration tools", () => {
   for (const [name, block, seesImages, reason] of [
     ["text-only model", image, false, /model.*image/i],
     ["unsupported MIME", { ...image, mimeType: "image/svg+xml" }, true, /unsupported/i],
+    [
+      "oversized image",
+      { ...image, data: Buffer.alloc(RESOURCE_BLOB_MAX_BYTES + 1).toString("base64") },
+      true,
+      /size limit/i,
+    ],
     ["invalid image", { ...image, data: btoa("plain text") }, true, /invalid|match/i],
     ["mismatched MIME", { ...image, mimeType: "image/jpeg" }, true, /invalid|match/i],
   ] as const) {
