@@ -140,25 +140,11 @@ function json(value: unknown): string {
 /**
  * Convert one persisted tool output into Pi tool-result content.
  *
- * TEXT ONLY, because that is all a chat tool can produce: every tool a turn can
- * call goes through `mcp-tools.ts`, whose forwarder renders an MCP image block
- * as the pointer `[image <mime>]` and whose `run_and_wait` result is JSON text.
- * Replay must reproduce what the live turn showed the model, so a block type
- * the live path cannot emit has no branch here either.
+ * Replay stored text and receipts. Live image bytes belong to their originating
+ * turn. Legacy or foreign non-text blocks get pointers so the JSON fallback
+ * cannot turn binary data into model-visible text.
  *
- * The one exception is an MCP-shaped result whose blocks are ALL non-text. The
- * generic JSON fallback below would stringify it whole — and for an image block
- * that means the raw base64 lands in the model's context, the exact thing the
- * live forwarder exists to prevent. Such a result should not reach here (the
- * forwarder textifies images before anything is persisted), but "should not"
- * is not "cannot": a row written by an older build, or a foreign persisted
- * shape, still replays through this function. So a content array with no
- * surviving text block is rendered as pointers, the same way the forwarder
- * would have rendered it live.
- *
- * `scope` is the call's ({@link offerScopeOf}), as live — the tool, its arguments and the
- * persisted `relayed` mark: a relayed third-party payload replays verbatim, exactly as the model
- * first read it.
+ * The persisted relay mark preserves the original connect-offer scope.
  */
 function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent {
   if (value && typeof value === "object") {

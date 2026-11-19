@@ -38,6 +38,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
+import { fileTypeFromBuffer } from "file-type";
 import { dispatchSpace, stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
   mergeConnectOffers,
@@ -166,6 +167,54 @@ export function mcpResultToPi(
     ...(offers.length > 0 ? { connectOffers: offers } : {}),
     ...(isRelayedResult(result) ? { relayed: true as const } : {}),
   };
+}
+
+type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
+
+async function liveRelayedImage(
+  block: Extract<RemoteToolResult["content"][number], { type: "image" }>,
+  modelSeesImages: boolean,
+): Promise<PiToolResult["content"][number]> {
+  const mimeType = normalizeMime(block.mimeType);
+  if (!isRasterImageMime(mimeType)) return { type: "text", text: "Unsupported image format." };
+  if (!modelSeesImages) return { type: "text", text: "The current model cannot read images." };
+  if (Buffer.byteLength(block.data, "base64") > RESOURCE_BLOB_MAX_BYTES) {
+    return { type: "text", text: RESOURCE_OVERSIZED_NOTE };
+  }
+  // MCP validates base64. The integration supplies the MIME type, so verify it against the bytes.
+  const detected = await fileTypeFromBuffer(Buffer.from(block.data, "base64")).catch(
+    () => undefined,
+  );
+  if (detected?.mime !== mimeType) {
+    return {
+      type: "text",
+      text: "Invalid image data or image format does not match its declared MIME type.",
+    };
+  }
+  return { type: "image", mimeType, data: block.data };
+}
+
+/** Only the inline image data reaches the model. A remote URI never triggers a read. */
+async function relayedToolResult(
+  result: RemoteToolResult,
+  scope: OfferScope,
+  modelSeesImages: boolean,
+): Promise<PiToolResult> {
+  const projected = mcpResultToPi(result, scope);
+  if (result.isError || !result.content.some((block) => block.type === "image")) return projected;
+  const content = [...projected.content];
+  for (const [index, block] of result.content.entries()) {
+    if (block.type === "image") content[index] = await liveRelayedImage(block, modelSeesImages);
+  }
+  const persistedContent = content.map((block) =>
+    block.type === "text"
+      ? block
+      : {
+          type: "text" as const,
+          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, supplied for this turn]`,
+        },
+  );
+  return { ...projected, content, persistedContent };
 }
 
 interface PlatformMcpTools {
@@ -489,13 +538,17 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        // Only platform file reads may supply native inputs. Typed remote tools return
-        // relayed data, even when their schema or result resembles an api_call.
+        if (toolName === "call_integration_tool" && isRelayedResult(result)) {
+          return withTurnBudgetNote(
+            await relayedToolResult(result, scope, opts.modelSeesImages === true),
+            turnBudget,
+          );
+        }
+        // Only platform file reads may interpret embedded resources as governed files.
         const arg = args.arguments;
         if (
           toolName === "read_file" ||
           (toolName === "call_integration_tool" &&
-            !isRelayedResult(result) &&
             arg &&
             typeof arg === "object" &&
             "read_as_file" in arg &&
