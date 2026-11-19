@@ -25,6 +25,7 @@ import {
 } from "../../services/chat-platform-services.ts";
 import {
   resolveChatAttachment,
+  readChatAttachment,
   detachOrDeleteContainedFiles,
   setOrgFileStorageLimit,
 } from "../../services/files.ts";
@@ -78,6 +79,8 @@ function buildPlatformServices(): PlatformServices {
     // file (or validate an existing file) and hand back its stable
     // `appfile://` URI. The files service (ACL, storage, quota) is the platform's.
     resolveChatAttachment,
+    // Read image or PDF bytes under the turn's current file ACL.
+    readChatAttachment,
     // Chat session teardown — detach-or-delete the session's contained files
     // before the session row is removed (the module has no storage access).
     cleanupSessionFiles: (chatSessionId, orgId, tx) =>

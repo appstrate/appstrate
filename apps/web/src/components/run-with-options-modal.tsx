@@ -115,6 +115,7 @@ function RunWithOptionsForm({
 
   return (
     <FormModal
+      inSpace
       onClose={onClose}
       title={t("run.options.title", { name: agent.display_name })}
       onSubmit={submit}

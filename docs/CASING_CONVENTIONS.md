@@ -365,7 +365,7 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names.
 
 **Rule**: the argument vocabulary of these two tools is camelCase: `fromFile`, `fromBytes`, `contentType` (multipart parts), `substituteBody`, `responseMode.{toFile, maxInlineBytes}`, `uploadProtocol`, `sourceMimeType`, `partSizeBytes`.
 
-**Why**: an LLM-facing tool schema, not a REST body — agent prompts and skills are written against these names, so renaming one silently breaks every agent that uses it. The platform's own MCP server (`apps/api/src/modules/mcp/tools.ts`) is a different surface and follows Zone 1: `list_files` takes `runId` (4b), `chat_session_id`, `purpose` and refuses any other argument; `invoke_operation` takes `if_match`. Its `call_integration_tool` (`integration-tools.ts`), the credential proxy outside the sandbox, is that surface too: it takes `tool`, `arguments` and `connection_id`, and the `{ns}__api_call` it calls (`api-call-batch.ts`) shares only its name with the sidecar's tool — `requests[].{method, target, headers, body, substitute_body, connection_id}`, `session_id`, `max_response_bytes`. A remote MCP server's typed tool (`{ns}__{tool}`) takes the server's own arguments, whatever their casing.
+**Why**: an LLM-facing tool schema, not a REST body — agent prompts and skills are written against these names, so renaming one silently breaks every agent that uses it. The platform's own MCP server (`apps/api/src/modules/mcp/tools.ts`) is a different surface and follows Zone 1: `list_files` takes `runId` (4b), `chat_session_id`, `purpose` and refuses any other argument; `invoke_operation` takes `if_match`. Its `call_integration_tool` (`integration-tools.ts`), the credential proxy outside the sandbox, is that surface too: it takes `tool`, `arguments` and `connection_id`, and the `{ns}__api_call` it calls (`api-call-batch.ts`) shares only its name with the sidecar's tool — `requests[].{method, target, headers, body, substitute_body, connection_id}`, `session_id`, `max_response_bytes`, `read_as_file`. A remote MCP server's typed tool (`{ns}__{tool}`) takes the server's own arguments, whatever their casing.
 
 #### Carve-out 4q — AFPS bundle container
 
@@ -464,7 +464,7 @@ The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`, the C
 
 Query params are wire surface. They follow the **same rule as wire JSON (Zone 1): snake_case by default**, with the same carve-outs applied by literal name:
 
-- **Universal DB-convention names** (Carve-out 4b): `?runId=` (`GET /api/files`, `GET /api/agents/{scope}/{name}/persistence`, the two call-journal reads `GET /api/integrations/calls` and `GET /api/me/connections/{connectionId}/calls`), `?packageId=` (`GET /api/files`), `?spaceId=` (`GET /api/webhooks`).
+- **Universal DB-convention names** (Carve-out 4b): `?runId=` (`GET /api/files`, `GET /api/agents/{scope}/{name}/persistence`, the two call-journal reads `GET /api/integrations/calls` and `GET /api/me/connections/{connectionId}/calls`), `?packageId=` (`GET /api/files`, the run lists `GET /api/runs` and `GET /api/orgs/{orgId}/runs`, the schedule lists `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`), `?spaceId=` (`GET /api/webhooks`).
 - **Pagination-envelope params** (Carve-out 4n): the cursor param `startingAfter` pairs with the camelCase `hasMore` body field.
 - **Headless-platform surface params** mirror their Carve-out 4n wire fields: `?externalId=` on `GET /api/end-users`.
 

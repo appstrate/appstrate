@@ -166,6 +166,16 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (`PackageActionsDropdown`) and a schedule's are items inside it, never a
    hand-built trigger. A page with no deed has no trigger. Search, filters,
    columns and view changes are list controls, they never enter this menu.
+   **A deed that acts in one space** (a menu entry, a header button) acts in the working space
+   when one is selected and asks in « Tous les espaces »; its label says which: plain « X » with
+   a space selected, « X dans {space} » when the mode leaves one space, « X dans… » when it asks
+   (the trigger is then the menu of the spaces), and no entry when none grants it. Build it with
+   `components/space-deed.ts`, and never twice on one page: an integration's « Activer » is its
+   header button, not a menu entry. A space is named with `SpaceName`/`SpaceNameOf`, several with
+   `SpaceTileStack`. A per-space section or tab shown in the mode opens with the space it is read
+   in (`ConfigurationSpace`, `components/configuration-space.tsx`: the working space when the
+   header names it, « Configurer dans {space} » for the one other, the menu of several),
+   entered through the page's `useSpaceEntry`.
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`
@@ -893,10 +903,20 @@ becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
+- Keep the chat composer and conversation search at 1rem in both orientations. A landscape
+  phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
+  `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
+- Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
+  The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
+  sheet. `interactive-widget=resizes-content` lets supporting browsers resize the layout.
+  When the keyboard only resizes the visual viewport, `useKeyboardViewport` supplies its height
+  and offset. Preserve pinch zoom.
+
 ## Checklist before handing UI work over
 
 - [ ] Uses the pattern of this file for each need; a new pattern added here.
 - [ ] Every role: same tabs, locked content explained, no 403 toast.
-- [ ] Light, dark, 1440 px and 390 px; nominal, empty, heavy and error states.
+- [ ] Light, dark, 1440 px and 390 px (and 360 px); nominal, empty, heavy and error states.
+- [ ] A screen with a field or a bottom bar: checked with the keyboard open on a phone.
 - [ ] fr and en, no literal string, no raw server text.
 - [ ] `bun test` and `bun run typecheck` in `apps/web`, `bun run check` from the root.

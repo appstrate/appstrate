@@ -5,7 +5,7 @@ import { useOrg } from "./use-org.ts";
 import { useSpaceLabelOf, useSpaces } from "./use-spaces.ts";
 import type { SpaceGrant } from "../lib/package-permissions.ts";
 import { useCurrentSpaceId } from "./use-current-space.ts";
-import { isSpaceEnterable } from "../lib/space-lists.ts";
+import { grantsInRowSpace, isSpaceEnterable } from "../lib/space-lists.ts";
 import type { OrgRole } from "@appstrate/shared-types";
 import type { CorePermission } from "@appstrate/core/permissions";
 import { hasFullOrgAccess } from "../lib/org-role.ts";
@@ -93,4 +93,17 @@ export function useSpaceGrant(spaceId: string | null | undefined): SpaceGrant | 
     personal: space.personal,
     access: space.access,
   };
+}
+
+/** Whether `permission` holds in a row's space (`spaceId`; the working space's when absent). */
+export function useRowSpaceGrants(): (spaceId: string | undefined, permission: string) => boolean {
+  const { can } = usePermissions();
+  const workingSpaceId = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  return useCallback(
+    (spaceId, permission) =>
+      grantsInRowSpace(spaceId, workingSpaceId, can, spaces, orgPermissions, permission),
+    [can, workingSpaceId, spaces, orgPermissions],
+  );
 }

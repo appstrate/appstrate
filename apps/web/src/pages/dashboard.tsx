@@ -25,6 +25,7 @@ export function DashboardPage() {
     isLoading: runsLoading,
     error: runsError,
   } = useFirstRunsPage({ limit: 15, spanning });
+  const running = useFirstRunsPage({ status: ["running"], limit: 1, spanning });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents({ spanning });
   // The same query as the agents above: no second request.
   const agentName = useRunAgentName({ spanning });
@@ -82,6 +83,7 @@ export function DashboardPage() {
         agents: orderedAgents,
         runs,
         runTotal: runsData?.total ?? runs.length,
+        runningTotal: running.data?.total ?? (running.isLoading ? undefined : null),
         schedules: schedules ?? [],
         agentName,
       }}

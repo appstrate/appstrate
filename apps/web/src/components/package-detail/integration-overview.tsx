@@ -6,6 +6,11 @@ import { Layers, Plug, Wrench } from "lucide-react";
 import { HealthCard, HealthCardItem, HealthAction, HealthIssueBadge } from "../health-card";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { useAgents } from "../../hooks/use-packages";
+import { useOverviewMode, useWorkingSpaceWording } from "../../hooks/use-overview-mode";
+import { useSpaceLink } from "../../hooks/use-current-space";
+import { useMyConnections } from "../../hooks/use-me-connections";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { connectionsInSpaces } from "../../lib/connection-count";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { packageDetailPath } from "../../lib/package-paths";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
@@ -15,12 +20,17 @@ import { SkeletonLine } from "../skeleton-line";
 import { OperationalStat } from "../operational-stat";
 
 export function IntegrationOverview({
+  packageId,
   detail,
+  spaceIds,
   dependentIds,
   onOpenConnections,
   onConfigureAuth,
 }: {
+  packageId: string;
   detail: IntegrationDetailWire;
+  /** The spaces the integration is active in; `undefined` while they load. */
+  spaceIds?: readonly string[];
   /** The organization's agents depending on this integration, in every space. */
   dependentIds?: ReadonlyArray<string>;
   onOpenConnections: (authKey?: string) => void;
@@ -29,18 +39,43 @@ export function IntegrationOverview({
 }) {
   const { t } = useTranslation("settings");
   const location = useLocation();
-  // Only the agents of this space open from here: the others' pages answer 404.
-  const { data: spaceAgents, isLoading: agentsLoading } = useAgents();
+  // The agents of the working space, or in « Tous les espaces » of every space reached, each
+  // opening in its own: those of another space would answer 404 here.
+  const { on } = useOverviewMode();
+  const linkInSpace = useSpaceLink();
+  const { data: spaceAgents, isLoading: agentsLoading } = useAgents({ spanning: on });
   const agents = dependentIds && spaceAgents?.filter((agent) => dependentIds.includes(agent.id));
   const previewAgent = agents?.[0];
-  const connections = [
+  // In « Tous les espaces » the figures are the reader's own connections across the
+  // integration's spaces, as its index card counts them; otherwise the working space's.
+  const { data: myConnections } = useMyConnections(on);
+  const orgId = useCurrentOrgId();
+  const spaceWording = useWorkingSpaceWording("settings");
+  const across =
+    on && myConnections && spaceIds
+      ? connectionsInSpaces(
+          myConnections.find((group) => group.source_id === packageId)?.connections ?? [],
+          orgId,
+          spaceIds,
+        )
+      : undefined;
+  const hereConnections = [
     ...new Map(
       detail.auths
         .flatMap((auth) => auth.connections)
         .map((connection) => [connection.id, connection]),
     ).values(),
   ];
-  const reconnect = connections.filter((connection) => connection.needs_reconnection).length;
+  const connections = on ? across : hereConnections;
+  const connectionCount = connections?.length;
+  const reconnect = connections?.filter((connection) => connection.needs_reconnection).length;
+  const reconnectOf = (auth: IntegrationAuthStatus) =>
+    (on
+      ? across?.filter((connection) => connection.auth_key === auth.auth_key)
+      : auth.connections
+    )?.filter((connection) => connection.needs_reconnection).length ?? 0;
+  const figure = (value: number | undefined) =>
+    value === undefined ? <SkeletonLine className="w-10" /> : value;
   const available = detail.tool_catalog?.length ?? 0;
   const connectionsTo = { pathname: location.pathname, hash: "#connections" };
   const toolsTo = integrationSettingsHref(location.pathname, "tools");
@@ -48,27 +83,31 @@ export function IntegrationOverview({
     authMethodLabel(auth, detail.auths, t(`integration.auth.type.${auth.type}`));
   const prepared = (auth: IntegrationAuthStatus) =>
     auth.type !== "oauth2" || isOauthAuthConnectable(auth);
-  const issues = detail.active
-    ? detail.auths.flatMap((auth) => {
-        const items: { key: string; title: string; onClick?: () => void; action: string }[] = [];
-        if (!prepared(auth))
-          items.push({
-            key: `setup:${auth.auth_key}`,
-            title: t("integration.health.setup", { method: labelFor(auth) }),
-            onClick: onConfigureAuth ? () => onConfigureAuth(auth.auth_key) : undefined,
-            action: t("detail.diagnostics.fix", { ns: "agents" }),
-          });
-        const count = auth.connections.filter((connection) => connection.needs_reconnection).length;
-        if (count)
-          items.push({
-            key: `reconnect:${auth.auth_key}`,
-            title: t("integration.health.reconnect", { method: labelFor(auth), count }),
-            onClick: () => onOpenConnections(auth.auth_key),
-            action: t("detail.diagnostics.fix", { ns: "agents" }),
-          });
-        return items;
-      })
-    : [];
+  // An OAuth client is set per space: in the mode the item names the space it is missing in.
+  const issues =
+    detail.active || on
+      ? detail.auths.flatMap((auth) => {
+          const items: { key: string; title: string; onClick?: () => void; action: string }[] = [];
+          if (detail.active && !prepared(auth))
+            items.push({
+              key: `setup:${auth.auth_key}`,
+              title: spaceWording("integration.health.setup", "integration.health.setupIn", {
+                method: labelFor(auth),
+              }),
+              onClick: onConfigureAuth ? () => onConfigureAuth(auth.auth_key) : undefined,
+              action: t("detail.diagnostics.fix", { ns: "agents" }),
+            });
+          const count = reconnectOf(auth);
+          if (count)
+            items.push({
+              key: `reconnect:${auth.auth_key}`,
+              title: t("integration.health.reconnect", { method: labelFor(auth), count }),
+              onClick: () => onOpenConnections(auth.auth_key),
+              action: t("detail.diagnostics.fix", { ns: "agents" }),
+            });
+          return items;
+        })
+      : [];
 
   return (
     <div className="flex flex-col gap-6" data-testid="integration-overview">
@@ -104,18 +143,23 @@ export function IntegrationOverview({
           icon={Plug}
           bodyClassName="p-0"
         >
-          <dl className="divide-y">
-            <OperationalStat
-              label={t("integration.summary.connections")}
-              value={connections.length}
-              target={connections.length ? { to: connectionsTo } : undefined}
-            />
-            <OperationalStat
-              label={t("integration.summary.reauthorize")}
-              value={reconnect}
-              target={reconnect ? { to: connectionsTo } : undefined}
-            />
-          </dl>
+          {/* An integration declaring no auths (AFPS §7.2) binds no connection: nothing to count. */}
+          {detail.auths.length === 0 ? (
+            <p className="text-muted-foreground px-4 py-4 text-sm">{t("integration.auth.none")}</p>
+          ) : (
+            <dl className="divide-y">
+              <OperationalStat
+                label={t("integration.summary.connections")}
+                value={figure(connectionCount)}
+                target={connectionCount ? { to: connectionsTo } : undefined}
+              />
+              <OperationalStat
+                label={t("integration.summary.reauthorize")}
+                value={figure(reconnect)}
+                target={reconnect ? { to: connectionsTo } : undefined}
+              />
+            </dl>
+          )}
         </DetailSectionCard>
         <DetailSectionCard
           title={t("integration.summary.agents")}
@@ -142,7 +186,14 @@ export function IntegrationOverview({
                 )
               }
               target={
-                previewAgent ? { to: packageDetailPath("agent", previewAgent.id) } : undefined
+                previewAgent
+                  ? {
+                      to: linkInSpace(
+                        packageDetailPath("agent", previewAgent.id),
+                        previewAgent.space_ids,
+                      ),
+                    }
+                  : undefined
               }
             />
           </dl>

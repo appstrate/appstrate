@@ -3,6 +3,9 @@
 // Pure verdicts on what a reader may DO to a package: controls read them so none offers what the server refuses.
 
 import type { LibraryPackageItem } from "../hooks/use-library";
+import type { CataloguePlacement } from "./catalogue-placement";
+import { linkedSpacePath } from "./across-spaces";
+import { packageDetailPath } from "./package-paths";
 
 export type ActivationRefusal = "notPlaced" | "activate" | "deactivate";
 
@@ -55,12 +58,28 @@ export function mayRemoveFromSpace(
   );
 }
 
+/**
+ * Whether a package page leaves for the catalogue once the package is taken out of `removedFrom`:
+ * out of the space the page is read from. In « Tous les espaces » the page names the spaces
+ * left, and stays.
+ */
+export function removalLeavesPage(
+  overview: boolean,
+  removedFrom: string | null,
+  workingSpaceId: string | null,
+): boolean {
+  return !overview && !!removedFrom && removedFrom === workingSpaceId;
+}
+
 export interface CatalogueDeeds {
   /** `home_writable`: moving is the same authority as editing. */
   moveHome: boolean;
   /** `home_shareable`: a verb of its own (RBAC spec §6.10). */
   share: boolean;
-  /** Spaces the package can be removed from: all its placements for a sharer, else the current space for its recipient. */
+  /**
+   * Spaces the package can be removed from: all its shared placements for a sharer; for its
+   * recipient, the current space, or with none (« Tous les espaces ») every placement it may remove.
+   */
   revokeFrom: string[];
 }
 
@@ -69,15 +88,55 @@ export function catalogueDeeds(
   currentSpaceId: string | null | undefined,
 ): CatalogueDeeds {
   const share = pkg.home_shareable === true;
+  const shared = pkg.placements
+    .filter((placement) => placement.via === "shared")
+    .map((placement) => placement.space_id);
   return {
     moveHome: pkg.home_writable === true,
     share,
     revokeFrom: share
-      ? pkg.placements
-          .filter((placement) => placement.via === "shared")
-          .map((placement) => placement.space_id)
-      : currentSpaceId && mayRemoveFromSpace(pkg, currentSpaceId)
-        ? [currentSpaceId]
-        : [],
+      ? shared
+      : currentSpaceId
+        ? mayRemoveFromSpace(pkg, currentSpaceId)
+          ? [currentSpaceId]
+          : []
+        : shared.filter((spaceId) => mayRemoveFromSpace(pkg, spaceId)),
   };
+}
+
+type PagePlacement = Pick<CataloguePlacement, "here" | "activeIn" | "inactiveIn" | "homeSpaceId">;
+
+/**
+ * The space a package's own page opens in from the catalogue: the current one when it holds the
+ * package; with none (« Tous les espaces »), a space the reader can enter where it runs, else
+ * where it is placed switched off, else its home. `null`: nowhere the page could be read.
+ */
+export function pageSpace(
+  placement: PagePlacement,
+  enterable: readonly string[],
+  currentSpaceId: string | null,
+): string | null {
+  if (currentSpaceId) return placement.here !== null ? currentSpaceId : null;
+  const reached = (ids: readonly (string | null)[]) =>
+    ids.find((id): id is string => !!id && enterable.includes(id)) ?? null;
+  return (
+    reached(placement.activeIn) ?? reached(placement.inactiveIn) ?? reached([placement.homeSpaceId])
+  );
+}
+
+/**
+ * The address of a package's own page from its catalogue sheet, entering the space `pageSpace`
+ * picks when it is not the working one; a system package held nowhere opens as is. `null`: no
+ * page to offer.
+ */
+export function catalogueOpenPage(
+  pkg: Pick<LibraryPackageItem, "id" | "type" | "source">,
+  placement: PagePlacement,
+  enterable: readonly string[],
+  currentSpaceId: string | null,
+  workingSpaceId: string | null,
+): string | null {
+  const space = pageSpace(placement, enterable, currentSpaceId);
+  if (space === null && pkg.source !== "system") return null;
+  return linkedSpacePath(packageDetailPath(pkg.type, pkg.id), space ?? undefined, workingSpaceId);
 }

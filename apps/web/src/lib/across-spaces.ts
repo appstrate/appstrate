@@ -21,7 +21,10 @@ export function rowSpace(
   return spaceIds?.[0];
 }
 
-/** `path` as it was within the current space (or for a row of no space); naming the row's space otherwise. */
+/**
+ * `path` as it was within the current space (or for a row of no space); naming the row's space
+ * otherwise, merged into the query `path` already carries, its hash kept last.
+ */
 export function linkedSpacePath(
   path: string,
   spaceId: string | undefined,
@@ -29,7 +32,14 @@ export function linkedSpacePath(
 ): string {
   // No current space yet: nothing to move from.
   if (!spaceId || !currentSpaceId || spaceId === currentSpaceId) return path;
-  return `${path}?${new URLSearchParams({ [ENTER_SPACE_PARAM]: spaceId }).toString()}`;
+  const hashAt = path.indexOf("#");
+  const hash = hashAt < 0 ? "" : path.slice(hashAt);
+  const beforeHash = hashAt < 0 ? path : path.slice(0, hashAt);
+  const queryAt = beforeHash.indexOf("?");
+  const pathname = queryAt < 0 ? beforeHash : beforeHash.slice(0, queryAt);
+  const params = new URLSearchParams(queryAt < 0 ? "" : beforeHash.slice(queryAt + 1));
+  params.set(ENTER_SPACE_PARAM, spaceId);
+  return `${pathname}?${params.toString()}${hash}`;
 }
 
 /**
@@ -59,6 +69,21 @@ export function linkedSpaceStep(
   if (!linked) return "none";
   if (enterable === undefined) return "wait";
   return enterable && current !== linked ? "wait" : "drop";
+}
+
+/**
+ * Where the page reopens: `target` in the first enterable space of `spaceIds` after the one that
+ * refused, so repeated refusals cannot loop; `null` when none is left.
+ */
+export function detailElsewhere(
+  spaceIds: readonly string[],
+  target: string,
+  currentSpaceId: string | null,
+  enterable: (spaceId: string) => boolean,
+): string | null {
+  if (!currentSpaceId) return null;
+  const next = spaceIds.slice(spaceIds.indexOf(currentSpaceId) + 1).find(enterable);
+  return next ? linkedSpacePath(target, next, currentSpaceId) : null;
 }
 
 /**

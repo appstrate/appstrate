@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`previewKind`, `PreviewKind`, `localPreviewKind`** (`@appstrate/core/mime`): the in-browser
+  preview kind of a mime (`html` | `image` | `pdf` | `text`, or null), moved from the API so the
+  web shell and the chat module classify a file the same way, and the subset (`image` | `pdf` | `text`) a
+  browser shows from its own copy of a file not yet sent.
+- `FILE_NAME_META_KEY` (`@appstrate/core/file-uri`): the content `_meta` key under which an
+  `appfile://` resource read names the stored file (`dev.appstrate/file_name`).
+- `PlatformServices.readChatAttachment` accepts a `ChatAttachmentRead` and returns `ChatAttachmentContent` for bounded image and PDF inputs under the caller's current file permissions. `isRasterImageMime` in `@appstrate/core/mime` identifies the inline raster formats used by the chat and file preview.
+
+- `findCause` in `@appstrate/core/error-cause` finds the first matching object in an error's cause chain, up to eight levels deep.
+
 - **`InlineRunModel`, `RunAndWaitClientOptions.inlineRunModel`** (`@appstrate/core/run-and-wait-client`, #2262):
   `{ modelId, generation? }`, written into an inline launch body as `modelId` / `generation`. A
   caller option, never a `run_and_wait` argument, so the model driving the tool cannot choose

@@ -3,12 +3,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  keepPreviousData,
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
 import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
@@ -85,6 +80,7 @@ export function useFilesPaged(
   const spanning = !!filters.spanning;
   const header = useOrgScope().header;
   const scope = useListScope(spanning, usePermissions().can("files:read"));
+  const filesScope = JSON.stringify([scope.orgId, scope.keySpace, filters.runId]);
   const query = {
     purpose: filters.purpose,
     runId: filters.runId,
@@ -102,7 +98,9 @@ export function useFilesPaged(
     ...keysetPaging,
     enabled: scope.enabled,
     // The previous result stays on screen while a new search or purpose loads.
-    placeholderData: keepPreviousData,
+    meta: { filesScope },
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.meta?.filesScope === filesScope ? previous : undefined,
     refetchInterval: scope.refetchInterval,
   });
 }

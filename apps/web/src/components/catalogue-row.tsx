@@ -53,7 +53,7 @@ export function CatalogueMenuItems({
         </DropdownMenuItem>
       )}
       {/* Activating is not here: it is a switch that says WHICH space it acts
-          on — a column in the matrix, "Actif ici" on the sheet. A menu item
+          on — a column in the matrix, the switch on the sheet. A menu item
           could only ever mean the space the app happens to be in. What remains
           are the deeds that act on the package itself. */}
       {open && (deeds.moveHome || deeds.share) && <DropdownMenuSeparator />}

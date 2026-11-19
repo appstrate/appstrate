@@ -14,7 +14,8 @@
  * see the WebRTC/STUN residual in `services/file-preview.ts`.)
  *
  * Three things are pinned here, and the last two matter as much as the first:
- *  - the header is present, and its single origin tracks `USERCONTENT_URL`;
+ *  - the header is present, and its preview origin tracks `USERCONTENT_URL` (`blob:` is always
+ *    added, for the composer's local PDF preview);
  *  - the header carries `frame-src` and NOTHING ELSE. A full SPA CSP would break
  *    the Vite build's inline bootstrapping, so a `script-src` (or any other
  *    directive) appearing next to `frame-src` is a real breakage, not a
@@ -88,14 +89,14 @@ describe("SPA document CSP", () => {
   it("sends the header on every SPA route, not just /", async () => {
     await withUsercontentUrl(undefined, async () => {
       const res = await fetchSpa("/agents/some-agent/runs");
-      expect(res.headers.get("Content-Security-Policy")).toBe("frame-src 'self'");
+      expect(res.headers.get("Content-Security-Policy")).toBe("frame-src 'self' blob:");
     });
   });
 
   it("names 'self' when USERCONTENT_URL is unset — previews are minted on APP_URL", async () => {
     await withUsercontentUrl(undefined, async () => {
       const res = await fetchSpa();
-      expect(res.headers.get("Content-Security-Policy")).toBe("frame-src 'self'");
+      expect(res.headers.get("Content-Security-Policy")).toBe("frame-src 'self' blob:");
     });
   });
 
@@ -103,7 +104,7 @@ describe("SPA document CSP", () => {
     await withUsercontentUrl("https://usercontent.example", async () => {
       const res = await fetchSpa();
       expect(res.headers.get("Content-Security-Policy")).toBe(
-        "frame-src https://usercontent.example",
+        "frame-src https://usercontent.example blob:",
       );
     });
   });
@@ -112,7 +113,7 @@ describe("SPA document CSP", () => {
     await withUsercontentUrl("https://usercontent.example:8443/preview/", async () => {
       const res = await fetchSpa();
       expect(res.headers.get("Content-Security-Policy")).toBe(
-        "frame-src https://usercontent.example:8443",
+        "frame-src https://usercontent.example:8443 blob:",
       );
     });
   });
@@ -131,6 +132,7 @@ describe("SPA document CSP", () => {
           .filter(Boolean)
           .map((d) => d.split(/\s+/)[0]);
         expect(directives).toEqual(["frame-src"]);
+        expect(csp.split(/\s+/)).toContain("blob:");
       });
     }
   });

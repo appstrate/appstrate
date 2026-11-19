@@ -699,8 +699,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const skills = buildSkillServer(
       servedSkillsContext(
         c,
+        org,
         (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
-          orgId: org,
           spaceId: space.id,
           permissions: space.permissions,
         })),

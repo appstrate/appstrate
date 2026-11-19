@@ -58,6 +58,7 @@ import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
+import { KEYBOARD_VIEWPORT_CLASS, useKeyboardViewport } from "@appstrate/ui/use-keyboard-viewport";
 import { AppToaster } from "./components/app-toaster";
 import {
   isOverlayPath,
@@ -441,7 +442,7 @@ function layoutRoute(layout: LayoutPath) {
 /** The one boot placeholder every gate renders, so a visitor sees a single uninterrupted spinner. */
 function BootScreen() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="flex min-h-dvh items-center justify-center">
       <Spinner />
     </div>
   );
@@ -453,27 +454,36 @@ function BootScreen() {
  * HERE, above the route gate, which waits on it before it refuses. The realtime sync
  * covers the chat too: a chat turn runs agents.
  */
-function MainLayout() {
+function MainLayout({ search }: { search: string }) {
   const studioSidebar = useSidebarStore();
   const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
-  useSpaceResolver();
+  useSpaceResolver(search);
   useOverviewRules();
   useGlobalRunSync();
+  useKeyboardViewport(product === "chat");
 
   return (
     <ShellFrameProvider>
-      <SidebarProvider open={sidebar.open} onOpenChange={sidebar.setOpen}>
+      <SidebarProvider
+        open={sidebar.open}
+        onOpenChange={sidebar.setOpen}
+        className={
+          product === "chat"
+            ? `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`
+            : undefined
+        }
+      >
         <AppSidebar product={product} />
         {/* Studio: the scroll lives HERE, not on an inner div (which would narrow the content
             by the scrollbar width and misalign it with the header). Chat owns its height. */}
         <SidebarInset
           className={
             product === "chat"
-              ? "bg-canvas h-svh min-h-0 overflow-hidden"
-              : "bg-canvas h-svh overflow-y-auto"
+              ? "bg-canvas min-h-0 overflow-hidden"
+              : "bg-canvas h-dvh overflow-y-auto"
           }
         >
           <ShellHeader />
@@ -686,7 +696,8 @@ export function App() {
                   }
                 />
               ))}
-              <Route element={<MainLayout />}>
+              {/* The address bar's search: the page tree reads the page under an overlay. */}
+              <Route element={<MainLayout search={location.search} />}>
                 {flatPaths(false).map(pageRoute)}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

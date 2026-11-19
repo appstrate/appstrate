@@ -704,7 +704,8 @@ const integrationToolSchema = {
     connection_ids: {
       type: "array",
       items: { type: "string", format: "uuid" },
-      description: "The listing's `connections` the tool reaches, by `connection_id`.",
+      description:
+        "The listing's `connections` the tool reaches, by `connection_id`; empty for a tool of an integration that declares no `auths` (AFPS §7.2), which binds no connection.",
     },
     missing_scopes: {
       type: "object",
@@ -789,13 +790,16 @@ export const credentialProxyPaths = {
         "`/api/credential-proxy/tools/call`): the integration catalog's selection (its " +
         "`tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is " +
         "`true`), less `hidden_tools` and the connect tool, described by the server's " +
-        "`tools/list`. Each server is listed with the connection the proxy selects (or the " +
+        "`tools/list`. An integration declaring no `auths` (AFPS §7.2) is listed with its typed " +
+        "tools and `connection_ids: []`, never in `not_ready`: its server is reached directly, " +
+        "nothing injected, its catalog cached per organization, integration version and server " +
+        "URL, and the listing journaled as one call with no connection. Every other server is listed with the connection the proxy selects (or the " +
         "`connection_id` named, when it is one of that integration's; when the selection asks " +
         "for a choice, the first of the caller's OWN connections it accepts: a connection " +
         "another member shared serves only when named or designated by an org default), " +
         "cached per connection, integration version and server URL for 5 minutes, and " +
         "journaled as one call of the connection when the listing reaches the server, its " +
-        "handshake refused included. Reaching a server sends the connection's credential: a " +
+        "handshake refused included. Reaching such a server sends the connection's credential: a " +
         "401 goes through the proxy's forced refresh, and a server refusing the credential " +
         "can flag the connection `needs_reconnection`, as a call does. A catalog " +
         "keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s " +
@@ -811,7 +815,8 @@ export const credentialProxyPaths = {
         "connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations " +
         "whose server the proxy refused to list (connection selection, permission, " +
         "`authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's " +
-        "credential (`upstream_credential_rejected`), each with that refusal; resolving a `name` " +
+        "credential (`upstream_credential_rejected`) or, declaring no auths, asked for one " +
+        "(`bad_gateway`), each with that refusal; resolving a `name` " +
         "only the unread catalog could map (under `allow_undeclared_tools`, neither a declared " +
         "tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits " +
         "never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could " +
@@ -820,7 +825,7 @@ export const credentialProxyPaths = {
         "rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's " +
         "latest published version. Requires `credential-proxy:call-own` or " +
         "`credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers " +
-        "`403 credential_proxy_closed`.",
+        "`403 credential_proxy_closed`, unauthenticated integrations included.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -962,9 +967,17 @@ export const credentialProxyPaths = {
         "answer of the server the platform turns into a problem carries RFC 9209 " +
         "`Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other " +
         "refusals and the result carry none. The arguments go to the server as given: it " +
-        "validates them. " +
+        "validates them. An integration declaring no `auths` (AFPS §7.2) is called without any " +
+        "connection: its server is reached directly (egress-guarded on the URL and every " +
+        "redirect hop, https required for an untrusted host, a refusal answered as the proxy's " +
+        "`403 blocked_target` and a host that does not resolve `502 upstream_unresolvable`, as " +
+        "the proxy answers them; the same exchange bound; nothing injected; activation re-checked " +
+        "before each exchange), the call is journaled with no connection, a `connection_id` is refused " +
+        "(`credential_not_found`) before any exchange, and the server's 401 or 403 is a " +
+        "`502 bad_gateway` (it declares no authentication) that flags nothing. " +
         "Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
-        "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`, " +
+        "unauthenticated integrations included.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -988,7 +1001,7 @@ export const credentialProxyPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics).",
+                    "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no `auths`: call it without `connection_id`.",
                 },
                 name: {
                   type: "string",
@@ -1048,7 +1061,10 @@ export const credentialProxyPaths = {
             "`credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's " +
             "refusals of the server URL, before anything is sent: `unauthorized_target` " +
             "(`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), " +
-            "`credential_exfiltration_refused` (`http_request_denied`).",
+            "`credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also " +
+            "answers the egress guard refusing a redirect hop, after the first hop was sent; for " +
+            "an integration declaring no auths, also plain `http` to a host the operator does " +
+            "not trust, on the server URL (nothing sent) or a hop.",
           headers: PROXY_STATUS_HEADER,
           content: problemContent,
         },
@@ -1059,7 +1075,9 @@ export const credentialProxyPaths = {
             "`api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), " +
             "before any exchange; `credential_not_found` — no connection the caller reaches, or " +
             "`connection_id` names nothing the caller reaches (the same body whether it is " +
-            "another member's connection out of reach or no connection at all).",
+            "another member's connection out of reach or no connection at all), or " +
+            "`connection_id` is passed for an integration that declares no authentication " +
+            "(call it without `connection_id`).",
           content: problemContent,
         },
         "409": {

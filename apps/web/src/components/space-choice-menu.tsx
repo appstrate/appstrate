@@ -3,13 +3,14 @@
 /**
  * The space an action naming no space acts in, chosen where the action is (`useSpaceAction`'s
  * `choose`): its own trigger opens a menu of the spaces it may act in, under a label naming the
- * deed (« Créer dans… »). The catalogue's « Ajouter à… » (`CatalogueAddButton`) is the same menu,
- * its entries carrying a state. One click on a space acts; nothing else is asked.
+ * deed (« Créer dans… »). The catalogue's « Ajouter à… » (`CatalogueAddButton`) is the same menu
+ * as a menu of checkboxes: each entry says whether the deed is done there, and a click undoes it
+ * where it may be undone. One click on a space acts; nothing else is asked.
  */
 import type { ReactNode } from "react";
-import { Check } from "lucide-react";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -22,12 +23,13 @@ import type { SpaceChoiceMenu } from "../lib/menu-action";
 import { SpaceName } from "./space-name";
 
 /**
- * A space's state in a menu that has one: `done` ticks it, inert, its text at the end (where the
- * deed is already done); `badge` follows its name.
+ * A space's state in a menu that has one: `checked` where the deed is done, `disabled` where the
+ * click would be refused (undoing it is not the reader's), `note` a text at the entry's end.
  */
 interface SpaceEntryState {
-  done?: string;
-  badge?: string;
+  checked: boolean;
+  disabled?: boolean;
+  note?: string;
 }
 
 type EntryStates = (spaceId: string) => SpaceEntryState;
@@ -40,25 +42,26 @@ function SpaceChoiceItems({ choice, states }: { choice: SpaceChoiceMenu; states?
         {choice.label}
       </DropdownMenuLabel>
       {choice.spaces.map((space) => {
-        const state = states?.(space.id);
+        if (!states) {
+          return (
+            <DropdownMenuItem key={space.id} onSelect={() => choice.onPick(space.id)}>
+              <SpaceName space={space} size="md" className="flex-1" />
+            </DropdownMenuItem>
+          );
+        }
+        const state = states(space.id);
         return (
-          <DropdownMenuItem
+          <DropdownMenuCheckboxItem
             key={space.id}
-            disabled={!!state?.done}
+            checked={state.checked}
+            disabled={state.disabled}
             onSelect={() => choice.onPick(space.id)}
           >
-            {states && <Check className={state?.done ? "text-success" : "invisible"} aria-hidden />}
-            <SpaceName space={space} size="md" className="flex-1">
-              {state?.badge && (
-                <span className="bg-primary/15 text-primary rounded px-1 text-[10px] leading-4 font-medium">
-                  {state.badge}
-                </span>
-              )}
-            </SpaceName>
-            {state?.done && (
-              <span className="text-muted-foreground shrink-0 text-xs">{state.done}</span>
+            <SpaceName space={space} size="md" className="flex-1" />
+            {state.note && (
+              <span className="text-muted-foreground shrink-0 text-xs">{state.note}</span>
             )}
-          </DropdownMenuItem>
+          </DropdownMenuCheckboxItem>
         );
       })}
     </>

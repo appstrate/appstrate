@@ -15,13 +15,13 @@ import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateLibraries } from "./use-library";
 import { runDetailPath, splitPackageRef } from "../lib/package-paths";
+import { spaceHeader } from "../lib/scoping-headers";
 import i18n from "../i18n";
 import {
   packageKeys,
   agentsKeys,
   runKeys,
   paginatedRunsKeys,
-  persistenceKeys,
   invalidatePackageFiles,
   invalidatePackageCaches,
   invalidateVersionInfo,
@@ -186,9 +186,11 @@ export function useImportPackage(meta?: MutationMeta) {
       file,
       force,
       type,
+      spaceId,
     }: {
       file: File;
       force?: boolean;
+      spaceId?: string;
       /** The type imported for: an archive of another type is refused before anything is written. */
       type?: PackageType;
     }): Promise<ImportedPackage> => {
@@ -200,6 +202,7 @@ export function useImportPackage(meta?: MutationMeta) {
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const { data } = await client.POST("/api/packages/import-bundle", {
           params: { query: { type } },
+          ...spaceHeader(spaceId),
           // Multipart gap: the generated body types the binary part as `string`; FormData passes through the serializer.
           body: { file },
           bodySerializer: () => fd,
@@ -213,6 +216,7 @@ export function useImportPackage(meta?: MutationMeta) {
       }
       const { data } = await client.POST("/api/packages/import", {
         params: { query: { force: force || undefined, type } },
+        ...spaceHeader(spaceId),
         // Multipart gap — see above.
         body: { file },
         bodySerializer: () => fd,
@@ -227,9 +231,18 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    mutationFn: async ({ url, type }: { url: string; type?: PackageType }) => {
+    mutationFn: async ({
+      url,
+      type,
+      spaceId,
+    }: {
+      url: string;
+      type?: PackageType;
+      spaceId?: string;
+    }) => {
       const { data } = await client.POST("/api/packages/import-github", {
         params: { query: { type } },
+        ...spaceHeader(spaceId),
         body: { url },
       });
       return data!;
@@ -254,12 +267,14 @@ export function useCancelRun() {
   });
 }
 
+/** Deletes an agent's completed runs in `spaceId` (the route is per space). */
 export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (spaceId: string) => {
       const { data } = await client.DELETE("/api/agents/{scope}/{name}/runs", {
         params: { path: splitPackageRef(packageId) },
+        ...spaceHeader(spaceId),
       });
       return data!;
     },
@@ -272,35 +287,6 @@ export function useDeleteAgentRuns(packageId: string) {
 }
 
 // --- Memory mutations (unified persistence) ---
-
-export function useDeleteMemory(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (memoryId: number) => {
-      await client.DELETE("/api/agents/{scope}/{name}/persistence/memories/{id}", {
-        params: { path: { ...splitPackageRef(packageId), id: memoryId } },
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: persistenceKeys.all });
-    },
-  });
-}
-
-export function useDeleteAllMemories(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const { data } = await client.DELETE("/api/agents/{scope}/{name}/persistence", {
-        params: { path: splitPackageRef(packageId), query: { kind: "memory" } },
-      });
-      return data!;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: persistenceKeys.all });
-    },
-  });
-}
 
 // --- Package (skill/tool) create/update mutations ---
 

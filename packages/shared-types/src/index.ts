@@ -744,6 +744,14 @@ export interface AgentDetail {
    * answer there would only ever be `true`.
    */
   active: boolean;
+  /**
+   * The spaces the caller reaches where the agent is active, as its row of the
+   * org agent index names them: its home first when it is one of them, then in
+   * the order of the space listing. Empty when it is active in none.
+   */
+  space_ids: string[];
+  /** Readable placements, including those switched off. */
+  read_space_ids: string[];
 }
 
 // --- Organization Package Types ---
@@ -825,11 +833,12 @@ export interface IntegrationIndexItem extends OrgPackageItem {
 // dropped from the base via Omit (a sub-interface can't loosen a required
 // field to optional). `icon` and `keywords` go the same way and for the
 // mirror-image reason: they exist so an INDEX row can be drawn without its
-// manifest, and the detail ships `manifest` itself. `space_ids` names the
-// spaces of an index; a detail is read in the request's space.
+// manifest, and the detail ships `manifest` itself. A detail's `space_ids`
+// may be empty (active in none of the spaces the caller reaches), an index
+// row's never is.
 export interface OrgPackageItemDetail extends Omit<
   OrgPackageItem,
-  "used_by_agents" | "icon" | "keywords" | "space_ids"
+  "used_by_agents" | "icon" | "keywords"
 > {
   /**
    * WHICH definition `content`, `manifest` and every field projected from it
@@ -845,6 +854,7 @@ export interface OrgPackageItemDetail extends Omit<
    * released definition.
    */
   definition: "draft" | "published";
+  read_space_ids: string[];
   /**
    * Present but nullable — the `draft_content` column is nullable, and a
    * published projection reads the archive entry this type is authored around.
@@ -937,6 +947,8 @@ export interface AgentMemoryItem {
    */
   pinned?: boolean;
   createdAt: string | null;
+  /** The space this row belongs to. */
+  spaceId: string;
 }
 
 export interface AgentPinnedSlotItem {
@@ -955,6 +967,8 @@ export interface AgentPinnedSlotItem {
   actor_id: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /** The space this row belongs to. */
+  spaceId: string;
 }
 
 // --- Org Proxy Types ---

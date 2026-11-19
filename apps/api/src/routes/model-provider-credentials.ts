@@ -38,7 +38,7 @@ import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstra
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
-import { isForeignKeyViolation } from "../lib/db-helpers.ts";
+import { isForeignKeyViolation } from "@appstrate/db/errors";
 import {
   ApiError,
   conflict,

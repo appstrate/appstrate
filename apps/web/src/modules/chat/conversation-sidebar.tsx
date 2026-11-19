@@ -10,12 +10,12 @@ import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { FileArtifact } from "../../components/file-artifact";
-import { MimeIcon } from "../../components/file-badges";
-import { RunRow } from "../../components/run-row";
+import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
@@ -26,13 +26,16 @@ import { useConversationTabs } from "./use-conversation-tabs";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
+import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
   ConversationSidebarState,
   ConversationSidebarTab,
+  LocalSidebarFile,
   SidebarFile,
+  StoredSidebarFile,
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
@@ -95,6 +98,25 @@ export function ShownFile({
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
+  const close = {
+    label: backToList ? t("context.backToFiles") : t("context.collapse"),
+    onClick: onClose,
+  };
+  return "local" in file ? (
+    <ShownLocalFile file={file} onClose={close} />
+  ) : (
+    <ShownStoredFile file={file} onClose={close} />
+  );
+}
+
+function ShownStoredFile({
+  file,
+  onClose,
+}: {
+  file: StoredSidebarFile;
+  onClose: { label: string; onClick: () => void };
+}) {
+  const { t } = useTranslation("chat");
   // A file of another space (a conversation's) is read, copied and downloaded there.
   const context = otherSpaceFileContext(file.spaceId, useCurrentOrgId(), useCurrentSpaceId());
   const { data, isLoading, error } = useFile(file.id, context);
@@ -107,10 +129,30 @@ export function ShownFile({
       isLoading={isLoading}
       error={error}
       fallbackName={file.name || t("context.file.untitled")}
-      onClose={{
-        label: backToList ? t("context.backToFiles") : t("context.collapse"),
-        onClick: onClose,
-      }}
+      onClose={onClose}
+      className="h-full rounded-none border-0"
+    />
+  );
+}
+
+/** A file picked in the composer: the same frame over the browser's own copy, nothing to fetch. */
+function ShownLocalFile({
+  file,
+  onClose,
+}: {
+  file: LocalSidebarFile;
+  onClose: { label: string; onClick: () => void };
+}) {
+  const { t } = useTranslation("chat");
+  const viewable = localViewableFile(file.local, file.url);
+  return (
+    <FileArtifact
+      fileId={viewable.id}
+      file={viewable}
+      isLoading={false}
+      error={null}
+      fallbackName={file.local.name || t("context.file.untitled")}
+      onClose={onClose}
       className="h-full rounded-none border-0"
     />
   );
@@ -124,12 +166,15 @@ export function ConversationRuns({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const canRead = useAdmittingSpaces("runs").length > 0;
+  const admitting = useAdmittingSpaces("runs");
+  const canRead = admitting.length > 0;
   // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
   const scope = useListScope(true, canRead);
-  const agentName = useRunAgentName();
-  const { data: agents } = useAgents();
+  // Their agents are every space's too: read from the index spanning spaces, while shown.
+  const shown = active && !!conversationId;
+  const { data: agents } = useAgents({ spanning: true, enabled: shown });
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
+  const agentName = useRunAgentName({ spanning: true, enabled: shown });
   const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
   // A conversation belongs to the organization: the runs it launched, in every space.
   const query = $api.useQuery(
@@ -157,6 +202,9 @@ export function ConversationRuns({
           agentName={agentName(run)}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
           dense
+          // The list spans the spaces the reader reads runs in: each row names its own once
+          // there are several.
+          spanning={admitting.length > 1}
           className="px-3"
         />
       ))}
@@ -164,16 +212,18 @@ export function ConversationRuns({
   );
 }
 
-function ConversationFiles({
+export function ConversationFiles({
   conversationId,
   active,
   onSelect,
 }: {
   conversationId: string | null;
   active: boolean;
-  onSelect: (file: SidebarFile) => void;
+  onSelect: (file: StoredSidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
+  // The list spans the spaces the reader reads files in: each row names its own once there are several.
+  const named = useAdmittingSpaces("files").length > 1;
   const query = useFiles({
     spanning: true,
     contextChatSessionId: conversationId ?? undefined,
@@ -211,6 +261,7 @@ function ConversationFiles({
               ].join(" · ")}
             </span>
           </span>
+          {named && <RowSpaceName spaceId={file.spaceId} />}
         </button>
       ))}
     </div>

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { createOverviewContext } from "../../helpers/overview.ts";
+import { createSpace } from "../../helpers/seed.ts";
+import { Sidebar } from "../../pages/sidebar.ts";
 import type { FileDto } from "../../../apps/web/src/hooks/use-files.ts";
 
 // Controlled file responses exercise gallery layout and capability gates without an LLM run.
@@ -158,5 +161,56 @@ for (const appearance of [
     await confirm.getByRole("button", { name: "Supprimer", exact: true }).click();
     await expect(preview).toHaveCount(0);
     expect(deleted).toBe(true);
+  });
+}
+
+for (const view of ["Vue cartes", "Vue tableau"]) {
+  test(`gallery drops other spaces' files during a slow scope change in ${view}`, async ({
+    browser,
+    browserCtx,
+    orgOnlyClient,
+  }) => {
+    const working = await createSpace(orgOnlyClient, "Gallery A");
+    const other = await createSpace(orgOnlyClient, "Gallery B");
+    const context = await createOverviewContext(
+      browser,
+      browserCtx.auth,
+      browserCtx.org.orgId,
+      working.id,
+    );
+    const page = await context.newPage();
+    const name = "only-in-b.txt";
+    const row = {
+      ...file("file_scope_b", name, other.id),
+      previewable: false,
+      preview_kind: "none",
+      mime: "text/plain",
+    };
+    const release = Promise.withResolvers<void>();
+    try {
+      await page.route(/\/api\/orgs\/[^/]+\/files(?:\?|$)/, (route) =>
+        route.fulfill({ json: { object: "list", data: [row], hasMore: false } }),
+      );
+      await page.route(/\/api\/files(?:\?|$)/, async (route) => {
+        await release.promise;
+        await route.fulfill({ json: { object: "list", data: [], hasMore: false } });
+      });
+      await page.goto("/files");
+      await page.getByRole("tab", { name: view, exact: true }).click();
+      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+      const pending = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/api/files",
+      );
+      await new Sidebar(page).switchSpace(working.name);
+      expect((await pending).headers()["x-space-id"]).toBe(working.id);
+      await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: `Plus d'actions pour ${name}` })).toHaveCount(
+        0,
+      );
+      release.resolve();
+    } finally {
+      release.resolve();
+      await context.close();
+    }
   });
 }

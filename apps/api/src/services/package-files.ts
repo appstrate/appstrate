@@ -375,8 +375,16 @@ export async function resolvePackageFileValidator(
   const ver = await getVersionForDownload(pkg.id, version);
   if (!ver) throw notFound("Version not found");
 
+  return publishedFileValidator(ver);
+}
+
+export function publishedFileValidator(ver: {
+  version: string;
+  integrity: string;
+  yanked: boolean;
+}) {
   return {
-    kind: "version",
+    kind: "version" as const,
     snapshotId: `pv-${ver.integrity}`,
     yanked: ver.yanked,
     version: ver.version,
@@ -394,8 +402,8 @@ export async function resolvePackageFileValidator(
  * `"Package file snapshot read"` log line.
  *
  * @throws 422 `version_artifact_unavailable` when a version's artifact is
- *   missing from storage. A missing DRAFT artifact is not an error — a freshly
- *   created package has no ZIP yet and must still list its DB-backed files.
+ *   missing from storage, including a system skill's shipped tree. A fresh
+ *   organization draft can consist entirely of DB-backed files.
  */
 export async function readPackageSnapshot(
   pkg: PackageFileSource,
@@ -418,6 +426,12 @@ export async function readPackageSnapshot(
       undefined,
       pkg.orgId === null ? "system" : "org",
     );
+    // A shipped skill always contains manifest.json and SKILL.md, so system sync
+    // always stores its tree. The row alone cannot account for its companion files.
+    if (stored === null && pkg.orgId === null && pkg.type === "skill") {
+      const { version } = asRecord(pkg.draftManifest);
+      throw versionArtifactUnavailable(pkg.id, typeof version === "string" ? version : "latest");
+    }
     files = stored ?? {};
     applyDraftOverlay(files, pkg);
     snapshotId = draftSnapshotId(files);

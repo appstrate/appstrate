@@ -25,3 +25,21 @@ export function writableDestinations<T extends SpaceOption>(
     (space) => space.id !== homeSpaceId && !space.personal && space.permissions.includes(required),
   );
 }
+
+/**
+ * The home's name on a detail header's meta line (`PackageOriginMeta`): said only where no tile
+ * names it — the home's tile leads when the package is active there — and not while the tiles
+ * are read (`spaceIds` undefined), so the line does not jump.
+ */
+export function homeNameBesideTiles({
+  homeSpaceId,
+  homeSpaceName,
+  spaceIds,
+}: {
+  homeSpaceId: string | null;
+  homeSpaceName?: string | null;
+  spaceIds: readonly string[] | undefined;
+}): string | null | undefined {
+  if (!spaceIds || (homeSpaceId && spaceIds.includes(homeSpaceId))) return null;
+  return homeSpaceName;
+}

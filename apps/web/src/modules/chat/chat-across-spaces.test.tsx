@@ -5,8 +5,8 @@
  * conversation panel keeps its lists live across spaces, and the grants the module reads.
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it } from "bun:test";
+import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -15,43 +15,27 @@ installFakeStorage({
   location: { pathname: "/", origin: "http://localhost" },
 });
 
-const { render } = await import("../../test/render.tsx");
+const { renderInSpace, memberSpaceClient, testSpace } = await import("../../test/space-context.ts");
+const { makeRun } = await import("../../test/run-fixture.ts");
+const { fileFixture } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
 const { SpaceTilesOf } = await import("../../components/space-name.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
 const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
-const { ConversationRuns, ShownFile } = await import("./conversation-sidebar.tsx");
+const { ConversationFiles, ConversationRuns, ShownFile } =
+  await import("./conversation-sidebar.tsx");
 const { useConversationTabs } = await import("./use-conversation-tabs.ts");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
 const { useCanReach } = await import("../../hooks/use-can-reach.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
-const { authStore } = await import("../../stores/auth-store.ts");
-const { overviewStore } = await import("../../stores/overview-store.ts");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 await i18n.loadNamespaces(["chat"]);
 
-let stubs: { mockRestore: () => void }[] = [];
-afterEach(() => {
-  for (const stub of stubs) stub.mockRestore();
-  stubs = [];
-});
-
-const space = (id: string, permissions: string[]) => ({
-  id,
-  object: "space",
-  access: "member",
-  permissions,
-  personal: false,
-  isDefault: id === "spc_a",
-  name: id,
-  role: null,
-});
+const space = (id: string, permissions: string[]) => testSpace(id, permissions, id);
 
 /** `node` with the overview mode chosen and, when `spaces` is given, the space listing answered. */
 function renderOverview(
@@ -59,52 +43,13 @@ function renderOverview(
   spaces?: ReturnType<typeof space>[],
   chosen = true,
 ): { html: string; queryClient: QueryClient } {
-  stubs = [
-    spyOn(orgStore, "getInitialState").mockReturnValue({
-      ...orgStore.getInitialState(),
-      id: "org_1",
-    }),
-    spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_a",
-    }),
-    spyOn(authStore, "getInitialState").mockReturnValue({
-      ...authStore.getInitialState(),
-      user: { id: "u_1", email: "u@example.test", emailVerified: true },
-    }),
-    spyOn(overviewStore, "getInitialState").mockReturnValue({
-      ...overviewStore.getInitialState(),
-      chosen: chosen ? { "u_1:org_1": true } : {},
-    }),
-  ];
-  const queryClient = new QueryClient();
-  queryClient.setQueryData(
-    ["orgs"],
-    [
-      {
-        id: "org_1",
-        name: "Acme",
-        slug: "acme",
-        icon: null,
-        color: null,
-        role: "member",
-        deleting_at: null,
-        permissions: [],
-        createdAt: "2026-09-05T00:00:00Z",
-      },
-    ],
-  );
-  if (spaces) {
-    queryClient.setQueryData(
-      ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-      {
-        object: "list",
-        hasMore: false,
-        data: spaces,
-      },
-    );
-  }
-  const html = render(<SidebarProvider>{node}</SidebarProvider>, { queryClient });
+  const queryClient = memberSpaceClient(spaces ?? []);
+  // No listing yet: the mode is not known.
+  if (!spaces) queryClient.removeQueries({ queryKey: ["get", "/api/spaces"] });
+  const html = renderInSpace(<SidebarProvider>{node}</SidebarProvider>, {
+    queryClient,
+    overview: chosen,
+  });
   return { html, queryClient };
 }
 
@@ -140,6 +85,53 @@ describe("the conversation panel", () => {
     expect((query!.options as { refetchInterval?: unknown }).refetchInterval).toBe(
       ACROSS_SPACES_POLL_MS,
     );
+  });
+
+  /** The panel's list once its query answered with `rows`, under `spaces`. */
+  function listed(
+    node: React.ReactElement,
+    spaces: ReturnType<typeof space>[],
+    path: string,
+    rows: unknown[],
+  ): string {
+    const { queryClient } = renderOverview(node, spaces);
+    const query = queryClient
+      .getQueryCache()
+      .getAll()
+      .find((q) => JSON.stringify(q.queryKey).includes(`"${path}"`));
+    queryClient.setQueryData(query!.queryKey, { object: "list", hasMore: false, data: rows });
+    return renderInSpace(<SidebarProvider>{node}</SidebarProvider>, {
+      queryClient,
+      overview: true,
+    });
+  }
+
+  it("names each run's and file's space only when several spaces admit the list", () => {
+    const runs = [makeRun({ id: "run_b", spaceId: "spc_b" })];
+    const files = [fileFixture({ name: "b.md", spaceId: "spc_b" })];
+    const both = (permission: string) => [
+      testSpace("spc_a", ["chat:read", permission]),
+      testSpace("spc_b", ["chat:read", permission]),
+    ];
+    const one = (permission: string) => [
+      testSpace("spc_a", ["chat:read", permission]),
+      testSpace("spc_b", ["chat:read"]),
+    ];
+    const runList = <ConversationRuns conversationId="chs_1" active />;
+    const fileList = <ConversationFiles conversationId="chs_1" active onSelect={() => {}} />;
+    // The row is drawn either way; only its space's name depends on how many spaces admit the list.
+    const cases: [React.ReactElement, string, string, unknown[], string][] = [
+      [runList, "runs:read", "/api/orgs/{orgId}/runs", runs, "#42"],
+      [fileList, "files:read", "/api/orgs/{orgId}/files", files, "b.md"],
+    ];
+    for (const [list, permission, path, rows, row] of cases) {
+      const several = listed(list, both(permission), path, rows);
+      const single = listed(list, one(permission), path, rows);
+      expect(several).toContain(row);
+      expect(single).toContain(row);
+      expect(several).toContain("Studio");
+      expect(single).not.toContain("Studio");
+    }
   });
 
   function Tabs() {

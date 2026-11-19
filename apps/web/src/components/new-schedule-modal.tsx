@@ -28,6 +28,7 @@ import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choic
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
+import { NoAccessState } from "./route-gate";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { isQueryInFlight } from "../lib/query-state";
 import { useActorName } from "../hooks/use-actor-name";
@@ -99,6 +100,7 @@ function NewScheduleForm({
   const agentsPending = isQueryInFlight(agentsQuery);
   const [picked, setPicked] = useState<string | undefined>(initialAgentId);
   const agentId = picked ?? agents?.[0]?.id;
+  if (!agentId && agentsQuery.isError) return <ErrorState error={agentsQuery.error} />;
 
   return (
     <div className="flex flex-col gap-5">
@@ -139,8 +141,9 @@ function ScheduleFields({
 }) {
   // The form seeds its inputs once: it waits for the agent detail, or a field
   // locked since would be seeded and refused (400 `locked_input_field`).
-  const { deps, error } = useScheduleFormDeps(agentId);
+  const { deps, error, denied } = useScheduleFormDeps(agentId);
   if (error) return <ErrorState error={error} />;
+  if (denied) return <NoAccessState />;
   if (!deps) return <SettingsSkeleton />;
   return (
     <ScheduleFieldsReady deps={deps} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />

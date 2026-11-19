@@ -19,6 +19,7 @@ import {
   ChatTransportProvider,
   SelectConversationProvider,
   type OpenFile,
+  type SpaceChoiceMenu,
 } from "@appstrate/module-chat/ui";
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
@@ -26,19 +27,21 @@ import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
-import { useRowSpaceGrants } from "../../hooks/use-space-action";
+import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
-import { useUploadClient } from "../../hooks/use-upload";
+import { useUploadInSpace } from "../../hooks/use-upload";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
+  heldLocalUrl,
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
+import { SpaceChoiceDropdown, SpaceChoiceSubmenu } from "../../components/space-choice-menu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -46,7 +49,7 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { useSpaceLabelOf } from "../../hooks/use-spaces";
+import { useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -121,9 +124,17 @@ export function ChatModulePage() {
   // trigger/source policy here: selecting a file always opens the same
   // Preview tab in the same sidebar.
   const presentFile = useCallback<OpenFile>(
-    (file) => dispatchSidebar({ type: "show-file", file }),
+    (file) =>
+      dispatchSidebar({
+        type: "show-file",
+        file: "local" in file ? { local: file.local, url: URL.createObjectURL(file.local) } : file,
+      }),
     [],
   );
+  // A picked file's object URL lives while the panel holds it. The panel starts empty, so
+  // Strict Mode's replay of the first run has nothing to revoke.
+  const localUrl = heldLocalUrl(sidebarState);
+  useEffect(() => (localUrl ? () => URL.revokeObjectURL(localUrl) : undefined), [localUrl]);
 
   // Browser back/forward bypasses the chat's selection callback. Clear from the
   // popstate callback (not an effect body) so returning to an old entry never
@@ -147,9 +158,8 @@ export function ChatModulePage() {
     [downloadFile, orgId, currentSpaceId],
   );
   // The very same uploader every SchemaForm file field uses — including its
-  // refresh of the org storage gauge. The chat composer stages files through
-  // it instead of re-implementing the 2-step upload.
-  const uploadFile = useUploadClient();
+  // refresh of the org storage gauge — into the space the chat names for each file.
+  const uploadFile = useUploadInSpace();
   const queryClient = useQueryClient();
   // The assistant creates and imports packages: the lists show them as the editor's would.
   const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
@@ -192,7 +202,6 @@ export function ChatModulePage() {
               t={translate}
               can={can}
               canIn={canIn}
-              workingSpaceId={currentSpaceId}
               actingSpaceIds={actingSpaceIds}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
@@ -202,6 +211,7 @@ export function ChatModulePage() {
               renderSpaces={renderSpaces}
               linkInSpace={linkInSpace}
               useSpaceLabelOf={useSpaceLabelOf}
+              SpaceChoiceMenu={ChatSpaceChoiceMenu}
             />
           </div>
           <ConversationSidebar
@@ -214,3 +224,25 @@ export function ChatModulePage() {
     </ChatTransportProvider>
   );
 }
+
+/** The chat's « in which space? » menu: the app's own, from a button or a menu entry. */
+const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({
+  variant,
+  label,
+  spaceIds,
+  onPick,
+  trigger,
+  testId,
+}) => {
+  const spaces = useSpacesOf(spaceIds);
+  const choice = { label, spaces, onPick };
+  return variant === "dropdown" ? (
+    <SpaceChoiceDropdown choice={choice}>{trigger}</SpaceChoiceDropdown>
+  ) : (
+    <SpaceChoiceSubmenu
+      choice={choice}
+      trigger={trigger}
+      marks={testId ? { "data-testid": testId } : undefined}
+    />
+  );
+};

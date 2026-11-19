@@ -99,10 +99,7 @@ export async function buildBundleFromUploadedAfps(
  * Returns the resolved version and its catalog manifest. Throws `notFound` if
  * no version exists for the package.
  */
-export async function resolveExportVersion(
-  packageId: string,
-  versionSpec?: string | null,
-): Promise<{ version: string; manifest: Record<string, unknown> }> {
+export async function resolveExportVersion(packageId: string, versionSpec?: string | null) {
   const row = await getVersionRow(packageId, versionSpec || "latest");
   if (row) return row;
   throw notFound(

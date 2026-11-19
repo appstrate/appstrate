@@ -11,8 +11,9 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { $api, client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
+import { spaceHeader } from "../lib/scoping-headers";
 import { generatedKeyPackage, keepPreviousWithin } from "../lib/query-state";
-import { useListScope, useOrgScope } from "./use-org-scope";
+import { useListScope, useOrgScope, useSpaceReadScope } from "./use-org-scope";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
@@ -125,7 +126,7 @@ async function fetchPackageDetail(
   const path = splitPackageRef(packageId);
   // Omitted: the server picks the draft for a writer, else the latest version. An explicit `draft` is an author's read (`403 draft_not_writable` for others).
   const query = version ? { query: { version } } : {};
-  const headers = spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
+  const headers = spaceHeader(spaceId);
   if (type === "agent") {
     const { data, response } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...query },
@@ -216,7 +217,8 @@ export function packageDetailQueryOptions<T extends PackageType>(
       id,
       version ?? null,
     ),
-    queryFn: () => fetchPackageDetail(type, id, version),
+    // Read FROM the key's space: a read made before entering it must not carry the working space.
+    queryFn: () => fetchPackageDetail(type, id, version, scope.spaceId ?? undefined),
   };
 }
 
@@ -249,6 +251,7 @@ function useDeletePackage(type: PackageType) {
     onSuccess: () => {
       // Stale, not refetched: the deleted package's own detail is still mounted until the navigation below.
       qc.invalidateQueries({ queryKey: packageKeys.family(segment), refetchType: "none" });
+      void invalidateLibraries(qc);
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
       toast.success(t("packages.deleted"));
@@ -317,6 +320,20 @@ export function useAgents({ spanning = false, enabled = true } = {}) {
   });
 }
 
+/**
+ * The agents of `agentIds` (a package's dependents, organization-wide) that the agent index lists
+ * where the reader stands (`spanning` as {@link useAgents}): what a package's « Utilisé par » lists
+ * and its overview counts. `data` is `undefined` until both are known; no `agentIds`, no read.
+ */
+export function useAgentsAmong(agentIds: readonly string[] | undefined, spanning: boolean) {
+  const query = useAgents({ spanning, enabled: agentIds !== undefined });
+  const ids = new Set(agentIds);
+  return {
+    ...query,
+    data: agentIds && query.data ? query.data.filter((agent) => ids.has(agent.id)) : undefined,
+  };
+}
+
 /** The current space's agent index, or every space's of `acrossOrgId`. Exported for its test. */
 export async function fetchAgents(acrossOrgId: string | null): Promise<AgentListItem[]> {
   const { data } = acrossOrgId
@@ -342,14 +359,16 @@ export async function fetchAgents(acrossOrgId: string | null): Promise<AgentList
 
 // --- Package download ---
 
+/** Downloads one version's `.afps`, read in `spaceId` (a space where the package is readable), the current space when absent. */
 export function usePackageDownload(scope: string | undefined, name: string | undefined) {
   return useCallback(
-    async (version: string) => {
+    async (version: string, spaceId?: string) => {
       if (!scope || !name) return;
       await downloadOrToast(
         () =>
           client.GET("/api/packages/{scope}/{name}/{version}/download", {
             params: { path: { scope, name, version } },
+            ...spaceHeader(spaceId),
             parseAs: "blob",
           }),
         `${stripScope(scope)}-${name}-${version}.afps`,
@@ -359,15 +378,20 @@ export function usePackageDownload(scope: string | undefined, name: string | und
   );
 }
 
-/** Exports an agent as a multi-package `.afps-bundle` via `downloadOrToast`; `version` pins a release, defaulting to the one resolved in the current space. */
+/**
+ * Exports an agent as a multi-package `.afps-bundle` via `downloadOrToast`; `version` pins a
+ * release. The export answers in a space where the agent is active: `spaceId` names it, the
+ * current space when absent.
+ */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
   return useCallback(
-    async (version?: string) => {
+    async (version?: string, spaceId?: string) => {
       if (!scope || !name) return;
       await downloadOrToast(
         () =>
           client.GET("/api/agents/{scope}/{name}/bundle", {
             params: { path: { scope, name }, query: { version } },
+            ...spaceHeader(spaceId),
             parseAs: "blob",
           }),
         `${stripScope(scope)}-${name}.afps-bundle`,
@@ -407,16 +431,19 @@ export function useVersionDetail(
   );
 }
 
-export function usePackageVersions(type: PackageType, packageId: string | undefined) {
-  const scope = useOrgScope();
-  const canRead = useCanReadPackages(type);
+export function usePackageVersions(
+  type: PackageType,
+  packageId: string | undefined,
+  spaceId?: string,
+) {
+  const scope = useSpaceReadScope(packagePermission(type, "read"), spaceId);
   return $api.useQuery(
     "get",
     `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
     { params: { header: scope.header, path: splitPackageRef(packageId ?? "") } },
     {
       select: (e): VersionListItem[] => e.data,
-      enabled: canRead && scope.enabled && !!packageId,
+      enabled: scope.enabled && !!packageId,
     },
   );
 }
@@ -527,17 +554,27 @@ export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
+    mutationFn: async ({
+      packageId,
+      name,
+      spaceId,
+    }: {
+      packageId: string;
+      name?: string;
+      spaceId: string;
+    }) => {
       // 201 → the forked package resource, bare: `id` is the new
       // package ID under org scope, `forked_from` the source package ID.
       const { data } = await client.POST("/api/packages/{scope}/{name}/fork", {
         params: { path: splitPackageRef(packageId) },
+        ...spaceHeader(spaceId),
         body: name ? { name } : {},
       });
       return { id: data!.id, forked_from: data!.forked_from ?? null };
     },
     onSuccess: () => {
       invalidatePackageCaches(qc);
+      void invalidateLibraries(qc);
       // The copy may be an integration, whose list is keyed apart from the package family.
       void invalidateIntegrationQueries(qc);
     },

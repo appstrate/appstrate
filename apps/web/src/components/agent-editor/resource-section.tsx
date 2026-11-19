@@ -43,7 +43,11 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { usePermissions } from "../../hooks/use-permissions";
+import { rowSpace } from "../../lib/across-spaces";
+import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { deedEntry, deedInSpaces, spaceDeedLabels } from "../space-deed";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { useSpacesFor } from "../../hooks/use-space-action";
 import { packagePermission } from "@appstrate/core/permissions";
 import { TextSkeleton } from "../loading-skeletons";
 
@@ -72,17 +76,29 @@ export function ResourceSection({
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  // The picker offers what this space RUNS: activation governs what a space
-  // offers — hints, CLI sync, this list — so the index (placed here and
-  // switched on, every type) is the offer. It is narrower than what a manifest
-  // may declare: resolving a DECLARED dependency name stays org-wide (RBAC
-  // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
-  // package this space does not run, and the entry below stays visible for it.
-  const { data: items, isLoading, error } = usePackageList(type);
+  // The picker offers the index, what the working space runs (in « Tous les espaces », any space
+  // the reader reaches: the definition is the same everywhere). A declared dependency resolves
+  // org-wide (RBAC §6.9), so one outside the index stays listed below.
+  const { on: spanning } = useOverviewMode();
+  const { data: items, isLoading, error } = usePackageList(type, spanning);
   // Without the type's read the catalog never loads: the declared
   // entries are then all this section knows, listed by id.
-  const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
-  const [importing, setImporting] = useState(false);
+  const canReadCatalog = useSpacesFor({ permission: packagePermission(type, "read") }).offered;
+  const catalogUnreadable = t(
+    spanning ? "editor.catalogUnreadableAcross" : "editor.catalogUnreadable",
+  );
+  const workingSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
+  const readSpace = (item: CatalogItem | undefined) =>
+    spanning ? rowSpace(item?.space_ids, workingSpaceId) : undefined;
+  const writers = useSpacesFor({ permission: packagePermission(type, "write") });
+  const [importSpaceId, setImportSpaceId] = useState<string | null>(null);
+  const importDeed = deedInSpaces(
+    spanning,
+    writers.targets,
+    spaceDeedLabels(t, "spaceChoice.import", "spaceChoice.importIn"),
+    setImportSpaceId,
+  );
   const [picking, setPicking] = useState(false);
   const [toolsId, setToolsId] = useState<string | null>(null);
   const toolsEntry = selectedEntries.find((entry) => entry.id === toolsId);
@@ -159,7 +175,7 @@ export function ResourceSection({
               id: "import",
               label: t("common:nav.import"),
               icon: Upload,
-              onSelect: () => setImporting(true),
+              ...deedEntry(importDeed),
             },
           ]}
         />
@@ -171,7 +187,7 @@ export function ResourceSection({
         <TextSkeleton className="py-2" />
       ) : selectedEntries.length === 0 ? (
         <EmptyState
-          message={canReadCatalog ? emptyLabel : t("editor.catalogUnreadable")}
+          message={canReadCatalog ? emptyLabel : catalogUnreadable}
           icon={SearchX}
           compact
         >
@@ -185,7 +201,7 @@ export function ResourceSection({
         <div className="border-border overflow-hidden rounded-lg border">
           {!canReadCatalog && (
             <p className="text-muted-foreground border-border border-b px-4 py-3 text-xs">
-              {t("editor.catalogUnreadable")}
+              {catalogUnreadable}
             </p>
           )}
           <Table>
@@ -217,9 +233,15 @@ export function ResourceSection({
                         {flagged ? (
                           <span className="text-destructive inline-flex items-center gap-1 text-xs">
                             <AlertTriangle className="size-3.5 shrink-0" />
-                            {isIntegration
-                              ? t("editor.integrationInactive")
-                              : t("editor.dependencyMissing")}
+                            {t(
+                              isIntegration
+                                ? spanning
+                                  ? "editor.integrationInactiveAcross"
+                                  : "editor.integrationInactive"
+                                : spanning
+                                  ? "editor.dependencyMissingAcross"
+                                  : "editor.dependencyMissing",
+                            )}
                           </span>
                         ) : (
                           item?.description && (
@@ -237,12 +259,15 @@ export function ResourceSection({
                             {entry.version ?? "*"}
                           </span>
                         ) : (
-                          isIntegration && <ActivateIntegrationButton packageId={entry.id} />
+                          // It switches it on in the working space, which the mode does not name.
+                          isIntegration &&
+                          !spanning && <ActivateIntegrationButton packageId={entry.id} />
                         )
                       ) : (
                         <PackageVersionSelect
                           type={type}
                           packageId={entry.id}
+                          spaceId={readSpace(item)}
                           value={entry.version ?? "*"}
                           onChange={(v) => updateVersion(entry.id, v)}
                           toOption={(version) => ({
@@ -282,7 +307,7 @@ export function ResourceSection({
                       >
                         <DropdownMenuItem asChild>
                           <Link
-                            to={packageDetailPath(type, entry.id)}
+                            to={linkInSpace(packageDetailPath(type, entry.id), readSpace(item))}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
@@ -300,8 +325,13 @@ export function ResourceSection({
         </div>
       )}
 
-      {importing && (
-        <ImportModal type={type} onClose={() => setImporting(false)} onImported={addImported} />
+      {importSpaceId && (
+        <ImportModal
+          spaceId={importSpaceId}
+          type={type}
+          onClose={() => setImportSpaceId(null)}
+          onImported={addImported}
+        />
       )}
       {picking && (
         <ResourcePicker
@@ -319,6 +349,7 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
+          spaceId={readSpace(byId.get(toolsEntry.id))}
           onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);
@@ -333,11 +364,13 @@ export function ResourceSection({
 /** An integration's allowed tools, edited on a copy and applied to the draft. */
 function ToolsModal({
   name,
+  spaceId,
   entry,
   onClose,
   onApply,
 }: {
   name: string;
+  spaceId?: string;
   entry: ResourceEntry;
   onClose: () => void;
   onApply: (entry: ResourceEntry) => void;
@@ -356,7 +389,12 @@ function ToolsModal({
       className="sm:max-w-2xl"
     >
       <div className="max-h-[60dvh] overflow-y-auto">
-        <IntegrationToolPicker packageId={entry.id} entry={draft} onChange={setDraft} />
+        <IntegrationToolPicker
+          spaceId={spaceId}
+          packageId={entry.id}
+          entry={draft}
+          onChange={setDraft}
+        />
       </div>
     </FormModal>
   );

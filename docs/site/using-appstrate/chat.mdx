@@ -10,11 +10,11 @@ The chat is a module (`@appstrate/module-chat`) that is part of the default `MOD
 ## What you need
 
 - **A model.** The chat runs on one of your organization's models. An administrator adds them under **Settings → Organization → Models**. If you have several, choose one in the composer. Until you choose, the chat follows the organization's default model, so a change of that default reaches everyone who never picked one.
-- **A role that can chat in the current space.** Conversations belong to a space. Every built-in space role can read conversations, and the `admin`, `builder`, `operator` and `runner` roles can also write. The `viewer` role is read-only.
+- **Access to the spaces used by the conversation.** Conversations belong to their author within an organization. Reading one requires chat read access in its origin space, if set, and in every space it has touched. Every built-in space role can read conversations, and the `admin`, `builder`, `operator` and `runner` roles can also write. The `viewer` role is read-only.
 
 ## Using it
 
-Open **Chat** in the sidebar (under Activity) and type. Your conversations are listed on the left. They are private to your account and to the space you are in, and they are stored on the server: if you leave the page while the assistant is answering, the answer is still saved. Deleting a conversation asks for confirmation, then deletes its messages and files, except a file that a run still uses. The address of a deleted conversation, or of one that belongs to another account or space, shows "Conversation not found". A role that can only read conversations does not get the **New conversation** button. The chat interface follows the dashboard's language (English or French).
+Open **Chat** in the sidebar (under Activity) and type. Your conversations are listed on the left. A conversation can work across the spaces where you can act. Limit it to its origin space to keep future turns there. Existing conversations from beta.68 start unrestricted. You can leave while the assistant is answering and read its saved response when you return. Deleting a conversation asks for confirmation, then deletes its messages and files, except a file that a run still uses. The address of a deleted conversation, or of one that belongs to another account or organization, shows "Conversation not found". A role that can only read conversations does not get the **New conversation** button. The chat interface follows the dashboard's language (English or French).
 
 Things the assistant can do for you:
 
@@ -26,11 +26,15 @@ Things the assistant can do for you:
 
 The assistant shows its reasoning as a collapsible row while it thinks, and names the model that answered. If a turn fails, the message says why (a provider refused the key, a rate limit, the organization out of credits, a connection that needs to be renewed) and offers **Retry**. When the server returned one, the failure shows a request ID that an administrator can look up in the logs.
 
+For example, ask “What is the renewal date in the contract in my connected drive?” For a temporary read, Chat retrieves the file with your access to the source and sends its content to your configured model provider for the current turn. Text and raster images are supported when the model accepts them. Native PDF input currently requires the OpenAI Responses adapter and a model that accepts images (it reads each page of a PDF as text and an image); otherwise the attachment chip says the model cannot read it. With a connector, this mode reads one file up to 700 KiB, with a smaller limit for text. Ordinary JSON API calls use their usual response format and limits. Your conversation keeps a receipt and the assistant’s answer, including anything it quotes.
+
+If you ask “Keep this version of the contract”, an inline run retrieves that revision with the integration and publishes a file. You need permission to launch the run. The file appears on its run page and in the conversation, and its visibility follows the run’s access rules. If the exact revision cannot be retrieved, the assistant asks before keeping a different version. A run can also process Office documents and larger files.
+
 ## Control what it can do
 
 ### Assistant access
 
-The access chip in the composer lists, for the current organization and space, what the assistant can do for you: use the Appstrate API on your behalf, run agents, create agents, see runs, browse files, connect accounts, activate an integration, schedule runs. Each line is marked allowed or denied by your role, or turned off in the composer. The assistant never exceeds your role.
+The access chip in the composer lists, for the spaces the conversation can act in, what the assistant can do for you: use the Appstrate API on your behalf, run agents, create agents, see runs, browse files, connect accounts, activate an integration, schedule runs. Each line is marked allowed or denied by your role, or turned off in the composer. The assistant never exceeds your role.
 
 ### Agent authoring
 
@@ -46,7 +50,7 @@ By default, a one-off agent the assistant composes runs on the organization's de
 
 | Mode                | Behaviour                                                                      |
 | ------------------- | ------------------------------------------------------------------------------ |
-| Automatic (default) | The assistant sees the space's skills and loads the ones that fit              |
+| Automatic (default) | The assistant sees the available skills and loads the ones that fit            |
 | Manual              | The skills you chose are loaded in full, and it can look for others if you ask |
 | Strict              | Only the skills you chose. It can neither list nor load any other              |
 

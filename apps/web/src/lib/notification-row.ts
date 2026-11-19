@@ -3,6 +3,7 @@
 import type { TFunction } from "i18next";
 import { formatDateField } from "./format-date";
 import { catalogueHref } from "./catalogue-link";
+import { linkedSpacePath } from "./across-spaces";
 import type { paths } from "../api/client";
 
 /** One notification as returned by `GET /api/notifications`. */
@@ -77,4 +78,18 @@ export function notificationRow(
     meta: date,
     target,
   };
+}
+
+/**
+ * Where a row leads, in the notification's own space: a failed run opens its run, every other
+ * kind its own page; either reads it. Another space's is entered on the way (`?enterSpace=`).
+ */
+export function notificationHref(
+  notification: NotificationItem,
+  target: string | null,
+  currentSpaceId: string | null,
+): string {
+  const path =
+    notification.type === "run_failed" && target ? target : `/notifications/${notification.id}`;
+  return linkedSpacePath(path, notification.spaceId, currentSpaceId);
 }

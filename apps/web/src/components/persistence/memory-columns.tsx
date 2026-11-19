@@ -9,6 +9,7 @@ import { TableRowActions } from "../table-row-actions";
 import { CellDate } from "../table-cells";
 import { ActorBadge } from "./actor-badge";
 import { memoryText } from "../../lib/memory-items";
+import { useSpaceColumn } from "../space-column";
 
 /** One entry of the unified memory list: a pinned slot or an archive memory. */
 export interface MemoryCollectionItem {
@@ -20,6 +21,8 @@ export interface MemoryCollectionItem {
   actor_id: string | null;
   runId: string | null;
   updatedAt: string | null;
+  /** The row's space, on a list spanning spaces. */
+  spaceId?: string;
 }
 
 const CHECKPOINT_KEY = "checkpoint";
@@ -28,14 +31,18 @@ export function useMemoryColumns({
   isDeleting,
   onCopy,
   onDelete,
+  spanning = false,
 }: {
   /** Only the row being deleted shows the spinner. */
   isDeleting: (item: MemoryCollectionItem) => boolean;
   onCopy: (item: MemoryCollectionItem) => void;
-  /** Absent without `persistence:delete` (and in a run view): the menu then only copies. */
-  onDelete?: (item: MemoryCollectionItem) => void;
+  /** Absent for a row its space does not let the reader delete (and in a run view): the menu then only copies. */
+  onDelete?: (item: MemoryCollectionItem) => (() => void) | undefined;
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }): DataColumn<MemoryCollectionItem>[] {
   const { t } = useTranslation(["agents", "common"]);
+  const spaceColumn = useSpaceColumn<MemoryCollectionItem>(spanning);
   const kindLabel = (item: MemoryCollectionItem) =>
     item.kind === "pinned"
       ? t("agents:detail.memoryTypePinned")
@@ -82,6 +89,7 @@ export function useMemoryColumns({
         );
       },
     },
+    ...spaceColumn,
     {
       id: "scope",
       header: t("agents:detail.memoryColumnScope"),
@@ -95,27 +103,30 @@ export function useMemoryColumns({
       align: "end",
       cell: (item) => <CellDate value={item.updatedAt} />,
     },
-    rowActionsColumn((item: MemoryCollectionItem) => (
-      <TableRowActions
-        menuLabel={t("agents:detail.memoryRowActions")}
-        isPending={isDeleting(item)}
-        actions={[
-          {
-            id: "copy",
-            label: t("common:btn.copy"),
-            icon: Copy,
-            onSelect: () => onCopy(item),
-          },
-          {
-            id: "delete",
-            label: t("common:btn.delete"),
-            icon: Trash2,
-            onSelect: () => onDelete?.(item),
-            destructive: true,
-            hidden: !onDelete,
-          },
-        ]}
-      />
-    )),
+    rowActionsColumn((item: MemoryCollectionItem) => {
+      const remove = onDelete?.(item);
+      return (
+        <TableRowActions
+          menuLabel={t("agents:detail.memoryRowActions")}
+          isPending={isDeleting(item)}
+          actions={[
+            {
+              id: "copy",
+              label: t("common:btn.copy"),
+              icon: Copy,
+              onSelect: () => onCopy(item),
+            },
+            {
+              id: "delete",
+              label: t("common:btn.delete"),
+              icon: Trash2,
+              onSelect: () => remove?.(),
+              destructive: true,
+              hidden: !remove,
+            },
+          ]}
+        />
+      );
+    }),
   ];
 }

@@ -151,7 +151,7 @@ export function OnboardingLayout({
           {subtitle && <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p>}
         </div>
 
-        <div className="mb-6 max-h-[40vh] overflow-y-auto">{children}</div>
+        <div className="mb-6 max-h-[40dvh] overflow-y-auto">{children}</div>
 
         <div className="border-border flex items-center gap-2 border-t pt-4">
           {onBack ? (

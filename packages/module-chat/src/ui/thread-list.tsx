@@ -78,6 +78,7 @@ import {
 } from "./sessions.ts";
 import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
+import { SEARCH_INPUT_CLASS } from "./phone-text.ts";
 import { useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -234,7 +235,7 @@ export function ChatConversationList({
                   setInput("");
                 }
               }}
-              className="h-7 pr-7 pl-7 text-xs [&::-webkit-search-cancel-button]:hidden"
+              className={SEARCH_INPUT_CLASS}
             />
             {input !== "" && (
               <button
