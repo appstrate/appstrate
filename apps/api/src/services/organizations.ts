@@ -740,7 +740,7 @@ function orgHasActiveRuns(): ApiError {
  * MUST be awaited by callers BEFORE anything observes the deletion —
  * concretely, before the route emits `onOrgDelete`. The ordering is
  * load-bearing and irreversible if inverted: module handlers on that event
- * perform destructive, non-transactional work outside our database (the ee
+ * perform destructive, non-transactional work outside our database (the billing
  * module drains billing then CANCELS the Stripe subscription and drops the
  * billing account; the mcp module drops the org from the RFC 8707 audience
  * allowlist). If `deleteOrganization` then throws — which it does, from inside

@@ -41,7 +41,7 @@ import type { AppEnv } from "../../types/index.ts";
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
- * minimal — `usage.list` / `usage.settledFrontier` (the EE module's cursor sweep
+ * minimal — `usage.list` / `usage.settledFrontier` (the billing module's cursor sweep
  * of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
  * (`resolveChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
  * which the chat module drives the single generic in-process Pi chat engine,
@@ -91,7 +91,7 @@ function buildPlatformServices(): PlatformServices {
         // same tx as the `chat_sessions` delete.
         tx as Parameters<typeof detachOrDeleteContainedFiles>[1],
       ),
-    // Per-org file storage limit — a metering/plan module (the EE module) writes
+    // Per-org file storage limit — a metering/plan module (the billing module) writes
     // the org's technical byte ceiling here; the platform enforces it on every
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,

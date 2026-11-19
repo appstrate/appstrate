@@ -131,7 +131,7 @@ export const ROUTE_ACCESS = {
   "/org-settings/billing": {
     feature: "billing",
     anyOf: ["billing:read"],
-    operations: ["getEeBillingAccount"],
+    operations: ["getBillingAccount"],
   },
 
   "/workspace-settings": {

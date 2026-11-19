@@ -199,7 +199,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     expect(row!.status).toBe("cancelled");
   });
 
-  it("cancelling a BYOK run forwards modelSource='org' so the ee module skips billing", async () => {
+  it("cancelling a BYOK run forwards modelSource='org' so the billing module skips billing", async () => {
     const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, { modelSource: "org" });
     await seedLlmUsage(ctx, runId, 0.1);

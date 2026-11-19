@@ -53,10 +53,10 @@
         "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
+        "@appstrate/module-billing": "workspace:*",
         "@appstrate/module-chat": "workspace:*",
         "@appstrate/module-claude-code": "workspace:*",
         "@appstrate/module-codex": "workspace:*",
-        "@appstrate/module-ee": "workspace:*",
         "@appstrate/module-observability": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
@@ -233,7 +233,7 @@
       "version": "17.0.0",
       "dependencies": {
         "@afps-spec/schema": "^0.13.0",
-        "@appstrate/afps-shared": "^0.13.0",
+        "@appstrate/afps-shared": "^0.14.0",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
         "ajv": "^8.20.0",
@@ -309,6 +309,23 @@
         "@modelcontextprotocol/sdk": "^1.32.2",
       },
     },
+    "packages/module-billing": {
+      "name": "@appstrate/module-billing",
+      "version": "0.0.0",
+      "dependencies": {
+        "@appstrate/core": "workspace:*",
+        "@appstrate/emails": "workspace:*",
+        "drizzle-orm": "^0.45.4",
+        "hono": "^4.13.18",
+        "ioredis": "^6.0.0",
+        "postgres": "^3.4.9",
+        "stripe": "^23.0.0",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "drizzle-kit": "^0.31.11",
+      },
+    },
     "packages/module-chat": {
       "name": "@appstrate/module-chat",
       "version": "0.1.0",
@@ -354,23 +371,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
-      },
-    },
-    "packages/module-ee": {
-      "name": "@appstrate/module-ee",
-      "version": "0.0.0",
-      "dependencies": {
-        "@appstrate/core": "workspace:*",
-        "@appstrate/emails": "workspace:*",
-        "drizzle-orm": "^0.45.4",
-        "hono": "^4.13.18",
-        "ioredis": "^6.0.0",
-        "postgres": "^3.4.9",
-        "stripe": "^23.0.0",
-        "zod": "^4.6.7",
-      },
-      "devDependencies": {
-        "drizzle-kit": "^0.31.11",
       },
     },
     "packages/module-observability": {
@@ -568,13 +568,13 @@
 
     "@appstrate/mcp-transport": ["@appstrate/mcp-transport@workspace:packages/mcp-transport"],
 
+    "@appstrate/module-billing": ["@appstrate/module-billing@workspace:packages/module-billing"],
+
     "@appstrate/module-chat": ["@appstrate/module-chat@workspace:packages/module-chat"],
 
     "@appstrate/module-claude-code": ["@appstrate/module-claude-code@workspace:packages/module-claude-code"],
 
     "@appstrate/module-codex": ["@appstrate/module-codex@workspace:packages/module-codex"],
-
-    "@appstrate/module-ee": ["@appstrate/module-ee@workspace:packages/module-ee"],
 
     "@appstrate/module-observability": ["@appstrate/module-observability@workspace:packages/module-observability"],
 

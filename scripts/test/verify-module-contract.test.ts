@@ -62,7 +62,7 @@ describe("scripts/verify-module-contract.ts as a process", () => {
   it("fails on a ledger owner that is not a known module", () => {
     const { code, output } = runGateWith((source) =>
       source.replace(
-        'beforeUsage: { owners: ["module-ee"] }',
+        'beforeUsage: { owners: ["module-billing"] }',
         'beforeUsage: { owners: ["not-a-module"] }',
       ),
     );
@@ -71,7 +71,9 @@ describe("scripts/verify-module-contract.ts as a process", () => {
   }, 60_000);
 
   it("fails when MODULE_TENANT and DECLARER_ROOTS name different modules", () => {
-    const { code, output } = runGateWith((source) => source.replace('  "module-ee": "ee",\n', ""));
+    const { code, output } = runGateWith((source) =>
+      source.replace('  "module-billing": "oss",\n', ""),
+    );
     expect(code).not.toBe(0);
     expect(output).toContain("MODULE_TENANT and DECLARER_ROOTS name different modules");
   }, 60_000);

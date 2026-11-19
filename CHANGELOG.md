@@ -72,6 +72,31 @@ Follow the [beta.68 to beta.69 maintenance procedure](docs/deployment/BETA_69.md
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
 
+- **Breaking: `@appstrate/module-ee` is now `@appstrate/module-billing`,
+  under Apache-2.0** (#1645). The billing module (Stripe billing, credit
+  quotas, usage metering, billing managers) leaves the commercial licence and
+  `packages/module-ee/` moves to `packages/module-billing/`, so the whole
+  repository and the published image are Apache-2.0. **A deployment that sets
+  `MODULES` with `@appstrate/module-ee` must replace it with
+  `@appstrate/module-billing` before upgrading**: the old specifier no longer
+  resolves, and the platform refuses to boot with
+  `Module "@appstrate/module-ee" could not be loaded`. Nothing maps the old
+  name to the new one. The module's id in logs changes from `ee` to `billing`
+  (`Module loaded {"id":"billing"}`). **The four `EE_RECONCILIATION_*`
+  variables are now `BILLING_RECONCILIATION_*`** (`_INTERVAL_SECONDS`,
+  `_BATCH_SIZE`, `_REPLAY_WINDOW`, `_MAX_GAP_SECONDS`): nothing reads the old
+  spelling, so a value left under it is silently ignored and the setting falls
+  back to its default. Rename them in the same window as `MODULES`. **The billing operation ids
+  and schema names drop their `Ee` prefix** (`getEeBillingAccount` →
+  `getBillingAccount`, `EeBillingPlan` → `BillingPlan`: nine operation ids and seven
+  schemas):
+  a client that calls an operation by id, an MCP `invoke_operation` included,
+  must use the new id; paths and payloads are unchanged. Nothing else changes
+  for a deployment: the `ee_*` tables, the `drizzle.ee_migrations` journal, the
+  `STRIPE_*` variables and the `/api/billing/*` routes keep their names, and no
+  migration runs. `verify:license-boundary` is now `verify:license-headers`:
+  every source file must declare `Apache-2.0`.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost

@@ -425,7 +425,7 @@ services:
       # schema):
       - OTEL_EXPORTER_OTLP_HEADERS
       - OTEL_EXPORTER_OTLP_PROTOCOL
-      # ── Commercial module (@appstrate/module-ee, optional) ──
+      # ── Billing module (@appstrate/module-billing, optional) ──
       # Inert until the module is in MODULES; the vars are read from
       # process.env by the module's own Zod schema (not in @appstrate/env).
       # Full list and defaults: .env.example, docs/ENV.md.
@@ -433,10 +433,10 @@ services:
       - STRIPE_WEBHOOK_SECRET
       - STRIPE_PRICE_ID_STARTER
       - STRIPE_PRICE_ID_PRO
-      - EE_RECONCILIATION_INTERVAL_SECONDS
-      - EE_RECONCILIATION_BATCH_SIZE
-      - EE_RECONCILIATION_REPLAY_WINDOW
-      - EE_RECONCILIATION_MAX_GAP_SECONDS
+      - BILLING_RECONCILIATION_INTERVAL_SECONDS
+      - BILLING_RECONCILIATION_BATCH_SIZE
+      - BILLING_RECONCILIATION_REPLAY_WINDOW
+      - BILLING_RECONCILIATION_MAX_GAP_SECONDS
     volumes:
       # SECURITY: the `:ro` suffix makes only the SOCKET FILE read-only — it
       # does NOT make the Docker API read-only. A process with this mount can

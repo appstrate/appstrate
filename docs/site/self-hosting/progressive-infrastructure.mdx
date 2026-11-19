@@ -54,13 +54,13 @@ Enabled by default (`oidc,webhooks,mcp,core-providers,@appstrate/module-chat`):
 
 Opt-in, append them to `MODULES`:
 
-| Module                            | What it provides                                                                                                                                                                |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `firecracker`                     | The Firecracker execution backend (see above)                                                                                                                                   |
-| `@appstrate/module-observability` | OpenTelemetry traces and metrics. See [Monitoring](/self-hosting/monitoring)                                                                                                    |
-| `@appstrate/module-claude-code`   | Lets an organization use a Claude subscription instead of an API key. Check the provider's terms before enabling it                                                             |
-| `@appstrate/module-codex`         | Lets an organization use a ChatGPT subscription instead of an API key. Check the provider's terms before enabling it                                                            |
-| `@appstrate/module-ee`            | The optional billing module: Stripe billing, credit quotas and usage metering. Needs PostgreSQL (it refuses to start on PGlite). Its licence is in `packages/module-ee/LICENSE` |
+| Module                            | What it provides                                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `firecracker`                     | The Firecracker execution backend (see above)                                                                                    |
+| `@appstrate/module-observability` | OpenTelemetry traces and metrics. See [Monitoring](/self-hosting/monitoring)                                                     |
+| `@appstrate/module-claude-code`   | Lets an organization use a Claude subscription instead of an API key. Check the provider's terms before enabling it              |
+| `@appstrate/module-codex`         | Lets an organization use a ChatGPT subscription instead of an API key. Check the provider's terms before enabling it             |
+| `@appstrate/module-billing`       | The optional billing module: Stripe billing, credit quotas and usage metering. Needs PostgreSQL (it refuses to start on PGlite). |
 
 Disable what you do not use to reduce the attack surface. Keep `oidc` if you use the CLI, since `appstrate login` goes through it. The authoritative default is the `MODULES` row in [Environment Variables](/self-hosting/environment-variables), and module authoring is covered in the [modules README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md).
 
@@ -76,7 +76,7 @@ Migrations are applied automatically at boot and there is no built-in rollback. 
 
 ## What happens at boot
 
-- Pending core migrations are applied under an advisory lock, unless `MIGRATIONS_ON_BOOT=verify`: boot then applies nothing and refuses to start while a migration is pending, naming each and the fix (`bun packages/db/src/migrate.ts`). `verify` requires `DATABASE_URL`. The `@appstrate/module-ee` journal is not covered, the module applies it itself. The tier Compose templates also run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform binds a port.
+- Pending core migrations are applied under an advisory lock, unless `MIGRATIONS_ON_BOOT=verify`: boot then applies nothing and refuses to start while a migration is pending, naming each and the fix (`bun packages/db/src/migrate.ts`). `verify` requires `DATABASE_URL`. The `@appstrate/module-billing` journal is not covered, the module applies it itself. The tier Compose templates also run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform binds a port.
 - Runs left in `running` or `pending` by a previous process are stopped and finalized as `failed` ("Server restarted while run was in progress"). On Docker, orphaned `appstrate-exec-*` networks are reclaimed too.
 - System packages shipped in the image are synced to the database.
 - On Docker, the agent and sidecar images are pre-pulled, and a warmer keeps them on the host so `docker image prune -a` cannot force a cold pull on the next run (`RUNTIME_IMAGE_WARM_INTERVAL_SECONDS`).

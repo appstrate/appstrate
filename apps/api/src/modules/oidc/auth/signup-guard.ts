@@ -87,7 +87,7 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
     query: input.query ?? null,
   });
   if (binding.kind === "none") {
-    // Signup outside an OIDC flow — defer to other modules (e.g. the ee
+    // Signup outside an OIDC flow — defer to other modules (e.g. the billing
     // module's free-tier hook) and the core signup path.
     return;
   }

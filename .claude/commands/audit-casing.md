@@ -50,7 +50,7 @@ Part of the audit is already automated. The orchestrator runs the gates before d
 ```sh
 bun test apps/api/test/unit/openapi-casing-carve-out.test.ts   # OpenAPI discovery gate
 bun test packages/db/test/schema-casing.test.ts                # Drizzle, core schema
-cd packages/module-ee && bun test test/unit/schema-casing.test.ts   # Drizzle, ee schema
+cd packages/module-billing && bun test test/unit/schema-casing.test.ts   # Drizzle, ee schema
 ```
 
 - The OpenAPI gate walks the built spec (core + every module) and fails on any camelCase property name, query parameter name or example/default key that is not in its exported `CAMEL_CASE_CARVE_OUTS` (name → doc section), on an allowlist entry nothing uses, and on a snake_case twin of a 4b name outside `SNAKE_TWIN_EXCEPTIONS`. Path-template parameter names are not wire and are not checked.
@@ -67,7 +67,7 @@ When invoked, this skill:
 4. Dispatches **6 opus sub-agents in parallel**, each scanning a specific surface:
    - **Agent A — Schema layer**: AFPS Zod + JSON Schema + appstrate validation/integration/mcp-server. Confirms canonical snake_case is intact.
    - **Agent B — Wire DTO layer**: shared-types + OpenAPI components + path examples + route projection sites. Discovery mode: finds every camelCase wire name and checks it against the doc's carve-out lists and the gate allowlist.
-   - **Agent C — Drizzle TS schema**: every `pgTable()` in `packages/db/src/schema/*.ts` and `packages/module-ee/drizzle/schema.ts`. Confirms the schema casing tests cover what the doc says.
+   - **Agent C — Drizzle TS schema**: every `pgTable()` in `packages/db/src/schema/*.ts` and `packages/module-billing/drizzle/schema.ts`. Confirms the schema casing tests cover what the doc says.
    - **Agent D — Consumers**: `apps/web/src/`, `packages/ui/src/`, `packages/module-chat/src/`, `apps/cli/src/` reads of wire DTOs. Confirms no camelCase reads on snake_case fields (undefined at runtime) and vice-versa.
    - **Agent E — Carve-outs**: every carve-out 4a–4t and asymmetry 5a–5d.
    - **Agent F — Cross-repo + tests**: sibling repos (on `origin/main`) + test fixtures + e2e helpers.
@@ -136,7 +136,7 @@ The sub-agents are **read-only**. They never modify files. After consolidation, 
 
 - **Every** TS/TSX file under `apps/`, `packages/`, `runtime-pi/`, `e2e/` is in scope
 - **Every** JSON file matching `manifest.json` is verified
-- **Every** Drizzle pgTable in `packages/db/src/schema/` and `packages/module-ee/drizzle/schema.ts` is read
+- **Every** Drizzle pgTable in `packages/db/src/schema/` and `packages/module-billing/drizzle/schema.ts` is read
 - **Every** OpenAPI component and path in `apps/api/src/openapi/`, `apps/api/src/modules/*/openapi*` and `packages/module-*/src/openapi.ts` is verified
 - **Every** module under `apps/api/src/modules/` and `packages/module-*` is included
 - Cross-repo: docs, website, connect-helper, afps-spec, github-action — each on `origin/main`
@@ -260,14 +260,14 @@ Output: per-interface/component table, the discovered field set (so coverage is 
 ```
 Mission: verify every Drizzle pgTable uses camelCase TS / snake_case SQL. Read `docs/CASING_CONVENTIONS.md` Zone 2 + Carve-out 4a first.
 
-The schema casing tests (packages/db/test/schema-casing.test.ts, packages/module-ee/test/unit/schema-casing.test.ts) check TS column keys and every SQL identifier the schema names. Confirm:
+The schema casing tests (packages/db/test/schema-casing.test.ts, packages/module-billing/test/unit/schema-casing.test.ts) check TS column keys and every SQL identifier the schema names. Confirm:
 - both tests import the whole schema barrel they claim to cover (a table outside the barrel escapes the test)
 - the Better Auth / plugin tables of 4a are exactly the ones in packages/db/src/schema/{auth,oidc}.ts, and the doc's table list matches
 - no hand-written SQL in a drizzle migration introduces a non-snake identifier the TS schema does not declare
 
 Scope:
 - packages/db/src/schema/*.ts (the whole platform schema; built-in modules own no tables)
-- packages/module-ee/drizzle/schema.ts (the one module with a schema of its own)
+- packages/module-billing/drizzle/schema.ts (the one module with a schema of its own)
 
 Output: per-file count, any TS field matching `[a-z]+_[a-z_]+:` → BUG.
 ```
@@ -334,7 +334,7 @@ Repos (audit `origin/main` of each: `git fetch`, then `git grep … origin/main`
 - docs (sibling repo), website, connect-helper, afps-spec
 - github-action — the clone lives at /Users/pierrecabriere/Dev/_appstrate_dev/github-action; audit its origin/main, not the checked-out branch
 
-Not in this list, and do not add them back: `module-claude-code` and `cloud` (moved in-tree as `packages/module-claude-code` and `packages/module-ee` — already covered by the in-tree `packages/` scope), `registry` and `portal` (retired products, same reason they left the core lockstep gate in #1033).
+Not in this list, and do not add them back: `module-claude-code` and `cloud` (moved in-tree as `packages/module-claude-code` and `packages/module-billing` — already covered by the in-tree `packages/` scope), `registry` and `portal` (retired products, same reason they left the core lockstep gate in #1033).
 
 For each:
 - Grep for any 1.x manifest residue (displayName, schemaVersion, fileConstraints, etc.)

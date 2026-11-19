@@ -2397,7 +2397,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2885,7 +2885,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4297,7 +4297,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
             "content": {
               "application/problem+json": {
                 "schema": {
