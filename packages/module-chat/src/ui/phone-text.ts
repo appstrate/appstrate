@@ -4,7 +4,7 @@
 
 /** The composer's `<textarea>`: compact, borderless, inside the composer card. */
 export const COMPOSER_INPUT_CLASS =
-  "placeholder:text-muted-foreground [grid-area:input] max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
+  "placeholder:text-muted-foreground [grid-area:input] max-h-40 min-h-10 desktop-pointer:min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";

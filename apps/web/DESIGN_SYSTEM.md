@@ -903,6 +903,12 @@ becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
 (`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
+Chat controls have a 40 px minimum touch target. Drawer rows and menu entries use 44 px.
+Give neighboring controls their own space, including a chip’s open and remove buttons.
+Keep actions visible or reachable from a visible menu on touchscreens in either orientation.
+The `desktop-pointer` variant allows denser controls on a wide screen with a fine pointer and
+hover. Actions revealed on hover must also appear on keyboard focus.
+
 - Keep the chat composer and conversation search at 1rem in both orientations. A landscape
   phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
   `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).

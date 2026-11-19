@@ -45,8 +45,7 @@ import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
-
-const ICON_BUTTON = "text-muted-foreground size-8 shrink-0 rounded-lg";
+import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
 const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
@@ -100,7 +99,7 @@ export function ComposerTools({
             type="button"
             variant="ghost"
             size="icon"
-            className={ICON_BUTTON}
+            className={COMPOSER_TOOL_BUTTON_CLASS}
             aria-label={t("composer.settings")}
             data-testid="composer-settings-trigger"
           >
@@ -297,7 +296,7 @@ function AttachButton() {
       variant="ghost"
       size="icon"
       disabled={unavailable}
-      className={ICON_BUTTON}
+      className={COMPOSER_TOOL_BUTTON_CLASS}
       aria-label={label}
     >
       <PaperclipIcon />
