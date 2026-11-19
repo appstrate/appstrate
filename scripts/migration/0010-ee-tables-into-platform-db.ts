@@ -34,7 +34,7 @@
  * source level the copy can carry, no unknown `ee_`/`cloud_` table left behind,
  * no source-only column, no billing row already on the target — and only once
  * they all pass does `--apply` migrate the target through the module's own
- * `migrateEeDb`, copy every table in ONE target transaction, and verify source
+ * `migrateBillingDb`, copy every table in ONE target transaction, and verify source
  * count = target count per table.
  *
  * Fidelity: every value is read as `text` and re-cast to the TARGET's own type
@@ -343,7 +343,7 @@ async function copyTable(src: SQL, tx: SQL, plan: TablePlan): Promise<number> {
 
 /**
  * Rows in the module's journal on the target. `drizzle.ee_migrations` is where
- * `migrateEeDb` writes it — deliberately a different TABLE in the same schema
+ * `migrateBillingDb` writes it — deliberately a different TABLE in the same schema
  * as the platform's own `__drizzle_migrations`.
  */
 async function appliedMigrations(db: SQL): Promise<number> {
@@ -416,11 +416,11 @@ async function sourceLevel(src: SQL): Promise<JournalEntry> {
  * module in a literal one — the same shape `scripts/lib/module-openapi.ts` uses.
  */
 async function applyModuleMigrations(url: string): Promise<void> {
-  // Crossing the module boundary AT RUNTIME is the point — never copy `migrateEeDb` here.
+  // Crossing the module boundary AT RUNTIME is the point — never copy `migrateBillingDb` here.
   const db = (await import(resolve(MODULE_ROOT, "src/db.ts"))) as {
-    migrateEeDb: (databaseUrl: string) => Promise<void>;
+    migrateBillingDb: (databaseUrl: string) => Promise<void>;
   };
-  await db.migrateEeDb(url);
+  await db.migrateBillingDb(url);
 }
 
 function planLines(prefix: SourcePrefix, level: JournalEntry, plans: TablePlan[]): string[] {
