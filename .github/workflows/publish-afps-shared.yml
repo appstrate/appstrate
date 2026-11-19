@@ -10,6 +10,11 @@ on:
     tags:
       - "afps-shared@*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing afps-shared tag to publish
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -31,7 +36,19 @@ jobs:
         working-directory: packages/afps-shared
 
     steps:
+      - name: Select the immutable package tag
+        id: select
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" == afps-shared@* ]]
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+        working-directory: .
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.select.outputs.tag }}
 
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
@@ -46,7 +63,7 @@ jobs:
         working-directory: .
 
       - name: TypeScript type-check
-        run: tsc --noEmit
+        run: bun run typecheck
 
       # The package's `test` script carries the per-test timeout the PR gate
       # applies (`scripts/run-tests.ts`); bare `bun test` would run with Bun's 5 s.
@@ -54,8 +71,10 @@ jobs:
         run: bun run test
 
       - name: Verify tag matches package.json version
+        env:
+          RELEASE_TAG: ${{ steps.select.outputs.tag }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#afps-shared@}"
+          TAG_VERSION="${RELEASE_TAG#afps-shared@}"
           PKG_VERSION=$(jq -r .version package.json)
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
@@ -81,6 +100,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
+          tag_name: ${{ steps.select.outputs.tag }}
           generate_release_notes: true
           # Never GitHub's "latest". `appstrate self-update`, `bootstrap.sh`
           # and `bootstrap-runner.sh` no longer read it: they resolve "latest"
