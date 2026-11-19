@@ -221,38 +221,40 @@ export function ChatConversationList({
           </SidebarMenu>
         </SidebarGroup>
       )}
-      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        {showSearch && (
-          <div className="relative mb-1">
-            <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
-            <SidebarInput
-              type="search"
-              value={input}
-              maxLength={SEARCH_MAX_LENGTH}
-              placeholder={t("threads.search.placeholder")}
-              aria-label={t("threads.search.placeholder")}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && input !== "") {
-                  event.preventDefault();
-                  setInput("");
-                }
-              }}
-              className={SEARCH_INPUT_CLASS}
-            />
-            {input !== "" && (
-              <button
-                type="button"
-                aria-label={t("threads.search.clear")}
-                title={t("threads.search.clear")}
-                onClick={() => setInput("")}
-                className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md p-0.5"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            )}
-          </div>
-        )}
+      {showSearch && (
+        <div className="relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden max-md:order-first">
+          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2" />
+          <SidebarInput
+            type="search"
+            value={input}
+            maxLength={SEARCH_MAX_LENGTH}
+            placeholder={t("threads.search.placeholder")}
+            aria-label={t("threads.search.placeholder")}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && input !== "") {
+                event.preventDefault();
+                setInput("");
+              }
+            }}
+            className={SEARCH_INPUT_CLASS}
+          />
+          {input !== "" && (
+            <button
+              type="button"
+              aria-label={t("threads.search.clear")}
+              title={t("threads.search.clear")}
+              onClick={() => setInput("")}
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+      <SidebarGroup
+        className={cn("min-h-0 flex-1 group-data-[collapsible=icon]:hidden", showSearch && "pt-0")}
+      >
         {(searching || groups.length === 0) && (
           <SidebarGroupLabel className={NOTE_TEXT_CLASS}>
             {t(searching ? "threads.results" : "threads.title")}
