@@ -30,7 +30,7 @@ export async function withLocalChatModel<T>(
     /** The assistant's reply to a request; receives the parsed Chat Completions body. */
     reply: (
       body: ChatCompletionBody,
-    ) => string | { name: string; arguments: Record<string, unknown> };
+    ) => string | Response | { name: string; arguments: Record<string, unknown> };
   },
   run: (model: LocalChatModel) => Promise<T>,
 ): Promise<T> {
@@ -44,6 +44,10 @@ export async function withLocalChatModel<T>(
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
     const answer = reply(JSON.parse(Buffer.concat(chunks).toString()) as ChatCompletionBody);
+    if (answer instanceof Response) {
+      res.writeHead(answer.status, Object.fromEntries(answer.headers)).end(await answer.text());
+      return;
+    }
     const toolCall =
       typeof answer === "string"
         ? undefined
