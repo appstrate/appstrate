@@ -17,7 +17,7 @@ import { runs } from "@appstrate/db/schema";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "./realtime.ts";
 import type { RealtimeChannel } from "./realtime.ts";
-import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
+import { canReadEveryRun, readsRun } from "../lib/run-visibility.ts";
 import type { Permission } from "../lib/permissions.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
@@ -77,7 +77,7 @@ export async function mayFollowRun(caller: RealtimeCaller, runId: string): Promi
       ),
     )
     .limit(1);
-  return !row || canReadEveryRun(caller.permissions) || ownsRun(caller.actor, row);
+  return !row || readsRun(caller.permissions, caller.actor, row);
 }
 
 /**

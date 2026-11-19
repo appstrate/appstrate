@@ -91,9 +91,10 @@ interface LoopbackClaims extends LoopbackIdentity {
   /** Whether the token grants the first-party-loopback capability. */
   firstPartyLoopback: boolean;
   /**
-   * Chat session this token's usage should be attributed to. Signed INTO the
-   * claims so the llm-proxy reads it from a validated token, never a spoofable
-   * header. Absent on the MCP bearer and on ephemeral (unpersisted) turns.
+   * Chat session that issued this token. Signed INTO the claims so the platform reads it
+   * from a validated token, never a spoofable header: the llm-proxy attributes usage to it,
+   * and a run launched with the MCP bearer may take the conversation's own files as inputs.
+   * Absent on ephemeral (unpersisted) turns.
    */
   chatSessionId?: string | null;
   /** The skills the turn's prompt injected, as served; MCP bearer only (→ `skill://` reads). */
@@ -183,6 +184,8 @@ export function mintMcpLoopbackToken(
     injectedSkills?: InjectedSkills;
     /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
     spaceIds?: readonly string[];
+    /** The persisted conversation of the turn, whose own files a run it launches may consume. */
+    chatSessionId?: string | null;
   },
   opts?: { ttlMs?: number },
 ): string {
@@ -253,8 +256,8 @@ export const chatLoopbackStrategy: AuthStrategy = {
       permissions,
       ...(claims.spaceIds !== undefined ? { spaceIds: claims.spaceIds } : {}),
       // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
-      // the preview). `chatSessionId` is stamped on the usage row by the
-      // llm-proxy; `viewAs` is re-published before any permission is resolved.
+      // the preview). `chatSessionId` names the issuing conversation (usage
+      // attribution, a run's inputs); `viewAs` is re-published before any permission is resolved.
       ...(claims.chatSessionId !== undefined ||
       claims.viewAs !== undefined ||
       injectedSkills !== undefined

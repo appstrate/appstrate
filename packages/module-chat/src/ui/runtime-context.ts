@@ -61,11 +61,8 @@ export interface ChatTransport {
  */
 export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
 
-/**
- * The host's space picker, opened from a button or from an entry in a menu.
- */
+/** The host's space picker, opened from an entry in a menu. */
 export type SpaceChoiceMenu = ComponentType<{
-  variant: "dropdown" | "submenu";
   label: string;
   spaceIds: readonly string[];
   onPick: (spaceId: string) => void;
@@ -200,6 +197,11 @@ export interface ChatHost {
    */
   actingSpaceIds: readonly string[] | null;
   /**
+   * Where a file attached from the computer goes: the caller's personal space (« Mon espace »),
+   * or why there is none yet (the listing is loading or failed, or a role preview holds none).
+   */
+  attachTarget: AttachTarget;
+  /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
    * credential would fix names no link to add one. `undefined` until the
@@ -220,6 +222,8 @@ export interface ChatHost {
    */
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
+  /** Display name from the current organization’s catalog. */
+  modelLabel?: string | null;
   firstName?: string | null;
   /** Names spaces. */
   renderSpaces: RenderSpaces;
@@ -236,6 +240,12 @@ export interface ChatHost {
   /** The host's menu of spaces, the one every « … in which space? » entry of the app opens. */
   SpaceChoiceMenu: SpaceChoiceMenu;
 }
+
+/** Why nothing can be attached: still loading, the listing failed, or a role preview (no personal space for good). */
+export type AttachUnavailable = "loading" | "error" | "preview";
+
+/** See `ChatHost.attachTarget`. */
+export type AttachTarget = { spaceId: string } | { unavailable: AttachUnavailable };
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */
 export function actsIn(

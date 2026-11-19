@@ -251,7 +251,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   deleteFile: {
     category: "handler-guarded",
-    reason: "getFileForActor: files:delete, or creator with fileLifecycleCeiling admitting it",
+    reason:
+      "resolveFileAcrossSpaces: files:delete, or creator with fileLifecycleCeiling admitting it",
   },
   deleteIntegrationPackage: {
     category: "handler-guarded",
@@ -292,7 +293,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   keepFile: {
     category: "handler-guarded",
-    reason: "getFileForActor: files:delete, or creator with fileLifecycleCeiling admitting it",
+    reason:
+      "resolveFileAcrossSpaces: files:delete, or creator with fileLifecycleCeiling admitting it",
   },
   listPackageFiles: {
     category: "handler-guarded",

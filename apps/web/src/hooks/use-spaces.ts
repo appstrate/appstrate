@@ -6,6 +6,7 @@ import { $api } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import { queryClient } from "../lib/query-client";
+import { isOwnPersonalSpace } from "../lib/own-personal-space";
 import { spaceLabel } from "../lib/space-label";
 import { getCurrentOrgId } from "../stores/org-store";
 import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
@@ -23,6 +24,17 @@ export function useSpaces(enabled = true) {
     enabled: enabled && scope.enabled,
     select: (e) => e.data,
   });
+}
+
+/**
+ * The caller's personal space id (« Mon espace »): `null` until the listing answers, and when it
+ * failed or answered without one (`failed`: a role preview lists none, whatever role is
+ * previewed), so `null` without `failed` only ever means loading.
+ */
+export function useOwnPersonalSpaceId(): { spaceId: string | null; failed: boolean } {
+  const { data: spaces, isError } = useSpaces();
+  const spaceId = spaces?.find(isOwnPersonalSpace)?.id ?? null;
+  return { spaceId, failed: isError || (spaces !== undefined && spaceId === null) };
 }
 
 /** The listed spaces among `spaceIds`, in order; the ones the listing does not know are left out. */

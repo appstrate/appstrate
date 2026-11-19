@@ -40,10 +40,11 @@ describe("ConversationSkeleton", () => {
     expect(html).not.toContain("Vérifiez");
   });
 
-  it("leaves the line out on a phone, where the focused composer hides it", () => {
+  it("starts the mobile composer at rest with its disclaimer visible", () => {
     const html = renderToString(
       <ConversationSkeleton label="Chargement" placeholder="Écrire" disclaimer="Vérifiez" />,
     );
-    expect(html).toMatch(/class="[^"]*max-md:hidden[^"]*">Vérifiez</);
+    expect(html).toContain('data-rest=""');
+    expect(html).not.toMatch(/max-md:hidden[^>]*>Vérifiez/);
   });
 });

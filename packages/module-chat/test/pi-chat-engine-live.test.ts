@@ -33,19 +33,17 @@ import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
 import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
-import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
+import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { logger } from "../src/logger.ts";
 import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const ANSWER = "Bonjour le monde";
 
-/** The turn's one space; nothing here records a touched space. */
-const LIVE_ORGANIZATION: TurnSpaces = {
-  spaces: [{ id: "spc_live", name: "Live", role: "admin" }],
-  touch: async () => {},
-  spaceOfUri: async () => undefined,
-};
+const LIVE_ORGANIZATION = inertTurnSpaces([
+  { id: "spc_live", name: "Live", role: "admin", permissions: [] },
+]);
 /** Distinct from the preset id, so a label defaulted to the id is caught. */
 const LIVE_MODEL_LABEL = "Live Preset (display)";
 

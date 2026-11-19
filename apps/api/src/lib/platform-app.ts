@@ -99,8 +99,7 @@ function getRegistered(use: string): { app: Hono<AppEnv>; operations: PlatformOp
  * Re-enter the fully-wired platform app in-process (no socket hop). `app.fetch`
  * returns `Response | Promise<Response>`; the async wrapper normalizes it to the
  * `Promise<Response>` callers (the `inProcess` service, the MCP router) expect.
- * `spacePin` confines the call to one space as a credential pin does
- * (`dispatchSpacePin`).
+ * `spacePin` confines the call to one space (`dispatchSpacePin`).
  */
 export function dispatchInProcess(request: Request, spacePin?: string): Promise<Response> {
   const env = spacePin === undefined ? undefined : dispatchSpacePinEnv(spacePin);

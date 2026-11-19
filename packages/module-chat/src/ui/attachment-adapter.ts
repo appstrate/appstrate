@@ -2,18 +2,16 @@
 
 /**
  * assistant-ui `AttachmentAdapter` for the chat composer (pinned
- * `@assistant-ui/react` 0.14.27). Its three methods:
+ * `@assistant-ui/react`). Its three methods:
  *
- *  - `add({file})` — register a picked file as a pending attachment (a chip), stamped with the
- *    space it goes to (`spaceOf`, the user's choice then). A file added while there is none is
- *    refused, and the client-side size guard rejects an over-cap file here, before any upload.
+ *  - `add({file})` — register a picked file as a pending attachment (a chip). The client-side
+ *    size guard rejects an over-cap file here, before any upload; a file added while the
+ *    personal space is not known yet is refused.
  *  - `send(pending)` — on composer submit, stage the bytes through the host's uploader into the
- *    stamped space, and return a complete attachment whose `file` content part carries the
- *    `upload://upl_x` URI. A stamped space the turn no longer reads (`turnSpaces`: the limit or
- *    the acting set changed since) fails that attachment, naming the space, before any upload:
- *    the server resolves an upload only among the turn's spaces. react-ai-sdk's
+ *    caller's personal space, whatever space the conversation reads, and return a complete
+ *    attachment whose `file` content part carries the `upload://upl_x` URI. react-ai-sdk's
  *    `toCreateMessage` maps the part to an ai-SDK file part (`url: upload://…`); the server then
- *    materializes it into a durable `appfile://` file.
+ *    materializes it into a durable `appfile://` file of the conversation.
  *  - `remove()` — no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
  *
@@ -28,7 +26,12 @@
 
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
-import type { ChatTranslate, UploadFile } from "./runtime-context.ts";
+import type {
+  AttachTarget,
+  AttachUnavailable,
+  ChatTranslate,
+  UploadFile,
+} from "./runtime-context.ts";
 import { stageComposerFile } from "./upload.ts";
 
 /**
@@ -46,17 +49,24 @@ function uploadFailureKey(err: unknown): string {
   return "upload.failed";
 }
 
+const ATTACH_UNAVAILABLE_KEY: Record<AttachUnavailable, string> = {
+  loading: "composer.attachUnavailable",
+  error: "composer.attachError",
+  preview: "composer.attachPreview",
+};
+
+/** The message saying why nothing can be attached. */
+export function attachUnavailableKey(reason: AttachUnavailable): string {
+  return ATTACH_UNAVAILABLE_KEY[reason];
+}
+
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
-  /** The space a file added now goes to (`attachSpaceOf`), `null` for none. */
-  spaceOf: () => string | null;
-  /** The spaces the turn being sent reads (`turnSpacesOf`), `null` while not known. */
-  turnSpaces: () => readonly string[] | null;
-  /** The host's name of a space, `undefined` when it cannot name it. */
-  spaceLabelOf: (spaceId: string) => string | undefined;
+  /** Where every file goes (the caller's personal space), or why it cannot. */
+  attachTarget: () => AttachTarget;
 }): AttachmentAdapter {
-  const { upload, t, spaceOf, turnSpaces, spaceLabelOf } = deps;
+  const { upload, t, attachTarget } = deps;
   const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
@@ -64,13 +74,14 @@ export function createChatAttachmentAdapter(deps: {
     // Any file type — the composer accepts arbitrary files (the agent's
     // input schema, not the composer, decides what a run will accept).
     accept: "*",
-    add({ file }): Promise<PendingAttachment & { spaceId: string }> {
+    add({ file }): Promise<PendingAttachment> {
       if (file.size > maxBytes) return Promise.reject(tooLarge());
-      const spaceId = spaceOf();
-      if (spaceId === null) return Promise.reject(new Error(t("composer.attachUnavailable")));
+      const target = attachTarget();
+      if ("unavailable" in target) {
+        return Promise.reject(new Error(t(attachUnavailableKey(target.unavailable))));
+      }
       return Promise.resolve({
         id: crypto.randomUUID(),
-        spaceId,
         type: "file",
         name: file.name,
         contentType: file.type || "application/octet-stream",
@@ -80,24 +91,11 @@ export function createChatAttachmentAdapter(deps: {
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.file.size > maxBytes) throw tooLarge();
-      const readable = turnSpaces();
-      if (
-        !("spaceId" in attachment) ||
-        typeof attachment.spaceId !== "string" ||
-        readable === null
-      ) {
-        throw new Error(t("composer.attachUnavailable"));
-      }
-      const { spaceId, ...pending } = attachment;
-      if (!readable.includes(spaceId)) {
-        const space = spaceLabelOf(spaceId);
-        throw new Error(
-          space ? t("upload.spaceNotRead", { space }) : t("upload.spaceNotReadUnnamed"),
-        );
-      }
+      const target = attachTarget();
+      if ("unavailable" in target) throw new Error(t(attachUnavailableKey(target.unavailable)));
       let uri: string;
       try {
-        uri = await stageComposerFile(upload, attachment.file, spaceId);
+        uri = await stageComposerFile(upload, attachment.file, target.spaceId);
       } catch (err) {
         // The host uploader's message is technical (status codes, English) and
         // ends up in the composer chip — surface the translated one instead.
@@ -110,7 +108,7 @@ export function createChatAttachmentAdapter(deps: {
         throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
       return {
-        ...pending,
+        ...attachment,
         status: { type: "complete" },
         content: [
           {

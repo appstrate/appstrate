@@ -913,15 +913,15 @@ export function ChatPanelSkeleton() {
   // A new conversation is limited to the selected space, and its composer shows the chip.
   const limited = useChatFilter().spaceId !== null;
   return (
-    <Waiting className="flex h-full flex-col items-center justify-center px-4">
+    <Waiting className="flex h-full min-h-0 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
       <ChatHeaderActionsBlocks conversation={false} />
-      <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
-        <div className="flex flex-col items-center">
+      <div className="flex w-full max-w-2xl flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
+        <div className="flex flex-1 flex-col items-center justify-center md:flex-none">
           {/* The `text-2xl` greeting's 32px line. */}
           <div className="flex h-8 items-center">
             <Skeleton className="h-6 w-44" />
           </div>
-          <div className="mt-1 flex h-5 items-center">
+          <div className="mt-1 flex h-6 items-center md:h-5">
             <Skeleton className="h-3.5 w-96 max-w-full" />
           </div>
         </div>
@@ -983,7 +983,7 @@ export function ChatSidebarSkeleton() {
         </SidebarMenu>
       </SidebarGroup>
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
+        <SidebarGroupLabel className="text-sm md:text-xs">{t("threads.title")}</SidebarGroupLabel>
         <SidebarMenu>
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>

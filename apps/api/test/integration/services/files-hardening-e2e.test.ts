@@ -33,7 +33,7 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import {
   createFileFromUpload,
   createFileFromStream,
-  getFileForActor,
+  resolveFileAcrossSpaces,
   deleteFile,
   setOrgFileStorageLimit,
   streamFileContent,
@@ -131,6 +131,22 @@ function publishStream(scope: Scope, runId: string, name: string, content: strin
 /** A member holding no grant beyond the resource itself — reads its own runs. */
 const NO_GRANTS: ReadonlySet<string> = new Set();
 
+/** Resolve `fileId` in `scope`'s space under `permissions` (plus the `files:read` every read asks). */
+const resolveInSpace = (
+  scope: { orgId: string; spaceId: string },
+  actor: Actor,
+  fileId: string,
+  permissions: ReadonlySet<string>,
+  opts: { creatorCanManage?: boolean } = {},
+) =>
+  resolveFileAcrossSpaces(
+    scope.orgId,
+    actor,
+    fileId,
+    { grants: [{ spaceId: scope.spaceId, permissions: new Set([...permissions, "files:read"]) }] },
+    opts,
+  );
+
 describe("files hardening — cross-phase interactions", () => {
   let ctx: TestContext;
   let scope: Scope;
@@ -217,7 +233,7 @@ describe("files hardening — cross-phase interactions", () => {
     // Existing content stays fully readable (list, resolve, download) over-limit.
     const listed = await listFilesIn(scope, userActor, { runId }, NO_GRANTS);
     expect(listed.data).toHaveLength(2);
-    const resolved = await getFileForActor(scope, userActor, doc1!.id, NO_GRANTS);
+    const resolved = await resolveInSpace(scope, userActor, doc1!.id, NO_GRANTS);
     expect(resolved?.capabilities.download).toBe(true);
     const stream = await streamFileContent(doc1!.storageKey);
     expect(stream).not.toBeNull();

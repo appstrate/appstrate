@@ -62,8 +62,8 @@ import {
   subscribeResolvedUploads,
 } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useAttachTarget, useConversationScope, useSpaceName } from "./conversation-scope.ts";
-import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
+import { useConversationScope } from "./conversation-scope.ts";
+import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
@@ -75,10 +75,19 @@ import {
 import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
+  ACTION_BAR_CLASS,
+  ACTION_ROW_CLASS,
+  COMPOSER_BUTTON_CLASS,
+  ICON_BUTTON_CLASS,
+  QUEUE_ICON_BUTTON_CLASS,
+  CHIP_REMOVE_CLASS,
+} from "./touch-targets.ts";
+import {
   ASSISTANT_MESSAGE_CLASS,
-  COMPOSER_GRID_CLASS,
   COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_CLASS,
   THREAD_FOOTER_CLASS,
   THREAD_VIEWPORT_CLASS,
   USER_MESSAGE_CLASS,
@@ -108,16 +117,14 @@ export function Thread({
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
-  // A drop cannot ask for a space: it goes to the one decided, or to the one last picked.
-  const dropSpaceId = useAttachTarget().spaceId;
-  const shownSpaceId = useChatTransport()?.spaceId ?? null;
-  const dropSpace = useSpaceName(dropSpaceId !== shownSpaceId ? dropSpaceId : null);
+  const canWrite = can("chat:write");
+  // The whole thread is the drop target, welcome screen and transcript alike; a reader gets none.
+  // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
+  // (a disabled dropzone would cancel the drop silently).
   return (
-    // The whole thread is the drop target, welcome screen and transcript alike;
-    // dropped files take the same adapter path as the picker. A reader gets no
-    // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || dropSpaceId === null}
+      disabled={!canWrite}
+      data-testid="chat-dropzone"
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -183,14 +190,18 @@ export function Thread({
       >
         <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
           <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">
-            {dropSpace
-              ? sentenceWithNode(t, "composer.dropzoneIn", dropSpace.node)
-              : t("composer.dropzone")}
-          </p>
+          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
         </div>
       </div>
     </ComposerPrimitive.AttachmentDropzone>
+  );
+}
+
+/** Auto-focus only on wide screens whose primary pointing device supports hover. */
+function shouldAutofocusComposer(): boolean {
+  return (
+    typeof window === "undefined" ||
+    window.matchMedia("(min-width: 48rem) and (hover: hover) and (pointer: fine)").matches
   );
 }
 
@@ -215,18 +226,22 @@ function ThreadWelcome({
   const outsideActingSet =
     canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center-safe overflow-y-auto px-4">
-      <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
-        <div className="text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
+      <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
+        {/* A phone keeps the composer at the bottom, where the thumb is, as every messenger does;
+            the greeting takes the room above. From `md` up both sit mid-screen. */}
+        <div className="flex flex-1 flex-col justify-center text-center md:flex-none">
           <h1 className="text-2xl font-semibold tracking-tight">
             {name ? t("welcome.greeting", { name }) : t("welcome.greetingAnonymous")}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className={cn("text-muted-foreground mt-1", READING_TEXT_CLASS)}>
             {/* A reader asks nothing: what there is to do is reread. */}
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
           </p>
           {outsideActingSet && (
-            <p className="text-muted-foreground mt-1 text-sm">{t("welcome.spaceNotActing")}</p>
+            <p className={cn("text-muted-foreground mt-1", READING_TEXT_CLASS)}>
+              {t("welcome.spaceNotActing")}
+            </p>
           )}
         </div>
         <Composer
@@ -322,7 +337,10 @@ function ComposerAttachmentChip() {
               <button
                 type="button"
                 aria-label={t("composer.removeAttachment")}
-                className="text-muted-foreground hover:text-foreground shrink-0"
+                className={cn(
+                  "text-muted-foreground hover:text-foreground desktop-pointer:size-3.5",
+                  CHIP_REMOVE_CLASS,
+                )}
               >
                 <XIcon className="size-3.5" />
               </button>
@@ -331,12 +349,12 @@ function ComposerAttachmentChip() {
         }
       />
       {notice && (
-        <span role="status" className="text-muted-foreground max-w-56 text-xs">
+        <span role="status" className={cn("text-muted-foreground max-w-56", NOTE_TEXT_CLASS)}>
           {notice}
         </span>
       )}
       {status.type === "incomplete" && status.reason === "error" && status.message && (
-        <span role="alert" className="text-destructive text-xs">
+        <span role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
           <span className="sr-only">{name}. </span>
           {status.message}
         </span>
@@ -419,7 +437,7 @@ function ComposerAttachmentError() {
   useAuiEvent("composer.send", () => setMessage(null));
   if (!message) return null;
   return (
-    <p role="alert" className="text-destructive text-xs">
+    <p role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
       {message}
     </p>
   );
@@ -502,7 +520,7 @@ function QueuedMessages({
             </span>
             <IconButton
               label={t("composer.queue.edit")}
-              className="size-6"
+              className={QUEUE_ICON_BUTTON_CLASS}
               disabled={!composerEmpty}
               onClick={() => {
                 queue.remove(index);
@@ -513,7 +531,7 @@ function QueuedMessages({
             </IconButton>
             <IconButton
               label={t("composer.queue.remove")}
-              className="size-6"
+              className={QUEUE_ICON_BUTTON_CLASS}
               onClick={() => queue.remove(index)}
             >
               <XIcon />
@@ -538,10 +556,15 @@ function Composer({
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t } = useChatHost();
+  const { can, t, modelLabel } = useChatHost();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
+  // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
+  const autofocus = shouldAutofocusComposer();
+  const [touched, setTouched] = React.useState(false);
+  const rest = !touched && composer.value === "" && !hasAttachments && !running;
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
@@ -568,7 +591,9 @@ function Composer({
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
-      className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      className="group/composer bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      data-rest={rest ? "" : undefined}
+      onClick={() => setTouched(true)}
       onSubmit={(e) => {
         if (limitPending) e.preventDefault();
       }}
@@ -585,13 +610,24 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
-      <div className={COMPOSER_GRID_CLASS}>
+      <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
+        <div className="min-w-0 [grid-area:tools]">{tools}</div>
         <ComposerPrimitive.Input
           rows={1}
-          autoFocus
+          // A phone would open its keyboard on arrival and never show the resting composer.
+          autoFocus={autofocus}
+          unstable_focusOnRunStart={autofocus}
+          unstable_focusOnScrollToBottom={autofocus}
+          unstable_focusOnThreadSwitched={autofocus}
+          onFocus={() => setTouched(true)}
+          aria-label={t("composer.placeholder")}
           enterKeyHint="send"
           addAttachmentOnPaste
-          placeholder={t("composer.placeholder")}
+          placeholder={
+            modelLabel
+              ? t("composer.placeholderModel", { model: modelLabel })
+              : t("composer.placeholder")
+          }
           onKeyDown={(e) => {
             // While the agent answers the primitive ignores Enter; it queues instead.
             if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
@@ -601,9 +637,8 @@ function Composer({
           }}
           className={COMPOSER_INPUT_CLASS}
         />
-        <div className="flex min-w-0 items-center justify-between gap-2 [grid-area:tools]">
-          <div className="min-w-0">{tools}</div>
-          <div className="min-w-0">{slot}</div>
+        <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
+          {slot}
         </div>
         <div className="flex items-center gap-2 [grid-area:send]">
           <ThreadPrimitive.If running={false}>
@@ -611,7 +646,7 @@ function Composer({
               <Button
                 type="button"
                 size="icon"
-                className="size-8 shrink-0 rounded-lg"
+                className={COMPOSER_BUTTON_CLASS}
                 aria-label={t("composer.send")}
               >
                 <SendHorizontalIcon />
@@ -623,7 +658,7 @@ function Composer({
               type="button"
               size="icon"
               variant="outline"
-              className="size-8 shrink-0 rounded-lg"
+              className={COMPOSER_BUTTON_CLASS}
               aria-label={t("composer.queue.add")}
               title={t("composer.queue.add")}
               disabled={!canQueue}
@@ -636,7 +671,7 @@ function Composer({
                 type="button"
                 size="icon"
                 variant="secondary"
-                className="size-8 shrink-0 rounded-lg"
+                className={COMPOSER_BUTTON_CLASS}
                 aria-label={t("composer.stop")}
               >
                 <SquareIcon className="fill-current" />
@@ -834,7 +869,7 @@ function AssistantMessage() {
         <TurnLimitNotice />
         <MessageError />
       </div>
-      <div className="mt-1 flex h-7 items-center gap-2">
+      <div className={ACTION_ROW_CLASS}>
         <TurnModelBadge />
         {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
             mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
@@ -842,7 +877,7 @@ function AssistantMessage() {
             height at each inference start/finish — the whole transcript would
             visibly jump. Copy stays usable mid-stream (copies the current
             snapshot), which is the seamless behavior we want. */}
-        <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <ActionBarPrimitive.Root className={ACTION_BAR_CLASS}>
           <ActionBarPrimitive.Copy asChild>
             <IconButton label={t("common:btn.copy")}>
               <MessagePrimitive.If copied>
@@ -875,7 +910,7 @@ const IconButton = React.forwardRef<
     aria-label={label}
     title={label}
     {...props}
-    className={cn("text-muted-foreground size-7 [&_svg]:size-3.5", props.className)}
+    className={cn(ICON_BUTTON_CLASS, props.className)}
   >
     {children}
   </Button>

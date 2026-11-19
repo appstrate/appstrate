@@ -303,6 +303,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["GET"], "/api/realtime/runs/{id}"],
     [["GET"], "/api/realtime/agents/{packageId}/runs"],
   ]),
+  ...rowDecided("`resolveFileAcrossSpaces`: `files:read` in the file's own space", [
+    [["GET"], "/api/files/{id}"],
+    [["GET"], "/api/files/{id}/content"],
+  ]),
   ...rowDecided("`files:delete` OR the file's own creator", [
     [["DELETE"], "/api/files/{id}"],
     [["POST"], "/api/files/{id}/keep"],
@@ -390,7 +394,7 @@ describe("every /api/ operation has a readable requirement", () => {
       (operation) =>
         operation.pathTemplate.startsWith("/api/") && !covers(NO_MOUNTED_GUARD, operation),
     );
-    expect(judged.filter((operation) => operation.method === "GET").length).toBeGreaterThan(70);
+    expect(judged.filter((operation) => operation.method === "GET").length).toBeGreaterThan(60);
     expect(judged.filter((operation) => operation.method !== "GET").length).toBeGreaterThan(80);
   });
 
@@ -444,6 +448,8 @@ describe("requirement anchors", () => {
       markNotificationReadById: req(["runs:read|runs:read-all"]),
       markAllNotificationsRead: req(["runs:read|runs:read-all"]),
       createUpload: req(["agents:run"]),
+      getFile: req(["files:read"]),
+      getFileContent: req(["files:read"]),
     };
     const ceilings = Object.fromEntries(
       Object.keys(expected).map((operationId) => [operationId, op(operationId).requirement]),
