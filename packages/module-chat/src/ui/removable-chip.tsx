@@ -8,6 +8,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { XIcon } from "lucide-react";
 import { badgeVariants } from "@appstrate/ui/components/badge";
+import { NOTE_TEXT_CLASS } from "./phone-text.ts";
 import { cn } from "@appstrate/ui/cn";
 
 const ICON = "[&>svg]:size-3.5 [&>svg]:shrink-0";
@@ -41,9 +42,11 @@ export function RemovableChip({
     // `rest` carries what a Radix trigger (`asChild`) passes: ref, handlers, data-state.
     <span
       {...rest}
+      data-composer-chip=""
       className={cn(
         badgeVariants({ variant: "secondary" }),
         "text-muted-foreground h-7 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-1 pl-2.5 font-normal",
+        NOTE_TEXT_CLASS,
         ICON,
         className,
       )}

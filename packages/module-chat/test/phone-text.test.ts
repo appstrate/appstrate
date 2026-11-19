@@ -6,6 +6,9 @@ import {
   COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_CLASS,
+  READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
   THREAD_FOOTER_CLASS,
   THREAD_VIEWPORT_CLASS,
@@ -22,7 +25,7 @@ it("keeps the composer and search at 1rem in both orientations", () => {
 });
 
 it("uses denser message bodies from md", () => {
-  for (const classes of [USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS]) {
+  for (const classes of [USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
     expect(classes.split(" ")).toContain("text-base");
     expect(classes.split(" ")).toContain("md:text-sm");
   }
@@ -50,5 +53,13 @@ describe("thread layout on a phone", () => {
   it("the disclaimer steps aside while the composer has the focus, below md only", () => {
     expect(THREAD_FOOTER_CLASS.split(/\s+/)).toContain("group/footer");
     expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:group-focus-within/footer:hidden");
+  });
+});
+
+describe("secondary text", () => {
+  it("is 14 px on a phone, never the 12 px of the dense size", () => {
+    expect(NOTE_TEXT_CLASS.split(" ")).toContain("text-sm");
+    expect(READING_TEXT_DENSE_CLASS.split(" ")).toEqual(["text-base", "md:text-xs"]);
+    expect(NOTE_TEXT_CLASS.split(/\s+/)).toContain("md:text-xs");
   });
 });

@@ -34,7 +34,7 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   });
   await page.setViewportSize({ width: 844, height: 390 });
   await page.goto(`/chat/${id}`);
-  const composer = page.getByPlaceholder("Message Appstrate…");
+  const composer = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
   const search = page.getByRole("searchbox");
   const code = page.locator("pre > code");
   await expect(composer).toHaveCSS("font-size", "16px");
@@ -84,4 +84,37 @@ test("chat fields stay legible in both orientations and the search sheet fits th
         .evaluate((root) => root.style.getPropertyValue("--keyboard-viewport-height")),
     )
     .toBe("");
+});
+
+test("a fresh phone composer keeps attach, input and send on one line until the first interaction", async ({
+  authedPage: page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/chat");
+  const input = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
+  const attach = page.getByRole("button", { name: /^Joindre des fichiers/ });
+  const send = page.getByRole("button", { name: "Envoyer", exact: true });
+  const grid = page.locator(".chat-composer-grid").filter({ has: input });
+  await expect(input).toBeVisible();
+  await expect(input).not.toBeFocused();
+  await expect(grid).toHaveAttribute("data-rest", "");
+  const [left, field, right] = await Promise.all([
+    attach.boundingBox(),
+    input.boundingBox(),
+    send.boundingBox(),
+  ]);
+  if (!left || !field || !right) throw new Error("Missing resting controls");
+  expect(Math.max(left.y, field.y, right.y)).toBeLessThan(
+    Math.min(left.y + left.height, field.y + field.height, right.y + right.height),
+  );
+  expect(left.x + left.width).toBeLessThanOrEqual(field.x + 1);
+  expect(field.x + field.width).toBeLessThanOrEqual(right.x + 1);
+  const choosing = page.waitForEvent("filechooser");
+  await attach.tap();
+  await (await choosing).setFiles([]);
+  await expect(grid).not.toHaveAttribute("data-rest", "");
+  await input.tap();
+  await expect(input).toBeFocused();
+  await input.fill("Bonjour");
+  await expect(send).toBeEnabled();
 });

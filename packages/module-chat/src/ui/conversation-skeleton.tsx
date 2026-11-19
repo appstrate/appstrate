@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
-import { COMPOSER_GRID_CLASS, DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
+import { DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
 
 /**
  * A saved conversation while its history loads: the turns it will show, in
@@ -53,9 +53,7 @@ export function ConversationSkeleton({
       ) : (
         <div aria-hidden className="mx-auto flex w-full max-w-2xl flex-col gap-2 pb-4">
           <ComposerSkeleton placeholder={placeholder} />
-          {/* `Disclaimer`. Below `md` it steps aside while the composer has the focus, and the
-              composer takes it on mount (`autoFocus`). */}
-          <div className={cn(DISCLAIMER_TEXT_CLASS, "self-center max-md:hidden")}>{disclaimer}</div>
+          <div className={cn(DISCLAIMER_TEXT_CLASS, "self-center")}>{disclaimer}</div>
         </div>
       )}
     </div>
@@ -77,18 +75,18 @@ export function ComposerSkeleton({
 }) {
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className={COMPOSER_GRID_CLASS}>
-        <div className="text-muted-foreground flex min-h-9 items-center py-1 text-base [grid-area:input]">
+      <div className="group/composer chat-composer-grid" data-rest="">
+        <div className="text-muted-foreground flex min-h-9 min-w-0 items-center overflow-hidden py-1 text-base [grid-area:input]">
           {placeholder}
         </div>
-        <div className="flex min-w-0 items-center justify-between gap-2 [grid-area:tools]">
-          <div className="flex items-center gap-1.5">
+        <div className="min-w-0 [grid-area:tools]">
+          <div className="flex items-center gap-1.5 max-md:[&>:not(:first-child)]:hidden">
             <Skeleton className="size-8 rounded-lg" />
             <Skeleton className="size-8 rounded-lg" />
             {limited && <Skeleton className="h-7 w-44 rounded-full" />}
           </div>
-          <Skeleton className="h-[30px] w-32 rounded-md" />
         </div>
+        <Skeleton className="h-[30px] w-32 rounded-md [grid-area:model] max-md:hidden" />
         <Skeleton className="size-8 rounded-lg [grid-area:send]" />
       </div>
     </div>

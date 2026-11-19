@@ -76,9 +76,10 @@ import { isImageMime, localPreviewKind } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
-  COMPOSER_GRID_CLASS,
   COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_CLASS,
   THREAD_FOOTER_CLASS,
   THREAD_VIEWPORT_CLASS,
   USER_MESSAGE_CLASS,
@@ -194,6 +195,14 @@ export function Thread({
   );
 }
 
+/** Auto-focus only on wide screens whose primary pointing device supports hover. */
+function shouldAutofocusComposer(): boolean {
+  return (
+    typeof window === "undefined" ||
+    window.matchMedia("(min-width: 48rem) and (hover: hover) and (pointer: fine)").matches
+  );
+}
+
 function ThreadWelcome({
   composerTools,
   composerSlot,
@@ -215,18 +224,22 @@ function ThreadWelcome({
   const outsideActingSet =
     canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center-safe overflow-y-auto px-4">
-      <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
-        <div className="text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
+      <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
+        {/* A phone keeps the composer at the bottom, where the thumb is, as every messenger does;
+            the greeting takes the room above. From `md` up both sit mid-screen. */}
+        <div className="flex flex-1 flex-col justify-center text-center md:flex-none">
           <h1 className="text-2xl font-semibold tracking-tight">
             {name ? t("welcome.greeting", { name }) : t("welcome.greetingAnonymous")}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className={cn("text-muted-foreground mt-1", READING_TEXT_CLASS)}>
             {/* A reader asks nothing: what there is to do is reread. */}
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
           </p>
           {outsideActingSet && (
-            <p className="text-muted-foreground mt-1 text-sm">{t("welcome.spaceNotActing")}</p>
+            <p className={cn("text-muted-foreground mt-1", READING_TEXT_CLASS)}>
+              {t("welcome.spaceNotActing")}
+            </p>
           )}
         </div>
         <Composer
@@ -331,12 +344,12 @@ function ComposerAttachmentChip() {
         }
       />
       {notice && (
-        <span role="status" className="text-muted-foreground max-w-56 text-xs">
+        <span role="status" className={cn("text-muted-foreground max-w-56", NOTE_TEXT_CLASS)}>
           {notice}
         </span>
       )}
       {status.type === "incomplete" && status.reason === "error" && status.message && (
-        <span role="alert" className="text-destructive text-xs">
+        <span role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
           <span className="sr-only">{name}. </span>
           {status.message}
         </span>
@@ -419,7 +432,7 @@ function ComposerAttachmentError() {
   useAuiEvent("composer.send", () => setMessage(null));
   if (!message) return null;
   return (
-    <p role="alert" className="text-destructive text-xs">
+    <p role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
       {message}
     </p>
   );
@@ -538,10 +551,15 @@ function Composer({
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t } = useChatHost();
+  const { can, t, modelLabel } = useChatHost();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
+  // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
+  const autofocus = shouldAutofocusComposer();
+  const [touched, setTouched] = React.useState(false);
+  const rest = !touched && composer.value === "" && !hasAttachments && !running;
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
@@ -568,7 +586,9 @@ function Composer({
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
-      className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      className="group/composer bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      data-rest={rest ? "" : undefined}
+      onClick={() => setTouched(true)}
       onSubmit={(e) => {
         if (limitPending) e.preventDefault();
       }}
@@ -585,13 +605,24 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
-      <div className={COMPOSER_GRID_CLASS}>
+      <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
+        <div className="min-w-0 [grid-area:tools]">{tools}</div>
         <ComposerPrimitive.Input
           rows={1}
-          autoFocus
+          // A phone would open its keyboard on arrival and never show the resting composer.
+          autoFocus={autofocus}
+          unstable_focusOnRunStart={autofocus}
+          unstable_focusOnScrollToBottom={autofocus}
+          unstable_focusOnThreadSwitched={autofocus}
+          onFocus={() => setTouched(true)}
+          aria-label={t("composer.placeholder")}
           enterKeyHint="send"
           addAttachmentOnPaste
-          placeholder={t("composer.placeholder")}
+          placeholder={
+            modelLabel
+              ? t("composer.placeholderModel", { model: modelLabel })
+              : t("composer.placeholder")
+          }
           onKeyDown={(e) => {
             // While the agent answers the primitive ignores Enter; it queues instead.
             if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
@@ -601,9 +632,8 @@ function Composer({
           }}
           className={COMPOSER_INPUT_CLASS}
         />
-        <div className="flex min-w-0 items-center justify-between gap-2 [grid-area:tools]">
-          <div className="min-w-0">{tools}</div>
-          <div className="min-w-0">{slot}</div>
+        <div className="min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
+          {slot}
         </div>
         <div className="flex items-center gap-2 [grid-area:send]">
           <ThreadPrimitive.If running={false}>
