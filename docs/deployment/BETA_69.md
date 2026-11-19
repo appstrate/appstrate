@@ -1,4 +1,6 @@
-# Upgrading beta.68 to beta.69
+# Upgrading production from beta.68 to beta.70
+
+The beta.69 tag stopped before CLI signing. Beta.70 ships its application and migrations with the native Apple Silicon build moved to macOS 15.
 
 Use the [release runbook](https://github.com/appstrate/docs/blob/main/deployment/RELEASE_RUNBOOK.md) maintenance procedure with the application stopped. The two binaries cannot safely serve traffic against the same upgraded schema. The [migration reference](../../scripts/migration/README.md) gives the commands, prerequisites and expected output for each script.
 
@@ -19,7 +21,7 @@ Record the application's active version, full `MODULES` list, and any explicit r
 2. Run **0054 before Drizzle**. Dry-run with `--signing-dir DIR`; resolve every `UNFOLDED` line, including missing archives and publisher signatures. The reviewed dry-run must show zero unresolved entries before `--apply`. Preserve the signing directory across retries.
 3. Run the release's migrate service for core journal entries 0097–0109. On an unmodified beta.68 journal, the count goes from 97 to 110. Verify that the connection reference in `connection_calls` is nullable after 0109. Apply 0048, then 0049 on instances that previously served 0097, 0051, and 0053 with the recorded timestamp. Run 0047 and 0052 in the window. Compare placement counts, manifests, stored integrity, dependency indexes and run-read rows with the rehearsal. Re-run the idempotent scripts.
 4. With writers still stopped, run `bun scripts/migration/0055-chat-file-read-receipts.ts`, repeat with `--apply`, then repeat the dry run. Require zero messages left to rewrite before reopening chat. Measure peak memory and elapsed time on the copy, as this script reads stored message content.
-5. Save the candidate version and billing configuration together in Coolify before deploying. Boot with `APPSTRATE_VERSION=1.0.0-beta.69` and `MIGRATIONS_ON_BOOT=verify`. Inspect Coolify's rendered Compose, readiness, runtime revisions and scheduler. Confirm the `billing` module loads against the existing `drizzle.ee_migrations` journal and cursor. Run a signed local integration, verify its output and exercise the sidecar with the runbook's network canary. Check A, B and All spaces, run acknowledgements, chat history, and local skill sync. Reopen writes and schedules after acceptance. Verify the installer and CLI npm channels separately.
+5. Save the candidate version and billing configuration together in Coolify before deploying. Boot with `APPSTRATE_VERSION=1.0.0-beta.70` and `MIGRATIONS_ON_BOOT=verify`. Inspect Coolify's rendered Compose, readiness, runtime revisions and scheduler. Confirm the `billing` module loads against the existing `drizzle.ee_migrations` journal and cursor. Run a signed local integration, verify its output and exercise the sidecar with the runbook's network canary. Check A, B and All spaces, run acknowledgements, chat history, and local skill sync. Reopen writes and schedules after acceptance. Verify the installer and CLI npm channels separately.
 
 ## Roll back
 
