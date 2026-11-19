@@ -35,6 +35,8 @@ export const THREAD_VIEWPORT_CLASS =
 export const THREAD_FOOTER_CLASS =
   "group/footer bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4";
 
+/** The line under the composer, as the conversation skeleton draws it too. */
+export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
+
 /** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
-export const DISCLAIMER_CLASS =
-  "text-muted-foreground/70 px-4 text-center text-xs max-md:group-focus-within/footer:hidden";
+export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:group-focus-within/footer:hidden`;

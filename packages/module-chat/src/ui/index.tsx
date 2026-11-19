@@ -553,6 +553,7 @@ const Conversation = memo(function Conversation({
       <ConversationSkeleton
         label={t("conversation.loading")}
         placeholder={canWrite ? t("composer.placeholder") : null}
+        disclaimer={t("thread.disclaimer")}
       />
     );
   }

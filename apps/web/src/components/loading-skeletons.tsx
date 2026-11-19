@@ -926,7 +926,10 @@ export function ChatPanelSkeleton() {
           </div>
         </div>
         {canWrite ? (
-          <ComposerSkeleton placeholder={<Skeleton className="h-3.5 w-48" />} limited={limited} />
+          <ComposerSkeleton
+            placeholder={<Skeleton className="h-4 w-48 md:h-3.5" />}
+            limited={limited}
+          />
         ) : (
           // A reader's composer is a read-only note.
           <Skeleton className="h-[46px] w-full rounded-xl" />
@@ -941,14 +944,22 @@ export function ChatPanelSkeleton() {
  * draws it (`ConversationSkeleton`) — turns at the top, the composer and its line at the bottom.
  */
 export function ChatConversationSkeleton() {
-  const { t } = useTranslation("common");
+  // The chat namespace loads with the module: its disclaimer text once loaded, a line until then.
+  const { t, i18n } = useTranslation("common");
   const canWrite = usePermissions().can("chat:write");
   return (
     <>
       <ChatHeaderActionsBlocks conversation />
       <ConversationSkeleton
         label={t("loading")}
-        placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
+        placeholder={canWrite ? <Skeleton className="h-4 w-48 md:h-3.5" /> : null}
+        disclaimer={
+          i18n.hasLoadedNamespace("chat") ? (
+            t("chat:thread.disclaimer")
+          ) : (
+            <Skeleton className="mx-auto my-0.5 h-3 w-64" />
+          )
+        }
       />
     </>
   );
