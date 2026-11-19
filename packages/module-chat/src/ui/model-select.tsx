@@ -20,6 +20,14 @@ import { ModelPickerList } from "@appstrate/ui/components/model-picker";
 import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-groups";
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from "@appstrate/ui/components/sheet";
+import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
@@ -48,6 +56,7 @@ export function ModelSelect({
   failed = false,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const isMobile = useIsMobile();
   const [tab, setTab] = useState<"models" | "configuration">("models");
   const { t, can, personalModelCredentials, modelCredentials } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
@@ -102,6 +111,118 @@ export function ModelSelect({
     return null;
   }
 
+  const panel = (
+    <Tabs
+      value={tab}
+      onValueChange={(value) => setTab(value as "models" | "configuration")}
+      className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
+    >
+      <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
+        <TabsTrigger value="models" className="h-6 px-2 text-xs">
+          {t("model.tabs.models")}
+        </TabsTrigger>
+        <TabsTrigger value="configuration" disabled={!active} className="relative h-6 px-2 text-xs">
+          {t("model.tabs.configuration")}
+          {hasOverrides && (
+            <span className="bg-primary ml-1.5 size-1.5 rounded-full" aria-hidden="true" />
+          )}
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="models" className="mt-1 min-h-0 overflow-y-auto p-0">
+        <ModelPickerList
+          groups={groups}
+          value={selectedId}
+          onSelect={(id) => id !== null && onSelect(id)}
+          selectable={isModelSelectable}
+          // `settings:` — the picker's labels live in the settings bundle (a boot
+          // namespace, so already loaded); the host binds `t` to `chat`.
+          labels={buildModelPickerLabels((key, options) => t(`settings:${key}`, options))}
+          // The module imports no router: the host's own page, a full navigation.
+          fixLink={(label) => (
+            <a href="/preferences/models" className="underline underline-offset-2">
+              {label}
+            </a>
+          )}
+          // A phone's panel has room, and rows a thumb can hit.
+          listClassName="max-h-[min(15rem,calc(100dvh-10rem))] max-md:max-h-[55dvh] max-md:[&_[cmdk-item]]:min-h-11 max-md:[&_[cmdk-item]]:items-center"
+        />
+      </TabsContent>
+
+      <TabsContent value="configuration" className="mt-1 min-h-0 overflow-y-auto px-0.5 py-1">
+        {active && (
+          <>
+            <div className="text-muted-foreground mb-2 truncate text-xs">
+              {active.label ?? active.modelId}
+            </div>
+            {hasNoGenerationControls ? (
+              <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
+                {t("generation.noneSupported")}
+              </p>
+            ) : (
+              <ModelGenerationControls
+                value={generation}
+                capabilities={active.generation}
+                onChange={onGenerationChange}
+                // `settings:` — the shared label family lives in the
+                // settings bundle (a boot namespace, so already loaded);
+                // the host binds `t` to `chat`.
+                labels={buildGenerationLabels(
+                  (key, options) => t(`settings:${key}`, options),
+                  active.generation,
+                )}
+              />
+            )}
+          </>
+        )}
+      </TabsContent>
+    </Tabs>
+  );
+  const trigger = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={cn(
+        "text-foreground hover:text-foreground desktop-pointer:min-h-0 h-auto min-h-10 gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
+        // On a phone the picker is the cell of the row that gives way: its name truncates, and
+        // under 400 px it is the icon alone (the name is in the field's placeholder).
+        "max-w-[min(16rem,100%)] min-w-9 justify-start text-left",
+        hasOverrides && "border-primary/40 bg-primary/5",
+      )}
+      title={t("model.settingsTitle")}
+      aria-label={`${t("model.settingsTitle")}: ${active ? (active.label ?? active.modelId) : t("model.select")}`}
+    >
+      <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
+      {active ? (
+        <span className="truncate font-medium max-[400px]:hidden">
+          {active.label ?? active.modelId}
+        </span>
+      ) : (
+        <span className="font-medium max-[400px]:hidden">{t("model.select")}</span>
+      )}
+      {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
+      <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0 max-[400px]:hidden" />
+    </Button>
+  );
+  // A phone shows the picker as a panel from the bottom, rows a thumb can hit; a desktop keeps its popover.
+  if (isMobile) {
+    return (
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>{trigger}</SheetTrigger>
+        <SheetContent
+          side="bottom"
+          showCloseButton={false}
+          className="max-h-[85dvh] overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
+        >
+          <SheetTitle className="sr-only">{t("model.settingsTitle")}</SheetTitle>
+          <SheetDescription className="sr-only">{t("model.settingsTitle")}</SheetDescription>
+          <div aria-hidden className="bg-border mx-auto mt-2 h-1 w-9 rounded-full" />
+          {panel}
+        </SheetContent>
+      </Sheet>
+    );
+  }
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverContent
@@ -112,97 +233,9 @@ export function ModelSelect({
         aria-label={t("model.settingsTitle")}
         className="w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden p-0 shadow-xl"
       >
-        <Tabs
-          value={tab}
-          onValueChange={(value) => setTab(value as "models" | "configuration")}
-          className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
-        >
-          <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
-            <TabsTrigger value="models" className="h-6 px-2 text-xs">
-              {t("model.tabs.models")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="configuration"
-              disabled={!active}
-              className="relative h-6 px-2 text-xs"
-            >
-              {t("model.tabs.configuration")}
-              {hasOverrides && (
-                <span className="bg-primary ml-1.5 size-1.5 rounded-full" aria-hidden="true" />
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="models" className="mt-1 min-h-0 overflow-y-auto p-0">
-            <ModelPickerList
-              groups={groups}
-              value={selectedId}
-              onSelect={(id) => id !== null && onSelect(id)}
-              selectable={isModelSelectable}
-              // `settings:` — the picker's labels live in the settings bundle (a boot
-              // namespace, so already loaded); the host binds `t` to `chat`.
-              labels={buildModelPickerLabels((key, options) => t(`settings:${key}`, options))}
-              // The module imports no router: the host's own page, a full navigation.
-              fixLink={(label) => (
-                <a href="/preferences/models" className="underline underline-offset-2">
-                  {label}
-                </a>
-              )}
-              listClassName="max-h-[min(15rem,calc(100dvh-10rem))]"
-            />
-          </TabsContent>
-
-          <TabsContent value="configuration" className="mt-1 min-h-0 overflow-y-auto px-0.5 py-1">
-            {active && (
-              <>
-                <div className="text-muted-foreground mb-2 truncate text-xs">
-                  {active.label ?? active.modelId}
-                </div>
-                {hasNoGenerationControls ? (
-                  <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
-                    {t("generation.noneSupported")}
-                  </p>
-                ) : (
-                  <ModelGenerationControls
-                    value={generation}
-                    capabilities={active.generation}
-                    onChange={onGenerationChange}
-                    // `settings:` — the shared label family lives in the
-                    // settings bundle (a boot namespace, so already loaded);
-                    // the host binds `t` to `chat`.
-                    labels={buildGenerationLabels(
-                      (key, options) => t(`settings:${key}`, options),
-                      active.generation,
-                    )}
-                  />
-                )}
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
+        {panel}
       </PopoverContent>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn(
-            "text-foreground hover:text-foreground desktop-pointer:min-h-0 h-auto min-h-10 gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
-            "max-w-[min(16rem,100%)] justify-start text-left",
-            hasOverrides && "border-primary/40 bg-primary/5",
-          )}
-          title={t("model.settingsTitle")}
-        >
-          <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
-          {active ? (
-            <span className="truncate font-medium">{active.label ?? active.modelId}</span>
-          ) : (
-            <span className="font-medium">{t("model.select")}</span>
-          )}
-          {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
-          <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
     </Popover>
   );
 }
