@@ -58,7 +58,7 @@ function register(factories: Array<(pi: ExtensionAPI) => void>): RegisteredTool[
  * every `initialize` a 500 from then on; `initGate`, while set, holds every
  * `initialize` until it resolves.
  */
-function mcpStub() {
+function mcpStub(imageBlocks?: Array<Record<string, unknown>>) {
   const methods: string[] = [];
   const state: { failInitialize: boolean; initGate: Promise<void> | null } = {
     failInitialize: false,
@@ -174,6 +174,12 @@ function mcpStub() {
       if (surface === "file-reader") {
         const args = (msg.params as { arguments: { tool: string } }).arguments;
         const remote = args.tool === "typed";
+        if (imageBlocks) {
+          return reply({
+            content: imageBlocks,
+            ...(remote ? { _meta: { "dev.appstrate/relayed": true } } : {}),
+          });
+        }
         return reply({
           content: [
             { type: "text", text: '{"status":200}' },
@@ -223,6 +229,7 @@ function buildTurn(
   signal = new AbortController().signal,
   listsSkills = false,
   pdfInput?: ReturnType<typeof createTurnPdfInput>,
+  modelSeesImages = true,
 ) {
   return buildPlatformMcpTools({
     url: MCP_URL,
@@ -235,7 +242,7 @@ function buildTurn(
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
     listsSkills,
-    modelSeesImages: true,
+    modelSeesImages,
     pdfInput,
   });
 }
@@ -533,6 +540,74 @@ describe("McpSurfaceCache", () => {
     read.tools[0]!.inputSchema.properties = { injected: {} };
     expect(cache.get("k")).toEqual(surface("t"));
   });
+});
+
+describe("inline images from remote integration tools", () => {
+  const data =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const image = { type: "image", mimeType: "image/png", data };
+  const caption = { type: "text", text: "sample caption" };
+
+  it("hands pixels to the live model and only a receipt to the stream and history", async () => {
+    const stub = mcpStub([
+      caption,
+      image,
+      { type: "resource_link", uri: "https://example.org/image", name: "link" },
+    ]);
+    const turn = await buildTurn(stub, "file-reader", undefined);
+    try {
+      const call = register(turn.extensionFactories).find(
+        (t) => t.name === "call_integration_tool",
+      )!;
+      const result = await call.execute("photo", { tool: "typed" });
+      expect(result.content.slice(0, 2)).toEqual([caption, image]);
+      const chunks = new PiChatUiStreamMapper().map({
+        type: "tool_execution_end",
+        toolName: call.name,
+        toolCallId: "photo",
+        result,
+        isError: false,
+      });
+      expect(JSON.stringify(chunks)).toContain("sample caption");
+      expect(JSON.stringify(chunks)).toContain("image/png");
+      expect(JSON.stringify(chunks)).not.toContain(data);
+      expect(stub.count("tools/call")).toBe(1);
+      expect(stub.count("resources/read")).toBe(0);
+    } finally {
+      await turn.close();
+    }
+  });
+
+  for (const [name, block, seesImages, reason] of [
+    ["text-only model", image, false, /model.*image/i],
+    ["unsupported MIME", { ...image, mimeType: "image/svg+xml" }, true, /unsupported/i],
+    ["invalid image", { ...image, data: btoa("plain text") }, true, /invalid|match/i],
+    ["mismatched MIME", { ...image, mimeType: "image/jpeg" }, true, /invalid|match/i],
+  ] as const) {
+    it(`explains a skipped image for ${name}`, async () => {
+      const stub = mcpStub([block]);
+      const turn = await buildTurn(
+        stub,
+        "file-reader",
+        undefined,
+        undefined,
+        false,
+        undefined,
+        seesImages,
+      );
+      try {
+        const call = register(turn.extensionFactories).find(
+          (t) => t.name === "call_integration_tool",
+        )!;
+        const result = await call.execute("photo", { tool: "typed" });
+        expect(result.content[0]?.type).toBe("text");
+        expect(result.content[0]?.text).toMatch(reason);
+        expect(JSON.stringify(result.content)).not.toContain(block.data);
+      } finally {
+        await turn.close();
+      }
+    });
+  }
 });
 
 describe("temporary connector files", () => {
