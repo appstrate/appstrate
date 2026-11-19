@@ -287,7 +287,7 @@ interface ContextFilesInjection {
  * there is exactly one place that knows the field shape.
  *
  * Declaring the field is all the work: from here the URIs travel the NORMAL
- * file-ref path (`collectFileRefs` → `getFileForActor` ACL → byte/count caps
+ * file-ref path (`collectFileRefs` → `resolveFilesAcrossSpaces` ACL → byte/count caps
  * → stream into the run-workspace storage prefix `{runId}/files/` →
  * `file_links`), and the platform prompt announces them like any other input
  * file. Nothing is mounted by a side path, so nothing can be mounted
@@ -426,7 +426,7 @@ export async function triggerInlineRun(params: {
       // run row exists (input already rewritten to `appfile://` ids).
       pendingFiles: parsed.pendingFiles,
       // `appfile://` inputs to protect via `file_links` (chaining).
-      consumedFileIds: parsed.consumedFileIds,
+      consumedFileIds: parsed.consumedFiles?.map((file) => file.id),
       modelId: modelIdOverride,
       generationConfigOverride: parsed.generationConfigOverride ?? null,
       proxyId: proxyIdOverride,

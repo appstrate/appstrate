@@ -23,7 +23,11 @@
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
-import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
+import {
+  parseSkillUri,
+  parseSkillUriPackage,
+  SKILL_DEFINITION_META_KEY,
+} from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
   RESOURCE_BLOB_MAX_BYTES,
@@ -44,7 +48,7 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
-import { FILE_NAME_META_KEY } from "@appstrate/core/file-uri";
+import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
@@ -201,15 +205,18 @@ export interface PiTurnBudget {
  * conversation touched.
  */
 export interface TurnSpaces {
-  spaces: readonly NamedSpace[];
+  /** The turn's spaces, each with the caller's effective permissions there. */
+  spaces: readonly (NamedSpace & { permissions: readonly string[] })[];
   /**
-   * Record `spaceId` (one of `spaces`: callers refuse the others first) on the session BEFORE
-   * the call naming it is dispatched. Throws, and the call is not made, when the space cannot
-   * be recorded.
+   * Record `spaceId` (one of `spaces`) on the session. Throws when it cannot be recorded, and
+   * the call fails.
    */
   touch(spaceId: string): Promise<void>;
-  /** The space a `skill://` or `appfile://` URI belongs to, when it names one. */
-  spaceOfUri(uri: string): Promise<string | undefined>;
+  /**
+   * The space of the file `uri` names. A missing file names none, nor does one the conversation
+   * holds: it is reached through its container, not a space.
+   */
+  fileSpace(uri: string): Promise<string | undefined>;
 }
 
 type BuildPlatformMcpToolsOptions = {
@@ -426,6 +433,20 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/**
+ * Refuse a space a call names outside the turn's, or record it before the call is dispatched
+ * there: the space is never defaulted.
+ */
+async function enterNamedSpace(
+  organization: TurnSpaces,
+  spaceId: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  const refusal = spaceIdRefusal(organization.spaces, spaceId);
+  if (refusal) return { ...refusal };
+  await organization.touch(spaceId as string);
+  return undefined;
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -445,18 +466,19 @@ function makeForwardExtension(
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
-        // The call names its space: refused like `run_and_wait`'s when it is outside the turn's
-        // spaces, else recorded before it is made.
         const spaceId = dispatchSpace(args);
         if (spaceId !== undefined) {
-          const refusal = spaceIdRefusal(organization.spaces, spaceId);
+          const refusal = await enterNamedSpace(organization, spaceId);
           if (refusal) {
+            // Rendered as the platform renders its own refusals (`refusalResult`).
             return withTurnBudgetNote(
-              toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
+              mcpResultToPi(
+                { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] },
+                offerScopeOf(toolName, { arguments: args }),
+              ),
               turnBudget,
             );
           }
-          await organization.touch(spaceId);
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
@@ -542,25 +564,26 @@ function makeReadResourceExtension(
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
-        // A resource of a space the conversation reads from touches it; one of a space outside the
-        // turn's is refused like a call naming it (the forward tool's structured refusal), unread
-        // and unrecorded.
-        const resourceSpace = await organization.spaceOfUri(uri);
-        if (resourceSpace) {
-          const refusal = spaceIdRefusal(organization.spaces, resourceSpace);
+        const skillSpace = parseSkillUri(uri)?.spaceId;
+        if (skillSpace) {
+          const refusal = await enterNamedSpace(organization, skillSpace);
           if (refusal) {
             return withTurnBudgetNote(
-              toPiToolResult(
-                { ...refusal },
-                offerScopeOf(READ_RESOURCE_TOOL, { arguments: params }),
-              ),
+              toPiToolResult(refusal, offerScopeOf(READ_RESOURCE_TOOL, { arguments: params })),
               turnBudget,
             );
           }
-          await organization.touch(resourceSpace);
         }
+        // The file's space is read before the read: a file deleted in between would otherwise be
+        // served with its space unrecorded. The platform reads it in its own space when the
+        // bearer may enter it and refuses any other as missing, so only a read it served records
+        // that space, before its content leaves; a refused one records, and reveals, nothing.
+        const fileSpace = isFileUri(uri) ? await organization.fileSpace(uri) : undefined;
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
+        if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
+          await organization.touch(fileSpace);
+        }
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
         // Keep the text of skills in the replay so their procedures still apply on later turns.
         const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
@@ -688,25 +711,6 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
 }
 
 /**
- * The space a `run_and_wait` names, with the other arguments, after
- * recording it on the session; or the refusal the server gives any space-acting tool
- * (`spaceIdRefusal`): the space is never defaulted.
- */
-async function namedSpace(
-  params: unknown,
-  organization: TurnSpaces,
-): Promise<
-  { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
-> {
-  const { space_id: named, ...args } = (params as Record<string, unknown> | null) ?? {};
-  const refusal = spaceIdRefusal(organization.spaces, named);
-  if (refusal) return { refusal: { ...refusal } };
-  const spaceId = named as string;
-  await organization.touch(spaceId);
-  return { spaceId, args };
-}
-
-/**
  * `run_and_wait` Pi tool: launch a run, stream the preliminary + progress cards
  * live into the UI stream, and return the FINAL run payload as the tool result.
  * The intermediate cards and the final tool output share the tool call id, so
@@ -736,14 +740,12 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
-        // The space the call names, taken out of the arguments (the shared launch refuses an
-        // argument it does not declare) and recorded before anything is launched.
-        const target = await namedSpace(params, ctx.organization);
-        if ("refusal" in target) {
-          return withTurnBudgetNote(
-            toPiToolResult(target.refusal, runAndWaitScope),
-            ctx.turnBudget,
-          );
+        // Taken out of the arguments (the shared launch refuses one it does not declare) and
+        // recorded before anything is launched.
+        const { space_id: spaceId, ...args } = (params as Record<string, unknown> | null) ?? {};
+        const refusal = await enterNamedSpace(ctx.organization, spaceId);
+        if (refusal) {
+          return withTurnBudgetNote(toPiToolResult(refusal, runAndWaitScope), ctx.turnBudget);
         }
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
@@ -751,9 +753,9 @@ function makeRunAndWaitExtension(
         // The run's wait budget descends from the TURN's deadline (never the
         // 30-minute client default), and a launch with no room left is refused
         // here — before any run row exists.
-        for await (const step of runAndWaitStepsWithinTurnBudget(target.args, {
+        for await (const step of runAndWaitStepsWithinTurnBudget(args, {
           origin: ctx.origin,
-          headers: { ...ctx.headers, "x-space-id": target.spaceId },
+          headers: { ...ctx.headers, "x-space-id": spaceId as string },
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
           // The chat holds the connect capability itself — the link goes to a

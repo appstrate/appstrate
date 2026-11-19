@@ -62,8 +62,8 @@ import {
   subscribeResolvedUploads,
 } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useAttachTarget, useConversationScope, useSpaceName } from "./conversation-scope.ts";
-import { sentenceWithName, sentenceWithNode } from "./sentence-with-name.tsx";
+import { useConversationScope } from "./conversation-scope.ts";
+import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
@@ -117,16 +117,14 @@ export function Thread({
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
-  // A drop cannot ask for a space: it goes to the one decided, or to the one last picked.
-  const dropSpaceId = useAttachTarget().spaceId;
-  const shownSpaceId = useChatTransport()?.spaceId ?? null;
-  const dropSpace = useSpaceName(dropSpaceId !== shownSpaceId ? dropSpaceId : null);
+  const canWrite = can("chat:write");
+  // The whole thread is the drop target, welcome screen and transcript alike; a reader gets none.
+  // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
+  // (a disabled dropzone would cancel the drop silently).
   return (
-    // The whole thread is the drop target, welcome screen and transcript alike;
-    // dropped files take the same adapter path as the picker. A reader gets no
-    // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || dropSpaceId === null}
+      disabled={!canWrite}
+      data-testid="chat-dropzone"
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -192,11 +190,7 @@ export function Thread({
       >
         <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
           <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">
-            {dropSpace
-              ? sentenceWithNode(t, "composer.dropzoneIn", dropSpace.node)
-              : t("composer.dropzone")}
-          </p>
+          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
         </div>
       </div>
     </ComposerPrimitive.AttachmentDropzone>

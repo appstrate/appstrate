@@ -599,10 +599,10 @@ interface CreateRunParams {
   actor: Actor | null;
   input: Record<string, unknown> | null;
   /**
-   * Existing durable files referenced by the run input. These rows are
-   * locked, revalidated in the space scope, and linked to the new run inside the
-   * same transaction as the run INSERT. This closes the resolve/create race:
-   * either every input file is protected by a link, or no run is created.
+   * Existing durable files referenced by the run input, locked, revalidated in
+   * the org (each in its own space) and linked to the new run in the run
+   * INSERT's transaction: either every input file is linked, or no run is
+   * created. A link protects a file of the run's own space only.
    */
   consumedFileIds?: string[];
   scheduleId?: string;
@@ -740,16 +740,12 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
 
     const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
     if (consumedFileIds.length > 0) {
+      // Org-scoped, not space-scoped: an input resolves in its file's own space
+      // (`resolveFilesAcrossSpaces`), which may be another than the run's.
       const available = await tx
         .select({ id: files.id })
         .from(files)
-        .where(
-          and(
-            inArray(files.id, consumedFileIds),
-            eq(files.orgId, scope.orgId),
-            eq(files.spaceId, scope.spaceId),
-          ),
-        )
+        .where(and(inArray(files.id, consumedFileIds), eq(files.orgId, scope.orgId)))
         .for("update");
       if (available.length !== consumedFileIds.length) {
         throw conflict(

@@ -56,6 +56,7 @@ import type {
   UseFileImageSrc,
 } from "./runtime-context.ts";
 export type {
+  AttachTarget,
   ChatCan,
   ChatRequest,
   ChatTranslate,
@@ -93,14 +94,7 @@ import {
   type ConversationCreation,
 } from "./chat-route.ts";
 import { useConversationLimit } from "./conversation-limit.ts";
-import {
-  AttachTargetProvider,
-  ConversationScopeProvider,
-  useAttachTarget,
-  useConversationAttachTarget,
-  turnSpacesOf,
-  useConversationScope,
-} from "./conversation-scope.ts";
+import { ConversationScopeProvider, useConversationScope } from "./conversation-scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -199,6 +193,8 @@ export interface ChatPageProps {
   canIn: ChatHost["canIn"];
   /** The spaces the chat acts in, `null` until known (see `ChatHost`). Pass a stable array. */
   actingSpaceIds: ChatHost["actingSpaceIds"];
+  /** Where an attached file goes, or why it cannot (see `ChatHost`). Pass a stable value. */
+  attachTarget: ChatHost["attachTarget"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -233,6 +229,7 @@ export function ChatPage({
   can,
   canIn,
   actingSpaceIds,
+  attachTarget,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -343,6 +340,7 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
+      attachTarget,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -362,6 +360,7 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
+      attachTarget,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -519,8 +518,6 @@ const Conversation = memo(function Conversation({
     selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
     generating: rest.serverGenerating === true,
   });
-  // The space a file goes to (`attachAvailability`).
-  const attachTarget = useConversationAttachTarget(scope, transport?.spaceId ?? null);
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
@@ -569,19 +566,17 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <AttachTargetProvider value={attachTarget}>
-        <ConversationInner
-          id={id}
-          transport={transport}
-          isPersisted={persistedAtMount}
-          initialMessages={initialMessages}
-          composerTools={tools}
-          composerSlot={composerSlot}
-          getChosenSkills={getChosenSkills}
-          getCreation={getCreation}
-          {...rest}
-        />
-      </AttachTargetProvider>
+      <ConversationInner
+        id={id}
+        transport={transport}
+        isPersisted={persistedAtMount}
+        initialMessages={initialMessages}
+        composerTools={tools}
+        composerSlot={composerSlot}
+        getChosenSkills={getChosenSkills}
+        getCreation={getCreation}
+        {...rest}
+      />
     </ConversationScopeProvider>
   );
 });
@@ -636,26 +631,20 @@ function ConversationInner({
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
-  const { t, actingSpaceIds, useSpaceLabelOf } = useChatHost();
+  const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
   // File attachments: the composer stages picked files through the HOST uploader, into the
-  // space each was added in, as `upload://` file parts the server materializes into durable
-  // files. A file whose space the turn no longer reads fails instead (`turnSpacesOf`).
-  const attachTarget = useAttachTarget();
-  const forgetAttachPick = attachTarget.forget;
-  const getAttachSpaceId = useLatest(attachTarget.spaceId);
-  const getTurnSpaces = useLatest(turnSpacesOf(scope, actingSpaceIds));
-  const getSpaceLabelOf = useLatest(useSpaceLabelOf());
+  // caller's personal space, as `upload://` file parts the server materializes into durable
+  // files of the conversation.
+  const getAttachTarget = useLatest(attachTarget);
   const attachments = useMemo(
     () =>
       createChatAttachmentAdapter({
         upload: uploadFile,
         t,
-        spaceOf: getAttachSpaceId,
-        turnSpaces: getTurnSpaces,
-        spaceLabelOf: (spaceId) => getSpaceLabelOf()(spaceId),
+        attachTarget: getAttachTarget,
       }),
-    [uploadFile, t, getAttachSpaceId, getTurnSpaces, getSpaceLabelOf],
+    [uploadFile, t, getAttachTarget],
   );
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
@@ -695,8 +684,6 @@ function ConversationInner({
         headers: buildHeaders,
         // Read at request time, like the model above, for the same reason.
         body: ({ id: chatId, messages, body }) => {
-          // The turn is sent: a space picked for its files does not carry into the next one.
-          forgetAttachPick();
           return turnBody({
             body,
             id: chatId,
@@ -709,7 +696,7 @@ function ConversationInner({
           });
         },
       }),
-    [buildHeaders, getChosenSkills, getCreation, getTransport, forgetAttachPick],
+    [buildHeaders, getChosenSkills, getCreation, getTransport],
   );
 
   const chat = useChat({

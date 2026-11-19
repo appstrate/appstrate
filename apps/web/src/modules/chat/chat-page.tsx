@@ -18,6 +18,7 @@ import {
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
+  type AttachTarget,
   type OpenFile,
   type SpaceChoiceMenu,
 } from "@appstrate/module-chat/ui";
@@ -31,6 +32,7 @@ import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
+import { useViewAs } from "../../stores/view-as-store";
 import { useUploadInSpace } from "../../hooks/use-upload";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
@@ -41,7 +43,7 @@ import { ConversationContextToggle, ConversationSidebar } from "./conversation-s
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
-import { SpaceChoiceDropdown, SpaceChoiceSubmenu } from "../../components/space-choice-menu";
+import { SpaceChoiceSubmenu } from "../../components/space-choice-menu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -49,7 +51,7 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
+import { useOwnPersonalSpaceId, useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -109,6 +111,17 @@ export function ChatModulePage() {
   // A call's grant is judged in the space the call acted in.
   const canIn = useRowSpaceGrants();
   const actingSpaceIds = useChatActingSpaceIds();
+  // Every file attached from the computer goes to the caller's own personal space.
+  const { spaceId: personalSpaceId, failed: spacesFailed } = useOwnPersonalSpaceId();
+  // A role preview holds no personal space: attaching is unavailable for good, not loading.
+  const previewing = useViewAs() !== null;
+  const attachTarget = useMemo<AttachTarget>(
+    () =>
+      personalSpaceId
+        ? { spaceId: personalSpaceId }
+        : { unavailable: previewing ? "preview" : spacesFailed ? "error" : "loading" },
+    [personalSpaceId, previewing, spacesFailed],
+  );
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -203,6 +216,7 @@ export function ChatModulePage() {
               can={can}
               canIn={canIn}
               actingSpaceIds={actingSpaceIds}
+              attachTarget={attachTarget}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
@@ -225,22 +239,12 @@ export function ChatModulePage() {
   );
 }
 
-/** The chat's « in which space? » menu: the app's own, from a button or a menu entry. */
-const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({
-  variant,
-  label,
-  spaceIds,
-  onPick,
-  trigger,
-  testId,
-}) => {
+/** The chat's « in which space? » menu: the app's own, from a menu entry. */
+const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({ label, spaceIds, onPick, trigger, testId }) => {
   const spaces = useSpacesOf(spaceIds);
-  const choice = { label, spaces, onPick };
-  return variant === "dropdown" ? (
-    <SpaceChoiceDropdown choice={choice}>{trigger}</SpaceChoiceDropdown>
-  ) : (
+  return (
     <SpaceChoiceSubmenu
-      choice={choice}
+      choice={{ label, spaces, onPick }}
       trigger={trigger}
       marks={testId ? { "data-testid": testId } : undefined}
     />

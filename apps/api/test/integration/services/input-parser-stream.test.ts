@@ -14,10 +14,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { Context } from "hono";
 import { db } from "@appstrate/db/client";
-import { uploads, runs } from "@appstrate/db/schema";
+import { uploads, runs, spaceRoles } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, addOrgMember } from "../../helpers/auth.ts";
+import { seedSpace, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
 import { createFileFromUpload, createFileFromStream } from "../../../src/services/files.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -74,6 +75,8 @@ function fakeCtx(ctx: {
   user?: { id: string };
   /** The caller's resolved grants — `runs:read-all` is what widens a run container. */
   permissions?: ReadonlySet<string>;
+  /** The caller's org role: with one, the caller reaches its other spaces (`callerReachableSpaces`). */
+  orgRole?: string;
 }): Context {
   const user = ctx.endUser ? undefined : (ctx.user ?? { id: "usr_input_parser_test" });
   return {
@@ -82,18 +85,25 @@ function fakeCtx(ctx: {
         ? ctx.orgId
         : key === "spaceId"
           ? ctx.spaceId
-          : key === "endUser"
-            ? ctx.endUser
-            : key === "user"
-              ? user
-              : key === "permissions"
-                ? ctx.permissions
-                : undefined,
+          : key === "space"
+            ? { id: ctx.spaceId }
+            : key === "endUser"
+              ? ctx.endUser
+              : key === "user"
+                ? user
+                : key === "permissions"
+                  ? ctx.permissions
+                  : key === "orgRole"
+                    ? ctx.orgRole
+                    : undefined,
+    set: () => {},
   } as unknown as Context;
 }
 
 /** A caller that reads every run in the space (space `admin`/`builder`). */
-const READS_EVERY_RUN: ReadonlySet<string> = new Set(["runs:read-all"]);
+/** Run inputs read file content: `files:read` in the file's space. */
+const READS_FILES: ReadonlySet<string> = new Set(["files:read"]);
+const READS_EVERY_RUN: ReadonlySet<string> = new Set(["files:read", "runs:read-all"]);
 
 /**
  * Insert a minimal prior-run row the rerun_from path can resolve. `userId` is
@@ -281,7 +291,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
     const newRunId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
-        fakeCtx({ ...scope, user: { id: memberB.id } }),
+        fakeCtx({ ...scope, user: { id: memberB.id }, permissions: READS_FILES }),
         { input: { doc: `appfile://${docA.id}` } },
         newRunId,
         fileSchema,
@@ -304,7 +314,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id }, permissions: READS_FILES }),
       { input: { doc: `appfile://${docA.id}` } },
       newRunId,
       fileSchema,
@@ -405,7 +415,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // A new run references it by appfile:// — resolved into the new workspace.
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id }, permissions: READS_FILES }),
       { input: { doc: `appfile://${doc.id}` } },
       newRunId,
       fileSchema,
@@ -426,6 +436,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
           orgId: other.orgId,
           spaceId: other.defaultSpaceId,
           user: { id: other.user.id },
+          permissions: READS_FILES,
         }),
         { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
@@ -436,7 +447,12 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // Cross-space: same org, foreign space id → 404.
     await expect(
       parseRequestInput(
-        fakeCtx({ orgId: ctx.orgId, spaceId: "spc_not_this_one", user: { id: ctx.user.id } }),
+        fakeCtx({
+          orgId: ctx.orgId,
+          spaceId: "spc_not_this_one",
+          user: { id: ctx.user.id },
+          permissions: READS_FILES,
+        }),
         { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -625,6 +641,55 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     expect(result.input).toBeUndefined();
     expect(result.uploadedFiles).toBeUndefined();
   });
+
+  it("replays an appfile:// input of another space under the caller's grant there", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-rerun-cross" });
+    const member = await createTestUser({ email: "m@rerun-cross.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const spaceA = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const spaceB = { orgId: ctx.orgId, spaceId: (await seedSpace({ orgId: ctx.orgId })).id };
+    // The member's own output in A, given to a run in B that is then replayed.
+    const producer = `run_${crypto.randomUUID()}`;
+    await seedRun(spaceA, { id: producer, input: null, userId: member.id });
+    const { row } = await createFileFromStream(
+      spaceA,
+      producer,
+      { userId: member.id, endUserId: null },
+      null,
+      { name: "out.pdf", mime: "application/pdf", body: new Blob([PDF_BYTES]).stream() },
+    );
+    const priorRunId = `run_${crypto.randomUUID()}`;
+    await seedRun(spaceB, {
+      id: priorRunId,
+      input: { doc: `appfile://${row.id}` },
+      userId: member.id,
+    });
+    const rerun = () =>
+      parseRequestInput(
+        fakeCtx({ ...spaceB, user: { id: member.id }, orgRole: "member" }),
+        { rerun_from: priorRunId },
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      );
+
+    // In A the member reads runs, not files: the replay is refused like a missing file.
+    const role = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["runs:read"] });
+    await seedSpaceMember({
+      spaceId: ctx.defaultSpaceId,
+      userId: member.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    await expect(rerun()).rejects.toMatchObject({ status: 404 });
+
+    await db
+      .update(spaceRoles)
+      .set({ permissions: ["runs:read", "files:read"] })
+      .where(eq(spaceRoles.id, role.id));
+    const result = await rerun();
+    expect(result.uploadedFiles).toHaveLength(1);
+    expect(result.consumedFiles).toEqual([{ id: row.id, spaceId: row.spaceId }]);
+  });
 });
 
 describe("parseRequestInput — colliding file names (workspace-name hardening)", () => {
@@ -674,7 +739,7 @@ describe("parseRequestInput — colliding file names (workspace-name hardening)"
 
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ ...scope, user: { id: actor.id } }),
+      fakeCtx({ ...scope, user: { id: actor.id }, permissions: READS_FILES }),
       { input: { docs: [`upload://${uploadId}`, `appfile://${doc.id}`, inlineUri] } },
       runId,
       arrayFileSchema,

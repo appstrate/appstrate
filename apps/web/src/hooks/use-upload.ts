@@ -12,7 +12,7 @@ import type { UploadFn } from "@appstrate/ui/schema-form";
 import { uploadInSpace } from "../api/uploads";
 import { invalidateOrgDetail } from "../lib/query-keys";
 
-/** Into the space the caller names (the chat attaches where the conversation acts), else the current one. */
+/** Into the space the caller names (the chat stages in the caller's personal space), else the current one. */
 export function useUploadInSpace(): (
   file: File,
   spaceId: string | undefined,

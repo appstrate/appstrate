@@ -3,7 +3,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RunAndWaitArgumentCode } from "@appstrate/core/run-and-wait-client";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import { FILE_CONTENT_GRANT } from "../../services/files.ts";
 
 /**
  * A tool's JSON answer: `structuredContent` plus the same JSON as text (MCP 2025-06-18);
@@ -96,13 +95,4 @@ export class ToolRefusal extends Error {
     super(refusal.error);
     this.name = "ToolRefusal";
   }
-}
-
-/** The refusal of a file read by a caller without the file-content grant ({@link FILE_CONTENT_GRANT}). */
-export function fileContentNotGranted(): ToolRefusal {
-  return new ToolRefusal({
-    code: "not_granted",
-    error: `Reading an Appstrate file requires ${FILE_CONTENT_GRANT} in its space.`,
-    required_permissions: [FILE_CONTENT_GRANT],
-  });
 }

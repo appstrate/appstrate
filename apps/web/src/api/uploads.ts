@@ -31,7 +31,7 @@ const defaultDeps: UploadDeps = {
 
 /**
  * Stages `file` and returns its `upload://` URI. `spaceId` names the space the upload lands in
- * (the chat, which attaches in a space it chose); absent, the working space, as the client's
+ * (the chat, which stages in the caller's personal space); absent, the working space, as the client's
  * middleware fills it.
  */
 export async function uploadInSpace(

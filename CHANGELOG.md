@@ -177,6 +177,46 @@ Follow the [beta.68 to beta.69 maintenance procedure](docs/deployment/BETA_69.md
 
 ### Changed
 
+- **BREAKING: a file named by id is read in its own space, under `files:read` there** (#2287).
+  The space may differ from the request's; the credential decides which spaces it reaches (a
+  session every space where you hold a role, an API key or a token issued for one space that
+  space alone). A refusal is indistinguishable from a missing file (`404`).
+  - Run inputs (`input`, `context_files`, `rerun_from`): an `appfile://` needs `files:read` in
+    its space, the run's own included, so a custom role, API key or OAuth client holding
+    `agents:run` without `files:read` gets a `404` where it used to launch. A run may take a
+    file of another space it reaches, your personal space included. Each consumed file is
+    audited as `file.consumed`. Only a run of the file's own space keeps it from deletion; a
+    rerun of a run whose input was deleted answers `404`.
+  - MCP file tools (`read_file`, `resources/read`, `validate_package_file`,
+    `import_package_file`): a file you cannot read there answers `not_found`, no longer
+    `not_granted`. `invoke_operation` answers as the REST route does.
+  - REST by id and lists: `GET /api/files/{id}`, `/content`, `DELETE` and `POST …/keep` act on
+    the file in its own space, `files:delete` judged there, so the capabilities a read returns
+    are what delete and keep do, from any `X-Space-Id`. Reading by id needs `files:read` in
+    the file's space (a credential whose scopes omit it still gets `403` on `GET`); `DELETE`
+    and `keep` need what they always did, `files:delete` there or being the file's creator.
+    A run's file list (`GET /api/files?runId=`) follows the run-container rule of a read by
+    id (its launcher, or `runs:read-all`; `runs:read` is not asked): anyone else is listed
+    nothing of the run (inputs, launch uploads, outputs), and a reader its inputs each under
+    the same rule.
+  - The chat's MCP credential acts in one space per request for reads too: a file named by id
+    (`read_file`, `invoke_operation getFile`, a run input of `run_and_wait`, `GET /api/files/{id}`)
+    is read in the space the call names, never in another space the conversation acts in; its
+    own uploads are read from any of them. Sessions and MCP tokens keep reading a file in any
+    space where you hold a role. Its package tools (`import_package_file`,
+    `validate_package_file`) authorise and place packages in that one space too: a bundle
+    naming a package homed in another space of the conversation answers that package
+    `not found`, as a credential pinned to the entered space does.
+  - Space-pinned MCP endpoint (`/api/mcp/o/{org}/s/{space}`): every tool of the request, its
+    dispatched operations included, reaches that space only (file reads, package authorisation
+    and placement), so a package homed in another space is out of reach there.
+
+- **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
+  the chat goes to « Mon espace » from every screen, private to you, and adds no space to the
+  conversation: a conversation limited to one space stays limited and still reads its
+  attachments. They are deleted with the conversation, except one a run of the same space
+  consumed: that run keeps it, detached from the conversation.
+
 - **The chat no longer lists your connected integrations and runnable agents in
   its system prompt.** It used to read them from `GET /api/me/context` on every
   turn; the assistant now reads them with the MCP `get_me` tool, for the space

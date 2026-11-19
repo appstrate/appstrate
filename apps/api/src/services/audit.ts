@@ -48,27 +48,33 @@ type ContextAuditInput = Omit<
   "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
 >;
 
-export async function recordAudit(input: RecordAuditInput): Promise<void> {
+/** Record one event, or several in one insert. */
+export async function recordAudit(events: RecordAuditInput | RecordAuditInput[]): Promise<void> {
+  const inputs = Array.isArray(events) ? events : [events];
+  if (inputs.length === 0) return;
   try {
-    await db.insert(auditEvents).values({
-      orgId: input.orgId,
-      spaceId: input.spaceId ?? null,
-      actorType: input.actorType,
-      actorId: input.actorId ?? null,
-      action: input.action,
-      resourceType: input.resourceType,
-      resourceId: input.resourceId ?? null,
-      before: input.before ?? null,
-      after: input.after ?? null,
-      ip: input.ip ?? null,
-      userAgent: input.userAgent ?? null,
-      requestId: input.requestId ?? null,
-    });
+    await db.insert(auditEvents).values(
+      inputs.map((input) => ({
+        orgId: input.orgId,
+        spaceId: input.spaceId ?? null,
+        actorType: input.actorType,
+        actorId: input.actorId ?? null,
+        action: input.action,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId ?? null,
+        before: input.before ?? null,
+        after: input.after ?? null,
+        ip: input.ip ?? null,
+        userAgent: input.userAgent ?? null,
+        requestId: input.requestId ?? null,
+      })),
+    );
   } catch (err) {
     logger.error("recordAudit failed (state change is unaffected)", {
-      action: input.action,
-      resourceType: input.resourceType,
-      resourceId: input.resourceId,
+      action: inputs[0]!.action,
+      resourceType: inputs[0]!.resourceType,
+      resourceId: inputs[0]!.resourceId,
+      count: inputs.length,
       error: getErrorMessage(err),
     });
   }
@@ -148,8 +154,17 @@ export async function recordAuditFromContext(
   input: ContextAuditInput & { orgIdOverride?: string; spaceIdOverride?: string },
 ): Promise<void> {
   const { orgIdOverride, spaceIdOverride, ...auditInput } = input;
-  const orgId = orgIdOverride ?? c.get("orgId");
-  if (!orgId) return;
+  await recordAuditsFromContext(c, [auditInput], { orgIdOverride, spaceIdOverride });
+}
+
+/** {@link recordAuditFromContext} for several events of one request, in one insert. */
+export async function recordAuditsFromContext(
+  c: Context<AppEnv>,
+  inputs: ContextAuditInput[],
+  overrides: { orgIdOverride?: string; spaceIdOverride?: string } = {},
+): Promise<void> {
+  const orgId = overrides.orgIdOverride ?? c.get("orgId");
+  if (!orgId || inputs.length === 0) return;
 
   const user = c.get("user");
   const apiKeyId = c.get("apiKeyId");
@@ -169,15 +184,19 @@ export async function recordAuditFromContext(
   }
 
   const persona = c.get("viewAs");
-  await recordAudit({
-    ...auditInput,
-    ...(persona ? { after: { ...(auditInput.after ?? {}), viewAs: viewAsAudit(persona) } } : {}),
-    orgId,
-    spaceId: spaceIdOverride ?? c.get("space")?.id ?? c.get("spaceId") ?? null,
-    actorType,
-    actorId,
-    ...requestAuditMeta(c),
-  });
+  const spaceId = overrides.spaceIdOverride ?? c.get("space")?.id ?? c.get("spaceId") ?? null;
+  const meta = requestAuditMeta(c);
+  await recordAudit(
+    inputs.map((input) => ({
+      ...input,
+      ...(persona ? { after: { ...(input.after ?? {}), viewAs: viewAsAudit(persona) } } : {}),
+      orgId,
+      spaceId,
+      actorType,
+      actorId,
+      ...meta,
+    })),
+  );
 }
 
 /** For session-less doors (OAuth callback, hosted connect): the caller names the principal. */

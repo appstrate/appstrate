@@ -21,7 +21,7 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
@@ -155,12 +155,33 @@ export async function createSession(input: {
   return input.spaceId === null ? insert() : writingOriginSpace(insert);
 }
 
-/** The space a file belongs to, or undefined when `orgId` holds no such file. */
-export async function fileSpaceId(orgId: string, fileId: string): Promise<string | undefined> {
+/**
+ * The space of the file `fileId` names in `orgId`, undefined for a missing file and for one the
+ * conversation holds in the caller's personal space: that one is reached through its container,
+ * not a space. A file the conversation holds in any other space names that space.
+ */
+export async function fileSpaceId(
+  orgId: string,
+  fileId: string,
+  conversation: { chatSessionId: string | null; personalSpaceId: string | null },
+): Promise<string | undefined> {
+  const { chatSessionId, personalSpaceId } = conversation;
   const [row] = await db
     .select({ spaceId: files.spaceId })
     .from(files)
-    .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
+    .where(
+      and(
+        eq(files.id, fileId),
+        eq(files.orgId, orgId),
+        chatSessionId && personalSpaceId
+          ? or(
+              isNull(files.chatSessionId),
+              ne(files.chatSessionId, chatSessionId),
+              ne(files.spaceId, personalSpaceId),
+            )
+          : undefined,
+      ),
+    )
     .limit(1);
   return row?.spaceId;
 }

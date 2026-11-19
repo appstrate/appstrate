@@ -25,14 +25,13 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
-  useAttachTarget,
   useConversationScope,
   useSpaceName,
-  type AttachUnavailableReason,
   type LimitUnavailableReason,
 } from "./conversation-scope.ts";
 import {
@@ -40,7 +39,7 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
-import { useChatHost, useChatTransport, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
@@ -51,12 +50,6 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
   "no-acting-space": "composer.limit.noActingSpace",
   outside: "composer.limit.outside",
-};
-
-const ATTACH_REASON_KEY: Record<AttachUnavailableReason, string> = {
-  outside: "composer.attachUnavailable",
-  "origin-outside": "composer.limit.outside",
-  "no-acting-space": "composer.limit.noActingSpace",
 };
 
 export interface ComposerToolsProps {
@@ -243,7 +236,6 @@ export function LimitMenuEntry() {
   ) : limit.kind === "choose" ? (
     // No origin and several acting spaces: the space picked becomes the origin.
     <SpaceChoiceMenu
-      variant="submenu"
       label={t("composer.limit.choose")}
       spaceIds={limit.spaceIds}
       onPick={scope.limitTo}
@@ -278,52 +270,35 @@ function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
   );
 }
 
-/** The attach button opens the native picker directly, or after choosing its destination. */
+/** The attach button opens the native picker: files always go to the caller's personal space. */
 function AttachButton() {
-  const { t, SpaceChoiceMenu } = useChatHost();
-  const shownSpaceId = useChatTransport()?.spaceId ?? null;
-  const { availability, pick } = useAttachTarget();
-  const filePicker = useRef<HTMLButtonElement>(null);
-  const space = useSpaceName(availability.kind === "attach" ? availability.spaceId : null);
-  const label =
-    space && availability.kind === "attach" && availability.spaceId !== shownSpaceId
-      ? t("composer.attachIn", { name: space.label })
-      : t("composer.attach");
-  const unavailable = availability.kind === "unavailable";
+  const { t, attachTarget } = useChatHost();
+  const label = t("composer.attach");
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      disabled={unavailable}
+      disabled={"unavailable" in attachTarget}
       className={COMPOSER_TOOL_BUTTON_CLASS}
       aria-label={label}
     >
       <PaperclipIcon />
     </Button>
   );
-  if (availability.kind === "attach") {
-    return <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>;
-  }
-  if (availability.kind === "choose") {
+  if ("spaceId" in attachTarget) {
     return (
-      <>
-        <SpaceChoiceMenu
-          variant="dropdown"
-          label={t("composer.attach.choose")}
-          spaceIds={availability.spaceIds}
-          onPick={(spaceId) => {
-            pick(spaceId);
-            filePicker.current?.click();
-          }}
-          trigger={button}
-        />
-        <ComposerPrimitive.AddAttachment hidden ref={filePicker} />
-      </>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-64 text-xs">
+          {t("composer.attachHint")}
+        </TooltipContent>
+      </Tooltip>
     );
   }
-  if (!availability.reason) return button;
-  const reason = t(ATTACH_REASON_KEY[availability.reason]);
+  const reason = t(attachUnavailableKey(attachTarget.unavailable));
   return (
     <Tooltip>
       <TooltipTrigger asChild>
