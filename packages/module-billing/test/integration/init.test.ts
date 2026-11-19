@@ -63,9 +63,9 @@ describe("billing module exports", () => {
   describe("features", () => {
     it("declares `billing` and nothing else", () => {
       // `toEqual` on the WHOLE object, not a `billing` lookup: the point of the
-      // assertion is the absence. This module contributed `custom_roles` until
-      // custom space roles became OSS (RBAC spec §9), and a licence flag over
-      // platform-owned routes is what must not come back.
+      // assertion is the absence. Custom space roles are platform code behind
+      // no flag (RBAC spec §9): a licence flag over platform-owned routes is
+      // what this keeps out.
       expect(billingModule.features).toEqual({ billing: true });
     });
   });

@@ -101,9 +101,10 @@ tree, no `__drizzle_migrations_<id>` table.
    of its own (`packages/module-billing/drizzle`) and self-migrates its `ee_*`
    tables into the platform database at `init()`, under a migration journal of
    its own (`drizzle.ee_migrations`, never the platform's
-   `drizzle.__drizzle_migrations`). It dates from when the module was under a
-   separate licence the core schema could not carry; the tables and the journal
-   keep their names because deployed databases carry them. It still reads
+   `drizzle.__drizzle_migrations`). The reason is the core's
+   zero-billing-vocabulary invariant (`docs/architecture/RBAC_PERMISSIONS_SPEC.md`
+   §9): core declares no billing column, role, permission, route or env var, so
+   the billing tables cannot sit in the core schema. It reads
    platform data through `ctx.services` (e.g. `services.usage.list`), never a
    SQL join across the module boundary.
    `bun run verify:module-sql-boundary` (in `bun run check`) enforces that last

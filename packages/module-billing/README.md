@@ -17,12 +17,11 @@ managers. Apache-2.0, like the rest of the repository.
   Its variables are the four `STRIPE_*` and the four `BILLING_RECONCILIATION_*`,
   validated by this module's own Zod schema (`src/env.ts`) and documented in
   `docs/ENV.md`.
-- **`ee` in a stored name is historical.** The module was `@appstrate/module-ee`
-  until it moved to Apache-2.0. The names that live in a deployed database or
-  in Redis kept that prefix, because renaming them would be a data migration
-  for no change in behaviour: the `ee_*` tables, the `drizzle.ee_migrations`
-  journal, the `ee:` Redis key prefix and the `ee-stripe-subscription:` advisory
-  lock key. Nothing else in the module carries it; a new name never does.
+- **Stored names carry an `ee` prefix.** The `ee_*` tables, the
+  `drizzle.ee_migrations` journal, the `ee:` Redis key prefix and the
+  `ee-stripe-subscription:` advisory-lock key live in deployed databases and
+  Redis, so they keep their spelling. No other name in the module carries it,
+  and a new name never does.
 - **Tests** run under the repository's harness — see "Testing" at the bottom.
 - **No lockstep.** `@appstrate/core` is a `workspace:*` dependency, so there is
   no npm publish, no version gate and no peer range to keep in step.
