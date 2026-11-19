@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LibraryBig, Menu, PanelLeft, Settings, type LucideIcon } from "lucide-react";
+import { LibraryBig, Menu, PanelLeft, Settings, X, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavOrg } from "@/components/nav-org";
 import { NavUser } from "@/components/nav-user";
@@ -108,6 +108,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
   return (
     <Sidebar
+      mobileFullScreen={product === "chat"}
       className={product === "chat" ? `overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}` : undefined}
     >
       {/* The brand cell sits at the header's height so the two rules meet across the shell. The
@@ -124,6 +125,20 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
           <div className="shrink-0 md:hidden">
             <NotificationBell />
           </div>
+        )}
+        {/* The chat's drawer is the whole screen on a phone: it closes from its own corner. */}
+        {product === "chat" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-11 shrink-0 md:hidden"
+            aria-label={t("btn.close")}
+            data-testid="sidebar-close"
+            onClick={() => setOpenMobile(false)}
+          >
+            <X className="size-5" aria-hidden="true" />
+          </Button>
         )}
       </SidebarHeader>
       <ProductTabs />

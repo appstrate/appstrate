@@ -104,6 +104,16 @@ they start with `packages/` or `e2e/`.
   chat puts in the `phone` slot (`ShellHeaderPhone`): the conversation's name, truncated; the
   pencil that edits it; the context panel at the right end. Controls are 44 px. It has no
   notification bell: in the chat the bell is in the sidebar's header on a phone.
+- **The chat's sidebar is the whole screen on a phone** (`Sidebar mobileFullScreen`, the chat only):
+  the organization switcher, the notification bell and a close button on its first row, then the
+  Studio/Chat switch, the search, "Nouvelle conversation", the recent conversations, the catalogue and
+  settings, the account at the bottom.
+- **A phone's menus rise from the bottom** (`SheetMenu`, `packages/module-chat/src/ui/sheet-menu.tsx`,
+  the design system's bottom `Sheet`): rows 48 px tall, the destructive one in red and asking before
+  it acts. Below `md` the composer's "+", a conversation's "…" and the model picker are such panels; a
+  desktop keeps its popovers and dropdown menus. The chat composer is one line for good on a phone:
+  "+" (attach, skills, space limit, creation mode, the disclaimer), the field, the model picker, send;
+  a dot on the "+" says a setting is off its default, and no chip or tool button stays beside the field.
 - Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
   (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
   `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll

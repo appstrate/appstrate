@@ -102,4 +102,9 @@ describe("the notification bell on a phone", () => {
     // Studio's header keeps its own.
     expect(render("studio")).not.toContain('aria-label="Notifications"');
   });
+
+  it("goes with a close button, as the chat's drawer is the whole screen on a phone", () => {
+    expect(render("chat")).toContain('data-testid="sidebar-close"');
+    expect(render("studio")).not.toContain('data-testid="sidebar-close"');
+  });
 });
