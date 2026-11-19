@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   EllipsisIcon,
   MessagesSquareIcon,
+  PencilIcon,
   PlusIcon,
   SearchIcon,
   Settings2Icon,
@@ -35,13 +36,8 @@ import { cn } from "@appstrate/ui/cn";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
+import { SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
@@ -335,9 +331,10 @@ function ConversationRow({
   const queryClient = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
-  const menuAction = useRef<"settings" | "delete" | null>(null);
   const restoreDialogFocus = (event: Event) => {
     if (dialogTrigger.current?.isConnected) {
       event.preventDefault();
@@ -462,55 +459,49 @@ function ConversationRow({
         )}
       </div>
       {canWrite && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("threads.actions.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              ref={menuTrigger}
-              className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
-            >
-              <EllipsisIcon className="size-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-48"
-            onCloseAutoFocus={(event) => {
-              const action = menuAction.current;
-              if (!action) return;
-              event.preventDefault();
-              menuAction.current = null;
-              dialogTrigger.current = menuTrigger.current;
-              if (action === "settings") setSettingsOpen(true);
-              else {
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
-              }
-            }}
+        <>
+          <button
+            type="button"
+            aria-label={t("threads.actions.openFor", {
+              title: session.title ?? t("threads.new"),
+            })}
+            aria-haspopup="dialog"
+            ref={menuTrigger}
+            onClick={() => setMenuOpen(true)}
+            className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
           >
-            <DropdownMenuItem
-              className="min-h-11"
-              onSelect={() => {
-                menuAction.current = "settings";
+            <EllipsisIcon className="size-5" />
+          </button>
+          {/* A phone's menu is a panel from the bottom: rename, then delete in red (which asks). */}
+          <SheetMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            title={t("threads.actions.openFor", { title: session.title ?? t("threads.new") })}
+          >
+            <SheetMenuRow
+              onClick={() => {
+                dialogTrigger.current = menuTrigger.current;
+                setMenuOpen(false);
+                setSettingsOpen(true);
               }}
             >
-              <Settings2Icon />
-              {t("threads.settings.title")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive min-h-11"
-              onSelect={() => {
-                menuAction.current = "delete";
+              <PencilIcon />
+              {t("threads.rename")}
+            </SheetMenuRow>
+            <SheetMenuRow
+              destructive
+              onClick={() => {
+                dialogTrigger.current = menuTrigger.current;
+                setMenuOpen(false);
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
               }}
             >
               <Trash2Icon />
               {t("common:btn.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </SheetMenuRow>
+          </SheetMenu>
+        </>
       )}
       <AlertDialog
         open={confirmingDelete}

@@ -168,6 +168,7 @@
   "turn.error.needsReconnectionOwn": "The subscription serving the selected model expired or was revoked. If it is yours, reconnect it in your preferences, then try again; otherwise, ask an organization administrator to reconnect it.",
   "turn.error.needsReconnectionMember": "The subscription serving the selected model expired or was revoked. Ask an organization administrator to reconnect it.",
   "threads.error": "Conversations could not be loaded.",
+  "threads.rename": "Rename",
   "threads.settings.title": "Conversation settings",
   "threads.settings.description": "The name shows in the conversation list and at the top of the page.",
   "threads.settings.name": "Name",
