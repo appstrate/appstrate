@@ -397,4 +397,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, conventions, and
 
 ## License
 
-[Apache License 2.0](./LICENSE).
+[Apache License 2.0](./LICENSE). Everything in this repository is Apache-2.0. What a future enterprise edition may contain, and the commitments that hold either way: [Licensing](https://docs.appstrate.com/resources/licensing).
