@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { linkedSpacePath } from "../../lib/across-spaces";
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { ChatConversationList, ChatTransportProvider } from "@appstrate/module-chat/ui";
@@ -91,7 +92,7 @@ function hostWith(granted: string[]): ChatHost {
     formatBytes: String,
     onPackagesChanged: () => {},
     renderSpaces: () => null,
-    linkInSpace: (path) => path,
+    linkInSpace: (path, spaceId) => linkedSpacePath(path, spaceId, "spc_a"),
     useSpaceLabelOf: () => () => undefined,
     SpaceChoiceMenu: () => null,
   };
@@ -167,7 +168,8 @@ describe("chat surfaces held to the caller's grants", () => {
           <ChatRunProgressCard
             runId="run_1"
             initialStatus="running"
-            runHref="/agents/@acme/bot/runs/run_1"
+            initialPackageId="@acme/bot"
+            spaceId="spc_b"
             phase="success"
             modalTitle="run"
             details={null}
@@ -183,5 +185,6 @@ describe("chat surfaces held to the caller's grants", () => {
     const granted = card(["runs:read"]);
     expect(granted).toContain("run.starting");
     expect(granted).toContain('title="run.openPage"');
+    expect(granted).toContain("?enterSpace=spc_b");
   });
 });

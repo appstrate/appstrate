@@ -82,8 +82,10 @@ export function ComposerTools({
   // restore (Radix reads it as a focus-outside): open it once the menu is gone.
   const openSkillsAfterClose = useRef(false);
 
+  // A phone's resting composer is one line, attach and send around the field: every tool after the
+  // attach button shows once the composer is touched (`data-rest` is the composer's).
   const cluster = (
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-1.5 max-md:flex-wrap max-md:group-data-[rest]/composer:[&>:not(:first-child)]:hidden">
       <AttachButton />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

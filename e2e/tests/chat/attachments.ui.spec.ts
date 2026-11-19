@@ -37,6 +37,8 @@ test("sends image pixels to the configured provider and reloads the attached fil
     async (model) => {
       await page.goto("/chat");
       await pickModel(page, modelId);
+      const message = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
+      await expect(message).toHaveAttribute("placeholder", new RegExp(modelId));
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: /^Joindre des fichiers/ }).click();
       await (
@@ -51,7 +53,7 @@ test("sends image pixels to the configured provider and reloads the attached fil
       await expect(page.getByText("contract.pdf", { exact: true })).toBeVisible();
       // A Chat Completions model reads no PDF natively: the chip says so before anything is sent.
       await expect(page.getByText("Ce modèle ne lit pas les PDF.")).toBeVisible();
-      await page.getByPlaceholder("Message Appstrate…").fill("Peux-tu lire ces deux fichiers ?");
+      await message.fill("Peux-tu lire ces deux fichiers ?");
       await page.getByRole("button", { name: "Envoyer", exact: true }).click();
       await expect(page.getByText(answer, { exact: true })).toBeVisible();
       await expect(page).toHaveURL(/\/chat\/[^/]+$/);

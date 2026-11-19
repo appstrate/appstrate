@@ -211,7 +211,7 @@ export function MemoryPanel({
                 </span>
               )}
             </div>
-            <pre className="bg-muted/40 max-h-[60vh] overflow-auto rounded-md p-4 text-sm whitespace-pre-wrap">
+            <pre className="bg-muted/40 max-h-[60dvh] overflow-auto rounded-md p-4 text-sm whitespace-pre-wrap">
               {memoryText(selected.content)}
             </pre>
           </div>

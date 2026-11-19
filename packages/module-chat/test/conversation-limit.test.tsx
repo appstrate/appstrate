@@ -407,6 +407,22 @@ describe("the composer's limit chip", () => {
     );
   });
 
+  it("hides every tool after attach while a phone's composer rests", () => {
+    const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true }));
+    // The markup escapes the `&` and `>` of the arbitrary variant.
+    expect(out).toContain("max-md:group-data-[rest]/composer:[&amp;&gt;:not(:first-child)]:hidden");
+    // Chips wrap inside the cluster rather than squeezing each other.
+    expect(out).toContain("max-md:flex-wrap");
+    // Attach is the cluster's first child; settings and the chip come after it.
+    const cluster = out.slice(out.indexOf("max-md:group-data-[rest]/composer"));
+    expect(cluster.indexOf('aria-label="composer.attach"')).toBeLessThan(
+      cluster.indexOf('data-testid="composer-settings-trigger"'),
+    );
+    expect(cluster.indexOf('data-testid="composer-settings-trigger"')).toBeLessThan(
+      cluster.indexOf('data-testid="composer-limit-chip"'),
+    );
+  });
+
   it("cannot be lifted while a turn generates or a change is in flight", () => {
     for (const busy of [{ generating: true }, { pending: true }]) {
       const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true, ...busy }));

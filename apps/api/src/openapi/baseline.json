@@ -7491,7 +7491,7 @@
             }
           },
           "403": {
-            "description": "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
+            "description": "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). For a draft declaring no auths, `blocked_target` (`Proxy-Status` error `destination_ip_prohibited`) is the egress guard refusing its server URL or a redirect hop, `https` required for a host the operator has not allowlisted.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7551,7 +7551,7 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`; `error=http_protocol_error` with `received-status=<status>` on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` that received an answer (a credential asked of an integration declaring none included), `error=http_protocol_error` alone on any other `bad_gateway`; `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code.",
+            "description": "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB, or the credential proxy's `max_response_bytes` when lower; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`; `error=http_protocol_error` with `received-status=<status>` on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` that received an answer (a credential asked of an integration declaring none included), `error=http_protocol_error` alone on any other `bad_gateway`; `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7939,7 +7939,7 @@
                             "proxy_closed",
                             "not_required"
                           ],
-                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
+                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
                         },
                         "imposed": {
                           "type": "boolean",
@@ -10863,7 +10863,7 @@
                             "proxy_closed",
                             "not_required"
                           ],
-                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
+                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
                         },
                         "imposed": {
                           "type": "boolean",
@@ -22112,6 +22112,9 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           }
@@ -22165,6 +22168,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound",
             "description": "No skill the caller may read in this space is served at `uri`."
+          },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -28840,7 +28846,7 @@
         "operationId": "listIntegrationTools",
         "tags": ["Credential Proxy"],
         "summary": "List the tools the caller can call outside a run",
-        "description": "Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's OWN connections it accepts: a connection another member shared serves only when named or designated by an org default), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. Reaching a server sends the connection's credential: a 401 goes through the proxy's forced refresh, and a server refusing the credential can flag the connection `needs_reconnection`, as a call does. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all (5 s when it resolves a `name`), and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. `connections` lists the connections the tools reach, each once, as `GET /api/credential-proxy/connections` lists them; each tool names its own (`connection_ids`). `not_ready` lists the integrations active in the space the caller has no usable connection of and that offer a tool outside a run (an `api_call` tool, or a remote server's), with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`), each with that refusal; resolving a `name` only the unread catalog could map (under `allow_undeclared_tools`, neither a declared tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could not be read (`listing_failure`, when known: the proxy's problem code or `timeout`), nothing was sent, and a later listing may read it. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "description": "Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. An integration declaring no `auths` (AFPS §7.2) is listed with its typed tools and `connection_ids: []`, never in `not_ready`: its server is reached directly, nothing injected, its catalog cached per organization, integration version and server URL, and the listing journaled as one call with no connection. Every other server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's OWN connections it accepts: a connection another member shared serves only when named or designated by an org default), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. Reaching such a server sends the connection's credential: a 401 goes through the proxy's forced refresh, and a server refusing the credential can flag the connection `needs_reconnection`, as a call does. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all (5 s when it resolves a `name`), and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. `connections` lists the connections the tools reach, each once, as `GET /api/credential-proxy/connections` lists them; each tool names its own (`connection_ids`). `not_ready` lists the integrations active in the space the caller has no usable connection of and that offer a tool outside a run (an `api_call` tool, or a remote server's), with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`) or, declaring no auths, asked for one (`bad_gateway`), each with that refusal; resolving a `name` only the unread catalog could map (under `allow_undeclared_tools`, neither a declared tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could not be read (`listing_failure`, when known: the proxy's problem code or `timeout`), nothing was sent, and a later listing may read it. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, unauthenticated integrations included.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28968,7 +28974,7 @@
                               "type": "string",
                               "format": "uuid"
                             },
-                            "description": "The listing's `connections` the tool reaches, by `connection_id`."
+                            "description": "The listing's `connections` the tool reaches, by `connection_id`; empty for a tool of an integration that declares no `auths` (AFPS §7.2), which binds no connection."
                           },
                           "missing_scopes": {
                             "type": "object",
@@ -29082,7 +29088,7 @@
                                   "proxy_closed",
                                   "not_required"
                                 ],
-                                "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
+                                "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
                               },
                               "imposed": {
                                 "type": "boolean",
@@ -29237,7 +29243,7 @@
         "operationId": "callRemoteIntegrationTool",
         "tags": ["Credential Proxy"],
         "summary": "Call a typed tool of a remote MCP integration",
-        "description": "One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks, a transport fault, or an answer of the server the platform turns into a problem carries RFC 9209 `Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. The arguments go to the server as given: it validates them. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "description": "One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks, a transport fault, or an answer of the server the platform turns into a problem carries RFC 9209 `Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. The arguments go to the server as given: it validates them. An integration declaring no `auths` (AFPS §7.2) is called without any connection: its server is reached directly (egress-guarded on the URL and every redirect hop, https required for an untrusted host, a refusal answered as the proxy's `403 blocked_target` and a host that does not resolve `502 upstream_unresolvable`, as the proxy answers them; the same exchange bound; nothing injected; activation re-checked before each exchange), the call is journaled with no connection, a `connection_id` is refused (`credential_not_found`) before any exchange, and the server's 401 or 403 is a `502 bad_gateway` (it declares no authentication) that flags nothing. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, unauthenticated integrations included.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -29266,7 +29272,7 @@
                   "connection_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics)."
+                    "description": "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no `auths`: call it without `connection_id`."
                   },
                   "name": {
                     "type": "string",
@@ -29324,7 +29330,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`).",
+            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also answers the egress guard refusing a redirect hop, after the first hop was sent; for an integration declaring no auths, also plain `http` to a host the operator does not trust, on the server URL (nothing sent) or a hop.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -29343,7 +29349,7 @@
             }
           },
           "404": {
-            "description": "`not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all).",
+            "description": "`not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all), or `connection_id` is passed for an integration that declares no authentication (call it without `connection_id`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31414,7 +31420,7 @@
         "operationId": "listMyConnectionCalls",
         "tags": ["Profile"],
         "summary": "The credential proxy's calls made with one of the caller's connections",
-        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
+        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
         "parameters": [
           {
             "name": "connectionId",
@@ -31512,97 +31518,112 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "description": "One call the credential proxy made with a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
-                        "required": [
-                          "id",
-                          "createdAt",
-                          "spaceId",
-                          "connection_id",
-                          "integration_package_id",
-                          "owner_type",
-                          "owner_id",
-                          "actor_type",
-                          "actor_id",
-                          "apiKeyId",
-                          "auth_method",
-                          "runId",
-                          "method",
-                          "host",
-                          "outcome",
-                          "duration_ms",
-                          "request_id"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "integer",
-                            "description": "Monotonic row id; the pagination cursor."
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "description": "One call or MCP operation the credential proxy dispatched (so it may have reached its upstream) outside a run or for a remote run, with or without a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
+                            "required": [
+                              "id",
+                              "createdAt",
+                              "spaceId",
+                              "connection_id",
+                              "integration_package_id",
+                              "owner_type",
+                              "owner_id",
+                              "actor_type",
+                              "actor_id",
+                              "apiKeyId",
+                              "auth_method",
+                              "runId",
+                              "method",
+                              "host",
+                              "outcome",
+                              "duration_ms",
+                              "request_id"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "integer",
+                                "description": "Monotonic row id; the pagination cursor."
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space the call was made in."
+                              },
+                              "connection_id": {
+                                "type": ["string", "null"],
+                                "format": "uuid",
+                                "description": "The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too."
+                              },
+                              "integration_package_id": {
+                                "type": "string",
+                                "description": "The integration (`@scope/name`)."
+                              },
+                              "owner_type": {
+                                "type": ["string", "null"],
+                                "enum": ["user", "end_user", null],
+                                "description": "The connection's owner when the call was made; null when it was gone by then, or when the call used no connection."
+                              },
+                              "owner_id": {
+                                "type": ["string", "null"]
+                              },
+                              "actor_type": {
+                                "type": "string",
+                                "enum": ["user", "end_user"],
+                                "description": "Who acted. Under an API key, the principal acting through it."
+                              },
+                              "actor_id": {
+                                "type": "string"
+                              },
+                              "apiKeyId": {
+                                "type": ["string", "null"],
+                                "description": "The API key the actor acted through, if any."
+                              },
+                              "auth_method": {
+                                "type": "string",
+                                "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "The run the call declared (`X-Run-Id`), if any."
+                              },
+                              "method": {
+                                "type": "string",
+                                "description": "The call's HTTP method."
+                              },
+                              "host": {
+                                "type": "string",
+                                "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host."
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "description": "The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …)."
+                              },
+                              "duration_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "request_id": {
+                                "type": "string",
+                                "description": "The call's `Request-Id`."
+                              }
+                            }
                           },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "spaceId": {
-                            "type": "string",
-                            "description": "The space the call was made in."
-                          },
-                          "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "integration_package_id": {
-                            "type": "string",
-                            "description": "The integration (`@scope/name`)."
-                          },
-                          "owner_type": {
-                            "type": ["string", "null"],
-                            "enum": ["user", "end_user", null],
-                            "description": "The connection's owner when the call was made; null when it was gone by then."
-                          },
-                          "owner_id": {
-                            "type": ["string", "null"]
-                          },
-                          "actor_type": {
-                            "type": "string",
-                            "enum": ["user", "end_user"],
-                            "description": "Who acted. Under an API key, the principal acting through it."
-                          },
-                          "actor_id": {
-                            "type": "string"
-                          },
-                          "apiKeyId": {
-                            "type": ["string", "null"],
-                            "description": "The API key the actor acted through, if any."
-                          },
-                          "auth_method": {
-                            "type": "string",
-                            "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
-                          },
-                          "runId": {
-                            "type": ["string", "null"],
-                            "description": "The run the call declared (`X-Run-Id`), if any."
-                          },
-                          "method": {
-                            "type": "string",
-                            "description": "The call's HTTP method."
-                          },
-                          "host": {
-                            "type": "string",
-                            "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host."
-                          },
-                          "outcome": {
-                            "type": "string",
-                            "description": "The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …)."
-                          },
-                          "duration_ms": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "request_id": {
-                            "type": "string",
-                            "description": "The call's `Request-Id`."
+                          {
+                            "type": "object",
+                            "properties": {
+                              "connection_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "The connection the call used: never null here, the caller owns it."
+                              }
+                            }
                           }
-                        }
+                        ]
                       }
                     },
                     "hasMore": {
@@ -31638,7 +31659,7 @@
         "operationId": "listConnectionCalls",
         "tags": ["Integrations"],
         "summary": "The credential proxy's calls made in the current space",
-        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
+        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -31744,7 +31765,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One call the credential proxy made with a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
+                        "description": "One call or MCP operation the credential proxy dispatched (so it may have reached its upstream) outside a run or for a remote run, with or without a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
                         "required": [
                           "id",
                           "createdAt",
@@ -31778,8 +31799,9 @@
                             "description": "The space the call was made in."
                           },
                           "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
+                            "type": ["string", "null"],
+                            "format": "uuid",
+                            "description": "The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too."
                           },
                           "integration_package_id": {
                             "type": "string",
@@ -31788,7 +31810,7 @@
                           "owner_type": {
                             "type": ["string", "null"],
                             "enum": ["user", "end_user", null],
-                            "description": "The connection's owner when the call was made; null when it was gone by then."
+                            "description": "The connection's owner when the call was made; null when it was gone by then, or when the call used no connection."
                           },
                           "owner_id": {
                             "type": ["string", "null"]

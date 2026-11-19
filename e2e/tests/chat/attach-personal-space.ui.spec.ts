@@ -54,7 +54,7 @@ test("a drop in « Tous les espaces » stages the file in the personal space", a
         const page = await context.newPage();
         await page.goto("/chat");
         await pickModel(page, modelId);
-        const message = page.getByPlaceholder("Message Appstrate…");
+        const message = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
         await expect(message).toBeVisible();
         // The attach button is usable at once: no space to choose.
         await expect(
@@ -105,7 +105,9 @@ test("a drop under a role preview says why nothing is attached", async ({
   try {
     const page = await context.newPage();
     await page.goto("/chat");
-    await expect(page.getByPlaceholder("Message Appstrate…")).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Message Appstrate…", exact: true }),
+    ).toBeVisible();
     await dropFile(page, page.getByTestId("chat-dropzone"), "depose.txt");
     await expect(page.getByRole("alert").filter({ hasText: /Aperçu d’un rôle/ })).toBeVisible();
   } finally {

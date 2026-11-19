@@ -6,6 +6,7 @@
   "file.noAccessIn": "Your role does not give access to the files of {{name}}.",
   "composer.readOnly": "Your role lets you reread your conversations, not start new ones or reply.",
   "composer.placeholder": "Message Appstrate…",
+  "composer.placeholderModel": "Chat with {{model}}",
   "composer.attach": "Attach files",
   "composer.removeAttachment": "Remove attachment",
   "composer.imageNotSeen": "This model cannot view the image.",

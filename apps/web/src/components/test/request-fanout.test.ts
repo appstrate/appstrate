@@ -97,8 +97,9 @@ describe("dashboard reuses its own runs", () => {
     expect(DASHBOARD_CONTENT).toContain("runs.slice(0, limit)");
   });
 
-  it("keeps exactly one run query on the page", () => {
-    expect([...DASHBOARD.matchAll(/useFirstRunsPage\(/g)]).toHaveLength(1);
+  it("requests only the recent feed and the independent running count", () => {
+    // The rendered overview-mode test checks the scope, status and limit of both keys.
+    expect([...DASHBOARD.matchAll(/useFirstRunsPage\(/g)]).toHaveLength(2);
   });
 
   it("keeps the table free of queries, and the fetching list exported", () => {

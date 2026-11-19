@@ -89,7 +89,7 @@ export function MissingConnectionsModal({
       {/* Cap the list height so a long set of integrations scrolls inside the
           modal instead of overflowing past it (and pushing the footer out of
           view). `-mr-2 pr-2` insets the scrollbar without clipping row borders. */}
-      <div className="-mr-2 flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-2">
+      <div className="-mr-2 flex max-h-[55dvh] flex-col gap-2 overflow-y-auto pr-2">
         {errors.map((err, i) => (
           <MissingRow
             key={`${err.field}-${i}`}

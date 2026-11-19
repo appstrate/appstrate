@@ -14,6 +14,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-18
+
 ### Added
 
 - **`readDeclaredOutputSchema(manifest)`** (`output-schema`): a manifest's `output.schema`

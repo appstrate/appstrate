@@ -26,7 +26,7 @@ export interface ConnectionCallView {
   id: number;
   createdAt: string;
   spaceId: string;
-  connection_id: string;
+  connection_id: string | null;
   integration_package_id: string;
   owner_type: string | null;
   owner_id: string | null;

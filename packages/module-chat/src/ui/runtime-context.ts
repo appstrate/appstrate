@@ -222,6 +222,8 @@ export interface ChatHost {
    */
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
+  /** Display name from the current organization’s catalog. */
+  modelLabel?: string | null;
   firstName?: string | null;
   /** Names spaces. */
   renderSpaces: RenderSpaces;

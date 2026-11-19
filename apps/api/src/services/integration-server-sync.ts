@@ -2,11 +2,12 @@
 
 /**
  * What a remote MCP server says about its integration: its tools (`tools/list`), its `serverInfo`
- * and its `instructions`, as a manifest proposal the editor merges. The MCP exchange goes through
- * the credential proxy (`proxyCall`) once a connection exists, so connection selection,
- * `authorized_uris`, the egress guard and the 401 refresh are the proxy's; this module only speaks
- * MCP over it. An unauthenticated integration (AFPS §7.2) has nothing to inject: its server is
- * reached directly, egress-guarded on every hop. Persists nothing.
+ * and its `instructions`, as a manifest proposal the editor merges. The MCP exchange is one
+ * operation of `mcp-over-proxy.ts`: through the credential proxy (`proxyCall`) once a connection
+ * exists, so connection selection, `authorized_uris`, the egress guard and the 401 refresh are the
+ * proxy's; for an unauthenticated integration (AFPS §7.2), which has nothing to inject, directly,
+ * egress-guarded on every hop. Either is journaled like a call outside a run. Persists nothing
+ * else.
  */
 
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -16,18 +17,16 @@ import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import type { Actor } from "../lib/actor.ts";
-import { ApiError, badGateway } from "../lib/errors.ts";
-import { checkEgressUrl, egressFetchImpl, fetchWithin } from "../lib/egress-host-guard.ts";
-import { readBodyUnder } from "../lib/capped-body.ts";
+import { ApiError } from "../lib/errors.ts";
+import { fetchWithin } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
 import {
+  directMcpOperation,
   listToolPages,
-  MAX_EXCHANGE_BYTES,
   MAX_LISTED_PAGES,
   MAX_LISTED_TOOLS,
-  McpExchangeTooLargeError,
   mcpServerFailure,
   proxiedMcpOperation,
   untrustedFields,
@@ -123,72 +122,56 @@ export async function syncIntegrationFromServer(input: {
 
   const unauthenticated = isUnauthenticatedIntegration(loaded.manifest);
   const reach = unauthenticated ? null : input.proxyReach();
-  if (unauthenticated && !(await checkEgressUrl(url, { requireHttpsForUntrustedHost: true })).ok) {
-    throw badGateway(`The MCP server at ${URL.parse(url)?.origin} is refused by the egress guard.`);
-  }
 
   // One bound for the whole sync, the icon lookup included.
   const timeout = AbortSignal.timeout(SYNC_TIMEOUT_MS);
   const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
-  const egressFetch = fetchWithin(egressFetchImpl(), deadline);
-  let directStatus: number | undefined;
-  const direct = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (init?.method === "GET") return new Response(null, { status: 405 });
-    const res = await egressFetch(target, init);
-    directStatus = res.status;
-    const body = await readBodyUnder(res, MAX_EXCHANGE_BYTES);
-    if (body === null) throw new McpExchangeTooLargeError(MAX_EXCHANGE_BYTES);
-    return new Response(body, { status: res.status, headers: res.headers });
-  }) as typeof fetch;
 
   // Alongside the exchange; a storage fault surfaces as itself, not as an MCP failure.
   const hasDoc = draftHasIntegrationDoc(scope.orgId, packageId);
   hasDoc.catch(() => {});
 
-  const proxied =
+  const operationInput = {
+    scope,
+    actor: input.actor,
+    integrationId: packageId,
+    caller: input.caller,
+    deadline,
+  };
+  const operation =
     reach === null
-      ? null
+      ? directMcpOperation(operationInput)
       : proxiedMcpOperation({
-          scope,
-          actor: input.actor,
-          integrationId: packageId,
+          ...operationInput,
           ...(input.connectionId ? { connectionId: input.connectionId } : {}),
           reach,
           version: DRAFT,
-          caller: input.caller,
-          deadline,
         });
-  const signal = proxied?.signal ?? deadline;
   let client: AppstrateMcpClient | undefined;
-  const exchange = async () => {
-    client = await createMcpHttpClient(url, {
-      fetch: proxied?.fetch ?? direct,
-      signal,
-      onWarning: (message, data) =>
-        logger.warn(untrustedText(message), { packageId, ...untrustedFields(data) }),
-    });
-    const { tools, truncated } = await listToolPages(client, signal);
-    return {
-      tools,
-      truncated,
-      info: client.getServerVersion(),
-      instructions: client.getInstructions(),
-    };
-  };
   let exchanged;
   try {
-    exchanged = await (proxied ? proxied.guard(exchange()) : exchange());
-  } catch (err) {
-    throw syncFailure(
-      err,
-      packageId,
-      url,
-      unauthenticated,
-      proxied?.receivedStatus() ?? directStatus,
+    exchanged = await operation.guard(
+      (async () => {
+        client = await createMcpHttpClient(url, {
+          fetch: operation.fetch,
+          signal: operation.signal,
+          onWarning: (message, data) =>
+            logger.warn(untrustedText(message), { packageId, ...untrustedFields(data) }),
+        });
+        const { tools, truncated } = await listToolPages(client, operation.signal);
+        return {
+          tools,
+          truncated,
+          info: client.getServerVersion(),
+          instructions: client.getInstructions(),
+        };
+      })(),
     );
+  } catch (err) {
+    throw syncFailure(err, packageId, url, unauthenticated, operation.receivedStatus());
   } finally {
     // Before the session's close, which is no exchange of the listing.
-    proxied?.settle();
+    operation.settle();
     await client?.close().catch(() => {});
   }
   return proposalFromServer(

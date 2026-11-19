@@ -143,18 +143,23 @@ export function IntegrationOverview({
           icon={Plug}
           bodyClassName="p-0"
         >
-          <dl className="divide-y">
-            <OperationalStat
-              label={t("integration.summary.connections")}
-              value={figure(connectionCount)}
-              target={connectionCount ? { to: connectionsTo } : undefined}
-            />
-            <OperationalStat
-              label={t("integration.summary.reauthorize")}
-              value={figure(reconnect)}
-              target={reconnect ? { to: connectionsTo } : undefined}
-            />
-          </dl>
+          {/* An integration declaring no auths (AFPS §7.2) binds no connection: nothing to count. */}
+          {detail.auths.length === 0 ? (
+            <p className="text-muted-foreground px-4 py-4 text-sm">{t("integration.auth.none")}</p>
+          ) : (
+            <dl className="divide-y">
+              <OperationalStat
+                label={t("integration.summary.connections")}
+                value={figure(connectionCount)}
+                target={connectionCount ? { to: connectionsTo } : undefined}
+              />
+              <OperationalStat
+                label={t("integration.summary.reauthorize")}
+                value={figure(reconnect)}
+                target={reconnect ? { to: connectionsTo } : undefined}
+              />
+            </dl>
+          )}
         </DetailSectionCard>
         <DetailSectionCard
           title={t("integration.summary.agents")}

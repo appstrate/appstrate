@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MCP spoken over the credential proxy: each exchange of an MCP client is one `proxyCall`, so the
- * connection selection, `authorized_uris`, the egress guard and the 401 refresh are the proxy's.
- * Shared by the typed tools of a remote integration (`remote-tools.ts`) and the editor's server
- * sync (`integration-server-sync.ts`).
+ * One MCP operation of a remote integration's server: over the credential proxy, each exchange
+ * one `proxyCall`, so the connection selection, `authorized_uris`, the egress guard and the 401
+ * refresh are the proxy's; or, for an unauthenticated integration (AFPS §7.2), with nothing to
+ * inject, directly, egress-guarded on every hop. Shared by the typed tools of a remote integration
+ * (`remote-tools.ts`) and the editor's server sync (`integration-server-sync.ts`).
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -15,9 +16,11 @@ import {
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
 import { findCause } from "@appstrate/core/error-cause";
+import { egressFetchImpl, isCleartextToUntrustedHost } from "../../lib/egress-host-guard.ts";
 import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import {
@@ -31,31 +34,39 @@ import type { ProxyReach } from "../integration-connections.ts";
 import type { ResolvedIntegrationVersion } from "../integration-service.ts";
 import { getCredentialProxyLimits } from "../proxy-limits.ts";
 import { recordConnectionCall, type ConnectionCall } from "./call-journal.ts";
-import { proxyCall, ProxyCallError } from "./core.ts";
+import { bodyReadError, proxyCall, ProxyCallError } from "./core.ts";
 
 export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
 
-interface ProxiedMcpOperationInput {
+interface McpOperationInput {
   scope: SpaceScope;
   actor: Actor;
   integrationId: string;
+  caller: ProxyCaller;
+  deadline: AbortSignal;
+}
+
+interface ProxiedMcpOperationInput extends McpOperationInput {
   /** The connection, as a `connection_id` names it; the proxy selects one when omitted. */
   connectionId?: string;
   reach: ProxyReach;
   /** The version the exchange is authorized against; the latest published one when omitted. */
   version?: ResolvedIntegrationVersion;
-  caller: ProxyCaller;
-  deadline: AbortSignal;
 }
 
 /**
  * Per MCP exchange (a `tools/list` page or a tool result), bounded like an `api_call` body; the
- * proxy's `max_response_bytes` wins when lower.
+ * proxy's `max_response_bytes` wins when lower ({@link exchangeBound}).
  */
-export const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
+const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
+
+/** The bound an MCP answer is read under, on either path. */
+function exchangeBound(): number {
+  return Math.min(MAX_EXCHANGE_BYTES, getCredentialProxyLimits().max_response_bytes);
+}
 
 /** An MCP exchange whose answer exceeded the bound it is read under: the server did answer. */
-export class McpExchangeTooLargeError extends Error {
+class McpExchangeTooLargeError extends Error {
   constructor(readonly limit: number) {
     super(`an MCP answer exceeds ${limit} bytes`);
     this.name = "McpExchangeTooLargeError";
@@ -105,9 +116,12 @@ export async function listToolPages(
   };
 }
 
-/** An exchange that reached a connection: its credential may have been sent. */
+/**
+ * An exchange that reached the server, or may have: through a connection, its credential may
+ * have been sent; `null` on the direct path, which sends none.
+ */
 interface JournaledExchange {
-  connectionId: string;
+  connectionId: string | null;
   method: string;
   target: string;
   outcome: string;
@@ -115,7 +129,7 @@ interface JournaledExchange {
 }
 
 interface JournalEntry {
-  reached(connectionId: string, outcome: string): void;
+  reached(connectionId: string | null, outcome: string): void;
   ended(): void;
 }
 
@@ -139,12 +153,12 @@ function isOperationExchange(body: RequestInit["body"]): boolean {
 
 /**
  * The journal row of one operation: the last exchange of the operation itself (the `tools/call`,
- * a `tools/list` page) that reached a connection, else the last exchange that did, whatever its
- * outcome (a timeout included); none when nothing reached one (a catalog served from cache, a
+ * a `tools/list` page) that reached the server, else the last exchange that did, whatever its
+ * outcome (a timeout included); none when nothing reached it (a catalog served from cache, a
  * refusal before dispatch). Registered with the audit drain at its first exchange, so a shutdown
  * waits for an operation outliving its request; written once every exchange has ended.
  */
-function operationJournal(input: ProxiedMcpOperationInput) {
+function operationJournal(input: McpOperationInput) {
   const entries: { reached?: JournaledExchange; operation: boolean; done: Promise<void> }[] = [];
   let release: (() => void) | undefined;
   let settled = false;
@@ -200,14 +214,14 @@ function operationJournal(input: ProxiedMcpOperationInput) {
   };
 }
 
-export interface ProxiedMcpOperation {
+export interface McpOperation {
   fetch: typeof fetch;
   /** The deadline, or the operation failing: what every request of the client is bound by. */
   signal: AbortSignal;
   /**
    * `work`, unless an exchange fails the operation first: an answer over the exchange bound, or
-   * the server refusing the connection's credential. The SDK may swallow either (an SSE stream
-   * erroring) and wait for its timeout; the operation answers at once.
+   * the server refusing the connection's credential (proxied path). The SDK may swallow either
+   * (an SSE stream erroring) and wait for its timeout; the operation answers at once.
    */
   guard<T>(work: Promise<T>): Promise<T>;
   settle(): void;
@@ -215,13 +229,29 @@ export interface ProxiedMcpOperation {
   receivedStatus(): number | undefined;
 }
 
+/** One exchange's request, and the operation's hooks into it. */
+interface Exchange {
+  method: string;
+  href: string;
+  init: RequestInit | undefined;
+  /** The request's own signal joined to the operation's. */
+  signal: AbortSignal;
+  /** Journals the exchange as having reached the server. */
+  reached(connectionId: string | null, outcome: string): void;
+  /** Fails the whole operation (see {@link McpOperation.guard}). */
+  fail(err: Error): void;
+}
+
 /**
- * One MCP operation spoken over the credential proxy: a `tools/list` listing or one `tools/call`,
- * journaled as one row ({@link operationJournal}). The SDK echoes the server's own values
- * (`Mcp-Session-Id`, `nextCursor`), so headers go literally: no placeholder they carry reaches a
- * credential.
+ * The operation around a transport: the standalone GET stream refused (it carries
+ * server-initiated messages, which a bounded exchange never reads), every exchange journaled
+ * ({@link operationJournal}). The SDK echoes the server's own values (`Mcp-Session-Id`,
+ * `nextCursor`), so headers go literally.
  */
-export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcpOperation {
+function mcpOperation(
+  input: McpOperationInput,
+  transport: (exchange: Exchange) => Promise<Response>,
+): McpOperation {
   const failed = new AbortController();
   const signal = AbortSignal.any([input.deadline, failed.signal]);
   const fail = (err: Error) => failed.abort(err);
@@ -229,17 +259,50 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
   let receivedStatus: number | undefined;
 
   const fetchImpl = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    // The standalone GET stream carries server-initiated messages, which a bounded exchange never reads.
     if (init?.method === "GET") return new Response(null, { status: 405 });
     signal.throwIfAborted();
     const method = init?.method ?? "POST";
     const href = target instanceof Request ? target.url : String(target);
-    const maxResponseBytes = Math.min(
-      MAX_EXCHANGE_BYTES,
-      getCredentialProxyLimits().max_response_bytes,
-    );
     // Nothing between the entry's registration and the `finally` that ends it can throw.
     const entry = journal.dispatch(method, href, isOperationExchange(init?.body));
+    try {
+      const res = await transport({
+        method,
+        href,
+        init,
+        signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+        reached: (connectionId, outcome) => entry?.reached(connectionId, outcome),
+        fail,
+      });
+      receivedStatus = res.status;
+      return res;
+    } finally {
+      entry?.ended();
+    }
+  }) as typeof fetch;
+
+  return {
+    fetch: fetchImpl,
+    signal,
+    guard: async (work) => {
+      try {
+        return await untilAborted(work, failed.signal);
+      } catch (err) {
+        throw failed.signal.aborted ? failed.signal.reason : err;
+      }
+    },
+    settle: journal.settle,
+    receivedStatus: () => receivedStatus,
+  };
+}
+
+/**
+ * One MCP operation spoken over the credential proxy: a `tools/list` listing or one `tools/call`,
+ * journaled as one row. No placeholder the literal headers carry reaches a credential.
+ */
+export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperation {
+  return mcpOperation(input, async ({ method, href, init, signal, reached, fail }) => {
+    const maxResponseBytes = exchangeBound();
     let result;
     try {
       result = await proxyCall({
@@ -257,50 +320,211 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
         body: typeof init?.body === "string" ? init.body : null,
         literalHeaders: true,
         maxResponseBytes,
-        signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+        signal,
       });
     } catch (err) {
-      if (err instanceof ProxyCallError && err.connectionId) {
-        entry?.reached(err.connectionId, err.code);
-      }
+      if (err instanceof ProxyCallError && err.connectionId) reached(err.connectionId, err.code);
       throw err;
-    } finally {
-      entry?.ended();
     }
-    entry?.reached(result.connectionId, String(result.status));
-    receivedStatus = result.status;
+    reached(result.connectionId, String(result.status));
     if (result.status === 401 || result.status === 403) {
       fail(new McpCredentialRejectedError(result.status, result.credential));
     }
-    // A body cut at the bound fails the operation, rather than handing the client half a message.
     const answered = result;
-    const relayed =
-      result.body?.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          flush() {
-            if (!answered.truncated) return;
-            const err = new McpExchangeTooLargeError(maxResponseBytes);
-            fail(err);
-            throw err;
-          },
-        }),
-      ) ?? null;
+    const relayed = relayAnswer(result.body, {
+      request: init?.body,
+      headers: result.headers,
+      bound: maxResponseBytes,
+      truncated: () => answered.truncated === true,
+      readFailure: (err) => bodyReadError(err, answered.redactedHost, answered.connectionId),
+      fail,
+    });
     return new Response(relayed, { status: result.status, headers: result.headers });
-  }) as typeof fetch;
+  });
+}
 
-  return {
-    fetch: fetchImpl,
-    signal,
-    guard: async (work) => {
-      try {
-        return await untilAborted(work, failed.signal);
-      } catch (err) {
-        throw failed.signal.aborted ? failed.signal.reason : err;
-      }
-    },
-    settle: journal.settle,
-    receivedStatus: () => receivedStatus,
+/** The id of the JSON-RPC request `body` carries, if it is one: a notification awaits none. */
+function awaitedResponseId(body: RequestInit["body"]): string | number | undefined {
+  if (typeof body !== "string") return undefined;
+  try {
+    const message: unknown = JSON.parse(body);
+    if (typeof message !== "object" || message === null || !("method" in message)) return undefined;
+    const id = (message as { id?: unknown }).id;
+    return typeof id === "string" || typeof id === "number" ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether an event stream's `data` carries the JSON-RPC response to request `id`. */
+function answersRequest(data: string, id: string | number): boolean {
+  try {
+    const message: unknown = JSON.parse(data);
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      ("result" in message || "error" in message) &&
+      (message as { id?: unknown }).id === id
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An answer's body, relayed to the MCP client. Past `bound` (or cut there, `truncated`) it fails
+ * the operation; failing mid-read, it fails it too while the response the request awaits has not
+ * arrived (a JSON body not ended, an event stream before the event answering its id), since the
+ * SDK swallows an event stream's error and would wait for its timeout. Once answered, or for a
+ * notification, a broken stream only errors itself: what it answered stands.
+ */
+function relayAnswer(
+  body: ReadableStream<Uint8Array> | null,
+  opts: {
+    request: RequestInit["body"];
+    headers: Headers;
+    bound: number;
+    truncated?: () => boolean;
+    readFailure: (err: unknown) => Error;
+    fail: (err: Error) => void;
+  },
+): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  const awaited = awaitedResponseId(opts.request);
+  const eventStream = opts.headers.get("content-type")?.includes("text/event-stream") === true;
+  const decoder = new TextDecoder();
+  let answered = awaited === undefined;
+  let pending = "";
+  let read = 0;
+  /** Scans the complete events of `chunk` for the response to the awaited id. */
+  const scan = (chunk: Uint8Array) => {
+    if (answered || !eventStream) return;
+    pending += decoder.decode(chunk, { stream: true });
+    const events = pending.split(/\r?\n\r?\n/);
+    pending = events.pop() ?? "";
+    for (const event of events) {
+      const data = event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).replace(/^ /, ""))
+        .join("\n");
+      if (data && answersRequest(data, awaited!)) answered = true;
+    }
   };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const failWith = (err: Error) => {
+        opts.fail(err);
+        controller.error(err);
+        void reader.cancel(err).catch(() => {});
+      };
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        if (answered) return controller.error(err);
+        return failWith(opts.readFailure(err));
+      }
+      if (chunk.done) {
+        if (opts.truncated?.()) return failWith(new McpExchangeTooLargeError(opts.bound));
+        return controller.close();
+      }
+      read += chunk.value.byteLength;
+      if (read > opts.bound) return failWith(new McpExchangeTooLargeError(opts.bound));
+      scan(chunk.value);
+      controller.enqueue(chunk.value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+}
+
+/** The direct path's egress options, beside the guard's own per-hop host check. */
+const DIRECT_EGRESS = {
+  // Not `validateHop`: declaring one makes the guard drop the body on a same-host redirect.
+  returnRedirect: (url: URL, hop: number) => {
+    if (isCleartextToUntrustedHost(url)) {
+      throw new SsrfBlockedError(url.hostname, "blocked-scheme", hop);
+    }
+    return false;
+  },
+  sensitiveHeaders: ["mcp-session-id"],
+} as const satisfies Parameters<typeof egressFetchImpl>[0];
+
+/** @internal Test-only: the redirect rules, for a guard driven with injected DNS and transport. */
+export const _directEgressOptionsForTesting = DIRECT_EGRESS;
+
+/**
+ * An unauthenticated integration's operation (AFPS §7.2): nothing injected, the egress guard and
+ * its https floor on every hop; a 307/308 keeps the body on the same host only (JSON-RPC
+ * arguments may be user data), `Mcp-Session-Id` stays with its origin; `beforeExchange` mirrors
+ * the proxy's per-exchange activation check; a challenge flags nothing, there is no connection.
+ */
+export function directMcpOperation(
+  input: McpOperationInput & { beforeExchange?: () => Promise<void> },
+): McpOperation {
+  const egressFetch = egressFetchImpl(DIRECT_EGRESS);
+  return mcpOperation(input, async ({ href, init, signal, reached, fail }) => {
+    const target = new URL(href);
+    /** The typed failure to throw, journaled when a request may have been sent. */
+    const failed = (err: unknown): ProxyCallError => {
+      const failure = directFailure(err, target.origin);
+      if (failure.sent) reached(null, failure.code);
+      return failure;
+    };
+    await input.beforeExchange?.();
+    if (isCleartextToUntrustedHost(target)) {
+      throw failed(new SsrfBlockedError(target.hostname, "blocked-scheme", 0));
+    }
+    const bound = exchangeBound();
+    let res;
+    try {
+      res = await egressFetch(href, { ...init, signal });
+    } catch (err) {
+      throw failed(err);
+    }
+    reached(null, String(res.status));
+    // The journal keeps the status received: a body failing later is not journaled again.
+    const relayed = relayAnswer(res.body, {
+      request: init?.body,
+      headers: res.headers,
+      bound,
+      readFailure: (err) => directFailure(err, target.origin),
+      fail,
+    });
+    return new Response(relayed, { status: res.status, headers: res.headers });
+  });
+}
+
+/**
+ * A failed direct exchange as the proxy's typed error, as `toProxyCallError` (`core.ts`) types
+ * the proxied path's: `sent` unless the first hop was refused or could not be resolved.
+ */
+function directFailure(err: unknown, origin: string): ProxyCallError {
+  const server = `The MCP server at ${origin}`;
+  if (err instanceof SsrfBlockedError && err.reason !== "too-many-redirects") {
+    const unresolvable = err.reason === "resolution-failed";
+    const refused = unresolvable ? "could not be resolved" : "the egress guard refuses";
+    const detail =
+      err.hop > 0
+        ? `${server} redirected to ${err.host}, which ${refused}.`
+        : unresolvable
+          ? upstreamFailureDetail(server, "upstream_unresolvable")
+          : `${server} is refused by the egress guard.`;
+    return new ProxyCallError(
+      unresolvable ? "upstream_unresolvable" : "blocked_target",
+      detail,
+      undefined,
+      err.hop > 0,
+    );
+  }
+  const code = isTimeout(err) ? "upstream_timeout" : "upstream_unreachable";
+  return new ProxyCallError(code, upstreamFailureDetail(server, code), undefined, true);
+}
+
+/** A deadline reached, at any depth of the error's causes. */
+function isTimeout(err: unknown): boolean {
+  return findCause(err, (e) => e.name === "TimeoutError") !== undefined;
 }
 
 /** `work`'s outcome, or `signal`'s reason once it aborts first; `work` then settles unobserved. */
@@ -422,7 +646,7 @@ export function mcpServerFailure(
       headers: upstreamProxyStatus({ receivedStatus: status }),
     });
   }
-  if (isRequestTimeout(err) || findCause(err, (e) => e.name === "TimeoutError")) {
+  if (isRequestTimeout(err) || isTimeout(err)) {
     return proxyProblem("upstream_timeout", upstreamFailureDetail(server, "upstream_timeout"));
   }
   const rpc = jsonRpcErrorOf(err);

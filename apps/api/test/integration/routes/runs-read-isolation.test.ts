@@ -232,6 +232,41 @@ describe("run read isolation between members", () => {
     expect(((await asOwner.json()) as RunList).data.map((r) => r.id)).toEqual([runAScheduled]);
   });
 
+  it("restarts agent and schedule histories at the newest visible run when the cursor is unreadable", async () => {
+    for (const path of [`/api/agents/${AGENT_PATH}/runs`, `/api/schedules/${scheduleId}/runs`]) {
+      const response = await app.request(`${path}?limit=1&startingAfter=${runB}`, {
+        headers: authHeaders(operatorA),
+      });
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as RunList).data.map((run) => run.id)).toEqual([
+        runAScheduled,
+      ]);
+    }
+  });
+
+  it("keeps tied runs in id order across pages of an agent or schedule", async () => {
+    const tied = await seedRun({
+      packageId: AGENT_ID,
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      userId: operatorA.user.id,
+      scheduleId,
+      startedAt: T2,
+    });
+    for (const path of [`/api/agents/${AGENT_PATH}/runs`, `/api/schedules/${scheduleId}/runs`]) {
+      const ids: string[] = [];
+      for (let page = 0; page < 2; page++) {
+        const cursor = page ? `&startingAfter=${ids[0]}` : "";
+        const response = await app.request(`${path}?limit=1${cursor}`, {
+          headers: authHeaders(operatorA),
+        });
+        expect(response.status).toBe(200);
+        ids.push(...((await response.json()) as RunList).data.map((run) => run.id));
+      }
+      expect(ids).toEqual([runAScheduled, tied.id].sort().reverse());
+    }
+  });
+
   it("scopes a schedule's run counters to the runs the caller may read", async () => {
     // The counters ride on the schedule DTO, which `schedules:read` hands to
     // the whole space — so a colleague reads A's schedule row and must still

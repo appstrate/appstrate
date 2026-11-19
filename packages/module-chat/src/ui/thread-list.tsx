@@ -78,6 +78,7 @@ import {
 } from "./sessions.ts";
 import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
+import { NOTE_TEXT_CLASS, READING_TEXT_DENSE_CLASS, SEARCH_INPUT_CLASS } from "./phone-text.ts";
 import { useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -234,7 +235,7 @@ export function ChatConversationList({
                   setInput("");
                 }
               }}
-              className="h-7 pr-7 pl-7 text-xs [&::-webkit-search-cancel-button]:hidden"
+              className={SEARCH_INPUT_CLASS}
             />
             {input !== "" && (
               <button
@@ -250,7 +251,7 @@ export function ChatConversationList({
           </div>
         )}
         {(searching || groups.length === 0) && (
-          <SidebarGroupLabel>
+          <SidebarGroupLabel className={NOTE_TEXT_CLASS}>
             {t(searching ? "threads.results" : "threads.title")}
           </SidebarGroupLabel>
         )}
@@ -275,7 +276,7 @@ export function ChatConversationList({
             ? list.map(row)
             : groups.map((group) => (
                 <li key={group.key} className="flex flex-col gap-1">
-                  <SidebarGroupLabel className="mt-1 h-6 px-2 text-[11px]">
+                  <SidebarGroupLabel className="mt-1 h-6 px-2 text-sm md:text-[11px]">
                     {t(GROUP_LABEL_KEY[group.key])}
                   </SidebarGroupLabel>
                   <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
@@ -289,7 +290,7 @@ export function ChatConversationList({
                 type="button"
                 disabled={isFetchingNextPage}
                 onClick={() => void fetchNextPage()}
-                className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-xs outline-none focus-visible:ring-2 disabled:opacity-50"
+                className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-base outline-none focus-visible:ring-2 disabled:opacity-50 md:text-xs"
               >
                 {isFetchingNextPage && <Spinner className="mr-1.5 size-3" />}
                 {t("threads.showMore")}
@@ -299,21 +300,25 @@ export function ChatConversationList({
         </SidebarMenu>
         {isError && list.length === 0 && (
           <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
-            <p className="text-sidebar-foreground/70 text-xs">{t("threads.error")}</p>
+            <p className={`text-sidebar-foreground/70 ${READING_TEXT_DENSE_CLASS}`}>
+              {t("threads.error")}
+            </p>
             <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
               {t("common:btn.retry")}
             </Button>
           </div>
         )}
         {!isLoading && !isError && list.length === 0 && searching && (
-          <p className="text-sidebar-foreground/70 px-2 py-6 text-center text-xs">
+          <p
+            className={`text-sidebar-foreground/70 px-2 py-6 text-center ${READING_TEXT_DENSE_CLASS}`}
+          >
             {t("threads.noResults")}
           </p>
         )}
         {!isLoading && !isError && list.length === 0 && !searching && (
           <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
             <MessagesSquareIcon className="text-sidebar-foreground/50 size-6" />
-            <p className="text-sidebar-foreground/70 text-xs">
+            <p className={`text-sidebar-foreground/70 ${READING_TEXT_DENSE_CLASS}`}>
               {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
             </p>
           </div>
@@ -387,12 +392,17 @@ function ConversationRow({
         className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]"
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={cn("block truncate text-left leading-4", unread && "font-semibold")}>
+          <span
+            className={cn(
+              "block truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              unread && "font-semibold",
+            )}
+          >
             {session.title ?? t("threads.new")}
           </span>
           <span
             data-testid="chat-session-spaces"
-            className="text-sidebar-foreground/70 flex h-4 min-w-0 items-center text-xs"
+            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:h-5 ${NOTE_TEXT_CLASS}`}
           >
             {sessionSpaces(session, renderSpaces, t)}
           </span>
