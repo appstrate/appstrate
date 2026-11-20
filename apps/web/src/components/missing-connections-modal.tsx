@@ -2,6 +2,7 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { PendingButton } from "@/components/app-ui/pending-button";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
@@ -16,9 +17,11 @@ import {
 } from "../hooks/use-integrations";
 import { useIntegrationName } from "../hooks/use-integration-name";
 import { usePermissions } from "../hooks/use-permissions";
+import { usePackageActivation } from "../hooks/use-library";
 import {
   integrationIdOfField,
   isStructuralCode,
+  onlyAwaitingActivation,
   retryDecision,
   type MissingIntegrationFieldError,
 } from "../lib/connection-choice";
@@ -63,7 +66,13 @@ export function MissingConnectionsModal({
   const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
   const stillBlocking = readiness && blockingIntegrationIds(readiness);
 
-  const { showRetry, canRetry } = retryDecision(errors, retrying, stillBlocking);
+  // Integrations activated from this modal: their row is resolved, so a re-run is worth offering
+  // even when every refusal was the structural `integration_not_active`.
+  const [activated, setActivated] = useState<ReadonlySet<string>>(new Set());
+  const decision = retryDecision(errors, retrying, stillBlocking);
+  const showRetry = decision.showRetry || activated.size > 0;
+  const { canRetry } = decision;
+  const allInactive = onlyAwaitingActivation(errors, activated);
 
   return (
     <Modal
@@ -85,7 +94,9 @@ export function MissingConnectionsModal({
         </div>
       }
     >
-      <p className="text-muted-foreground mb-3 text-sm">{t("missingConnections.intro")}</p>
+      <p className="text-muted-foreground mb-3 text-sm">
+        {t(allInactive ? "missingConnections.introInactive" : "missingConnections.intro")}
+      </p>
       {/* Cap the list height so a long set of integrations scrolls inside the
           modal instead of overflowing past it (and pushing the footer out of
           view). `-mr-2 pr-2` insets the scrollbar without clipping row borders. */}
@@ -97,6 +108,8 @@ export function MissingConnectionsModal({
             agentPackageId={agentPackageId}
             version={version}
             integrationEntries={integrationEntries}
+            activated={activated.has(integrationIdOfField(err.field))}
+            onActivated={(id) => setActivated((prev) => new Set(prev).add(id))}
           />
         ))}
       </div>
@@ -110,18 +123,29 @@ export function MissingRow({
   agentPackageId,
   version,
   integrationEntries,
+  activated = false,
+  onActivated,
 }: {
   err: MissingIntegrationFieldError;
   agentPackageId: string;
   version: string | undefined;
   integrationEntries: AgentIntegrationEntry[] | undefined;
+  /** An `integration_not_active` row the user switched on from this modal. */
+  activated?: boolean;
+  onActivated?: (packageId: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
   // the integration, or the agent's dependency or configuration must change. No picker.
-  const isStructural = isStructuralCode(err.code);
+  // Inactive in this space: the integration is unreadable here (its detail 404s), so the row
+  // offers the activation instead of a picker and fetches nothing about it. Once activated it
+  // is an ordinary row: the live verdict says what is left (connect, choose, ...).
+  const isInactive = err.code === "integration_not_active";
+  const awaitingActivation = isInactive && !activated;
+  const isStructural = awaitingActivation || (!isInactive && isStructuralCode(err.code));
+  const { mayActivate, activate, pending: activating } = usePackageActivation(packageId);
 
   // The server's verdict for the launched version, under the key the picker below reads it
   // from. The header follows it live: a connect, a renew or a `connection_update` event
@@ -146,7 +170,9 @@ export function MissingRow({
   const canRenderPicker = pickable && !!verdict;
   const loadingVerdict = pickable && !canRenderPicker;
 
-  const displayName = useIntegrationName(packageId);
+  // An empty id keeps the detail query disabled: the row then names the package id.
+  const detailName = useIntegrationName(awaitingActivation ? "" : packageId);
+  const displayName = awaitingActivation ? packageId : detailName;
   // An item code this build has no sentence for keeps the resolver's own message.
   const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
@@ -169,13 +195,37 @@ export function MissingRow({
               <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
                 <Icon className="mt-0.5 size-3 shrink-0" />
                 <span className="min-w-0 break-words">
-                  {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
+                  {unbound ??
+                    (resolved
+                      ? t("missingConnections.resolved")
+                      : activated
+                        ? t("missingConnections.activated")
+                        : message)}
                 </span>
               </div>
             )}
           </div>
         </div>
       </div>
+      {awaitingActivation && (
+        <div className="border-border/60 mt-1 border-t pt-2">
+          {mayActivate ? (
+            <PendingButton
+              size="sm"
+              variant="outline"
+              pending={activating}
+              onClick={() => activate({ onSuccess: () => onActivated?.(packageId) })}
+              data-testid={`missing-activate-${packageId}`}
+            >
+              {t("missingConnections.activate")}
+            </PendingButton>
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              {t("missingConnections.inactiveNoRight")}
+            </p>
+          )}
+        </div>
+      )}
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <IntegrationConnectionPicker

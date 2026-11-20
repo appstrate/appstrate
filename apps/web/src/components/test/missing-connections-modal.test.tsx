@@ -13,7 +13,11 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
 import { MissingRow } from "../missing-connections-modal.tsx";
-import type { MissingIntegrationFieldError } from "../../lib/connection-choice.ts";
+import {
+  onlyAwaitingActivation,
+  retryDecision,
+  type MissingIntegrationFieldError,
+} from "../../lib/connection-choice.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
 import { spaceStore } from "../../stores/space-store.ts";
 
@@ -232,5 +236,130 @@ describe("MissingRow", () => {
     } finally {
       snapshot.mockRestore();
     }
+  });
+  describe("integration_not_active", () => {
+    const SPACE = "spc_1";
+    const RAW = "activate it with POST /api/spaces/spc_1/packages";
+    const inactive = (): MissingIntegrationFieldError => ({
+      ...fieldError("integration_not_active"),
+      message: RAW,
+    });
+    const libraryKey = () =>
+      $api.queryOptions("get", "/api/spaces/{id}/library", {
+        params: { path: { id: SPACE }, header: { "X-Org-Id": undefined } },
+      }).queryKey;
+    const libraryWith = (activate: "allowed" | "forbidden") =>
+      ({
+        packages: {
+          integration: [
+            {
+              id: INTEGRATION,
+              placements: [],
+              activation: [{ spaceId: SPACE, activate, deactivate: "forbidden" }],
+            },
+          ],
+        },
+      }) as never;
+
+    function renderInactive(activate: "allowed" | "forbidden"): string {
+      const qc = new QueryClient();
+      qc.setQueryData(libraryKey(), libraryWith(activate));
+      const snapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
+        ...spaceStore.getInitialState(),
+        id: SPACE,
+      });
+      try {
+        return render(
+          <MissingRow
+            err={inactive()}
+            agentPackageId={AGENT}
+            version={undefined}
+            integrationEntries={undefined}
+          />,
+          { queryClient: qc },
+        );
+      } finally {
+        snapshot.mockRestore();
+      }
+    }
+
+    it("offers the activation to a caller who may, without the server's API remedy", () => {
+      const html = renderInactive("allowed");
+      expect(html).toContain(`data-testid="missing-activate-${INTEGRATION}"`);
+      expect(html).toContain(label("missingConnections.activate"));
+      expect(html).not.toContain(label("missingConnections.inactiveNoRight"));
+      expect(html).not.toContain(RAW);
+    });
+
+    it("offers the activation for a package homed elsewhere, from the org-wide library", () => {
+      const qc = new QueryClient();
+      qc.setQueryData(libraryKey(), { packages: { integration: [] } });
+      qc.setQueryData(
+        $api.queryOptions("get", "/api/library", { params: { header: { "X-Org-Id": undefined } } })
+          .queryKey,
+        libraryWith("allowed"),
+      );
+      const snapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
+        ...spaceStore.getInitialState(),
+        id: SPACE,
+      });
+      try {
+        const html = render(
+          <MissingRow
+            err={inactive()}
+            agentPackageId={AGENT}
+            version={undefined}
+            integrationEntries={undefined}
+          />,
+          { queryClient: qc },
+        );
+        expect(html).toContain(`data-testid="missing-activate-${INTEGRATION}"`);
+      } finally {
+        snapshot.mockRestore();
+      }
+    });
+
+    it("follows the live verdict once activated: blocked keeps the row open, clear resolves it", () => {
+      const renderActivated = (res: Resolution, blocking: boolean) => {
+        const qc = new QueryClient();
+        qc.setQueryData(readinessKey(), readiness(res, blocking));
+        return render(
+          <MissingRow
+            err={inactive()}
+            agentPackageId={AGENT}
+            version={undefined}
+            integrationEntries={undefined}
+            activated
+          />,
+          { queryClient: qc },
+        );
+      };
+      const blocked = renderActivated(BLOCKED, true);
+      expect(blocked).not.toContain("missing-activate-");
+      expect(blocked).not.toContain(label("missingConnections.resolved"));
+      expect(blocked).toContain(label("missingConnections.activated"));
+      const clear = renderActivated(resolution({}), false);
+      expect(clear).toContain(label("missingConnections.resolved"));
+    });
+
+    it("holds the re-run while the verdict still blocks the activated integration", () => {
+      const errors = [inactive()];
+      expect(retryDecision(errors, false, [INTEGRATION]).canRetry).toBe(false);
+      expect(retryDecision(errors, false, []).canRetry).toBe(true);
+    });
+
+    it("keeps the inactive intro only while a row is still un-activated", () => {
+      const errors = [inactive()];
+      expect(onlyAwaitingActivation(errors, new Set())).toBe(true);
+      expect(onlyAwaitingActivation(errors, new Set([INTEGRATION]))).toBe(false);
+      expect(onlyAwaitingActivation([fieldError("not_connected")], new Set())).toBe(false);
+    });
+
+    it("tells a caller without the right who can activate it", () => {
+      const html = renderInactive("forbidden");
+      expect(html).not.toContain("missing-activate-");
+      expect(html).toContain(label("missingConnections.inactiveNoRight"));
+      expect(html).not.toContain(RAW);
+    });
   });
 });

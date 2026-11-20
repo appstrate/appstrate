@@ -190,6 +190,17 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
+/** The inactive-only intro holds while every refusal is `integration_not_active` and one is not yet activated. */
+export function onlyAwaitingActivation(
+  errors: MissingIntegrationFieldError[],
+  activated: ReadonlySet<string>,
+): boolean {
+  return (
+    errors.every((e) => e.code === "integration_not_active") &&
+    errors.some((e) => !activated.has(integrationIdOfField(e.field)))
+  );
+}
+
 /** Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded, nothing gated). */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],

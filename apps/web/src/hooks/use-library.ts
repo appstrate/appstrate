@@ -243,7 +243,12 @@ export function usePackageActivation(packageId: string) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
   const { data: library } = useSpaceLibrary();
-  const row = libraryRow(library, packageId);
+  const spaceRow = libraryRow(library, packageId);
+  // A package homed elsewhere and not placed here may be absent from the space library (a
+  // personal space lists only what is placed): the org-wide library's per-space verdict
+  // (`activation`, "may place") answers then. Read only when needed.
+  const { data: orgLibrary } = useCatalogueLibrary({ enabled: !!library && !spaceRow });
+  const row = spaceRow ?? libraryRow(orgLibrary, packageId);
   return {
     mayActivate: !!spaceId && !!row && activationGate(row, spaceId, true).allowed,
     activate: (options?: { onSuccess?: () => void }) => {
