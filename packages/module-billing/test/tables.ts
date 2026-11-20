@@ -7,6 +7,9 @@
  * `truncateAll()` deletes in it.
  */
 export default [
+  "ee_compute_usage",
+  "ee_settled_runs",
+  "ee_compute_cursor",
   "ee_usage_records",
   "ee_billed_llm_usage",
   "ee_billing_cursor",

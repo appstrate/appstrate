@@ -419,7 +419,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   );
   const gatesMs = Date.now() - gatesStart;
   if (!gates.ok) throw preflightGateApiError(gates.error);
-  const { agent } = gates;
+  const { agent, maxConcurrentRuns } = gates;
 
   // --- Step 2a: Integration manifest version snapshot ---
   //
@@ -615,6 +615,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         packageId: agent.id,
         actor,
         input: input ?? null,
+        maxConcurrentRuns,
         scheduleId,
         versionLabel: versionLabel ?? undefined,
         versionRef,

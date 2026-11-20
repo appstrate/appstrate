@@ -32,6 +32,8 @@ import {
 } from "../billing/contact.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
 import { getPlatformServices } from "../platform.ts";
+import { periodEndOf, periodStartOf, quotaStanding } from "../compute/period.ts";
+import { readComputeSecondsUsed } from "../compute/usage.ts";
 import {
   problemJson,
   noBillingAccount,
@@ -107,6 +109,8 @@ interface PlanDetail {
   price: number;
   credit_quota: number;
   file_storage_bytes: number;
+  included_compute_minutes: number | null;
+  max_concurrent_runs: number | null;
 }
 
 type CheckoutPlanId = (typeof CHECKOUT_PLAN_IDS)[number];
@@ -123,6 +127,8 @@ function planDetail(p: PlanDefinition): PlanDetail {
     price: p.monthlyPrice,
     credit_quota: p.creditQuota,
     file_storage_bytes: p.fileStorageBytes,
+    included_compute_minutes: p.includedComputeMinutes,
+    max_concurrent_runs: p.maxConcurrentRuns,
   };
 }
 
@@ -174,6 +180,23 @@ function managerList(managers: BillingManager[]) {
 }
 
 /**
+ * The org's compute month as the dashboard reads it. The gauge is the SAME arithmetic as the
+ * admission gate (`used >= included`), so a bar reading 100 % is exactly a refused launch.
+ */
+function computeSnapshot(usedSeconds: number, plan: PlanDefinition | undefined) {
+  const periodStart = periodStartOf(new Date());
+  const included = plan?.includedComputeMinutes ?? null;
+  return {
+    used_seconds: usedSeconds,
+    included_minutes: included,
+    usage_percent: included === null ? 0 : quotaStanding(usedSeconds, included).percent,
+    period_start: `${periodStart}T00:00:00.000Z`,
+    period_end: periodEndOf(periodStart).toISOString(),
+    max_concurrent_runs: plan?.maxConcurrentRuns ?? null,
+  };
+}
+
+/**
  * The wire projection of one org's billing account — plan, usage, status and upgrades —
  * shared by `GET /api/billing` and the answer to a plan change; `null` when the org has
  * no billing account. `plan_action` is the same `planAction` predicate
@@ -181,18 +204,22 @@ function managerList(managers: BillingManager[]) {
  * follows it never calls an endpoint this API is going to reject.
  */
 async function billingSnapshot(orgId: string) {
-  const [account] = await getBillingDb()
-    .select({
-      planId: billingAccounts.planId,
-      creditsUsed: billingAccounts.creditsUsed,
-      creditQuota: billingAccounts.creditQuota,
-      periodEnd: billingAccounts.periodEnd,
-      stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
-      subscriptionStatus: billingAccounts.subscriptionStatus,
-      cancelAtPeriodEnd: billingAccounts.cancelAtPeriodEnd,
-    })
-    .from(billingAccounts)
-    .where(eq(billingAccounts.orgId, orgId));
+  // Independent reads: the month's counter does not depend on the account row.
+  const [[account], usedSeconds] = await Promise.all([
+    getBillingDb()
+      .select({
+        planId: billingAccounts.planId,
+        creditsUsed: billingAccounts.creditsUsed,
+        creditQuota: billingAccounts.creditQuota,
+        periodEnd: billingAccounts.periodEnd,
+        stripeSubscriptionId: billingAccounts.stripeSubscriptionId,
+        subscriptionStatus: billingAccounts.subscriptionStatus,
+        cancelAtPeriodEnd: billingAccounts.cancelAtPeriodEnd,
+      })
+      .from(billingAccounts)
+      .where(eq(billingAccounts.orgId, orgId)),
+    readComputeSecondsUsed(orgId),
+  ]);
 
   if (!account) return null;
 
@@ -204,6 +231,7 @@ async function billingSnapshot(orgId: string) {
   const plans = getPlans();
   const allPlans = [plans.free, plans.starter, plans.pro];
   const currentPlan = allPlans.find((p) => p.id === account.planId);
+  const compute = computeSnapshot(usedSeconds, currentPlan);
 
   return {
     plan: {
@@ -211,6 +239,7 @@ async function billingSnapshot(orgId: string) {
       name: currentPlan?.name ?? account.planId,
     },
     plans: allPlans.map(planDetail),
+    compute,
     usage_percent: usagePercent,
     credits_used: account.creditsUsed,
     credit_quota: account.creditQuota,

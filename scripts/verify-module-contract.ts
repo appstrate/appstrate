@@ -274,6 +274,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
  */
 const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
   beforeUsage: { owners: ["module-billing"] },
+  runLimits: { owners: ["module-billing"] },
   beforeSignup: { owners: ["oidc"] },
   afterSignup: { owners: ["oidc"] },
 };
@@ -302,6 +303,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   logger: { owners: ["module-observability"] },
   http: { owners: ["module-chat", "module-observability"] },
   usage: { owners: ["module-billing"] },
+  runs: { owners: ["module-billing"] },
   inProcess: { owners: ["module-chat"] },
   resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },

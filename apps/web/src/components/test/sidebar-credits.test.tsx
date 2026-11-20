@@ -25,6 +25,14 @@ const ORG_ID = "org_credits";
 const account: components["schemas"]["BillingAccount"] = {
   plan: { id: "starter", name: "Starter" },
   plans: [],
+  compute: {
+    used_seconds: 24_700,
+    included_minutes: 1000,
+    usage_percent: 41,
+    period_start: "2026-11-01T00:00:00.000Z",
+    period_end: "2026-12-01T00:00:00.000Z",
+    max_concurrent_runs: 3,
+  },
   usage_percent: 42,
   credits_used: 420,
   credit_quota: 1000,
@@ -34,7 +42,10 @@ const account: components["schemas"]["BillingAccount"] = {
   upgrades: [],
 };
 
-function gauge(permissions: string[]): string {
+function gauge(
+  permissions: string[],
+  override: Partial<components["schemas"]["BillingAccount"]> = {},
+): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const org: components["schemas"]["Organization"] = {
     id: ORG_ID,
@@ -55,7 +66,7 @@ function gauge(permissions: string[]): string {
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing", { params: { header: { "X-Org-Id": ORG_ID } } })
       .queryKey,
-    account,
+    { ...account, ...override },
   );
   try {
     return render(<SidebarCredits />, { queryClient });
@@ -75,6 +86,31 @@ describe("the sidebar credit gauge", () => {
     expect(html).toContain('href="/org-settings/billing"');
     expect(html).toContain('role="progressbar"');
     expect(html).toContain('aria-valuenow="42"');
+    expect(html).toContain("Crédits");
+  });
+
+  it("shows the compute minutes used this month above the credits", () => {
+    appConfig.features.billing = true;
+    const html = gauge(["billing:read"]);
+    expect(html).toContain("Calcul");
+    // 24 700 s is 411 whole minutes of the 1 000 included.
+    expect(html).toContain("411");
+    expect(html).toContain("min");
+    expect(html).toContain('aria-valuenow="41"');
+    expect(html.indexOf("Calcul")).toBeLessThan(html.indexOf("Crédits"));
+  });
+
+  it("leaves the compute gauge out when the plan carries no compute quota", () => {
+    appConfig.features.billing = true;
+    const html = gauge(["billing:read"], {
+      compute: {
+        ...account.compute,
+        included_minutes: null,
+        usage_percent: 0,
+        max_concurrent_runs: null,
+      },
+    });
+    expect(html).not.toContain("Calcul");
     expect(html).toContain("Crédits");
   });
 

@@ -11,6 +11,7 @@ import {
   desc,
   isNull,
   inArray,
+  isNotNull,
   count,
   gte,
   lte,
@@ -43,6 +44,7 @@ import {
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
+  type TerminalRunStatus,
 } from "@appstrate/core/run-status";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
@@ -63,7 +65,7 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
-import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
+import type { LlmUsageLedgerRow, ModelCost, TerminalRunRow } from "@appstrate/core/module";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import {
   resolvedConnectionMapSchema,
@@ -529,8 +531,13 @@ export function orgRunConcurrencyLockKey(orgId: string): string {
  * throw propagate; a caller that reaches either without `initRunLimits()` has a
  * boot-ordering bug, not a run to admit.
  */
-async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<void> {
-  const cap = getPlatformRunLimits().max_concurrent_per_org;
+async function enforceOrgConcurrencyCap(
+  tx: DbTx,
+  scope: SpaceScope,
+  orgCap: number | null | undefined,
+): Promise<void> {
+  // The lower of the deployment-wide cap and the one a module set for this org (its plan).
+  const cap = Math.min(getPlatformRunLimits().max_concurrent_per_org, orgCap ?? Infinity);
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
   );
@@ -689,6 +696,12 @@ interface CreateRunParams {
   modelCredentialId?: string | null;
   /** The member whose own credential pays the run: see `runs.payer_user_id`. */
   payerUserId?: string | null;
+  /**
+   * The org's own cap on runs in flight, as the `runLimits` hook answered it at the launch
+   * gates (`run-preflight-gates.ts`). Enforced here with the deployment-wide one, under the
+   * per-org admission lock. Absent for a run that occupies no platform slot (remote).
+   */
+  maxConcurrentRuns?: number | null;
 }
 
 export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
@@ -709,7 +722,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
     // link. Only the ORDER of two independent acquisitions changed. One
     // visible consequence, deliberate: a request that is both over-cap and
     // references a deleted file now answers 429 instead of 409.
-    await enforceOrgConcurrencyCap(tx, scope);
+    await enforceOrgConcurrencyCap(tx, scope, params.maxConcurrentRuns);
 
     // Take the run FK's lock before file locks. If deletion won during preflight, refuse
     // this launch. A version deletion takes FOR UPDATE on this same package, so a pinned
@@ -903,6 +916,9 @@ export async function updateRun(
   const set: Record<string, unknown> = {};
 
   if (updates.status !== undefined) set.status = updates.status;
+  // Stamped once, at the first flip to `running` and never moved (COALESCE keeps the first):
+  // the start of the duration a run the platform terminates is measured from.
+  if (updates.status === "running") set.runningAt = sql`COALESCE(${runs.runningAt}, now())`;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
 
   // Monotone status invariant, enforced in the WHERE (not read-then-write):
@@ -2164,6 +2180,60 @@ export async function listLlmUsage(args: {
     credentialSource: r.credentialSource,
     pricingStatus: r.pricingStatus,
     settled: r.settled,
+  }));
+}
+
+/**
+ * Cursor read of finished runs, ordered by `(completed_at, id)` ASC — the platform side of
+ * `PlatformServices.runs.listTerminal`. A metering module settles a run's compute time from
+ * it without a cross-module SQL join into `runs`.
+ *
+ * Only terminal runs with a `completed_at` are visible (`idx_runs_completed_at` is partial on
+ * exactly that). `after` is the exclusive keyset, compared as a row value so the two columns
+ * order together. The limit clamps like {@link listLlmUsage}'s.
+ */
+export async function listTerminalRuns(args: {
+  after?: { completedAt: Date; id: string };
+  limit?: number;
+}): Promise<TerminalRunRow[]> {
+  const limit = Math.min(
+    Math.max(args.limit ?? LLM_USAGE_LIST_DEFAULT_LIMIT, 1),
+    LLM_USAGE_LIST_MAX_LIMIT,
+  );
+  const rows = await db
+    .select({
+      id: runs.id,
+      orgId: runs.orgId,
+      runOrigin: runs.runOrigin,
+      status: runs.status,
+      duration: runs.duration,
+      completedAt: runs.completedAt,
+    })
+    .from(runs)
+    .where(
+      and(
+        inArray(runs.status, [...terminalRunStatusValues]),
+        isNotNull(runs.completedAt),
+        args.after
+          ? sql`(${runs.completedAt}, ${runs.id}) > (${args.after.completedAt.toISOString()}::timestamptz, ${args.after.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(asc(runs.completedAt), asc(runs.id))
+    .limit(limit);
+
+  // A run never ran longer than the platform's timeout ceiling: a bigger `duration` is an
+  // artifact (a terminal written long after the run stopped, e.g. an orphan finalized at the
+  // next boot) and must not be billed as consumption.
+  const ceilingMs = getPlatformRunLimits().timeout_ceiling_seconds * 1000;
+  // The WHERE keeps only terminal rows with a `completed_at`; the column types cannot say so.
+  return rows.map((r) => ({
+    id: r.id,
+    orgId: r.orgId,
+    runOrigin: r.runOrigin,
+    status: r.status as TerminalRunStatus,
+    durationMs: r.duration === null ? null : Math.min(r.duration, ceilingMs),
+    completedAt: r.completedAt as Date,
   }));
 }
 

@@ -21,6 +21,7 @@ import { mockPlatformServices } from "./mock-platform.ts";
 import { orgQueries } from "./org-queries.ts";
 import { startStripeMock } from "./stripe.ts";
 import { stopBillingSweeper } from "../../src/billing/billing-sweeper.ts";
+import { stopComputeSweeper } from "../../src/compute/settlement.ts";
 
 /**
  * Point the module's three `init(ctx)` seams at the in-memory doubles for ONE test file,
@@ -42,6 +43,8 @@ export function useBillingTestSeams(): void {
     // timer. Disarm it: a maintenance tick firing mid-suite would clear the pending
     // cancellations a test seeded. Idempotent, like the rest of this helper.
     stopBillingSweeper();
+    // The compute sweep is armed by `init()` too, and would settle runs a test seeded.
+    stopComputeSweeper();
 
     for (const key of SWAPPED_ENV) previousEnv[key] = process.env[key];
 

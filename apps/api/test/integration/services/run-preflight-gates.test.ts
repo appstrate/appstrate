@@ -357,4 +357,44 @@ describe("runPreflightGates — beforeUsage execution facts", () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.timings.beforeUsageHookMs).toBe(0);
   });
+
+  it("hands the org's run cap from the `runLimits` hook to the caller, for platform runs only", async () => {
+    await loadModulesFromInstances(
+      [
+        {
+          manifest: { id: "test-limits", name: "Limits", version: "0.0.0" },
+          async init() {},
+          hooks: { runLimits: async () => ({ maxConcurrentRuns: 3 }) },
+        },
+      ],
+      fakeInitCtx(),
+    );
+
+    const platform = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent: loadedPackage("@gates/agent", 60),
+      credentialSource: "org",
+      executionPlane: "platform",
+    });
+    const remote = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent: loadedPackage("@gates/agent", 60),
+      credentialSource: null,
+      executionPlane: "remote",
+    });
+
+    expect(platform.ok && platform.maxConcurrentRuns).toBe(3);
+    // A remote run occupies no platform slot: the cap is not asked for, nor applied.
+    expect(remote.ok && remote.maxConcurrentRuns).toBeNull();
+  });
+
+  it("reports no org cap when no module provides `runLimits`", async () => {
+    const res = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent: loadedPackage("@gates/agent", 60),
+      credentialSource: "system",
+      executionPlane: "platform",
+    });
+    expect(res.ok && res.maxConcurrentRuns).toBeNull();
+  });
 });

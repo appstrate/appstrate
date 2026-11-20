@@ -24,6 +24,8 @@ import { BillingContactSection } from "../../components/billing-contact-section"
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { formatDateField } from "../../lib/format-date";
+import { computeState, usedComputeMinutes } from "../../lib/billing-compute";
+import { formatNumber } from "../../lib/format-number";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -99,6 +101,7 @@ function BillingOverview() {
         ? t("billing.cycleReset", { date: formatDateField(billing.period_end, "date") })
         : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
 
+  const compute = computeState(billing.compute);
   const hasSubscription = billing.status !== "none";
   const upgradeIds = billing.upgrades.map((u) => u.id);
   // Every upgrade is a checkout target by type, so the header button just
@@ -195,6 +198,37 @@ function BillingOverview() {
           }
         />
 
+        {billing.compute.included_minutes !== null && (
+          <UsageMeter
+            className="mt-4"
+            label={t("billing.compute")}
+            percent={billing.compute.usage_percent}
+            summary={
+              <>
+                {billing.compute.usage_percent}%
+                <span className="text-muted-foreground ml-2 text-xs font-normal">
+                  (
+                  {t("billing.computeCount", {
+                    used: formatNumber(usedComputeMinutes(billing.compute)),
+                    included: formatNumber(billing.compute.included_minutes),
+                  })}
+                  ,{" "}
+                  {t("billing.computeReset", {
+                    date: formatDateField(billing.compute.period_end, "date"),
+                  })}
+                  )
+                </span>
+              </>
+            }
+          />
+        )}
+
+        {billing.compute.max_concurrent_runs !== null && (
+          <p className="text-muted-foreground mt-1.5 text-xs">
+            {t("billing.computeConcurrency", { count: billing.compute.max_concurrent_runs })}
+          </p>
+        )}
+
         {(storageLoading || storage) && (
           <UsageMeter
             className="mt-4"
@@ -216,6 +250,31 @@ function BillingOverview() {
           />
         )}
       </Card>
+
+      {compute === "warning" && (
+        <Alert variant="warning" className="mb-4">
+          <AlertTitle>
+            {t("billing.computeWarningTitle", { percent: billing.compute.usage_percent })}
+          </AlertTitle>
+          <AlertDescription>
+            {t("billing.computeWarningDescription", {
+              included: formatNumber(billing.compute.included_minutes ?? 0),
+              date: formatDateField(billing.compute.period_end, "date"),
+            })}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {compute === "exhausted" && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTitle>{t("billing.computeExhaustedTitle")}</AlertTitle>
+          <AlertDescription>
+            {t("billing.computeExhaustedDescription", {
+              date: formatDateField(billing.compute.period_end, "date"),
+            })}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {billing.status === "past_due" && (
         <Alert variant="warning" className="mb-4">

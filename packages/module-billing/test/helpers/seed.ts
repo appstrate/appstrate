@@ -15,10 +15,12 @@ import {
   billedLlmUsage,
   billingCursor,
   billingManagers,
+  computeCursor,
+  computeUsage,
 } from "../../drizzle/schema.ts";
 import { CREDITS_PER_DOLLAR } from "../../src/credits.ts";
-import type { LlmUsageLedgerRow } from "@appstrate/core/module";
-import { mockLedger } from "./mock-platform.ts";
+import type { LlmUsageLedgerRow, TerminalRunRow } from "@appstrate/core/module";
+import { mockLedger, mockRuns } from "./mock-platform.ts";
 
 export async function seedBillingAccount(overrides: {
   orgId: string;
@@ -204,4 +206,56 @@ export async function seedBillingManager(overrides: {
     })
     .returning();
   return row!;
+}
+
+let terminalRunSeq = 0;
+
+/**
+ * Push a finished run into the mock platform's `runs.listTerminal` feed. `completedAt`
+ * defaults to a distinct, increasing instant so rows seeded in order are read in order.
+ */
+export function seedTerminalRun(overrides: {
+  orgId: string;
+  id?: string;
+  runOrigin?: "platform" | "remote";
+  status?: TerminalRunRow["status"];
+  durationMs?: number | null;
+  completedAt?: Date;
+}): TerminalRunRow {
+  terminalRunSeq += 1;
+  const row: TerminalRunRow = {
+    id: overrides.id ?? `run_seed_${terminalRunSeq}`,
+    orgId: overrides.orgId,
+    runOrigin: overrides.runOrigin ?? "platform",
+    status: overrides.status ?? "success",
+    durationMs: overrides.durationMs === undefined ? 40_000 : overrides.durationMs,
+    completedAt: overrides.completedAt ?? new Date(Date.now() + terminalRunSeq * 1000),
+  };
+  mockRuns.push(row);
+  return row;
+}
+
+/**
+ * (Re)seed the compute settlement watermark, the single row the 0009 migration creates and
+ * `truncateBillingTables` deletes. Defaults to the epoch so a test settles everything it seeds.
+ */
+export async function seedComputeCursor(
+  overrides: { completedAt?: Date; runId?: string } = {},
+): Promise<void> {
+  await getBillingDb()
+    .insert(computeCursor)
+    .values({ completedAt: overrides.completedAt ?? new Date(0), runId: overrides.runId ?? "" })
+    .onConflictDoUpdate({
+      target: computeCursor.id,
+      set: { completedAt: overrides.completedAt ?? new Date(0), runId: overrides.runId ?? "" },
+    });
+}
+
+/** Set an org's compute counter for the month `periodStart` (`YYYY-MM-01`). */
+export async function seedComputeUsage(overrides: {
+  orgId: string;
+  periodStart: string;
+  secondsUsed: number;
+}): Promise<void> {
+  await getBillingDb().insert(computeUsage).values(overrides);
 }

@@ -1,0 +1,12 @@
+-- Index for the terminal-run cursor read (`PlatformServices.runs.listTerminal`), which a
+-- metering module sweeps by `(completed_at, id)`. Partial: only finished runs carry a
+-- `completed_at`.
+--
+-- SHAPE ONLY (`docs/NO_TRANSITIONAL_CODE.md` section 2): an index, no data touched.
+--
+-- Building it takes a SHARE lock on `runs`: writes to the table wait for the build. Boot runs
+-- this before the API takes traffic (`appstrate-migrate`, `MIGRATIONS_ON_BOOT=verify`), but on a
+-- large production `runs` table measure the build first and apply it ahead of the rollout.
+--
+-- ROLLBACK: drop the index; nothing reads it but that service.
+CREATE INDEX IF NOT EXISTS "idx_runs_completed_at" ON "runs" USING btree ("completed_at","id") WHERE "runs"."completed_at" IS NOT NULL;
