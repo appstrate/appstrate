@@ -161,6 +161,22 @@ const ZOD4_STRING_FORMAT_BANS = [
   },
 ];
 
+// Better Auth reads a marked refresh token presented again as stolen and deletes
+// every refresh token of the (client, user) pair on every resource. Platform code
+// ends OAuth tokens through `services/oauth-token-revocation.ts` (delete), never
+// by writing `revoked` on `oauth_refresh_tokens` / `oauth_access_tokens`. `revoked`
+// exists only on those two tables (the others use `revokedAt`), so any `revoked`
+// key in a write payload is a violation. Covers `.set({…})`, `.values({…})`,
+// `.values([{…}])` and `onConflictDoUpdate({ set: {…} })`.
+const REVOKED_KEY = "Property:matches([key.name='revoked'], [key.value='revoked'])";
+const OAUTH_TOKEN_REVOKED_MESSAGE =
+  "Never write `revoked` on OAuth token rows: Better Auth treats a marked refresh token presented again as stolen and deletes every refresh token of the (client, user) pair on every resource. End tokens through services/oauth-token-revocation.ts (delete).";
+const OAUTH_TOKEN_REVOKED_BANS = [
+  `CallExpression[callee.property.name=/^(set|values)$/] > ObjectExpression > ${REVOKED_KEY}`,
+  `CallExpression[callee.property.name='values'] > ArrayExpression > ObjectExpression > ${REVOKED_KEY}`,
+  `Property[key.name='set'] > ObjectExpression > ${REVOKED_KEY}`,
+].map((selector) => ({ selector, message: OAUTH_TOKEN_REVOKED_MESSAGE }));
+
 // Global-stream capture, banned in CLI tests. Two shapes are matched:
 // assigning over `process.stdout.write` / `process.stderr.write` /
 // `process.exit`, and `spyOn`-ing the two stream writes (which reaches the
@@ -494,10 +510,11 @@ export default tseslint.config(
     // API payloads with Zod like everything else. This block stays ABOVE the
     // `**/test/**` and `apps/cli/src/**` blocks that re-declare
     // `no-restricted-syntax`, so those still win (with the bans re-spread) for
-    // the files they cover — including `scripts/test/**`.
+    // the files they cover — including `scripts/test/**`. The OAuth token
+    // ban rides along; tests and the CLI, which own no such write, drop it.
     files: ALL_TS,
     rules: {
-      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
+      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS, ...OAUTH_TOKEN_REVOKED_BANS],
     },
   },
   {
