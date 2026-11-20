@@ -5,7 +5,7 @@
  *
  * Served at GET /api/oauth/login. Supports:
  *   - Email/password authentication
- *   - Social login (Google, GitHub) — redirects through Better Auth's
+ *   - Social login (Google, GitHub, Microsoft) — redirects through Better Auth's
  *     social sign-in then back to the authorize endpoint
  *   - Registration link → /api/oauth/register with same OAuth params
  *   - Forgot password link (when SMTP is enabled)
@@ -29,14 +29,14 @@ interface LoginPageProps {
   /** Resolved branding for the owning space. */
   branding: ResolvedSpaceBranding;
   /** Available social auth providers. */
-  socialProviders?: { google?: boolean; github?: boolean };
+  socialProviders?: { google?: boolean; github?: boolean; microsoft?: boolean };
   /** Whether SMTP is configured (enables forgot password + magic link). */
   smtpEnabled?: boolean;
   /**
    * Whether signup is open for this client's underlying org. When `false`
    * (org-level client with `allow_signup=false`), only the "Créer un
    * compte" CTA is hidden. Social sign-in and magic-link stay visible so
-   * existing members who linked a Google/GitHub account (or never set a
+   * existing members who linked a Google/GitHub/Microsoft account (or never set a
    * password) can still sign in. Orphan user creation is prevented at the
    * BA `beforeSignup` hook layer (`oidcBeforeSignupGuard`), so showing
    * these buttons is safe.
@@ -76,13 +76,14 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
   // `better-auth.state` cookie flows natively without any server bridge.
   //
   // Social + magic-link stay visible regardless of `allowSignup` — an
-  // existing member may have linked a Google/GitHub account or rely on
+  // existing member may have linked a Google/GitHub/Microsoft account or rely on
   // magic-link to sign in without a password. Orphan creation on closed
   // clients is blocked by the `beforeSignup` BA hook
   // (`oidcBeforeSignupGuard`).
   const allowSignup = props.allowSignup;
   const google = props.socialProviders?.google ?? false;
   const github = props.socialProviders?.github ?? false;
+  const microsoft = props.socialProviders?.microsoft ?? false;
   const magicLink = props.smtpEnabled ?? false;
 
   const registerUrl = `/api/oauth/register${props.queryString}`;
@@ -129,6 +130,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
     ${renderSocialButtons({
       google,
       github,
+      microsoft,
       magicLinkUrl: magicLink ? magicLinkUrl : null,
     })}
     <div class="footer-links">
@@ -141,7 +143,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
             : null
       }
     </div>
-    ${google || github ? renderSocialSignInScript() : null}
+    ${google || github || microsoft ? renderSocialSignInScript() : null}
     ${expiryEnabled ? renderLoginExpiryScript() : null}
   `;
   return renderLayout({ branding: props.branding, title, maxWidth: 400, bodyHtml });
