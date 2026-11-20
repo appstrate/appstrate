@@ -36,11 +36,7 @@ function keywordScore(name: string, text: string, tokens: readonly string[]): Ke
 }
 
 /** Negative when `a` ranks before `b`: exact name, then tokens in the name, then in the text, then the shorter name. */
-export function compareKeywordScores(
-  a: KeywordScore,
-  b: KeywordScore,
-  tokens: readonly string[],
-): number {
+function compareKeywordScores(a: KeywordScore, b: KeywordScore, tokens: readonly string[]): number {
   return (
     Number(b.exact) - Number(a.exact) ||
     b.inName - a.inName ||
