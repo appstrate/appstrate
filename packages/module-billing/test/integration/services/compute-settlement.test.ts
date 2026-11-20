@@ -20,6 +20,7 @@ import {
   releaseMockRunsHang,
   setMockRunsError,
   setMockRunsHang,
+  mockRunsReads,
 } from "../../helpers/mock-platform.ts";
 import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { useBillingTestSeams } from "../../helpers/setup.ts";
@@ -519,16 +520,20 @@ describe("the catch-up timer", () => {
     startComputeSweeper(5);
     await waitFor(async () => (await secondsUsed()) === 12);
 
+    // Stop, then wait for the pass that may be in flight: from here on nothing can read the feed.
     stopComputeSweeper();
+    await drainComputeSweeper();
+    const readsAtStop = mockRunsReads;
     seedTerminalRun({
       orgId,
       durationMs: 8_000,
       completedAt: new Date(NOW.getTime() + 60_000),
     });
     await Bun.sleep(100);
-    // Stopped: nothing settles the new run.
+
+    // No tick ran after the stop: the feed was not read again, so the new run is unsettled.
+    expect(mockRunsReads).toBe(readsAtStop);
     expect(await secondsUsed()).toBe(12);
-    await drainComputeSweeper();
   });
 
   it("purges the rows of deleted organizations once every sixty ticks", async () => {

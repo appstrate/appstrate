@@ -24,7 +24,11 @@ export const mockRuns: TerminalRunRow[] = [];
 /** Set when the next `runs.listTerminal` read should throw. */
 let mockRunsError = false;
 
+/** How many times `runs.listTerminal` was read: a settlement pass reads it at least once. */
+export let mockRunsReads = 0;
+
 export function resetMockRuns(): void {
+  mockRunsReads = 0;
   mockRuns.length = 0;
   mockRunsError = false;
 }
@@ -173,6 +177,7 @@ export const mockPlatformServices = {
       after?: { completedAt: Date; id: string };
       limit?: number;
     }): Promise<TerminalRunRow[]> => {
+      mockRunsReads++;
       if (mockRunsGate) await mockRunsGate;
       if (mockRunsError) {
         mockRunsError = false;
