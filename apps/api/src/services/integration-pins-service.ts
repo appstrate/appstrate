@@ -954,6 +954,7 @@ interface AgentConnectionReadiness {
  * tab. Both are handed to the picks; nothing downstream re-reads the package.
  */
 export async function resolveAgentConnectionReadiness(args: {
+  dependencyOverrides?: Record<string, string> | null;
   scope: SpaceScope;
   agentPackageId: string;
   principal: ConnectionPrincipal;
@@ -1014,6 +1015,7 @@ export async function resolveAgentConnectionReadiness(args: {
   // aligned for `?version=draft` as well.
   await resolveRunIntegrationVersions({
     agentManifest,
+    dependencyOverrides: args.dependencyOverrides,
     orgId: scope.orgId,
     manifestCache,
   });

@@ -107,6 +107,7 @@ function makeTools(
     id,
     name: id,
     role: "admin",
+    personal: false,
     permissions: new Set(permissions),
     surface: readOnlySpaces.includes(id) ? readOnly : surface,
   });

@@ -419,7 +419,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Remove a member",
       description:
-        "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile.",
+        "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Other members' schedules naming a connection the member shared are disabled too (`connection_unshared`); `getMemberDepartureImpact` lists, before the removal, every team-space schedule it would stop.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -428,6 +428,100 @@ export const organizationsPaths = {
         "204": {
           description: "Member removed",
           headers: STD_RESPONSE_HEADERS,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/members/{userId}/departure-impact": {
+    get: {
+      operationId: "getMemberDepartureImpact",
+      tags: ["Organizations"],
+      summary: "Preview what removing a member stops",
+      description:
+        "The enabled schedules in TEAM spaces that `removeMember` would disable for this member, in one list whatever the cause: `actor_left_org` for a schedule the member is the actor of, `connection_unshared` for another actor's schedule whose `connection_overrides` name a connection the member shares into that space (the removal withdraws every share of the member's connections). Each item's `lost_integrations` lists the integrations whose named connection belongs to the departing member: reassigning the schedule to another member (`updateSchedule`) is not enough there, a replacement connection is needed too. Read with the same selectors the removal uses, without writing anything: a snapshot, which a later change can make stale before the removal runs. Schedules in personal spaces are left out — the departing member's personal space enters its 30-day offboarding window and an administrator cannot read a live one. A credential confined to spaces (a space-bound token, the chat's bearer) sees only the items in the spaces it may name. Known limit: a binding to the member's connection outside the schedule's own `connection_overrides` — an admin pin, an organization default, or a member pin of the departing member — is not listed, and is not disabled by the removal either (the schedule fails at resolution). Same guard and same per-target rule as `removeMember`: 404 when the user is not a member, 403 when the caller could not remove them (an admin previewing an owner, any token previewing an owner).",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "userId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Schedules the removal would stop, ordered by space name then schedule name",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "id",
+                        "name",
+                        "space",
+                        "packageId",
+                        "actor",
+                        "cause",
+                        "lost_integrations",
+                      ],
+                      properties: {
+                        id: { type: "string", description: "Schedule id." },
+                        name: { type: ["string", "null"] },
+                        space: {
+                          type: "object",
+                          required: ["id", "name"],
+                          properties: { id: { type: "string" }, name: { type: "string" } },
+                        },
+                        packageId: { type: "string", description: "The scheduled agent." },
+                        actor: {
+                          type: "object",
+                          required: ["type", "id", "name"],
+                          properties: {
+                            type: { type: "string", enum: ["user", "end_user"] },
+                            id: { type: "string" },
+                            name: { type: ["string", "null"] },
+                          },
+                        },
+                        cause: {
+                          type: "string",
+                          enum: ["actor_left_org", "connection_unshared"],
+                          description: "The `disabled_reason` the removal would set.",
+                        },
+                        lost_integrations: {
+                          type: "array",
+                          items: { type: "string" },
+                          description:
+                            "Integrations whose connection named in `connection_overrides` belongs to the departing member.",
+                        },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean", description: "Always false: the list is complete." },
+                },
+              },
+              example: {
+                object: "list",
+                hasMore: false,
+                data: [
+                  {
+                    id: "sch_abc123",
+                    name: "Daily digest",
+                    space: { id: "spc_team", name: "Sales" },
+                    packageId: "@acme/digest",
+                    actor: { type: "user", id: "usr_def456", name: "Bob" },
+                    cause: "actor_left_org",
+                    lost_integrations: ["@acme/gmail"],
+                  },
+                ],
+              },
+            },
+          },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
