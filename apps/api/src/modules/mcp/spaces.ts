@@ -32,17 +32,13 @@ export interface OrgWideSpaces {
   current: McpSpace;
 }
 
-/** What a tool reads of an org-wide connection: its spaces, and a dispatch into any of them. */
+/** An org-wide connection as a tool reads it. */
 export interface OrgWideToolSpaces extends OrgWideSpaces {
-  /** A dispatch run in one reachable space, with the caller's permissions there; throws for any other. */
+  /** A dispatch run in one reachable space; throws for any other. */
   dispatchIn: (spaceId: string) => Dispatch;
 }
 
-/**
- * {@link OrgWideToolSpaces.dispatchIn} over `send`. A credential bound to a set of spaces
- * (`bound`) is confined to one space per dispatch (`dispatchInProcess`'s pin); any other
- * credential enters the space by its `x-space-id`.
- */
+/** {@link OrgWideToolSpaces.dispatchIn} over `send`: a `bound` credential is pinned to the space per dispatch, any other enters it by `x-space-id`. */
 export function spaceDispatcher(
   spaces: OrgWideSpaces,
   send: (request: Request, spacePin?: string) => Promise<Response>,
@@ -120,7 +116,7 @@ export function grantedSpaces(
   return matching.length === spaces.reachable.length ? undefined : matching;
 }
 
-/** The ids of the spaces where `granted` holds: an item's `granted_in`, present whatever the count. */
+/** The ids of the spaces where `granted` holds. */
 export function spaceIdsWhere(
   spaces: readonly McpSpace[],
   granted: (space: McpSpace) => boolean,
@@ -147,19 +143,20 @@ export const NO_FALLBACK_HINT =
   "Do not retry this action in another space to get around the refusal; report it to the " +
   "user, who decides which space the action belongs in.";
 
+export function spaceMismatchRefusal(acts: string, argument: string, space?: McpSpace): Refusal {
+  return {
+    code: "space_mismatch",
+    error: `This request acts in ${acts}; send a call for another space as its own request.`,
+    arguments: [argument],
+    ...(space ? { space: spaceRef(space) } : {}),
+  };
+}
+
 /** The refusal a call's `space_id` earns, or undefined when it names the entered space. */
 export function spaceArgumentRefusal(spaces: OrgWideSpaces, spaceId: unknown): Refusal | undefined {
   const named = spaceIdRefusal(spaces.reachable, spaceId);
   if (named) return named;
-  if (spaceId !== spaces.current.id) {
-    return {
-      code: "space_mismatch",
-      error:
-        `This request acts in ${describeSpace(spaces.current)}; ` +
-        "send a call for another space as its own request.",
-      arguments: ["space_id"],
-      space: spaceRef(spaces.current),
-    };
-  }
-  return undefined;
+  return spaceId !== spaces.current.id
+    ? spaceMismatchRefusal(describeSpace(spaces.current), "space_id", spaces.current)
+    : undefined;
 }

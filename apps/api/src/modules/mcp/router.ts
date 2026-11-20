@@ -176,8 +176,8 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * and skip a search round-trip.
  *
  * Still maintenance-free: the index is derived from the live catalog, so the
- * surface grows without editing this text. describe (or search's
- * best_match) remains the source of truth for input schemas.
+ * surface grows without editing this text. describe remains the source of truth
+ * for input schemas.
  */
 export function buildServerInstructions(
   permissions: ReadonlySet<string>,
@@ -284,7 +284,7 @@ export function buildServerInstructions(
 - Codes \`auth_key_serves_no_selected_tool\` and \`auth_key_on_unauthenticated_integration\` on \`integrations.<id>\` are not connection problems at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, or one of an integration that declares no auth method, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
 - Code \`required_integration_unbound\` on \`integrations.<id>\` is not a connect problem: the agent requires that integration and a pin, or a stored schedule's \`connection_overrides\`, binds it to none (\`[]\`). It clears by naming a connection in that layer, or in \`connection_overrides\` (a run override outranks a member pin, not an admin pin); tell the user which. In \`connection_overrides\`, \`[]\` runs without the integration, and for a required one answers \`required_integration_unbound\` unless an admin imposes a set; connections an admin imposes on the integration (an admin pin or an enforced org default) stay bound whatever you pass, so the override only adds to them (\`[]\` adds nothing) and a connection outside a set that allows no additions answers \`override_outranked\`.`
     : "";
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. The index covers operations only: use search to find agents, skills and integration tools, which it alone lists completely, and for an operation only when the index is genuinely ambiguous or a capability you expect isn't listed (pass \`kinds: ["operation"]\` then). Never guess an operationId or body shape: describe (or search's best_match) is the source of truth for the input schema.${runIntro}
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. The index covers operations only: use search to find agents, skills and integration tools, which it alone lists completely, and for an operation only when the index is genuinely ambiguous or a capability you expect isn't listed (pass \`kinds: ["operation"]\` then). Never guess an operationId or body shape: describe is the source of truth for the input schema.${runIntro}
 
 ## Core model
 Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -316,7 +316,7 @@ const pinnedSpaceContext =
   "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
 
 const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
-- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask. Only \`search\` may omit it: it then searches every space you reach, and each item's \`granted_in\` names the spaces where it is usable (the \`space_id\` to act with; for an agent, where you can launch it or, for one you can launch nowhere, where you can read it).
+- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask. Only \`search\` may omit it: it then searches every space you reach, and each item's \`granted_in\` names the spaces where you reach it: act on it with one of them, where your role there still decides.
 - Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
 - Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
@@ -704,11 +704,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         dispatchIn: spaceDispatcher(orgSpaces, dispatchInProcess, !spansSpaces),
       },
       // `search`, `describe` and `read` reach skills through the Skills extension's own reader.
-      skills: {
-        list: () => skills.list("published"),
-        entry: skills.entry,
-        read: skills.read,
-      },
+      skills,
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
@@ -726,7 +722,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const prompts = buildAgentPromptProvider({
       origin,
       authHeaders,
-      dispatch,
+      dispatchIn: toolCtx.orgSpaces?.dispatchIn ?? (() => dispatch),
       spaces: orgSpaces?.reachable ?? [{ id: scope.spaceId, name: c.get("space")!.name, surface }],
     });
     const server = createMcpServer(

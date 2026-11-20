@@ -296,12 +296,12 @@ describe("mcp org-wide connection", () => {
     const across = payload(await call("search", { query: "createAgent", kinds: ["operation"] }));
     const operations = across.data.operations as {
       items: Array<{ id: string; granted_in: string[] }>;
-      denied: Array<{ id: string }>;
+      denied?: Array<{ id: string }>;
     };
     expect(operations.items.find((op) => op.id === "createAgent")?.granted_in).toEqual([
       gestion.id,
     ]);
-    expect(operations.denied.map((op) => op.id)).not.toContain("createAgent");
+    expect((operations.denied ?? []).map((op) => op.id)).not.toContain("createAgent");
   });
 
   it("re-checks kind:inline as its own act: an operator runs agents, not inline runs", async () => {

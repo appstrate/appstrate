@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The keyword search `search` runs over every kind it lists. */
-
 export const DEFAULT_SEARCH_LIMIT = 25;
 export const MAX_SEARCH_LIMIT = 100;
 
@@ -21,9 +19,7 @@ export function searchScore(text: string, tokens: readonly string[]): number {
   return score;
 }
 
-/** How well an item's `name` and `text` match `tokens`; compared by {@link compareKeywordScores}. */
 export interface KeywordScore {
-  /** The name is the query itself. */
   exact: boolean;
   inName: number;
   inText: number;
@@ -39,11 +35,7 @@ function keywordScore(name: string, text: string, tokens: readonly string[]): Ke
   };
 }
 
-/**
- * Negative when `a` ranks before `b`: an item whose name is the query itself, then by the tokens
- * its name holds, then by those its text holds, then the shorter name (the one the tokens cover
- * most). `0` when the tokens do not tell them apart.
- */
+/** Negative when `a` ranks before `b`: exact name, then tokens in the name, then in the text, then the shorter name. */
 export function compareKeywordScores(
   a: KeywordScore,
   b: KeywordScore,
@@ -57,10 +49,7 @@ export function compareKeywordScores(
   );
 }
 
-/**
- * `items` matching `tokens` (all of them when there are none) with their scores, best first by
- * {@link compareKeywordScores}, ties kept in the order given.
- */
+/** `items` matching `tokens` (all when there are none), best first, ties kept in the order given. */
 export function rankByKeywords<T>(
   items: readonly T[],
   tokens: readonly string[],

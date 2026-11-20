@@ -99,7 +99,7 @@ export interface IntegrationToolListing {
   not_ready: IntegrationOutsideRun[];
   unlisted: UnlistedIntegration[];
   truncated_catalogs: TruncatedCatalog[];
-  /** Cache-only listing: the remote integrations whose catalog was not in the cache. */
+  /** The remote integrations whose catalog a cache-only listing did not find in the cache. */
   uncached: string[];
 }
 
@@ -112,10 +112,7 @@ interface IntegrationToolQuery {
    */
   name?: string;
   connectionId?: string;
-  /**
-   * Read remote catalogs from the cache only: a cold one is not listed, so nothing is sent to its
-   * server, and its declared tools are listed `catalog_unreadable`, counted in `uncached`.
-   */
+  /** Read remote catalogs from the cache only; a cold one's tools are listed `catalog_unreadable`. */
   cachedOnly?: boolean;
 }
 
@@ -381,7 +378,7 @@ async function readRemoteCatalog(
 }
 
 type RemoteListing =
-  | { tools: RemoteTool[]; truncatedAt: number | null; uncached?: true }
+  | { tools: RemoteTool[]; truncatedAt: number | null; listingFailure?: string }
   | { unlisted: UnlistedIntegration };
 
 /**
@@ -530,7 +527,7 @@ async function remoteTools(
   return {
     tools,
     truncatedAt: catalog.truncatedAt,
-    ...(catalog.listingFailure === "not_cached" ? { uncached: true as const } : {}),
+    ...(catalog.listingFailure ? { listingFailure: catalog.listingFailure } : {}),
   };
 }
 
@@ -659,7 +656,7 @@ export async function listIntegrationTools(
       continue;
     }
     tools.push(...result.tools);
-    if (result.uncached) uncached.push(id);
+    if (result.listingFailure === "not_cached") uncached.push(id);
     if (result.truncatedAt !== null) {
       truncatedCatalogs.push({ integration_package_id: id, listed_tools: result.truncatedAt });
     }

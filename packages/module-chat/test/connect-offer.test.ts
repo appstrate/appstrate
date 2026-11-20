@@ -224,20 +224,12 @@ describe("offerScopeOf", () => {
         not_ready: [{ integration_package_id: "@x/y", refusal: refusal(PLATFORM) }],
         unlisted: [{ integration_package_id: "@x/z", refusal: refusal(PLATFORM_2) }],
       },
-      best_match: {
-        kind: "integration_tool",
-        id: "x__find",
-        // A remote server controls its schemas.
-        input_schema: { type: "object", properties: { q: { connect_url: STRANGER } } },
-      },
     };
     const split = offerScopeOf("search", {})(payload);
     expect(split.offers).toEqual([{ connect_url: PLATFORM }, { connect_url: PLATFORM_2 }]);
     const redacted = split.redacted as typeof payload;
     expect(redacted.operations).toBe(payload.operations);
     expect(redacted.integration_tools.items).toBe(payload.integration_tools.items);
-    // `best_match` holds what a member or a server wrote: redacted, never offered.
-    expect(JSON.stringify(redacted.best_match)).not.toContain(STRANGER);
     expect(redacted.integration_tools.not_ready[0]!.refusal.connect_url).toBe(
       REDACTED_CONNECT_LINK,
     );
@@ -253,7 +245,6 @@ describe("offerScopeOf", () => {
     const payload = {
       agents: { total: 1, items: [{ id: "@a/b", connect_url: STRANGER }] },
       skills: { total: 1, items: [{ id: "skill://x", connect_url: STRANGER }] },
-      best_match: { kind: "agent", id: "@a/b", input: { connect_url: STRANGER } },
     };
     const split = offerScopeOf("search", {})(payload);
     expect(split.offers).toEqual([]);
@@ -285,7 +276,6 @@ describe("offerScopeOf", () => {
     const payload = {
       operations: { total: 0, items: [] },
       integration_tools: { total: 0, items: [] },
-      best_match: { kind: "operation", id: "listAgents" },
     };
     const split = offerScopeOf("search", {})(payload);
     expect(split).toEqual({ redacted: payload, offers: [] });

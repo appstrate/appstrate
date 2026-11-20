@@ -11,87 +11,65 @@
  * read.
  */
 
-import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { parseSkillUri, type SkillEntry } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-uri";
 import type { DispatchContext } from "./api-call-batch.ts";
-import { asRecord, dispatchHeaders, type Refusal } from "./tool-results.ts";
-
-/** The kinds of things `search` finds and `describe` details. */
-export const DISCOVERY_KINDS = ["operation", "integration_tool", "agent", "skill"] as const;
-export type DiscoveryKind = (typeof DISCOVERY_KINDS)[number];
-
-/**
- * The tool that acts on each kind, and the surface act that declares it (`null`: always
- * declared). A hint names the tool only to a caller it is declared to.
- */
-export const KIND_USE: Record<
-  DiscoveryKind,
-  { tool: string; act: "invokes" | "proxies" | "runs" | null }
-> = {
-  operation: { tool: "invoke_operation", act: "invokes" },
-  integration_tool: { tool: "call_integration_tool", act: "proxies" },
-  agent: { tool: "run_and_wait", act: "runs" },
-  skill: { tool: "read", act: null },
-};
+import type { SkillServer } from "./skills.ts";
+import { spaceMismatchRefusal } from "./spaces.ts";
+import { asRecord, dispatchHeaders, type Refusal, type RouteRefusal } from "./tool-results.ts";
 
 /** The skills the connection reaches, as the Skills extension serves them. */
-export interface McpSkillReader {
-  /** The published skills of every space reached. */
-  list: () => Promise<SkillEntry[]>;
-  /** The entry whose `SKILL.md` is at `uri`, `null` when none is readable there. */
-  entry: (uri: string) => Promise<SkillEntry | null>;
-  /** `resources/read` of a `skill://` URI; throws the extension's JSON-RPC error. */
-  read: (uri: string) => Promise<ReadResourceResult>;
-}
-
-/** A route's refusal, as `invoke_operation` relays one: its status and problem body. */
-export interface RouteRefusal {
-  status: number;
-  body: unknown;
-}
+export type McpSkillReader = Pick<SkillServer, "list" | "entry" | "read">;
 
 /** Spaces read at once by a search across spaces. */
 const SPACES_AT_ONCE = 4;
 
+interface SpaceReads<S, T> {
+  answered: { space: S; value: T }[];
+  refused: { space: S; refused: RouteRefusal }[];
+}
+
+const isRefused = (value: object): value is { refused: RouteRefusal } => "refused" in value;
+
 /**
  * `read` in each of `spaces` (concurrently, bounded), the answers apart from the spaces whose
- * route refused. `undefined` stands for the one space a pinned connection is in.
+ * route refused. Without `spaces` (a pinned connection), one read in the space it is in.
  */
-export async function readSpaces<S, T extends object>(
+export function readSpaces<S, T extends object>(
   spaces: readonly S[],
   read: (space: S) => Promise<T | { refused: RouteRefusal }>,
-): Promise<{ answered: { space: S; value: T }[]; refused: { space: S; refused: RouteRefusal }[] }> {
-  const reads = await mapWithConcurrency(spaces, SPACES_AT_ONCE, async (space) => ({
+): Promise<SpaceReads<S, T>>;
+export function readSpaces<S, T extends object>(
+  spaces: readonly S[] | undefined,
+  read: (space: S | undefined) => Promise<T | { refused: RouteRefusal }>,
+): Promise<SpaceReads<S | undefined, T>>;
+export async function readSpaces<S, T extends object>(
+  spaces: readonly S[] | undefined,
+  read: (space: S | undefined) => Promise<T | { refused: RouteRefusal }>,
+): Promise<SpaceReads<S | undefined, T>> {
+  const reads = await mapWithConcurrency(spaces ?? [undefined], SPACES_AT_ONCE, async (space) => ({
     space,
     value: await read(space),
   }));
-  const answered: { space: S; value: T }[] = [];
-  const refused: { space: S; refused: RouteRefusal }[] = [];
+  const answered: SpaceReads<S | undefined, T>["answered"] = [];
+  const refused: SpaceReads<S | undefined, T>["refused"] = [];
   for (const { space, value } of reads) {
-    if ("refused" in value) refused.push({ space, refused: value.refused as RouteRefusal });
-    else answered.push({ space, value: value as T });
+    if (isRefused(value)) refused.push({ space, refused: value.refused });
+    else answered.push({ space, value });
   }
   return { answered, refused };
 }
 
-/** A space of a search across spaces whose read was refused, so its items are absent. */
-interface UnsearchedSpace {
-  space_id: string;
-  status: number;
-  code?: string;
-}
-
 /** The `unsearched` field of a section: the spaces (none for a pinned connection) whose read was refused. */
 export function unsearched(
-  refused: readonly { spaceId: string | undefined; refused: RouteRefusal }[],
-): { unsearched?: UnsearchedSpace[] } {
-  const spaces = refused.flatMap(({ spaceId, refused: route }): UnsearchedSpace[] => {
-    if (!spaceId) return [];
+  refused: readonly { space: { id: string } | undefined; refused: RouteRefusal }[],
+): { unsearched?: { space_id: string; status: number; code?: string }[] } {
+  const spaces = refused.flatMap(({ space, refused: route }) => {
+    if (!space) return [];
     const code = asRecord(route.body)?.code;
     return [
-      { space_id: spaceId, status: route.status, ...(typeof code === "string" ? { code } : {}) },
+      { space_id: space.id, status: route.status, ...(typeof code === "string" ? { code } : {}) },
     ];
   });
   return spaces.length > 0 ? { unsearched: spaces } : {};
@@ -99,24 +77,22 @@ export function unsearched(
 
 export interface AgentHit {
   id: string;
-  title: string;
+  display_name: string;
   description: string;
   published: boolean;
 }
 
-/** A GET dispatched in-process, in `spaceId` when given and in the space the caller's headers enter otherwise. */
+/** A GET dispatched in-process, in the space `ctx` enters. */
 export function dispatchGet(
   ctx: DispatchContext,
   path: string,
-  options: { spaceId?: string; signal?: AbortSignal } = {},
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const headers = dispatchHeaders(ctx.authHeaders);
-  if (options.spaceId) headers.set("x-space-id", options.spaceId);
   return ctx.dispatch(
     new Request(new URL(path, ctx.origin).toString(), {
       method: "GET",
-      headers,
-      ...(options.signal ? { signal: options.signal } : {}),
+      headers: dispatchHeaders(ctx.authHeaders),
+      ...(signal ? { signal } : {}),
     }),
   );
 }
@@ -124,9 +100,9 @@ export function dispatchGet(
 /** The agents index of a space (`GET /api/agents`), the one reader of its rows. */
 export async function listAgents(
   ctx: DispatchContext,
-  options: { spaceId?: string; signal?: AbortSignal } = {},
+  signal?: AbortSignal,
 ): Promise<{ agents: AgentHit[] } | { refused: RouteRefusal }> {
-  const response = await dispatchGet(ctx, "/api/agents", options);
+  const response = await dispatchGet(ctx, "/api/agents", signal);
   const body = asRecord(await response.json().catch(() => undefined));
   if (!response.ok || !Array.isArray(body?.data)) {
     return { refused: { status: response.status, body: body ?? null } };
@@ -135,11 +111,11 @@ export async function listAgents(
     const row = asRecord(raw);
     const id = row?.id;
     if (typeof id !== "string" || parseScopedName(id) === null) return [];
-    const title = typeof row?.display_name === "string" ? row.display_name.trim() : "";
+    const name = typeof row?.display_name === "string" ? row.display_name.trim() : "";
     return [
       {
         id,
-        title: title || id,
+        display_name: name || id,
         description: typeof row?.description === "string" ? row.description : "",
         published: row?.published === true,
       },
@@ -200,7 +176,7 @@ export async function describeAgent(
   }
   if (launch)
     agent.run_with = {
-      tool: KIND_USE.agent.tool,
+      tool: "run_and_wait",
       arguments: {
         kind: "agent",
         scope: `@${scoped.scope}`,
@@ -225,7 +201,7 @@ export async function listSkills(
   reader: McpSkillReader,
   spaceIds: readonly string[],
 ): Promise<SkillHit[]> {
-  const entries = await reader.list();
+  const entries = await reader.list("published");
   return entries.flatMap((entry): SkillHit[] => {
     const address = parseSkillUri(entry.uri);
     if (!address || !spaceIds.includes(address.spaceId)) return [];
@@ -241,22 +217,16 @@ export async function listSkills(
   });
 }
 
-/**
- * The refusal of a skill URI in another space than the one the call entered (`spaceId`), or
- * `undefined`: a call reads only the space it names, which is the one the chat records.
- */
+/** The refusal of a skill URI in another space than the one the call entered, or `undefined`. */
 export function skillSpaceRefusal(
   uri: string,
   spaceId: string,
   argument: string,
 ): Refusal | undefined {
   const address = parseSkillUri(uri);
-  if (!address || address.spaceId === spaceId) return undefined;
-  return {
-    code: "space_mismatch",
-    error: `This call acts in space ${spaceId}; ${uri} is in another space. Send a call for that space as its own request.`,
-    arguments: [argument],
-  };
+  return address && address.spaceId !== spaceId
+    ? spaceMismatchRefusal(`space ${spaceId}`, argument)
+    : undefined;
 }
 
 /** A skill's entry: its frontmatter and the `skill://` URI of each of its files. */
@@ -264,8 +234,6 @@ export async function describeSkill(
   reader: McpSkillReader,
   uri: string,
   spaceId: string,
-  /** The `space_id` `read_with` names, org-wide: the space the call named. */
-  readSpaceId?: string,
 ): Promise<{ skill: Record<string, unknown> } | { refusal: Refusal }> {
   const mismatch = skillSpaceRefusal(uri, spaceId, "id");
   if (mismatch) return { refusal: mismatch };
@@ -286,10 +254,6 @@ export async function describeSkill(
       package_id: address.packageId,
       frontmatter: entry.frontmatter,
       resources: entry.resources,
-      read_with: {
-        tool: KIND_USE.skill.tool,
-        arguments: { uri: entry.uri, ...(readSpaceId ? { space_id: readSpaceId } : {}) },
-      },
     },
   };
 }

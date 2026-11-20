@@ -612,13 +612,12 @@ describe("mcp integration tools", () => {
         expect(items(all.data)[0]!.granted_in.sort()).toEqual(
           [owner.defaultSpaceId, other.id].sort(),
         );
-        // One entry per space listing the connection, each naming it.
+        // The connection listed the same in both spaces is one entry, naming both.
         const connections = (
-          all.data.integration_tools as { connections: Array<{ space_id: string }> }
+          all.data.integration_tools as { connections: Array<{ granted_in: string[] }> }
         ).connections;
-        expect(connections.map((c) => c.space_id).sort()).toEqual(
-          [owner.defaultSpaceId, other.id].sort(),
-        );
+        expect(connections).toHaveLength(1);
+        expect(connections[0]!.granted_in.sort()).toEqual([owner.defaultSpaceId, other.id].sort());
 
         const one = await callTool(caller, "search", {
           kinds: ["integration_tool"],
@@ -1070,7 +1069,12 @@ describe("mcp integration tools", () => {
         query: "search",
       });
       expect(searched.isError).toBe(false);
-      expect(searched.data.best_match).toMatchObject({
+      const described = await callTool(caller, "describe", {
+        ...where,
+        kind: "integration_tool",
+        id: REMOTE_TOOL,
+      });
+      expect(described.data).toMatchObject({
         kind: "integration_tool",
         id: REMOTE_TOOL,
         integration_package_id: REMOTE_ID,
@@ -1168,7 +1172,6 @@ describe("mcp integration tools", () => {
         data.integration_tools as {
           items: Array<{ id: string; catalog_unreadable?: true }>;
           uncached?: string[];
-          note?: string;
         };
 
       // A search over every kind sends nothing to the server: the declared names, flagged.
@@ -1178,7 +1181,6 @@ describe("mcp integration tools", () => {
       expect(section(general.data).items.find((t) => t.id === REMOTE_TOOL)).toMatchObject({
         catalog_unreadable: true,
       });
-      expect(section(general.data).note).toContain('`kinds: ["integration_tool"]`');
 
       // Naming the kind reads it from the server, as the call it journals.
       const named = await callTool(caller, "search", {
@@ -1302,7 +1304,11 @@ describe("mcp integration tools", () => {
           query: "image",
         });
         expect(targeted.isError).toBe(false);
-        expect(targeted.data.best_match).toMatchObject({
+        const described = await callTool(caller, "describe", {
+          kind: "integration_tool",
+          id: OPEN_TOOL,
+        });
+        expect(described.data).toMatchObject({
           kind: "integration_tool",
           id: OPEN_TOOL,
           integration_package_id: OPEN_ID,
@@ -1317,7 +1323,9 @@ describe("mcp integration tools", () => {
           kinds: ["integration_tool"],
           query: "image",
         });
-        expect((general.data.best_match as { id: string }).id).toBe(OPEN_TOOL);
+        expect(
+          (general.data.integration_tools as { items: Array<{ id: string }> }).items[0]!.id,
+        ).toBe(OPEN_TOOL);
 
         const envelope = await mcp(caller, "tools/call", {
           name: "call_integration_tool",

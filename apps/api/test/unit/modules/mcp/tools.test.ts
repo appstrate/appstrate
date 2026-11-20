@@ -377,24 +377,6 @@ describe("search", () => {
     expect((body.operations as { items: unknown[] }).items.length).toBeLessThanOrEqual(3);
   });
 
-  it("embeds the top match's full schema as best_match on a keyword search", async () => {
-    const { byName } = makeTools(["mcp:read"]);
-    const res = await byName
-      .get("search")!
-      .handler({ query: "agent", kinds: ["operation"] }, noExtra);
-    const body = parseResult(res);
-    const best = body.best_match as Record<string, unknown> | undefined;
-    expect(best).toBeDefined();
-    // best_match is the FULL describe payload, not the compact list row.
-    const ops = (body.operations as { items: Array<Record<string, unknown>> }).items;
-    expect(best!.kind).toBe("operation");
-    expect(best!.id).toBe(ops[0]!.id);
-    expect(typeof best!.method).toBe("string");
-    expect(typeof best!.path).toBe("string");
-    expect("request_body" in best!).toBe(true);
-    expect("referenced_schemas" in best!).toBe(true);
-  });
-
   it("points at invoke_operation only for a caller who may invoke", () => {
     // An act this permission set makes impossible is ABSENT from the guidance,
     // never contradicted: a discovery-only caller is not sent to a tool it is
@@ -403,13 +385,6 @@ describe("search", () => {
       makeTools(permissions).byName.get("search")!.descriptor.description!;
     expect(description(["mcp:read"])).not.toContain("invoke_operation");
     expect(description(["mcp:read", "mcp:invoke"])).toContain("invoke_operation");
-  });
-
-  it("omits best_match when there is no query (plain catalog listing)", async () => {
-    const { byName } = makeTools(["mcp:read"]);
-    const res = await byName.get("search")!.handler({ limit: 5, kinds: ["operation"] }, noExtra);
-    const body = parseResult(res);
-    expect(body.best_match).toBeUndefined();
   });
 
   // A search is a question the model asked on purpose, so a match its role
@@ -422,7 +397,6 @@ describe("search", () => {
     async function searchAgents(): Promise<{
       operations: Array<Record<string, unknown>>;
       denied: Array<{ id: string; required_permissions: string[] }>;
-      body: Record<string, unknown>;
       section: Record<string, unknown>;
     }> {
       const { byName } = makeTools(VIEWER);
@@ -434,7 +408,6 @@ describe("search", () => {
       return {
         operations: section.items as Array<Record<string, unknown>>,
         denied: section.denied as Array<{ id: string; required_permissions: string[] }>,
-        body,
         section,
       };
     }
@@ -456,8 +429,8 @@ describe("search", () => {
       expect(refused.get("createAgent")).toEqual(["agents:write"]);
     });
 
-    it("counts only granted matches and never points best_match at a denied one", async () => {
-      const { operations, denied, body, section } = await searchAgents();
+    it("counts only granted matches", async () => {
+      const { operations, denied, section } = await searchAgents();
       // `limit: 100` is the tool's maximum: the granted half fitting under it
       // is what makes `total === operations.length` a statement about
       // filtering rather than about truncation.
@@ -469,23 +442,7 @@ describe("search", () => {
       // tell "three you may not call" from "eighty".
       expect(section.denied_total as number).toBeGreaterThanOrEqual(denied.length);
       if (denied.length < 100) expect(section.denied_total).toBe(denied.length);
-      const best = body.best_match as Record<string, unknown>;
-      expect(best.id).toBe(operations[0]!.id);
-      expect(best.granted).toBe(true);
-      expect(denied.map((row) => row.id)).not.toContain(best.id);
     });
-  });
-
-  it("best_match is identical to what describe returns for that id", async () => {
-    const { byName } = makeTools(["mcp:read"]);
-    const searchRes = await byName
-      .get("search")!
-      .handler({ query: "agent", kinds: ["operation"] }, noExtra);
-    const best = parseResult(searchRes).best_match as Record<string, unknown>;
-    const describeRes = await byName
-      .get("describe")!
-      .handler({ kind: "operation", id: best.id }, noExtra);
-    expect(parseResult(describeRes)).toEqual(best);
   });
 });
 
@@ -1153,7 +1110,7 @@ describe("buildOperationIndex", () => {
     );
   });
 
-  it("carries no structured method+path columns (those come from describe / best_match)", () => {
+  it("carries no structured method+path columns (those come from describe)", () => {
     const index = buildOperationIndex(new Set(["mcp:read", "agents:read"]), undefined);
     const { operations } = getCatalog();
     const knownIds = new Set([...operations.values()].map((op) => op.operationId));

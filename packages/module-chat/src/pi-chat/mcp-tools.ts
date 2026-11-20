@@ -516,11 +516,7 @@ function searchesOperationsOnly(args: Record<string, unknown>): boolean {
     : Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
 }
 
-/**
- * Whether a call reads every space of the turn: it omits a `space_id` its tool declares and does
- * not require, so the platform covers each space reached. Not an operations-only search, which
- * reads the static catalog and the caller's permissions, no space's data.
- */
+/** Whether a call omits a `space_id` its tool declares and does not require, so it reads every space of the turn (not an operations-only search). */
 function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
   const schema = (inputSchema ?? {}) as {
     properties?: Record<string, unknown>;
@@ -531,6 +527,15 @@ function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>
     !searchesOperationsOnly(args) &&
     schema.properties?.space_id !== undefined &&
     !(Array.isArray(schema.required) && schema.required.includes("space_id"))
+  );
+}
+
+/** A read of a skill's text, kept whole in the replay so its procedure still applies on later turns. */
+function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
+  return (
+    typeof uri === "string" &&
+    uri.startsWith(SKILL_URI_PREFIX) &&
+    resources.every((resource) => "text" in resource)
   );
 }
 
@@ -567,7 +572,6 @@ function makeForwardExtension(
             );
           }
         } else if (readsEveryTurnSpace(tool.inputSchema, args)) {
-          // Recorded as a named space is: the conversation's visibility depends on it.
           await Promise.all(organization.spaces.map((space) => organization.touch(space.id)));
         }
         const client = await untilAborted(getClient(), callSignal);
@@ -604,16 +608,11 @@ function makeForwardExtension(
               scope,
             );
             const file = await liveResources(resources, opts, toolCallId);
-            // A skill's text stays in the replay, as `read_resource` keeps it.
-            const keepSkill =
-              typeof args.uri === "string" &&
-              args.uri.startsWith(SKILL_URI_PREFIX) &&
-              resources.every((resource) => "text" in resource);
             return withTurnBudgetNote(
               {
                 ...meta,
                 content: [...meta.content, ...file.content],
-                ...(keepSkill
+                ...(keepsSkillText(args.uri, resources)
                   ? {}
                   : {
                       persistedContent: [
@@ -688,10 +687,12 @@ function makeReadResourceExtension(
           await organization.touch(fileSpace);
         }
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
-        // Keep the text of skills in the replay so their procedures still apply on later turns.
-        const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
         return withTurnBudgetNote(
-          { content, details: { uri }, ...(keepSkill ? {} : { persistedContent: receipts }) },
+          {
+            content,
+            details: { uri },
+            ...(keepsSkillText(uri, result.contents) ? {} : { persistedContent: receipts }),
+          },
           turnBudget,
         );
       },

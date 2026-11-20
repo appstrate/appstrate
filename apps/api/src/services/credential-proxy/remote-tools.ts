@@ -299,9 +299,8 @@ export interface RemoteToolCatalog {
   tools: ServerTool[];
   listed: boolean;
   /**
-   * Unlisted, why when known: the proxy's problem code, `timeout` when the catalog was not read
-   * before the listing's wait or its own timeout ended, or `not_cached` when the listing read the
-   * cache only and the catalog was not in it.
+   * Unlisted, why when known: the proxy's problem code, `timeout`, or `not_cached` (a cache-only
+   * listing found nothing).
    */
   listingFailure?: string;
   /** How many tools were read when the server lists more; `null` when all were. */
@@ -319,7 +318,7 @@ export async function listRemoteTools(
   input: RemoteToolsInput & {
     manifest: IntegrationManifest;
     connectionId?: string;
-    /** Read the cached `tools/list` only: a cold catalog is not listed, and nothing is sent. */
+    /** Read the cached `tools/list` only; nothing is sent. */
     cachedOnly?: boolean;
   },
 ): Promise<RemoteToolCatalog> {

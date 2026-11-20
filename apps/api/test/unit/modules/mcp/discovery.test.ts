@@ -3,14 +3,13 @@
 /**
  * `search` and `describe` over the kinds beside operations: agents, read from the agent routes
  * behind the dispatch, and skills, read from the Skills extension's reader. The routes' guards
- * and the reader's ACL are the integration suites'; here, what each kind lists and describes, how
- * `best_match` ranks across kinds, and when a kind is declared.
+ * and the reader's ACL are the integration suites'; here, what each kind lists and describes, and
+ * when a kind is declared.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { SkillEntry } from "@appstrate/core/skill-uri";
 import { deriveMcpSurface, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
-import { operationIdGranted } from "../../../../src/modules/mcp/catalog.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
 
@@ -45,14 +44,22 @@ const AGENTS = [
 
 function makeTools(
   permissions: string[],
-  agentsStatus = 200,
-  /** Org-wide: spaces whose agents route refuses. */
-  refusingSpaces: string[] = [],
-  orgWide = false,
-  /** Org-wide: spaces where the caller cannot launch (no `mcp:invoke`). */
-  readOnlySpaces: string[] = [],
-  /** Org-wide: spaces listing no agent. */
-  emptySpaces: string[] = [],
+  {
+    agentsStatus = 200,
+    refusingSpaces = [],
+    orgWide = false,
+    readOnlySpaces = [],
+    emptySpaces = [],
+  }: {
+    agentsStatus?: number;
+    /** Org-wide: spaces whose agents route refuses. */
+    refusingSpaces?: string[];
+    orgWide?: boolean;
+    /** Org-wide: spaces where the caller cannot launch (no `mcp:invoke`). */
+    readOnlySpaces?: string[];
+    /** Org-wide: spaces listing no agent. */
+    emptySpaces?: string[];
+  } = {},
 ) {
   const requests: string[] = [];
   const dispatch: Dispatch = async (req) => {
@@ -140,12 +147,6 @@ function makeTools(
 }
 
 describe("search over agents and skills", () => {
-  it("is granted the reads it lists", () => {
-    const permissions = new Set(READER);
-    expect(operationIdGranted("listAgents", permissions, undefined)).toBe(true);
-    expect(operationIdGranted("listSkills", permissions, undefined)).toBe(true);
-  });
-
   it("searches every declared kind when none is named, one section each", async () => {
     const { call } = makeTools(READER);
     const result = await call("search", {});
@@ -155,14 +156,14 @@ describe("search over agents and skills", () => {
       items: [
         {
           id: "@acme/invoice-sorter",
-          title: "Invoice sorter",
+          display_name: "Invoice sorter",
           description: "Sorts invoices.",
           published: true,
         },
         // No display name: the id stands in.
         {
           id: "@acme/draft-only",
-          title: "@acme/draft-only",
+          display_name: "@acme/draft-only",
           description: "Not yet published.",
           published: false,
         },
@@ -180,44 +181,20 @@ describe("search over agents and skills", () => {
         },
       ],
     });
-    // Without keywords nothing is described.
-    expect(result.best_match).toBeUndefined();
   });
 
   it("searches only the kinds named, and refuses a kind it does not declare", async () => {
     const { call, requests } = makeTools(READER);
     const skills = await call("search", { kinds: ["skill"], query: "tone" });
-    expect(Object.keys(skills).sort()).toEqual(["best_match", "skills"]);
+    expect(Object.keys(skills)).toEqual(["skills"]);
     expect(requests).toEqual([]);
     const refused = await call("search", { kinds: ["agent", "file"] });
     expect(refused).toMatchObject({ code: "invalid_argument", arguments: ["kinds"] });
     expect(refused.accepted).toEqual(["operation", "agent", "skill"]);
   });
 
-  it("describes the best hit across kinds as best_match", async () => {
-    const { call } = makeTools(READER);
-    const agent = await call("search", { query: "@acme/invoice-sorter" });
-    expect(agent.best_match).toMatchObject({
-      kind: "agent",
-      id: "@acme/invoice-sorter",
-      version: "1.2.0",
-      run_with: {
-        tool: "run_and_wait",
-        arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter" },
-      },
-    });
-    const skill = await call("search", { query: "tone" });
-    expect(skill.best_match).toMatchObject({
-      kind: "skill",
-      id: TONE.uri,
-      package_id: "@acme/tone",
-    });
-    const operation = await call("search", { query: "listAgents" });
-    expect(operation.best_match).toMatchObject({ kind: "operation", id: "listAgents" });
-  });
-
   it("relays the agents route's refusal in its section", async () => {
-    const { byName, call } = makeTools(READER, 403);
+    const { byName, call } = makeTools(READER, { agentsStatus: 403 });
     const named = await byName.get("search")!.handler({ kinds: ["agent"] }, noExtra);
     expect(named.isError).toBe(true);
     expect(parseResult(named)).toEqual({ status: 403, body: { code: "forbidden" } });
@@ -305,24 +282,10 @@ describe("describe of an agent or a skill", () => {
       package_id: "@acme/tone",
       frontmatter: TONE.frontmatter,
       resources: TONE.resources,
-      read_with: { tool: "read", arguments: { uri: TONE.uri } },
     });
     expect(
       await call("describe", { kind: "skill", id: "skill://spc_1/acme/gone/gone/SKILL.md" }),
     ).toMatchObject({ code: "not_found", arguments: ["id"] });
-  });
-
-  it("reads a skill only in the space the call entered", async () => {
-    const { call } = makeTools(READER);
-    // The reader answers for the other space too: the refusal is the call's own.
-    expect(await call("describe", { kind: "skill", id: ELSEWHERE.uri })).toMatchObject({
-      code: "space_mismatch",
-      arguments: ["id"],
-    });
-    expect(await call("read", { uri: ELSEWHERE.uri })).toMatchObject({
-      code: "space_mismatch",
-      arguments: ["uri"],
-    });
   });
 
   it("names what is missing", async () => {
@@ -335,31 +298,8 @@ describe("describe of an agent or a skill", () => {
 });
 
 describe("search across spaces", () => {
-  const runWith = (result: Record<string, unknown>) =>
-    (result.best_match as { run_with: { arguments: Record<string, unknown> } }).run_with.arguments;
-
-  it("names no space in a best match's run_with unless the call named one", async () => {
-    const { call } = makeTools(READER, 200, [], true);
-    const across = await call("search", { query: "@acme/invoice-sorter", kinds: ["agent"] });
-    expect(runWith(across)).toEqual({ kind: "agent", scope: "@acme", name: "invoice-sorter" });
-    const named = await call("search", {
-      query: "@acme/invoice-sorter",
-      kinds: ["agent"],
-      space_id: SPACE,
-    });
-    expect(runWith(named)).toMatchObject({ space_id: SPACE });
-    const described = await call("describe", {
-      kind: "agent",
-      id: "@acme/invoice-sorter",
-      space_id: SPACE,
-    });
-    expect((described.run_with as { arguments: object }).arguments).toMatchObject({
-      space_id: SPACE,
-    });
-  });
-
   it("reports a space whose agents route refused, and answers the others", async () => {
-    const { call } = makeTools(READER, 200, ["spc_2"], true);
+    const { call } = makeTools(READER, { refusingSpaces: ["spc_2"], orgWide: true });
     const result = await call("search", { kinds: ["agent"] });
     const agents = result.agents as { items: Array<{ granted_in: string[] }>; unsearched: unknown };
     expect(agents.items.every((item) => item.granted_in.join() === SPACE)).toBe(true);
@@ -368,41 +308,27 @@ describe("search across spaces", () => {
 });
 
 describe("agents across spaces", () => {
-  const grantedIn = (result: Record<string, unknown>) =>
-    (result.agents as { items: Array<{ id: string; granted_in: string[] }> }).items.find(
-      (item) => item.id === "@acme/invoice-sorter",
-    )?.granted_in;
-
-  it("names where the caller can launch each agent, else where it is listed", async () => {
-    // Operator in A, viewer in B, the agent in both: where it can be launched.
-    const mixed = makeTools(READER, 200, [], true, ["spc_2"]);
-    expect(grantedIn(await mixed.call("search", { kinds: ["agent"] }))).toEqual([SPACE]);
-    // Viewer in A, operator in B, the agent in A only: still found, where it is readable.
-    const viewerFirst = makeTools(READER, 200, [], true, [SPACE], ["spc_2"]);
-    expect(grantedIn(await viewerFirst.call("search", { kinds: ["agent"] }))).toEqual([SPACE]);
-    const viewer = makeTools(READER, 200, [], true, [SPACE, "spc_2"]);
-    expect(grantedIn(await viewer.call("search", { kinds: ["agent"] }))).toEqual([SPACE, "spc_2"]);
+  it("names the spaces where an agent is listed", async () => {
+    const { call } = makeTools(READER, { orgWide: true });
+    const found = await call("search", { kinds: ["agent"] });
+    const items = (found.agents as { items: Array<{ id: string; granted_in: string[] }> }).items;
+    expect(items.find((item) => item.id === "@acme/invoice-sorter")?.granted_in).toEqual([
+      SPACE,
+      "spc_2",
+    ]);
   });
 
-  it("says which space an agent's per-space settings were read in", async () => {
-    const { call } = makeTools(READER, 200, [], true);
+  it("names the space an agent is described in, and its run_with the same", async () => {
+    const { call } = makeTools(READER, { orgWide: true });
     const described = await call("describe", {
       kind: "agent",
       id: "@acme/invoice-sorter",
       space_id: SPACE,
     });
-    expect(described.space_id).toBe(SPACE);
-    const found = await call("search", { query: "@acme/invoice-sorter", kinds: ["agent"] });
-    expect((found.best_match as { space_id: string }).space_id).toBe(SPACE);
-  });
-
-  it("falls back to the next hit when the best one cannot be described", async () => {
-    const { call } = makeTools(READER);
-    // The draft-only agent outranks every operation but its detail answers 404.
-    const result = await call("search", { query: "draft only" });
-    expect((result.agents as { items: Array<{ id: string }> }).items.map((i) => i.id)).toContain(
-      "@acme/draft-only",
-    );
-    expect(result.best_match).toMatchObject({ kind: "operation" });
+    expect(described.space).toEqual({ id: SPACE, name: SPACE });
+    expect(described.run_with).toEqual({
+      tool: "run_and_wait",
+      arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter", space_id: SPACE },
+    });
   });
 });

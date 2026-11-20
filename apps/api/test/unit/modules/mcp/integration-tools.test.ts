@@ -21,6 +21,7 @@ import {
 } from "../../../../src/modules/mcp/tools.ts";
 import { MAX_LISTED_SCOPES } from "../../../../src/modules/mcp/integration-tool-catalog.ts";
 import { searchIntegrationTools } from "../../../../src/modules/mcp/integration-tools.ts";
+import type { McpSpace } from "../../../../src/modules/mcp/spaces.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
 import {
@@ -247,7 +248,7 @@ const declaresIntegrationTools = (made: Parameters<typeof kindEnum>[0]): boolean
   return kinds[0]!;
 };
 
-/** `search` over the `integration_tool` kind: its section and the cross-kind `best_match`. */
+/** `search` over the `integration_tool` kind: its section. */
 async function searchKind(made: ReturnType<typeof makeTools>, args: Record<string, unknown>) {
   const result = await made.byName
     .get("search")!
@@ -257,8 +258,14 @@ async function searchKind(made: ReturnType<typeof makeTools>, args: Record<strin
     result,
     body,
     section: body.integration_tools as Record<string, unknown>,
-    best: body.best_match as Record<string, unknown> | undefined,
   };
+}
+
+/** `describe` of an integration tool by its id. */
+async function describeTool(made: ReturnType<typeof makeTools>, id: string) {
+  return parseResult(
+    await made.byName.get("describe")!.handler({ kind: "integration_tool", id }, noExtra),
+  );
 }
 
 describe("integration tools — declaration", () => {
@@ -306,8 +313,8 @@ describe("integration tools — declaration", () => {
 describe("search — integration_tool kind", () => {
   const search = async (args: Record<string, unknown>, fixture: Fixture = {}) => {
     const made = makeTools(CALL_OWN, undefined, true, fixture);
-    const { result, section, best } = await searchKind(made, args);
-    return { ...made, result, payload: section, best };
+    const { result, section } = await searchKind(made, args);
+    return { ...made, result, payload: section };
   };
   const toolNames = (payload: Record<string, unknown>) =>
     (payload.items as Array<{ id: string }>).map((tool) => tool.id);
@@ -345,26 +352,22 @@ describe("search — integration_tool kind", () => {
     ]);
   });
 
-  it("carries the top result's input schema when searched, by keyword or integration", async () => {
-    for (const args of [{ query: "items" }, { integration: INTEGRATION, query: "items" }]) {
-      const { best: found } = await search(args);
-      const best = found as Record<string, unknown> & {
-        input_schema: { properties: Record<string, unknown>; additionalProperties: boolean };
-      };
-      expect(best.kind).toBe("integration_tool");
-      expect(best.id).toBe(TOOL);
-      expect(Object.keys(best.input_schema.properties).sort()).toEqual([
-        "max_response_bytes",
-        "read_as_file",
-        "requests",
-        "session_id",
-      ]);
-      expect(best.input_schema.additionalProperties).toBe(false);
-      expect(best.usage).toContain("`{ session_id, results }`");
-    }
+  it("describes a tool with its input schema and usage", async () => {
+    const found = (await describeTool(makeTools(CALL_OWN), TOOL)) as Record<string, unknown> & {
+      input_schema: { properties: Record<string, unknown>; additionalProperties: boolean };
+    };
+    expect(found.kind).toBe("integration_tool");
+    expect(found.id).toBe(TOOL);
+    expect(Object.keys(found.input_schema.properties).sort()).toEqual([
+      "max_response_bytes",
+      "read_as_file",
+      "requests",
+      "session_id",
+    ]);
+    expect(found.input_schema.additionalProperties).toBe(false);
+    expect(found.usage).toContain("`{ session_id, results }`");
     const nothing = await search({ query: "nothing-matches" });
     expect(nothing.payload).toEqual({ total: 0, items: [] });
-    expect(nothing.best).toBeUndefined();
   });
 
   it("asks the listing for the integration it searches, and ranks by keyword in listing order", async () => {
@@ -1175,12 +1178,13 @@ describe("typed tools of a remote MCP integration", () => {
   const callTool = (paths: Request[]) =>
     paths.find((req) => new URL(req.url).pathname.endsWith("/tools/call"));
 
-  it("lists a typed tool as the listing describes it, its schema in `best_match`", async () => {
+  it("lists a typed tool as the listing describes it, describe giving its schema", async () => {
     const made = makeTools(CALL_OWN, undefined, true, fixture);
-    const { section: payload, best } = await searchKind(made, {
+    const { section: payload } = await searchKind(made, {
       integration: REMOTE,
       query: "search",
     });
+    const best = await describeTool(made, "acme_docs__search");
     expect(payload.items).toEqual([
       {
         id: "acme_docs__search",
@@ -1196,22 +1200,12 @@ describe("typed tools of a remote MCP integration", () => {
     expect(made.calls).toHaveLength(0);
   });
 
-  it("never makes a tool known by name alone the best match", async () => {
-    const made = makeTools(CALL_OWN, undefined, true, {
-      listing: listingOf([
-        remoteTool({ catalog_unreadable: true, input_schema: { type: "object" } }),
-      ]),
-    });
-    const { section, best } = await searchKind(made, { integration: REMOTE, query: "search" });
-    expect(section.total).toBe(1);
-    expect(best).toBeUndefined();
-  });
-
   it("merges a tool listed in two spaces: both spaces, each connection's missing scopes", async () => {
     const other = "9b1c2d3e-0000-4000-8000-000000000002";
-    const read = (connectionId: string) => ({
-      spaceId: connectionId === CONNECTION_ID ? "spc_1" : "spc_2",
-      ctx: {
+    const spaces = [{ id: "spc_1" }, { id: "spc_2" }] as McpSpace[];
+    const contextIn = (space: McpSpace | undefined) => {
+      const connectionId = space?.id === "spc_1" ? CONNECTION_ID : other;
+      return {
         origin: "https://test.local",
         authHeaders: new Headers(),
         dispatch: (async () =>
@@ -1223,10 +1217,11 @@ describe("typed tools of a remote MCP integration", () => {
           ])()) as Dispatch,
         observe: () => {},
         runs: false,
-      },
-    });
+      };
+    };
     const found = await searchIntegrationTools(
-      [read(CONNECTION_ID), read(other)],
+      spaces,
+      contextIn,
       { tokens: [], limit: 10, cachedOnly: true },
       undefined,
     );
@@ -1415,16 +1410,13 @@ describe("typed tools of a remote MCP integration", () => {
   });
 
   it("explains missing_scopes in a typed tool's usage only", async () => {
-    const remote = await searchKind(makeTools(CALL_OWN, undefined, true, fixture), {
-      integration: REMOTE,
-      query: "search",
-    });
-    const apiCall = await searchKind(makeTools(CALL_OWN), {
-      integration: INTEGRATION,
-      query: "items",
-    });
-    const remoteUsage = remote.best!.usage as string;
-    const apiUsage = apiCall.best!.usage as string;
+    const remote = await describeTool(
+      makeTools(CALL_OWN, undefined, true, fixture),
+      "acme_docs__search",
+    );
+    const apiCall = await describeTool(makeTools(CALL_OWN), TOOL);
+    const remoteUsage = remote.usage as string;
+    const apiUsage = apiCall.usage as string;
     expect(remoteUsage).toContain("`missing_scopes`");
     expect(apiUsage).not.toContain("missing_scopes");
     expect(apiUsage).toContain("`scopes_granted_count`");
@@ -1465,11 +1457,9 @@ describe("typed tools of a remote MCP integration", () => {
 });
 
 describe("search — what an integration_tool search says it leaves out", () => {
-  /** The section, with the cross-kind `best_match` beside it. */
-  const search = async (args: Record<string, unknown>, fixture: Fixture) => {
-    const { section, best } = await searchKind(makeTools(CALL_OWN, undefined, true, fixture), args);
-    return { ...section, best_match: best } as Record<string, unknown>;
-  };
+  const search = async (args: Record<string, unknown>, fixture: Fixture) =>
+    (await searchKind(makeTools(CALL_OWN, undefined, true, fixture), args)).section;
+  const first = (payload: Record<string, unknown>) => (payload.items as { id: string }[])[0]!.id;
   const named = (name: string, description = "Acme Items.") => apiCallTool({ name, description });
 
   it("ranks a tool whose name is the query first, whatever the listing order", async () => {
@@ -1477,7 +1467,7 @@ describe("search — what an integration_tool search says it leaves out", () => 
       { query: "acme_items__folder" },
       { listing: listingOf([named("acme_items__folder_list"), named("acme_items__folder")]) },
     );
-    expect((payload.best_match as { id: string }).id).toBe("acme_items__folder");
+    expect(first(payload)).toBe("acme_items__folder");
   });
 
   it("ranks a tool whose name holds the query's words above one whose description does", async () => {
@@ -1494,7 +1484,6 @@ describe("search — what an integration_tool search says it leaves out", () => 
       "acme_items__get_workspace_hierarchy",
       "acme_items__get_custom_fields",
     ]);
-    expect((payload.best_match as { id: string }).id).toBe("acme_items__get_workspace_hierarchy");
   });
 
   it("ranks the shorter of two names holding the same words first", async () => {
@@ -1507,7 +1496,7 @@ describe("search — what an integration_tool search says it leaves out", () => 
         ]),
       },
     );
-    expect((payload.best_match as { id: string }).id).toBe("acme_items__create_task");
+    expect(first(payload)).toBe("acme_items__create_task");
   });
 
   it("says when more tools match than are shown, naming the integration filter", async () => {
@@ -1673,7 +1662,7 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(result.structuredContent).toEqual({ count: 1 });
   });
 
-  it("relays a typed tool's output schema in `best_match`", async () => {
+  it("relays a typed tool's output schema in `describe`", async () => {
     const outputSchema = { type: "object", properties: { count: { type: "number" } } };
     const withOutput: Fixture = {
       listing: listingOf([
@@ -1690,8 +1679,7 @@ describe("call_integration_tool — a result past the budget", () => {
       ]),
     };
     const made = makeTools(CALL_OWN, () => Response.json({}), true, withOutput);
-    const { best } = await searchKind(made, { query: "acme_docs__search" });
-    expect(best!.output_schema).toEqual(outputSchema);
+    expect((await describeTool(made, "acme_docs__search")).output_schema).toEqual(outputSchema);
   });
 });
 

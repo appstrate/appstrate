@@ -950,7 +950,7 @@ The catalog knows the requirement, so the MCP tool could refuse without ever tou
 
 ### 13.12 Hiding denied operations from `search`
 
-The operation index in the server instructions lists only what the caller's set grants: it is always in context, and teaching an act the token lacks only buys a refusal. A search is different — the model asking on purpose, usually on the user's behalf ("can you delete X?"). Answering "no such operation" there would be false; answering which permission it needs and that the role lacks it is true, and tells the user what to change. So `search` returns granted operation matches under `operations` (and draws `best_match` from them alone) and the rest in that section's `denied` with their caller-space `required_permissions`, ids only. An operation the row or the target space decides stays visible for the same reason: hiding it would hide the refusal's explanation.
+The operation index in the server instructions lists only what the caller's set grants: it is always in context, and teaching an act the token lacks only buys a refusal. A search is different — the model asking on purpose, usually on the user's behalf ("can you delete X?"). Answering "no such operation" there would be false; answering which permission it needs and that the role lacks it is true, and tells the user what to change. So `search` returns granted operation matches under `operations` and the rest in that section's `denied` with their caller-space `required_permissions`, ids only. An operation the row or the target space decides stays visible for the same reason: hiding it would hide the refusal's explanation.
 
 ### 13.13 Marking row-decided operations `conditional`
 

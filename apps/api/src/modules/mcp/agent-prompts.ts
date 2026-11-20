@@ -27,7 +27,7 @@ import {
   type AgentLaunchView,
 } from "./agent-prompt-render.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
-import { dispatchGet, listAgents } from "./discovery.ts";
+import { dispatchGet, listAgents, readSpaces } from "./discovery.ts";
 
 /** A space the connection reaches, as the prompts need it. */
 export interface PromptSpace {
@@ -39,18 +39,16 @@ export interface PromptSpace {
 export interface AgentPromptContext {
   origin: string;
   authHeaders: Headers;
-  dispatch: Dispatch;
+  /** A dispatch run in one of `spaces`. */
+  dispatchIn: (spaceId: string) => Dispatch;
   spaces: readonly PromptSpace[];
 }
 
-/** A `GET /api/agents` row that gets a prompt: a published agent. */
-interface ListedAgent {
+/** A published agent of a space, with the prompt name it gets. */
+interface NamedAgent {
   packageId: string;
   title: string;
   description: string;
-}
-
-interface NamedAgent extends ListedAgent {
   name: string;
   spaceId: string;
 }
@@ -62,17 +60,12 @@ const REQUEST_ARGUMENT = {
   required: false,
 };
 
-async function listPublishedAgents(
-  ctx: AgentPromptContext,
-  spaceId: string,
-): Promise<ListedAgent[]> {
-  const listed = await listAgents(ctx, { spaceId });
-  if ("refused" in listed) return [];
-  return listed.agents
-    .filter((agent) => agent.published)
-    .map(({ id, title, description }) => ({ packageId: id, title, description }))
-    .sort((a, b) => (a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0));
-}
+/** `ctx` reading in `spaceId`. */
+const readingIn = (ctx: AgentPromptContext, spaceId: string) => ({
+  origin: ctx.origin,
+  authHeaders: ctx.authHeaders,
+  dispatch: ctx.dispatchIn(spaceId),
+});
 
 /**
  * Names in space order, then package id order, over published agents only. The
@@ -81,23 +74,28 @@ async function listPublishedAgents(
  * `run-<scope>-<name>`.
  */
 async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
-  const spaces = ctx.spaces.filter((space) => space.surface.runs);
-  const listed = await Promise.all(spaces.map((space) => listPublishedAgents(ctx, space.id)));
+  const { answered } = await readSpaces(
+    ctx.spaces.filter((space) => space.surface.runs),
+    (space) => listAgents(readingIn(ctx, space.id)),
+  );
   const taken = new Set<string>();
   const named: NamedAgent[] = [];
-  spaces.forEach((space, i) => {
-    for (const agent of listed[i]!) {
-      const segment = parseScopedName(agent.packageId)!.name;
+  for (const { space, value } of answered) {
+    const published = value.agents
+      .filter((agent) => agent.published)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const { id, display_name: title, description } of published) {
+      const segment = parseScopedName(id)!.name;
       const preferred = agentPromptName(segment);
       const name = !taken.has(preferred)
         ? preferred
-        : named.some((other) => other.packageId === agent.packageId)
+        : named.some((other) => other.packageId === id)
           ? spaceCollisionPromptName(segment, space.name, taken)
-          : scopeCollisionPromptName(agent.packageId, taken);
+          : scopeCollisionPromptName(id, taken);
       taken.add(name);
-      named.push({ ...agent, name, spaceId: space.id });
+      named.push({ packageId: id, title, description, name, spaceId: space.id });
     }
-  });
+  }
   return named;
 }
 
@@ -107,9 +105,8 @@ async function resolveAgent(
   agent: NamedAgent,
 ): Promise<AgentLaunchView | null> {
   const response = await dispatchGet(
-    ctx,
+    readingIn(ctx, agent.spaceId),
     `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
-    { spaceId: agent.spaceId },
   );
   if (!response.ok) return null;
   const body = (await response.json()) as {
