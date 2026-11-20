@@ -7,8 +7,9 @@
  * endpoint (`/api/mcp/o/:org`) or a space endpoint (`/api/mcp/o/:org/s/:space`).
  * The tokens live in Better Auth's `oauth_refresh_tokens` /
  * `oauth_access_tokens`; `oauth_grant_states` holds what they cannot: the
- * revocation watermark and the last use. A grant groups every live refresh
- * token of its triple (one per authorization), and revoking it ends them all.
+ * revocation watermark, the last issuance and the last use. A grant groups
+ * every live refresh token of its triple (one per authorization), and revoking
+ * it ends them all.
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -21,13 +22,23 @@ import {
   oauthRefreshToken,
   organizations,
   spaces,
+  verification,
 } from "@appstrate/db/schema";
-import { and, arrayContains, eq, inArray, sql } from "drizzle-orm";
+import { and, arrayContains, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { parseMcpResourceUri, type McpResourceBinding } from "../../../lib/audiences.ts";
 import { logger } from "../../../lib/logger.ts";
 
 /** Lifetime of the access tokens `/oauth2/token` mints (`auth/plugins.ts`). */
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+
+/**
+ * Better Auth's own default digest for the tokens and codes it stores (SHA-256,
+ * unpadded base64url), set as its `storeTokens` so the platform can find an
+ * authorization code's row from the code a token request carries.
+ */
+export function hashOAuthToken(token: string): string {
+  return new Bun.CryptoHasher("sha256").update(token).digest("base64url");
+}
 
 /** At most one activity write per grant per interval, as for CLI sessions. */
 const LAST_USED_TOUCH_INTERVAL_MS = 60 * 1000;
@@ -101,6 +112,71 @@ export async function checkMcpGrantAndTouch(params: {
   return true;
 }
 
+// ─── Issuance ────────────────────────────────────────────────────────────────
+
+/** When an authorization code was issued, or `undefined` for a code with no row. */
+export async function authorizationCodeIssuedAt(code: string): Promise<Date | undefined> {
+  const [row] = await db
+    .select({ createdAt: verification.createdAt })
+    .from(verification)
+    .where(eq(verification.identifier, hashOAuthToken(code)))
+    .limit(1);
+  return row?.createdAt;
+}
+
+/**
+ * Called once `/oauth2/token` has minted an MCP-bound token, before the
+ * response leaves. `authorizedAt` is when the authority the request presented
+ * was established: its code's issuance, or the request's own start for a
+ * refresh. The issuance is recorded, so a grant without a refresh token is
+ * listed from its first second. The response is refused when the grant was
+ * revoked since `authorizedAt`: a code given before the revocation, or a
+ * refresh that read its token before the revocation deleted it. The refused
+ * response's refresh token loses the resource.
+ *
+ * The upsert takes the grant's row lock, which `revokeMcpGrant` holds for its
+ * whole transaction, so the watermark it returns is that of any revocation
+ * running at the same time.
+ */
+export async function admitMcpTokenIssuance(params: {
+  userId: string;
+  clientId: string;
+  binding: McpResourceBinding & { resource: string };
+  authorizedAt: Date;
+  refreshToken: string | undefined;
+}): Promise<boolean> {
+  const { userId, clientId, binding, authorizedAt, refreshToken } = params;
+  const revokedSince = sql`${oauthGrantState.tokensValidAfter} >= ${authorizedAt.toISOString()}::timestamptz`;
+  const [state] = await db
+    .insert(oauthGrantState)
+    .values({
+      userId,
+      clientId,
+      resource: binding.resource,
+      orgId: binding.orgId,
+      spaceId: binding.spaceId ?? null,
+      lastIssuedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
+      // A refused issuance is not one: the last issuance stays as it was.
+      set: {
+        lastIssuedAt: sql`case when ${revokedSince} then ${oauthGrantState.lastIssuedAt} else excluded.last_issued_at end`,
+      },
+    })
+    .returning({ tokensValidAfter: oauthGrantState.tokensValidAfter });
+  if (!state?.tokensValidAfter || state.tokensValidAfter < authorizedAt) return true;
+  if (refreshToken) {
+    await withdrawResource(
+      db,
+      oauthRefreshToken,
+      eq(oauthRefreshToken.token, hashOAuthToken(refreshToken)),
+      binding.resource,
+    );
+  }
+  return false;
+}
+
 // ─── Listing ─────────────────────────────────────────────────────────────────
 
 /**
@@ -161,9 +237,9 @@ interface Candidate {
 
 /**
  * A grant is listed while it holds a live refresh token, or while an access
- * token minted without one (no `offline_access`) may still be in use: its last
- * use is within an access token's lifetime and after its watermark. A grant
- * whose org or space no longer exists is not listed.
+ * token issued without one (no `offline_access`) may still be valid: its last
+ * issuance is within an access token's lifetime and after its watermark. A
+ * grant whose org or space no longer exists is not listed.
  */
 async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
   if ("userIds" in scope && scope.userIds.length === 0) return [];
@@ -239,9 +315,9 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
   const states = new Map(stateRows.map((s) => [mcpGrantId(s.userId, s.clientId, s.resource), s]));
   const accessTokenCutoff = now.getTime() - ACCESS_TOKEN_TTL_SECONDS * 1000;
   for (const [id, state] of states) {
-    if (candidates.has(id) || !state.lastUsedAt) continue;
-    if (state.lastUsedAt.getTime() < accessTokenCutoff) continue;
-    if (state.tokensValidAfter && state.tokensValidAfter >= state.lastUsedAt) continue;
+    if (candidates.has(id) || !state.lastIssuedAt) continue;
+    if (state.lastIssuedAt.getTime() <= accessTokenCutoff) continue;
+    if (state.tokensValidAfter && state.tokensValidAfter >= state.lastIssuedAt) continue;
     add(state.userId, state.clientId, state.resource, state.createdAt);
   }
   if (candidates.size === 0) return [];
@@ -352,33 +428,48 @@ function hostOf(url: string): string | null {
 
 // ─── Revocation ──────────────────────────────────────────────────────────────
 
+type ResourceBoundTable = typeof oauthRefreshToken | typeof oauthAccessToken | typeof oauthConsent;
+type Executor = Pick<typeof db, "delete" | "update">;
+
 /**
- * End a grant: delete its tokens and the user's consent to the client for its
- * resource (reconnecting shows the consent screen again), and raise its
- * watermark so an access token already issued is refused on its next request.
+ * Take `resource` off the rows `where` selects. One authorization may cover
+ * several MCP endpoints (the client asked for several at `/oauth2/authorize`,
+ * and each token request then picks one): a row left with no resource is
+ * deleted, one covering others keeps them.
  *
- * The refresh tokens are deleted, not marked revoked: Better Auth treats a
- * revoked refresh token presented again as a stolen one and invalidates every
- * refresh token of the (client, user) pair, which would end the client's other
- * grants too. Their access-token rows go with them (`refresh_id` cascade).
+ * Rows are deleted, never marked revoked: Better Auth treats a revoked refresh
+ * token presented again as a stolen one and invalidates every refresh token of
+ * the (client, user) pair, which would end the client's other grants too.
+ */
+async function withdrawResource(
+  executor: Executor,
+  table: ResourceBoundTable,
+  where: SQL | undefined,
+  resource: string,
+): Promise<void> {
+  const covering = and(where, arrayContains(table.resources, [resource]));
+  const remaining = sql`array_remove(${table.resources}, ${resource})`;
+  await executor.delete(table).where(and(covering, sql`cardinality(${remaining}) = 0`));
+  await executor
+    .update(table as typeof oauthRefreshToken)
+    .set({ resources: remaining })
+    .where(covering);
+}
+
+/**
+ * End a grant: withdraw its resource from its tokens and from the user's
+ * consent to the client (reconnecting shows the consent screen again), and
+ * raise its watermark so an access token already issued is refused on its next
+ * request. Access-token rows of a deleted refresh token go with it
+ * (`refresh_id` cascade).
+ *
+ * The grant's row is locked first and its watermark set last, after the
+ * deletes: a token request that read a code or refresh token before them began
+ * before the watermark, and `admitMcpTokenIssuance` refuses its response.
  */
 export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
   const { userId, clientId, resource } = grant;
-  const ofGrant = <
-    T extends typeof oauthRefreshToken | typeof oauthAccessToken | typeof oauthConsent,
-  >(
-    table: T,
-  ) =>
-    and(
-      eq(table.userId, userId),
-      eq(table.clientId, clientId),
-      arrayContains(table.resources, [resource]),
-    );
   await db.transaction(async (tx) => {
-    await tx.delete(oauthRefreshToken).where(ofGrant(oauthRefreshToken));
-    await tx.delete(oauthAccessToken).where(ofGrant(oauthAccessToken));
-    await tx.delete(oauthConsent).where(ofGrant(oauthConsent));
-    const now = new Date();
     await tx
       .insert(oauthGrantState)
       .values({
@@ -387,11 +478,29 @@ export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
         resource,
         orgId: grant.orgId,
         spaceId: grant.spaceId,
-        tokensValidAfter: now,
+        tokensValidAfter: new Date(),
       })
       .onConflictDoUpdate({
         target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
-        set: { tokensValidAfter: now },
+        set: { tokensValidAfter: new Date() },
       });
+    for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {
+      await withdrawResource(
+        tx,
+        table,
+        and(eq(table.userId, userId), eq(table.clientId, clientId)),
+        resource,
+      );
+    }
+    await tx
+      .update(oauthGrantState)
+      .set({ tokensValidAfter: new Date() })
+      .where(
+        and(
+          eq(oauthGrantState.userId, userId),
+          eq(oauthGrantState.clientId, clientId),
+          eq(oauthGrantState.resource, resource),
+        ),
+      );
   });
 }

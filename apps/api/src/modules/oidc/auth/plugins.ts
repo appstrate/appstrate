@@ -67,7 +67,7 @@ import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { accessGrantsPlugin } from "./access-grants-plugin.ts";
-import { ACCESS_TOKEN_TTL_SECONDS } from "../services/mcp-grants.ts";
+import { ACCESS_TOKEN_TTL_SECONDS, hashOAuthToken } from "../services/mcp-grants.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
 
@@ -220,6 +220,9 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // first restores TS2353. Do not remove.
     oauthProvider({
       accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      // The provider's own default digest, stated here so the platform can
+      // find an authorization code's row by the code a token request carries.
+      storeTokens: { hash: hashOAuthToken },
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
       // No session manages OAuth clients through the plugin's client CRUD

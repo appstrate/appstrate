@@ -467,6 +467,7 @@ export const oauthGrantState = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
     tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }),
+    lastIssuedAt: timestamp("last_issued_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     lastUsedIp: text("last_used_ip"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

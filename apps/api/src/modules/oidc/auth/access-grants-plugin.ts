@@ -12,9 +12,13 @@
  * the platform auth pipeline (API keys, OAuth bearers, the MCP endpoint's
  * in-process dispatch) never reaches them, and `getSessionFromCtx` resolves a
  * cookie session or nothing.
+ *
+ * It also hooks `/oauth2/token`, where an MCP grant's tokens are issued: each
+ * issuance is recorded, and one whose authorization a revocation has ended
+ * since is refused (`admitMcpTokenIssuance`).
  */
 
-import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
+import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { APIError } from "better-auth/api";
 import * as z from "zod";
 import { listResponse } from "@appstrate/core/list-query";
@@ -26,7 +30,13 @@ import {
   revokeAccessGrantForUser,
   revokeAllAccessGrantsForUser,
 } from "../services/access-grants.ts";
-import type { McpGrant } from "../services/mcp-grants.ts";
+import {
+  admitMcpTokenIssuance,
+  authorizationCodeIssuedAt,
+  type McpGrant,
+} from "../services/mcp-grants.ts";
+import { verifyEndUserAccessToken } from "../services/enduser-token.ts";
+import { mcpBindingFromAudiences } from "../../../lib/audiences.ts";
 
 type SessionCtx = Parameters<typeof getSessionFromCtx>[0];
 
@@ -63,9 +73,68 @@ async function auditMcpRevocations(
   );
 }
 
+/**
+ * When the authority a `/oauth2/token` request presents was established: its
+ * code's issuance for `authorization_code`, the request's own start for
+ * `refresh_token` (the refresh token is read after it). Absent for any other
+ * grant, or a code with no row (the provider refuses that request itself).
+ * Keyed by the request, the one object both hooks of a call share.
+ */
+const authorizedAtByRequest = new WeakMap<Request, Date>();
+
+type TokenHookCtx = { request?: Request; body?: unknown; context: unknown };
+
+const isTokenEndpoint = (ctx: { path?: string }) => ctx.path === "/oauth2/token";
+
+async function captureAuthorizedAt(ctx: TokenHookCtx): Promise<void> {
+  if (!ctx.request) return;
+  const body = (ctx.body ?? {}) as { grant_type?: unknown; code?: unknown };
+  if (body.grant_type === "refresh_token") {
+    authorizedAtByRequest.set(ctx.request, new Date());
+  } else if (body.grant_type === "authorization_code" && typeof body.code === "string") {
+    const issuedAt = await authorizationCodeIssuedAt(body.code);
+    if (issuedAt) authorizedAtByRequest.set(ctx.request, issuedAt);
+  }
+}
+
+async function admitIssuedTokens(ctx: TokenHookCtx): Promise<void> {
+  const returned = (ctx.context as { returned?: unknown }).returned as
+    { access_token?: unknown; refresh_token?: unknown } | undefined;
+  if (typeof returned?.access_token !== "string") return;
+  const claims = await verifyEndUserAccessToken(returned.access_token);
+  const binding = claims ? mcpBindingFromAudiences(claims.audiences) : undefined;
+  if (!claims?.clientId || !binding) return;
+  // An issuance with no instant to judge it by is refused, never let through.
+  const authorizedAt = ctx.request ? authorizedAtByRequest.get(ctx.request) : undefined;
+  const admitted =
+    authorizedAt !== undefined &&
+    (await admitMcpTokenIssuance({
+      userId: claims.authUserId,
+      clientId: claims.clientId,
+      binding,
+      authorizedAt,
+      refreshToken: typeof returned.refresh_token === "string" ? returned.refresh_token : undefined,
+    }));
+  if (!admitted) {
+    logger.info("oidc: token issuance refused — the MCP grant was revoked since", {
+      module: "oidc",
+      userId: claims.authUserId,
+      clientId: claims.clientId,
+    });
+    throw new APIError("BAD_REQUEST", {
+      error: "invalid_grant",
+      error_description: "This authorization was revoked.",
+    });
+  }
+}
+
 export function accessGrantsPlugin() {
   return {
     id: "appstrate-access-grants",
+    hooks: {
+      before: [{ matcher: isTokenEndpoint, handler: createAuthMiddleware(captureAuthorizedAt) }],
+      after: [{ matcher: isTokenEndpoint, handler: createAuthMiddleware(admitIssuedTokens) }],
+    },
     endpoints: {
       listAccessGrants: createAuthEndpoint(
         "/access-grants",

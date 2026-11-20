@@ -5,6 +5,7 @@ CREATE TABLE "oauth_grant_states" (
 	"org_id" uuid NOT NULL,
 	"space_id" text,
 	"tokens_valid_after" timestamp with time zone,
+	"last_issued_at" timestamp with time zone,
 	"last_used_at" timestamp with time zone,
 	"last_used_ip" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,

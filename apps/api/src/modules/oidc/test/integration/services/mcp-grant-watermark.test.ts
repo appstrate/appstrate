@@ -6,13 +6,14 @@
  * until it expires. The grant's revocation watermark closes that window: a JWT
  * issued at or before it is refused on the next request, and a token minted
  * after it (a new authorization) is accepted. The same check records the
- * grant's last use.
+ * grant's last use; `/oauth2/token` records its issuance, and refuses one whose
+ * authorization a revocation overtook.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { and, eq, like } from "drizzle-orm";
 import { decodeJwt } from "jose";
-import { oauthGrantState, oauthResource } from "@appstrate/db/schema";
+import { oauthGrantState, oauthRefreshToken, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
@@ -21,6 +22,7 @@ import { MCP_ACCEPT } from "../../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri } from "../../../../../lib/audiences.ts";
 import { overrideJwks } from "../../../services/enduser-token.ts";
+import { admitMcpTokenIssuance } from "../../../services/mcp-grants.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { authorizationCodeFlow } from "../../helpers/authorization-code-flow.ts";
 import mcpModule from "../../../../mcp/index.ts";
@@ -95,6 +97,14 @@ describe("MCP access grant watermark", () => {
     return String(token.access_token);
   }
 
+  /** Issuance wrote the grant's row: move its watermark. */
+  async function setWatermark(clientId: string, at: Date) {
+    await db
+      .update(oauthGrantState)
+      .set({ tokensValidAfter: at })
+      .where(and(eq(oauthGrantState.clientId, clientId), eq(oauthGrantState.userId, ctx.user.id)));
+  }
+
   async function stateOf(clientId: string) {
     const [row] = await db
       .select()
@@ -102,6 +112,45 @@ describe("MCP access grant watermark", () => {
       .where(and(eq(oauthGrantState.clientId, clientId), eq(oauthGrantState.userId, ctx.user.id)));
     return row;
   }
+
+  it("records an issuance before any use", async () => {
+    const clientId = await registerClient();
+    await mint(clientId);
+    const row = await stateOf(clientId);
+    expect(row?.lastIssuedAt).toBeInstanceOf(Date);
+    expect(row?.lastUsedAt).toBeNull();
+  });
+
+  it("refuses an issuance whose authorization a revocation overtook", async () => {
+    // A refresh that read its token before the revocation deleted it: the
+    // response is refused, and the refresh token it carried is withdrawn.
+    const clientId = await registerClient();
+    const { token } = await authorizationCodeFlow(app, {
+      cookie: ctx.cookie,
+      clientId,
+      redirectUri: REDIRECT_URI,
+      scope: "openid offline_access mcp:read mcp:invoke",
+      resource,
+    });
+    const issuedAt = (await stateOf(clientId))!.lastIssuedAt;
+    const startedAt = new Date(Date.now() - 50);
+    await setWatermark(clientId, new Date());
+
+    const admitted = await admitMcpTokenIssuance({
+      userId: ctx.user.id,
+      clientId,
+      binding: { orgId: ctx.orgId, resource },
+      authorizedAt: startedAt,
+      refreshToken: String(token.refresh_token),
+    });
+    expect(admitted).toBe(false);
+    const live = await db
+      .select({ id: oauthRefreshToken.id })
+      .from(oauthRefreshToken)
+      .where(eq(oauthRefreshToken.clientId, clientId));
+    expect(live).toHaveLength(0);
+    expect((await stateOf(clientId))!.lastIssuedAt).toEqual(issuedAt);
+  });
 
   it("records the grant's first use with its org", async () => {
     const clientId = await registerClient();
@@ -122,10 +171,7 @@ describe("MCP access grant watermark", () => {
     const bearer = await mint(clientId);
     expect((await mcpInitialize(ctx.orgId, bearer)).status).toBe(200);
 
-    await db
-      .update(oauthGrantState)
-      .set({ tokensValidAfter: new Date(Date.now() + 1000) })
-      .where(eq(oauthGrantState.clientId, clientId));
+    await setWatermark(clientId, new Date(Date.now() + 1000));
 
     expect((await mcpInitialize(ctx.orgId, bearer)).status).toBe(401);
   });
@@ -134,26 +180,14 @@ describe("MCP access grant watermark", () => {
     const clientId = await registerClient();
     const bearer = await mint(clientId);
     const { iat } = decodeJwt(bearer);
-    await db.insert(oauthGrantState).values({
-      userId: ctx.user.id,
-      clientId,
-      resource,
-      orgId: ctx.orgId,
-      tokensValidAfter: new Date(iat! * 1000 + 999),
-    });
+    await setWatermark(clientId, new Date(iat! * 1000 + 999));
     expect((await mcpInitialize(ctx.orgId, bearer)).status).toBe(401);
   });
 
   it("accepts a token minted after the watermark", async () => {
     const clientId = await registerClient();
     await mint(clientId);
-    await db.insert(oauthGrantState).values({
-      userId: ctx.user.id,
-      clientId,
-      resource,
-      orgId: ctx.orgId,
-      tokensValidAfter: new Date(Date.now() - 5000),
-    });
+    await setWatermark(clientId, new Date(Date.now() - 5000));
     const fresh = await mint(clientId);
     expect((await mcpInitialize(ctx.orgId, fresh)).status).toBe(200);
   });
@@ -163,13 +197,7 @@ describe("MCP access grant watermark", () => {
     const kept = await registerClient();
     const revokedBearer = await mint(revoked);
     const keptBearer = await mint(kept);
-    await db.insert(oauthGrantState).values({
-      userId: ctx.user.id,
-      clientId: revoked,
-      resource,
-      orgId: ctx.orgId,
-      tokensValidAfter: new Date(Date.now() + 1000),
-    });
+    await setWatermark(revoked, new Date(Date.now() + 1000));
     expect((await mcpInitialize(ctx.orgId, revokedBearer)).status).toBe(401);
     expect((await mcpInitialize(ctx.orgId, keptBearer)).status).toBe(200);
   });
