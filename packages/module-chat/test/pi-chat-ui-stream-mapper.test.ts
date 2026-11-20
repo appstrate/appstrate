@@ -599,6 +599,27 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
     ).toBe("s2");
   });
 
+  it("counts a summary's tokens in the turn's usage, never as the context measure", () => {
+    const summarized: AgentSessionEvent = {
+      type: "compaction_end",
+      result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, usage: usage(7_000, 400) },
+      aborted: false,
+    };
+    const aborted: AgentSessionEvent = {
+      type: "compaction_end",
+      result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, usage: usage(9, 9) },
+      aborted: true,
+    };
+    const result = run([
+      start,
+      end("stop", usage(1_000, 100)),
+      summarized,
+      aborted,
+    ]).mapper.result();
+    expect(result.usage).toMatchObject({ input_tokens: 8_000, output_tokens: 500 });
+    expect(result.lastSettledUsage).toEqual(usage(1_000, 100));
+  });
+
   it("ignores an aborted or failed summary", () => {
     const aborted: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: true };
     const failed: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: false };

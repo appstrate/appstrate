@@ -162,36 +162,37 @@ De bout en bout : modèle d'organisation à petite fenêtre pour franchir le seu
 Le premier résume une fois. Le second ne fait aucun appel de résumé, et sa requête commence
 par le résumé du premier. Vérifier aussi le rechargement de la page et la reprise de flux.
 
-## Lot 2 : usage compté par appel
+## Lot 2 : usage compté par appel (fait)
 
-- `ui-stream-mapper.ts` : ajouter `result.usage` de `compaction_end` au cumul du tour
-  (`addRequestUsage`), sans toucher `lastSettledUsage` (un résumé n'est pas la mesure du
-  contexte).
-- `engine.ts` : le bloc `recordUsage` passe dans un chemin commun aux sorties nominale et en
-  échec, et n'écrit que si le cumul est non nul.
-- Vérifier d'abord que le mode proxy ne compte pas déjà le résumé par ailleurs, pour ne pas le
-  compter deux fois : le bloc est gardé par `metering.kind === "inline"`, à confirmer par un
-  test dans chaque mode.
-- Écriture non attendue de la ligne `llm_usage` : hors lot. La corriger demande de décider si
-  la fin de flux attend le registre, ce qui retarde le dernier octet.
+- `ui-stream-mapper.ts` : l'usage de `compaction_end.result.usage` (non interrompu) s'ajoute au
+  cumul du tour (`addRequestUsage`) ; `lastSettledUsage` n'y est pas touché (un résumé n'est pas
+  la mesure du contexte). Même règle que le runner (`pi-runner.ts`, `compaction_end`).
+- `engine.ts` : l'écriture inline (`recordUsage`) passe dans une fermeture appelée une fois, depuis
+  le `finally`, après le détachement des événements : sortie nominale, échec fournisseur, arrêt,
+  exception relancée. Rien n'est écrit quand le cumul est nul.
+- Pas de double compte : une liaison inline (`createPiOAuthModelBinding`) appelle le fournisseur
+  sur `model.baseUrl` et ne passe jamais par llm-proxy ; seule la liaison proxy, qui n'écrit rien
+  elle-même, y passe. L'appel de résumé emprunte la même fonction de flux que les appels normaux,
+  donc llm-proxy le compte déjà en mode proxy.
+- Les deux modes donnent maintenant au panneau Infos (`loadSessionUsage`, somme des lignes
+  `llm_usage` de la conversation) le même total, résumé compris.
+- Ligne inline écrite après le signal de la conversation : `recordTurnUsage` (`chat-stream.ts`)
+  écrit sans retenir le flux, puis émet `chat_session_update` (`notifySessionUpdate`) une fois la
+  ligne enregistrée, pour une conversation persistée seulement. Le détail (`loadSessionUsage`) est
+  relu sur ce signal. Limite : si l'écriture directe échoue et part dans la file de reprise, le
+  signal précède la ligne.
+- Mode proxy, non modifié : llm-proxy écrit la ligne depuis l'écoute SSE, hors du flux client, à
+  la fin de la réponse amont ; le signal de persistance vient après la fermeture du tour (drain de
+  persistance, fermeture MCP comprise). L'ordre n'est donc pas garanti mais la ligne précède en
+  pratique. Un signal là-bas partirait à chaque appel (relecture du détail en plein tour) et
+  ferait émettre un canal du module de chat par le cœur de l'API.
 
-Tests : tour en échec après un appel abouti → une ligne ; tour avec résumé → les tokens du
-résumé sont dans la ligne ; même total dans les deux modes de facturation.
+## Lot 3 : réserve de réponse (décidé)
 
-## Lot 3 : réserve de réponse
-
-Décision à prendre avant d'écrire du code.
-
-- Vérifier quel `max_tokens` part réellement dans la requête pour un modèle à 384k de sortie.
-  S'il vaut 384k, baisser la seule réserve fait refuser par le fournisseur toute requête dont
-  l'entrée dépasse `fenêtre - 384k`. La réserve et le `max_tokens` envoyé doivent alors baisser
-  ensemble.
-- Vérifier le plafond de sortie de l'appel de résumé de Pi (`generateSummary` le dérive de
-  `reserveTokens`). Une réserve de 384k autoriserait un résumé de plusieurs centaines de
-  milliers de tokens.
-- `deriveResponseReserveTokens` est partagé avec le sidecar des runs
-  (`runtime-pi/sidecar/token-budget.ts`) : tout changement touche les deux surfaces, qui
-  doivent rester d'accord.
+Plafond absolu de 64k (`RESERVE_CEILING_TOKENS`) sur la réserve. pi-ai borne le `max_tokens`
+envoyé à `fenêtre − entrée estimée − marge`, avec un plancher d'environ 32k, sur toutes les formes
+d'API : la réserve ne protège plus d'un refus 400 du fournisseur. La sortie de l'appel de résumé
+n'est pas dimensionnée par la réserve.
 
 ## Ordre et découpage
 

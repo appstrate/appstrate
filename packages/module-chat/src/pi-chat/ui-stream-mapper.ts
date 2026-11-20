@@ -247,6 +247,9 @@ export class PiChatUiStreamMapper {
         // A later summary in the same turn starts from the earlier one, so it replaces it.
         const compaction = e.aborted ? undefined : compactionOf(e.result);
         if (compaction) this.compaction = compaction;
+        // The summary is a billed call that emits no `message_end`; it is not a context measure.
+        const usage = e.aborted ? undefined : (e.result as { usage?: PiUsage } | undefined)?.usage;
+        if (usage) this.accUsage = addRequestUsage(this.accUsage, usage, this.cost);
         return [];
       }
       default:

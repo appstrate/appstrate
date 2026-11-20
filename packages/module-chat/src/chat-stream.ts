@@ -26,12 +26,13 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
+import { notifySessionUpdate } from "./realtime.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin } from "./self.ts";
-import type { InjectedSkills } from "@appstrate/core/chat-contract";
+import type { ChatUsageRecord, InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import {
   materializeUserAttachments,
@@ -268,6 +269,25 @@ export async function persistClaimedUserMessage(
     await clearActiveStream(sessionId, streamId).catch(() => {});
     throw err;
   }
+}
+
+/**
+ * Write a turn's usage row without holding the stream, then signal its conversation: the row
+ * lands after the turn's own persistence signal, and the detail reads the ledger.
+ */
+export function recordTurnUsage(
+  record: ChatUsageRecord,
+  write: (record: ChatUsageRecord) => Promise<void>,
+  notify: typeof notifySessionUpdate = notifySessionUpdate,
+): void {
+  void write(record).then(
+    () => {
+      if (record.chatSessionId) notify(record.chatSessionId, record.orgId, record.userId);
+    },
+    (err: unknown) => {
+      logger.warn("chat usage metering failed", { err: String(err) });
+    },
+  );
 }
 
 export async function handleChatStream(
@@ -908,9 +928,7 @@ export async function handleChatStream(
             subscription.subscription && "model" in subscription
               ? subscription.model.credentialId
               : null;
-          void deps.recordChatUsage({ ...record, credentialId }).catch((err) => {
-            logger.warn("chat usage metering failed", { err: String(err) });
-          });
+          recordTurnUsage({ ...record, credentialId }, deps.recordChatUsage);
         },
       }),
     );

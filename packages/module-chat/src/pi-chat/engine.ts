@@ -333,6 +333,37 @@ export function runPiChat(input: PiChatInput): Response {
       let anchors: TurnAnchors | undefined;
       /** Detach handle for the Pi event subscription — released in `finally`. */
       let unsubscribe: (() => void) | undefined;
+      // Meter the turn (fire-and-forget by the caller): the token counts + the model's catalog
+      // rates, priced by the platform seam with the shared formula. Called once, from `finally`, so
+      // a turn that fails after settled calls or a summary still pays for them; a turn that spent
+      // nothing writes nothing.
+      const meterTurn = (): void => {
+        const { metering } = modelBinding;
+        if (metering.kind !== "inline") return;
+        const { usage } = mapper.result();
+        const tokens = [
+          usage.input_tokens ?? 0,
+          usage.output_tokens ?? 0,
+          usage.cache_read_input_tokens ?? 0,
+          usage.cache_creation_input_tokens ?? 0,
+        ];
+        if (tokens.every((count) => count === 0)) return;
+        input.recordUsage({
+          orgId: input.orgId,
+          userId: input.userId,
+          chatSessionId: input.chatSessionId,
+          presetId: input.presetId,
+          modelId: model.id,
+          apiShape: model.api as ChatUsageRecord["apiShape"],
+          inputTokens: tokens[0]!,
+          outputTokens: tokens[1]!,
+          cacheReadTokens: tokens[2]!,
+          cacheWriteTokens: tokens[3]!,
+          ...(usage.tiers ? { tiers: usage.tiers } : {}),
+          cost: metering.cost,
+          durationMs: Date.now() - startedAt,
+        });
+      };
       try {
         // Open the stream NOW, before any of the turn's construction work. This
         // chunk carries nothing but a message id, and it is what flips the
@@ -724,28 +755,6 @@ export function runPiChat(input: PiChatInput): Response {
           });
         }
         for (const chunk of closing.chunks) write(chunk);
-
-        // Meter the turn (fire-and-forget by the caller). We hand the platform
-        // seam the token counts + the model's catalog rates and let it compute
-        // the equivalent cost with the shared formula (consistent with the
-        // proxy/runner paths) rather than forwarding pi-ai's own `meta.costUsd`.
-        if (modelBinding.metering.kind === "inline") {
-          input.recordUsage({
-            orgId: input.orgId,
-            userId: input.userId,
-            chatSessionId: input.chatSessionId,
-            presetId: input.presetId,
-            modelId: model.id,
-            apiShape: model.api as ChatUsageRecord["apiShape"],
-            inputTokens: meta.usage.input_tokens ?? 0,
-            outputTokens: meta.usage.output_tokens ?? 0,
-            cacheReadTokens: meta.usage.cache_read_input_tokens ?? 0,
-            cacheWriteTokens: meta.usage.cache_creation_input_tokens ?? 0,
-            ...(meta.usage.tiers ? { tiers: meta.usage.tiers } : {}),
-            cost: modelBinding.metering.cost,
-            durationMs: Date.now() - startedAt,
-          });
-        }
       } catch (err) {
         // `createUIMessageStream` turns an escaped exception into a transient
         // error chunk. Without a start + finish boundary there is no assistant
@@ -782,6 +791,7 @@ export function runPiChat(input: PiChatInput): Response {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
         unsubscribe?.();
+        meterTurn();
         // Once per turn, on every exit, so a turn that died in construction
         // still reports how far it got (`null` past that point).
         logger.info("chat turn construction", {

@@ -54,9 +54,20 @@ const mcpFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return Response.json({ jsonrpc: "2.0", id: msg.id, result }, { headers });
 }) as typeof fetch;
 
-/** A session whose prompt replays one assistant message per `usage` entry. */
+type Usage = { input: number; output: number; cacheRead: number; cacheWrite: number };
+const piUsage = (usage: Usage) => ({
+  ...usage,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+});
+
+/**
+ * A session whose prompt replays one assistant message per `usage` entry, then optionally a
+ * summary billed `summarized`, then optionally throws.
+ */
 function replaySession(
-  usages: Array<{ input: number; output: number; cacheRead: number; cacheWrite: number }>,
+  usages: Usage[],
+  { summarized, throws }: { summarized?: Usage; throws?: boolean } = {},
 ): PiChatSession {
   let listener: (event: unknown) => void = () => {};
   return {
@@ -71,19 +82,101 @@ function replaySession(
         const message = {
           role: "assistant",
           stopReason: i < usages.length - 1 ? "toolUse" : "stop",
-          usage: {
-            ...usage,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
+          usage: piUsage(usage),
         };
         listener({ type: "message_start", message });
         listener({ type: "message_end", message });
       });
+      if (summarized) {
+        listener({
+          type: "compaction_end",
+          reason: "threshold",
+          result: {
+            summary: "Résumé",
+            firstKeptEntryId: "entry_live",
+            tokensBefore: 150_000,
+            usage: piUsage(summarized),
+          },
+          aborted: false,
+        });
+      }
+      if (throws) throw new Error("tool host crashed");
     },
     abort: async () => {},
   };
 }
+
+const BINDING = createPiOAuthModelBinding(
+  {
+    modelId: "claude-sonnet-4-5",
+    apiShape: "anthropic-messages",
+    baseUrl: "https://api.anthropic.com",
+    accessToken: "oauth-secret-in-memory",
+    credentialId: "cred-test",
+    input: ["text"],
+    contextWindow: 200_000,
+    maxTokens: 16_384,
+    reasoning: false,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  { pi_provider: "anthropic", pi_dialect: null },
+);
+
+/** The rows a turn driven by `session` records. */
+async function recordedBy(
+  session: PiChatSession,
+): Promise<Omit<ChatUsageRecord, "credentialId">[]> {
+  const recorded: Omit<ChatUsageRecord, "credentialId">[] = [];
+  const res = runPiChat({
+    slot: { release() {} },
+    modelBinding: BINDING,
+    presetId: "preset_metering",
+    modelLabel: "Metering preset",
+    orgId: "org_metering",
+    userId: "user_metering",
+    chatSessionId: null,
+    messages: [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "bonjour" }] },
+    ] as UIMessage[],
+    system: "You are a helpful assistant.",
+    generation: {},
+    platformMcp: { url: MCP_URL, headers: {}, organization: ORGANIZATION, fetch: mcpFetch },
+    abortSignal: new AbortController().signal,
+    onError: (error) => String(error),
+    recordUsage: (record) => recorded.push(record),
+    createSession: async () => ({ session }),
+  });
+  await res.text();
+  return recorded;
+}
+
+const CALL = { input: 1_200, output: 300, cacheRead: 4_000, cacheWrite: 0 };
+
+describe("inline-metered chat turn, on every exit", () => {
+  it("records the settled calls of a turn that then threw, once", async () => {
+    const recorded = await recordedBy(replaySession([CALL], { throws: true }));
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      inputTokens: 1_200,
+      outputTokens: 300,
+      cacheReadTokens: 4_000,
+    });
+  }, 20_000);
+
+  it("records the summary's tokens with the turn's calls", async () => {
+    const recorded = await recordedBy(
+      replaySession([CALL], {
+        summarized: { input: 50_000, output: 2_000, cacheRead: 0, cacheWrite: 0 },
+      }),
+    );
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ inputTokens: 51_200, outputTokens: 2_300 });
+  }, 20_000);
+
+  it("records nothing for a turn that spent nothing", async () => {
+    expect(await recordedBy(replaySession([], { throws: true }))).toEqual([]);
+  }, 20_000);
+});
 
 describe("inline-metered chat turn", () => {
   it("records the turn once, with the band of the call over the 100k tier", async () => {
@@ -102,7 +195,7 @@ describe("inline-metered chat turn", () => {
       },
       { pi_provider: "anthropic", pi_dialect: null },
     );
-    const recorded: ChatUsageRecord[] = [];
+    const recorded: Omit<ChatUsageRecord, "credentialId">[] = [];
     const session = replaySession([
       // 20k prompt: base rate.
       { input: 20_000, output: 1_000, cacheRead: 0, cacheWrite: 0 },
