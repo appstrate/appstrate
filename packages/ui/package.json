@@ -40,6 +40,7 @@
     "./components/model-picker-labels": "./src/components/model-picker-labels.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
+    "./context-window": "./src/context-window.ts",
     "./identity-colors": "./src/identity-colors.ts",
     "./keyset-paging": "./src/keyset-paging.ts",
     "./lucide-names": "./src/lucide-names.ts",

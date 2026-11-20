@@ -52,7 +52,7 @@ import {
   DEFAULT_MODEL_REASONING_LEVEL,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
+import { ChatTurnDeadlineError, closePiTurn, turnContextOf } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
@@ -318,6 +318,8 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      /** The sizing handed to Pi and stamped on the turn's context, and Pi's measure; set with the model. */
+      let contextMeasure: Parameters<typeof turnContextOf>[1];
       /** Detach handle for the Pi event subscription — released in `finally`. */
       let unsubscribe: (() => void) | undefined;
       try {
@@ -407,6 +409,8 @@ export function runPiChat(input: PiChatInput): Response {
         } = sdk;
 
         const piModel = model;
+        const sizing = derivePiCompactionSettings(piModel);
+        contextMeasure = { sizing, contextTokens: sdk.calculateContextTokens };
         const requestedThinkingLevel =
           input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {
@@ -556,7 +560,7 @@ export function runPiChat(input: PiChatInput): Response {
             resourceLoader,
             sessionManager,
             settingsManager: SettingsManager.inMemory({
-              compaction: derivePiCompactionSettings(piModel).compaction,
+              compaction: sizing.compaction,
               thinkingBudgets,
               // The chat only passes bounded, supported rasters. Do not decode them in the API.
               images: { autoResize: false },
@@ -679,6 +683,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelId: input.presetId,
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
+          ...turnContextOf(meta, contextMeasure),
         });
         // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
@@ -746,6 +751,7 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
+            ...turnContextOf(mapper.result(), contextMeasure),
           });
           logger.error("Pi chat turn failed", {
             err: String(err),

@@ -549,3 +549,50 @@ describe("the space a tool call is stamped with", () => {
     expect("providerMetadata" in available({ space_id: "spc_x" }, new Set(["spc_o"]))).toBe(false);
   });
 });
+
+describe("PiChatUiStreamMapper — the last settled call", () => {
+  const usage = (input: number, output: number, cacheRead = 0) => ({
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: ZERO_COST,
+  });
+  const start: AgentSessionEvent = { type: "message_start", message: { role: "assistant" } };
+  const end = (stopReason: string, u: ReturnType<typeof usage>): AgentSessionEvent => ({
+    type: "message_end",
+    message: { role: "assistant", stopReason, usage: u },
+  });
+  const compaction: AgentSessionEvent = { type: "compaction_end", result: {}, aborted: false };
+
+  it("keeps the last call's usage, which the turn's summed usage cannot give back", () => {
+    const { mapper } = run([
+      end("toolUse", usage(1_000, 200, 9_000)),
+      end("stop", usage(1_500, 300)),
+    ]);
+    expect(mapper.result().lastSettledUsage).toEqual(usage(1_500, 300));
+    expect(mapper.result().usage.input_tokens).toBe(2_500);
+  });
+
+  it("skips an aborted or failed call, which measured nothing", () => {
+    const { mapper } = run([
+      end("stop", usage(4_000, 100)),
+      end("aborted", usage(9, 0)),
+      end("error", usage(9, 0)),
+    ]);
+    expect(mapper.result().lastSettledUsage).toEqual(usage(4_000, 100));
+    expect("lastSettledUsage" in run([end("error", usage(9, 0))]).mapper.result()).toBe(false);
+  });
+
+  it("flags a summary made at any point of the turn, not an aborted one", () => {
+    expect(run([compaction, start, end("stop", usage(10, 5))]).mapper.result().compacted).toBe(
+      true,
+    );
+    expect(run([start, end("stop", usage(10, 5)), compaction]).mapper.result().compacted).toBe(
+      true,
+    );
+    const aborted: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: true };
+    expect(run([aborted, start]).mapper.result().compacted).toBe(false);
+  });
+});

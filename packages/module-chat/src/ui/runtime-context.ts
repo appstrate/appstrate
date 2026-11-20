@@ -221,9 +221,10 @@ export interface ChatHost {
    * packages, as its own editor and import dialog do after a write.
    */
   onPackagesChanged: () => void;
-  /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
-  /** Display name from the current organization’s catalog. */
+  /** The selected model's id, and its display name from the current organization’s catalog. */
+  modelId?: string | null;
   modelLabel?: string | null;
+  /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
   /** Names spaces. */
   renderSpaces: RenderSpaces;

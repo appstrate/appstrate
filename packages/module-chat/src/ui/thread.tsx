@@ -65,6 +65,7 @@ import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useConversationScope } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { ContextGauge } from "./context-gauge.tsx";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
@@ -637,6 +638,7 @@ function Composer({
           {slot}
         </div>
         <div className="flex items-center gap-2 [grid-area:send]">
+          <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild disabled={limitPending}>
               <Button

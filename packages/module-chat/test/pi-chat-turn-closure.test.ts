@@ -10,12 +10,14 @@
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import type { PiUsage } from "../src/pi-chat/pi-events.ts";
 import {
   ChatTurnDeadlineError,
   closePiTurn,
   isChatTurnDeadline,
   resolveTurnClosure,
   turnDeadlineNoticeText,
+  turnContextOf,
   turnNoticeChunks,
 } from "../src/pi-chat/pi-turn-closure.ts";
 
@@ -385,6 +387,53 @@ describe("the model a turn bound to", () => {
       modelId: "mdl_opus",
       modelLabel: "Claude Opus 5",
       errorCategory: "upstream_unavailable",
+    });
+  });
+});
+
+describe("turnContextOf", () => {
+  const MEASURE = {
+    sizing: { contextWindow: 200_000, compaction: { reserveTokens: 16_384 } },
+    contextTokens: (u: PiUsage) => u.input + u.output + u.cacheRead + u.cacheWrite,
+  };
+  const used = (input: number): PiUsage => ({
+    input,
+    output: 200,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  });
+
+  it("states the call's tokens by Pi's measure, over the window and its threshold", () => {
+    expect(turnContextOf({ lastSettledUsage: used(48_000), compacted: true }, MEASURE)).toEqual({
+      context: { tokens: 48_200, window: 200_000, compactAt: 183_616, compacted: true },
+    });
+  });
+
+  it("states nothing when no call settled, it reported no tokens, or no model was bound", () => {
+    expect(turnContextOf({ compacted: false }, MEASURE)).toEqual({});
+    const empty = { ...used(0), output: 0 };
+    expect(turnContextOf({ lastSettledUsage: empty, compacted: false }, MEASURE)).toEqual({});
+    expect(turnContextOf({ lastSettledUsage: used(5), compacted: false }, undefined)).toEqual({});
+  });
+
+  it("persists the context with the turn's closing metadata", async () => {
+    const chunks = closePiTurn({
+      finishReason: "stop",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 1,
+      stepCapReached: false,
+      ...MODEL,
+      ...turnContextOf({ lastSettledUsage: used(48_000), compacted: false }, MEASURE),
+      newId: () => "assistant-ctx",
+    }).chunks;
+    expect(turnMetadataFromMessage(await assemble(chunks))?.context).toEqual({
+      tokens: 48_200,
+      window: 200_000,
+      compactAt: 183_616,
     });
   });
 });

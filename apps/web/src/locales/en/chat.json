@@ -226,5 +226,12 @@
   "threads.results": "Results",
   "threads.noResults": "No conversation matches.",
   "threads.search.placeholder": "Search",
-  "threads.search.clear": "Clear search"
+  "threads.search.clear": "Clear search",
+  "contextUsage.title": "Context size",
+  "contextUsage.counts": "{{used}} / {{max}} tokens",
+  "contextUsage.label": "Context size: {{counts}}. {{sentence}}",
+  "contextUsage.compactAt": "Past {{threshold}} tokens, the history is summarized automatically.",
+  "contextUsage.compactNear": "Nearing {{threshold}} tokens: the history will then be summarized automatically.",
+  "contextUsage.compactNext": "{{threshold}}-token threshold reached: the history will be summarized before the next message.",
+  "contextUsage.measuredWith": "Measured with {{model}}."
 }

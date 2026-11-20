@@ -311,6 +311,9 @@ const MIN_KEEP_RECENT_TOKENS = 20_000;
 /** Fraction of the context window to keep verbatim after a compaction pass. */
 const KEEP_RECENT_FRACTION = 0.1;
 
+type EnabledCompaction = { enabled: true; reserveTokens: number; keepRecentTokens: number };
+type ContextModel = { contextWindow?: number | null; maxTokens?: number | null };
+
 /**
  * Derive Pi SDK compaction settings from a resolved model. Pure function
  * so the env-driven (`SYSTEM_PROVIDER_KEYS`) and DB-driven (`org_models`)
@@ -339,14 +342,18 @@ const KEEP_RECENT_FRACTION = 0.1;
  * third party's settings object. Under this shape that is `TS2559` at the call
  * site — the boundary is enforced by the compiler instead of by a convention.
  */
-export function derivePiCompactionSettings(
-  model: { contextWindow?: number | null; maxTokens?: number | null },
-  { enabled = true }: { enabled?: boolean } = {},
-): {
-  compaction:
-    { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number };
+export function derivePiCompactionSettings(model: ContextModel): {
+  compaction: EnabledCompaction;
   contextWindow: number;
-} {
+};
+export function derivePiCompactionSettings(
+  model: ContextModel,
+  options: { enabled?: boolean },
+): { compaction: { enabled: false } | EnabledCompaction; contextWindow: number };
+export function derivePiCompactionSettings(
+  model: ContextModel,
+  { enabled = true }: { enabled?: boolean } = {},
+): { compaction: { enabled: false } | EnabledCompaction; contextWindow: number } {
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
   if (!enabled) {
     return { compaction: { enabled: false }, contextWindow };

@@ -226,5 +226,12 @@
   "threads.results": "Résultats",
   "threads.noResults": "Aucune conversation ne correspond.",
   "threads.search.placeholder": "Rechercher",
-  "threads.search.clear": "Effacer la recherche"
+  "threads.search.clear": "Effacer la recherche",
+  "contextUsage.title": "Taille du contexte",
+  "contextUsage.counts": "{{used}} / {{max}} tokens",
+  "contextUsage.label": "Taille du contexte : {{counts}}. {{sentence}}",
+  "contextUsage.compactAt": "Au-delà de {{threshold}} tokens, l’historique est résumé automatiquement.",
+  "contextUsage.compactNear": "Bientôt {{threshold}} tokens : l’historique sera alors résumé automatiquement.",
+  "contextUsage.compactNext": "Seuil de {{threshold}} tokens atteint : l’historique sera résumé avant le prochain message.",
+  "contextUsage.measuredWith": "Mesuré avec {{model}}."
 }
