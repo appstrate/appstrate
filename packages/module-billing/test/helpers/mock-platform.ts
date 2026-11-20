@@ -29,6 +29,22 @@ export function resetMockRuns(): void {
   mockRunsError = false;
 }
 
+let mockRunsGate: Promise<void> | null = null;
+let releaseRunsGate: (() => void) | null = null;
+
+/** Make `runs.listTerminal` wait until {@link releaseMockRunsHang} — drives a wedged pass. */
+export function setMockRunsHang(): void {
+  mockRunsGate = new Promise<void>((resolve) => {
+    releaseRunsGate = resolve;
+  });
+}
+
+export function releaseMockRunsHang(): void {
+  releaseRunsGate?.();
+  mockRunsGate = null;
+  releaseRunsGate = null;
+}
+
 /** Make the next `runs.listTerminal` read throw — drives settlement failure paths. */
 export function setMockRunsError(): void {
   mockRunsError = true;
@@ -157,6 +173,7 @@ export const mockPlatformServices = {
       after?: { completedAt: Date; id: string };
       limit?: number;
     }): Promise<TerminalRunRow[]> => {
+      if (mockRunsGate) await mockRunsGate;
       if (mockRunsError) {
         mockRunsError = false;
         throw new Error("mock runs read failure");
