@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import type { useMemberDepartureImpact } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { TextSkeleton } from "../../components/loading-skeletons";
+import { SkeletonLine } from "../../components/skeleton-line";
 import { ErrorState } from "../../components/page-states";
 import { scheduleLabel } from "../../lib/schedule-options";
 import {
@@ -33,7 +33,21 @@ export function MemberDepartureImpact({
   const { t } = useTranslation(["settings", "agents"]);
   const currentSpaceId = useCurrentSpaceId();
 
-  if (impact.isLoading) return <TextSkeleton lines={3} />;
+  if (impact.isLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        <SkeletonLine className="w-1/2 text-sm font-medium" />
+        <div className="divide-y rounded-md border">
+          {[0, 1].map((row) => (
+            <div key={row} className="flex flex-col gap-1 px-3 py-2">
+              <SkeletonLine className="w-2/3 text-sm font-medium" />
+              <SkeletonLine className="w-1/3 text-xs" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (impact.error) return <ErrorState error={impact.error} compact />;
   const items = impact.data;
   if (!items) return null;

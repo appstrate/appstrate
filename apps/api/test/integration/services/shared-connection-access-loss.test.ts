@@ -22,6 +22,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedEndUser,
   seedPackage,
   seedSchedule,
   seedSpace,
@@ -595,6 +596,35 @@ describe("unsharing on access loss", () => {
           disabledReason: "actor_left_org",
         });
         expect(await rowOf(s6.id)).toEqual(s6);
+      });
+
+      it("lists an end-user's schedule naming the member's shared connection, by its name", async () => {
+        const member = await addMember();
+        const conn = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+        const endUser = await seedEndUser({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          name: "Customer",
+        });
+        const schedule = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          endUserId: endUser.id,
+          enabled: true,
+          connectionOverrides: { [INTEGRATION]: [conn] },
+        });
+
+        const impact = await memberDepartureImpact(ctx.orgId, member, asOwner());
+
+        expect(impact).toEqual([
+          expect.objectContaining({
+            id: schedule.id,
+            cause: "connection_unshared",
+            actor: { type: "end_user", id: endUser.id, name: "Customer" },
+            lost_integrations: [INTEGRATION],
+          }),
+        ]);
       });
     });
   });

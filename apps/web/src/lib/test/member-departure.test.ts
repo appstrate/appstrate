@@ -7,21 +7,17 @@ const space = { id: "spc_team", name: "Sales" };
 
 describe("departureFixSection", () => {
   it("sends a schedule of the member naming none of their connections to its identity", () => {
-    expect(departureFixSection({ cause: "actor_left_org", lost_integrations: [] })).toBe(
-      "identity",
-    );
+    expect(departureFixSection({ cause: "actor_left_org" })).toBe("identity");
   });
 
-  it("sends a schedule of the member naming one of their connections to its connections", () => {
-    expect(departureFixSection({ cause: "actor_left_org", lost_integrations: ["@a/gmail"] })).toBe(
-      "connections",
-    );
+  const owned = { cause: "actor_left_org" as const, lost_integrations: ["@a/gmail"] };
+
+  it("sends a schedule of the member to its identity even when it names their connections", () => {
+    expect(departureFixSection(owned)).toBe("identity");
   });
 
   it("sends a schedule of another actor on a shared connection to its connections", () => {
-    expect(departureFixSection({ cause: "connection_unshared", lost_integrations: [] })).toBe(
-      "connections",
-    );
+    expect(departureFixSection({ cause: "connection_unshared" })).toBe("connections");
   });
 });
 

@@ -8,17 +8,16 @@ export type DepartureImpactItem =
   operations["getMemberDepartureImpact"]["responses"][200]["content"]["application/json"]["data"][number];
 
 /**
- * The schedule settings section that fixes an item: a connection the departing member owns needs
- * a replacement, a connection they merely shared needs another choice; only a schedule that runs
- * as the member and names none of theirs is fixed by naming another actor.
+ * The schedule settings section that fixes an item. A schedule that runs as the leaving member
+ * changes ACTOR first, always: the connections section only lets the viewer pick their own
+ * connections and resets stale picks after an actor change, so any replacement connection comes
+ * as the second step. A schedule of another actor on a connection the member shared only needs
+ * another connection.
  */
 export function departureFixSection(
-  item: Pick<DepartureImpactItem, "cause" | "lost_integrations">,
+  item: Pick<DepartureImpactItem, "cause">,
 ): Extract<ScheduleSettingsSection, "identity" | "connections"> {
-  if (item.lost_integrations.length > 0 || item.cause === "connection_unshared") {
-    return "connections";
-  }
-  return "identity";
+  return item.cause === "actor_left_org" ? "identity" : "connections";
 }
 
 /** Where the admin fixes an item: its schedule's settings, entering the schedule's space when it is another one. */

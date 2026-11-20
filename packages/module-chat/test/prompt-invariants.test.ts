@@ -716,8 +716,10 @@ describe("the persona and the spaces", () => {
     });
 
     describe("without an origin space (the overview)", () => {
-      const fallback = (id: string, label: string) =>
-        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`; when you create something there, name that space in your reply.`;
+      const CARVE_OUT =
+        " — except what a personal space refuses (an API key, an end-user, an OIDC client), for which you offer team spaces first";
+      const fallback = (id: string, label: string, carveOut = "") =>
+        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`${carveOut}; when you create something there, name that space in your reply.`;
       const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };
       const DEFAULT = { ...SPACES[1]!, isDefault: true };
 
@@ -726,7 +728,8 @@ describe("the persona and the spaces", () => {
           ...CONTEXT_OPTS,
           spaces: [DEFAULT, PERSONAL],
         });
-        expect(out).toContain(fallback("spc_p", "Mine, your personal space"));
+        // The server instructions send what a personal space refuses to a team space: no conflict.
+        expect(out).toContain(fallback("spc_p", "Mine, your personal space", CARVE_OUT));
         expect(out).not.toContain("Ask the user which space");
       });
 
@@ -736,6 +739,7 @@ describe("the persona and the spaces", () => {
           spaces: [SPACES[0]!, DEFAULT],
         });
         expect(out).toContain(fallback("spc_b", "Beta, the organization's default space"));
+        expect(out).not.toContain(CARVE_OUT);
         expect(out).not.toContain("Ask the user which space");
       });
 
@@ -748,6 +752,7 @@ describe("the persona and the spaces", () => {
         expect(out).toContain(sentence("Beta", "spc_b"));
         expect(out).not.toContain("When the user names no space, pass");
         expect(out).not.toContain("name that space in your reply");
+        expect(out).not.toContain(CARVE_OUT);
       });
     });
 

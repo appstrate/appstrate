@@ -19,8 +19,11 @@ import {
   seedPackage,
   seedRun,
   seedSchedule,
+  seedSpace,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
+import { orgPermissions } from "../../../src/lib/permissions.ts";
 import { assertDbHas, assertDbMissing, expectProblem } from "../../helpers/assertions.ts";
 import {
   organizations,
@@ -1346,6 +1349,67 @@ describe("Organizations API", () => {
       const res = await preview(admin.cookie, ctx.orgId, ctx.user.id);
 
       expect(res.status).toBe(403);
+    });
+
+    it("lets an owner on a session preview a co-owner", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-coowner-org" });
+      const coOwner = await createTestUser();
+      await addOrgMember(ctx.orgId, coOwner.id, "owner");
+
+      const res = await preview(ctx.cookie, ctx.orgId, coOwner.id);
+
+      expect(res.status).toBe(200);
+    });
+
+    it("answers an empty list for a member with nothing to stop", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-empty-org" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await preview(ctx.cookie, ctx.orgId, member.id);
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+    });
+
+    it("shows a credential confined to spaces only the items of the spaces it may name", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-confined-org" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+      const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/impact-agent` });
+      const inDefault = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        enabled: true,
+      });
+      const inOther = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: other.id,
+        userId: member.id,
+        enabled: true,
+      });
+      const idsSeenBy = async (headers: Record<string, string>) => {
+        const res = await app.request(
+          `/api/orgs/${ctx.orgId}/members/${member.id}/departure-impact`,
+          { headers },
+        );
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { data: { id: string }[] }).data.map((item) => item.id);
+      };
+
+      expect((await idsSeenBy({ Cookie: ctx.cookie })).sort()).toEqual(
+        [inDefault.id, inOther.id].sort(),
+      );
+      const confined = loopbackHeaders(ctx, ctx.orgId, {
+        orgRole: "owner",
+        permissions: [...orgPermissions("owner")],
+        spaceIds: [ctx.defaultSpaceId],
+      });
+      expect(await idsSeenBy(confined)).toEqual([inDefault.id]);
     });
 
     it("answers 404 for a user who is not a member", async () => {

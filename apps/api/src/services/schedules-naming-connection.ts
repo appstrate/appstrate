@@ -28,6 +28,17 @@ export function schedulesNamingAny(connectionIds: readonly string[]): SQL | unde
   return or(...connectionIds.map((id) => scheduleOverridesName(id)));
 }
 
+/** The keys of `overrides` naming one of `ownedIds`, in key order. */
+export function integrationsNamingAny(
+  overrides: ConnectionOverrides | null,
+  ownedIds: ReadonlySet<string>,
+): string[] {
+  return Object.entries(overrides ?? {})
+    .filter(([, ids]) => ids.some((id) => ownedIds.has(id)))
+    .map(([integrationId]) => integrationId)
+    .sort();
+}
+
 /** A connection and the actor owning it. */
 interface OwnedConnection {
   id: string;

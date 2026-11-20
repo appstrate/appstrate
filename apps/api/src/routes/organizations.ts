@@ -9,6 +9,7 @@ import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
+import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import {
   createOrganization,
   getOrgById,
@@ -543,7 +544,8 @@ router.get(
       c.req.param("userId")!,
       memberActor(c),
     );
-    return c.json(listResponse(items));
+    // A confined credential sees nothing of the spaces it may not name, as `GET /api/spaces`.
+    return c.json(listResponse(items.filter((item) => credentialAdmitsSpace(c, item.space.id))));
   },
 );
 

@@ -64,10 +64,12 @@ import {
   sharesLostIn,
   unshareConnectionsOfOwnersWithoutAccess,
 } from "./space-members.ts";
-import { selectForeignNamingScheduleIds } from "./schedules-naming-connection.ts";
+import {
+  integrationsNamingAny,
+  selectForeignNamingScheduleIds,
+} from "./schedules-naming-connection.ts";
 import { batchLoadEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
@@ -723,17 +725,6 @@ export interface DepartureImpactItem {
   cause: ExitDisableCause;
   /** Integrations whose named connection is the departing member's: reassigning is not enough. */
   lost_integrations: string[];
-}
-
-/** The keys of `overrides` naming one of `ownedIds`, in key order. */
-export function integrationsNamingAny(
-  overrides: ConnectionOverrides | null,
-  ownedIds: ReadonlySet<string>,
-): string[] {
-  return Object.entries(overrides ?? {})
-    .filter(([, ids]) => ids.some((id) => ownedIds.has(id)))
-    .map(([integrationId]) => integrationId)
-    .sort();
 }
 
 /**

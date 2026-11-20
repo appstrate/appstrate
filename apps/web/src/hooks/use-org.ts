@@ -76,13 +76,13 @@ export function useRemoveMember() {
   });
 }
 
-/** What removing a member would stop in team spaces; read fresh, as the admin may reassign elsewhere and come back. */
+/** What removing a member would stop in team spaces; never cached, so each opening of the confirmation starts from a fresh load. */
 export function useMemberDepartureImpact(orgId: string | undefined, userId: string | null) {
   return $api.useQuery(
     "get",
     "/api/orgs/{orgId}/members/{userId}/departure-impact",
     { params: { path: { orgId: orgId ?? "", userId: userId ?? "" } } },
-    { enabled: !!orgId && !!userId, staleTime: 0, select: (envelope) => envelope.data },
+    { enabled: !!orgId && !!userId, staleTime: 0, gcTime: 0, select: (envelope) => envelope.data },
   );
 }
 

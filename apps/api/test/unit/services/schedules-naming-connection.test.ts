@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { integrationsNamingAny } from "../../../src/services/organizations.ts";
+import { integrationsNamingAny } from "../../../src/services/schedules-naming-connection.ts";
 
 describe("integrationsNamingAny", () => {
   const owned = new Set(["conn_a", "conn_b"]);
