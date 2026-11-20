@@ -2,6 +2,7 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { PendingButton } from "@/components/app-ui/pending-button";
+import { ActivateIntegrationButton } from "./activate-integration-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
@@ -17,7 +18,6 @@ import {
 } from "../hooks/use-integrations";
 import { useIntegrationName } from "../hooks/use-integration-name";
 import { usePermissions } from "../hooks/use-permissions";
-import { usePackageActivation } from "../hooks/use-library";
 import {
   integrationIdOfField,
   isStructuralCode,
@@ -71,9 +71,7 @@ export function MissingConnectionsModal({
   // even when every refusal was the structural `integration_not_active`.
   const [switchedOn, setActivated] = useState<ReadonlySet<string>>(new Set());
   const activated = stillActivated(errors, switchedOn);
-  const decision = retryDecision(errors, retrying, stillBlocking);
-  const showRetry = decision.showRetry || activated.size > 0;
-  const { canRetry } = decision;
+  const { showRetry, canRetry } = retryDecision(errors, retrying, stillBlocking, activated);
   const allInactive = onlyAwaitingActivation(errors, activated);
 
   return (
@@ -139,19 +137,14 @@ export function MissingRow({
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
   const readsIntegrations = usePermissions().can("integrations:read");
-  // Structural failures can't be fixed by connecting — an admin must activate
-  // the integration, or the agent's dependency or configuration must change. No picker.
+  // Structural failures can't be fixed by connecting: the agent's dependency or configuration
+  // must change. No picker.
   // Inactive in this space: the integration is unreadable here (its detail 404s), so the row
   // offers the activation instead of a picker and fetches nothing about it. Once activated it
   // is an ordinary row: the live verdict says what is left (connect, choose, ...).
   const isInactive = err.code === "integration_not_active";
   const awaitingActivation = isInactive && !activated;
   const isStructural = awaitingActivation || (!isInactive && isStructuralCode(err.code));
-  const {
-    mayActivate,
-    activate,
-    pending: activating,
-  } = usePackageActivation(packageId, { enabled: awaitingActivation });
 
   // The server's verdict for the launched version, under the key the picker below reads it
   // from. The header follows it live: a connect, a renew or a `connection_update` event
@@ -181,6 +174,9 @@ export function MissingRow({
   const displayName = awaitingActivation ? packageId : detailName;
   // An item code this build has no sentence for keeps the resolver's own message.
   const message = refusalMessage(err) ?? err.message;
+  // Once activated, a row the live verdict still blocks says why, in the same words as any refusal.
+  const verdictCode = verdict?.resolution.error_code;
+  const activatedMessage = verdictCode ? refusalMessage({ code: verdictCode }) : null;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
   const colorClass = resolved
     ? "text-emerald-600"
@@ -205,7 +201,7 @@ export function MissingRow({
                     (resolved
                       ? t("missingConnections.resolved")
                       : activated
-                        ? t("missingConnections.activated")
+                        ? (activatedMessage ?? t("missingConnections.activated"))
                         : message)}
                 </span>
               </div>
@@ -215,21 +211,10 @@ export function MissingRow({
       </div>
       {awaitingActivation && (
         <div className="border-border/60 mt-1 border-t pt-2">
-          {mayActivate ? (
-            <PendingButton
-              size="sm"
-              variant="outline"
-              pending={activating}
-              onClick={() => activate({ onSuccess: () => onActivated?.(packageId) })}
-              data-testid={`missing-activate-${packageId}`}
-            >
-              {t("missingConnections.activate")}
-            </PendingButton>
-          ) : (
-            <p className="text-muted-foreground text-xs">
-              {t("missingConnections.inactiveNoRight")}
-            </p>
-          )}
+          <ActivateIntegrationButton
+            packageId={packageId}
+            onActivated={() => onActivated?.(packageId)}
+          />
         </div>
       )}
       {canRenderPicker && (

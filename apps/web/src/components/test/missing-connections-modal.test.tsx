@@ -286,9 +286,9 @@ describe("MissingRow", () => {
 
     it("offers the activation to a caller who may, without the server's API remedy", () => {
       const html = renderInactive("allowed");
-      expect(html).toContain(`data-testid="missing-activate-${INTEGRATION}"`);
-      expect(html).toContain(label("missingConnections.activate"));
-      expect(html).not.toContain(label("missingConnections.inactiveNoRight"));
+      expect(html).toContain(`data-testid="integration-activate-${INTEGRATION}"`);
+      expect(html).toContain(label("detail.activate"));
+      expect(html).not.toContain(i18n.t("common:library.cannotActivate"));
       expect(html).not.toContain(RAW);
     });
 
@@ -314,7 +314,7 @@ describe("MissingRow", () => {
           />,
           { queryClient: qc },
         );
-        expect(html).toContain(`data-testid="missing-activate-${INTEGRATION}"`);
+        expect(html).toContain(`data-testid="integration-activate-${INTEGRATION}"`);
       } finally {
         snapshot.mockRestore();
       }
@@ -336,17 +336,23 @@ describe("MissingRow", () => {
         );
       };
       const blocked = renderActivated(BLOCKED, true);
-      expect(blocked).not.toContain("missing-activate-");
+      expect(blocked).not.toContain("integration-activate-");
       expect(blocked).not.toContain(label("missingConnections.resolved"));
-      expect(blocked).toContain(label("missingConnections.activated"));
+      expect(blocked).not.toContain(label("missingConnections.activated"));
+      expect(blocked).toContain(refusalMessage({ code: "must_choose_connection" })!);
       const clear = renderActivated(resolution({}), false);
       expect(clear).toContain(label("missingConnections.resolved"));
     });
 
     it("holds the re-run while the verdict still blocks the activated integration", () => {
       const errors = [inactive()];
-      expect(retryDecision(errors, false, [INTEGRATION]).canRetry).toBe(false);
-      expect(retryDecision(errors, false, []).canRetry).toBe(true);
+      const activated = new Set([INTEGRATION]);
+      expect(retryDecision(errors, false, [INTEGRATION], activated).canRetry).toBe(false);
+      expect(retryDecision(errors, false, [], activated)).toEqual({
+        showRetry: true,
+        canRetry: true,
+      });
+      expect(retryDecision(errors, false, []).showRetry).toBe(false);
     });
 
     it("keeps the inactive intro only while a row is still un-activated", () => {
@@ -362,10 +368,10 @@ describe("MissingRow", () => {
       expect(stillActivated([fieldError("not_connected")], switchedOn).size).toBe(0);
     });
 
-    it("tells a caller without the right who can activate it", () => {
+    it("explains the refusal on the disabled button for a caller without the right", () => {
       const html = renderInactive("forbidden");
-      expect(html).not.toContain("missing-activate-");
-      expect(html).toContain(label("missingConnections.inactiveNoRight"));
+      expect(html).toContain("disabled");
+      expect(html).toContain(i18n.t("common:library.cannotActivate"));
       expect(html).not.toContain(RAW);
     });
   });

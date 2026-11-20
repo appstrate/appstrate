@@ -213,16 +213,20 @@ export function onlyAwaitingActivation(
   );
 }
 
-/** Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded, nothing gated). */
+/**
+ * Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded,
+ * nothing gated). Offered once a row is fixable or an `activated` one awaits its re-run.
+ */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
   retrying: boolean,
   stillBlocking: readonly string[] | undefined,
+  activated: ReadonlySet<string> = new Set(),
 ): { showRetry: boolean; canRetry: boolean } {
   const blocked = (e: MissingIntegrationFieldError) =>
     stillBlocking?.includes(integrationIdOfField(e.field)) === true;
   return {
-    showRetry: errors.some((e) => !isStructuralCode(e.code)),
+    showRetry: activated.size > 0 || errors.some((e) => !isStructuralCode(e.code)),
     canRetry: !retrying && !errors.some(blocked),
   };
 }

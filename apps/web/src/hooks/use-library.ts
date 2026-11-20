@@ -245,14 +245,21 @@ export function usePackageActivation(
 ) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
-  const { data: library } = useSpaceLibrary({ enabled });
+  const { data: library, isLoading: libraryLoading } = useSpaceLibrary({ enabled });
   const spaceRow = libraryRow(library, packageId);
   // Homed elsewhere and not placed here, a package is absent from a personal space's library:
   // the org-wide library's per-space `activation` verdict answers then.
-  const { data: orgLibrary } = useCatalogueLibrary({ enabled: enabled && !!library && !spaceRow });
+  const { data: orgLibrary, isLoading: orgLoading } = useCatalogueLibrary({
+    enabled: enabled && !!library && !spaceRow,
+  });
   const row = spaceRow ?? libraryRow(orgLibrary, packageId);
+  const gate = spaceId && row ? activationGate(row, spaceId, true) : null;
   return {
-    mayActivate: !!spaceId && !!row && activationGate(row, spaceId, true).allowed,
+    mayActivate: !!gate?.allowed,
+    /** Why the server refuses; `null` when allowed or no verdict names a reason. */
+    refusal: gate?.refusal ?? null,
+    /** The libraries that decide `mayActivate` are still loading: a refusal is not known yet. */
+    loading: libraryLoading || orgLoading,
     activate: (options?: { onSuccess?: () => void }) => {
       if (spaceId) setActive.mutate({ spaceId, packageId, active: true }, options);
     },
