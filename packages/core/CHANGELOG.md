@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RESERVE_CEILING_TOKENS`** (`@appstrate/core/token-budget`, #2324): the absolute cap on the
+  response reserve (64 000), see the `### Changed` entry below.
 - **`DEFAULT_CONTEXT_WINDOW`, `DEFAULT_MAX_TOKENS`** (`@appstrate/core/token-budget`, #2324): the
   limits of a model nothing else sizes (128 000 / 16 384), moved from `@appstrate/runner-pi` so
   the chat's gauge sizes a catalog row as the runner does.

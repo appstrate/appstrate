@@ -55,8 +55,16 @@ fromHook?, usage?)` existe et fonctionne sur une session en mémoire. `null` : l
    est déterministe, donc le rang est stable d'un tour à l'autre.
 3. **Une coupe dans le tour en cours s'ancre sur le message utilisateur du tour**
    (`branchHeadId`, `offset: 0`). Les entrées produites en direct par Pi n'ont pas de
-   correspondance garantie avec la reprojection des `parts` persistées. On garde alors tout le
-   tour en cours, ce qui est le comportement attendu pour le contenu le plus récent.
+   correspondance garantie avec la reprojection des `parts` persistées : une reprise après
+   dépassement garde dans la session l'entrée de l'assistant en échec (masquée par une
+   `context_edit`), Pi synthétise des résultats pour les appels d'outils orphelins, et les
+   messages `system`/`custom` du tour n'ont pas de `part`. Un rang calculé en direct pourrait donc
+   désigner, au tour suivant, un autre message sans que rien ne le signale.
+   - Coût : quand Pi coupe après le message utilisateur du tour, le tour suivant reprojette tout
+     le tour, donc plus que ce que Pi avait gardé, et peut repasser le seuil plus tôt. Au plus un
+     résumé de plus par compaction coupée dans un tour (ce résumé-là coupe dans l'historique
+     projeté, qui se traduit exactement), jamais un par message. Quand Pi coupe au message
+     utilisateur lui-même, l'ancre est exacte.
 4. **Placement de l'entrée de compaction à la reprojection : juste après la première entrée
    gardée.** Le contexte envoyé est identique quel que soit le placement, et celui-ci laisse
    tous les messages assistants suivants « après la compaction », donc leur usage estimé reste
@@ -86,9 +94,17 @@ export interface AppstrateTurnSummary {
 Décisions d'implémentation (lot 1) :
 
 - `turnContextOf` rend `{ context?, summary? }` : le résumé est écrit même sans mesure.
-- Un résumé dont l'ancre n'est pas sur la branche (ou dont `offset` dépasse la projection de son
-  message) est ignoré avec `logger.warn` ; la recherche continue vers un résumé plus ancien,
-  sinon projection complète.
+- Un résumé dont l'ancre n'est pas sur la branche, ou dont `offset` dépasse la projection de son
+  message (`resolveSummaryCheckpoint` projette le seul message d'ancre pour le savoir), est
+  ignoré avec `logger.warn` ; la recherche continue vers un résumé plus ancien, sinon projection
+  complète. `buildStructuredPiTurn` reçoit un point de reprise déjà validé et ne redécide rien :
+  les images chargées avant correspondent à ce qui est projeté.
+- Mesure d'un tour qui a résumé après sa dernière réponse (le résumé de seuil de Pi tourne
+  après la réponse, `_handlePostAgentRun` → `_checkCompaction`) : `context.tokens` prend
+  `result.estimatedTokensAfter`, l'estimation de Pi du contexte après le résumé, et non l'usage
+  du dernier appel, mesuré avant. Pi la calcule en caractères/4 sur la projection de la session,
+  message `system` du tour compris (prompt système), donc sans plancher supplémentaire. Un appel
+  abouti après le résumé (résumé d'avant requête ou de dépassement) remet l'usage réel.
 - `offset` = rang dans la projection d'un `UIMessage` (un message utilisateur : 0 ; un assistant :
   un message par étape, plus les résultats d'outils, dans l'ordre).
 - Horodatage : après `appendCompaction`, la reconstruction relit l'horodatage de l'entrée et
@@ -112,8 +128,9 @@ Ajout d'export dans `@appstrate/core` : entrée au CHANGELOG sous `[Unreleased]`
 ### Projection (`structured-session.ts`)
 
 - `buildStructuredPiTurn` cherche, en remontant la branche, le tour le plus récent qui porte
-  `context.summary` et dont l'ancre se trouve sur la branche, à sa position ou avant.
-  Ancre introuvable : point de reprise ignoré, projection complète, `logger.warn`.
+  `turn.summary` et dont l'ancre se trouve sur la branche, à sa position ou avant.
+  Ancre introuvable ou `offset` hors de la projection de son message : point de reprise ignoré
+  avec `logger.warn`, recherche d'un plus ancien, sinon projection complète.
 - Avec un point de reprise : ne projeter que depuis l'ancre. Les messages antérieurs ne sont
   ni convertis ni estimés, et `loadAttachmentImages` ne lit que les messages projetés.
 - La projection rend, pour chaque message Pi, son origine `{ messageId, offset }`.
@@ -196,14 +213,18 @@ n'est pas dimensionnée par la réserve.
 
 ## Ordre et découpage
 
-Trois PR indépendantes, dans cet ordre : lot 1, lot 2, lot 3. Le lot 1 supprime le coût
-récurrent ; le lot 2 rend mesurable ce qu'il reste ; le lot 3 change un seuil et se juge mieux
-une fois les deux premiers en place.
+Une branche, quatre commits : lot 1, lot 2, lot 3, puis l'affichage. Le lot 1 supprime le coût
+récurrent ; le lot 2 rend mesurable ce qu'il reste ; le lot 3 change un seuil.
 
 Le lot 1 change la forme des métadonnées de tour lues par le navigateur : API et interface
 partent dans la même version, sans déploiement progressif.
 
 ## Hors périmètre
 
-Les points « Affichage » et « À envisager » de #2324, et la compaction côté fournisseur
-(Anthropic `compact_20260112`, Responses API), spécifique à chaque API.
+La compaction côté fournisseur (Anthropic `compact_20260112`, Responses API), spécifique à
+chaque API.
+
+Les points « Affichage » et « À envisager » de #2324 sont traités dans cette branche : jauge et
+popover (historique résumé indiqué, plus de niveau « plein » après un résumé), adéquation du
+modèle à la conversation (`model-fit.ts`), lecture de la fenêtre (`packages/ui` `context-window.ts`)
+et libellés.

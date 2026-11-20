@@ -237,6 +237,7 @@
   "contextUsage.compactNear": "Bientôt {{threshold}} tokens : l’historique sera alors résumé automatiquement.",
   "contextUsage.compactNext": "Seuil de {{threshold}} tokens atteint : l’historique sera résumé avant le prochain message.",
   "contextUsage.windowAssumed": "Ce modèle ne déclare pas sa fenêtre de contexte : {{window}} est une valeur supposée.",
+  "contextUsage.summarized": "Les messages les plus anciens sont résumés.",
   "contextUsage.measuredWith": "Mesuré avec {{model}}.",
   "contextUsage.measuredWithReadAgainst": "Dernière mesure prise avec {{model}}, rapportée à la fenêtre et au seuil de {{selected}}.",
   "context.info.usageTitle": "Modèles et tokens",

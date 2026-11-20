@@ -78,6 +78,12 @@ interface PiChatResultMeta {
   lastSettledUsage?: PiUsage;
   /** The turn's last summary of the history, absent when Pi made none. */
   compaction?: PiCompaction;
+  /**
+   * Pi's estimate of the context left by a summary no settled call followed (its threshold
+   * summary runs after the turn's last reply): the next request's size, which the last settled
+   * call, measured before the summary, overstates.
+   */
+  contextAfterCompaction?: number;
 }
 
 /** What Pi's `compaction_end` result says about the summary it appended. */
@@ -176,6 +182,7 @@ export class PiChatUiStreamMapper {
   private lastTool: string | undefined;
   private lastSettledUsage: PiUsage | undefined;
   private compaction: PiCompaction | undefined;
+  private contextAfterCompaction: number | undefined;
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -246,7 +253,11 @@ export class PiChatUiStreamMapper {
       case "compaction_end": {
         // A later summary in the same turn starts from the earlier one, so it replaces it.
         const compaction = e.aborted ? undefined : compactionOf(e.result);
-        if (compaction) this.compaction = compaction;
+        if (compaction) {
+          this.compaction = compaction;
+          const after = (e.result as { estimatedTokensAfter?: unknown }).estimatedTokensAfter;
+          this.contextAfterCompaction = typeof after === "number" && after > 0 ? after : undefined;
+        }
         // The summary is a billed call that emits no `message_end`; it is not a context measure.
         const usage = e.aborted ? undefined : (e.result as { usage?: PiUsage } | undefined)?.usage;
         if (usage) this.accUsage = addRequestUsage(this.accUsage, usage, this.cost);
@@ -364,6 +375,7 @@ export class PiChatUiStreamMapper {
     // Pi's own rule for a call that measured something (`getLastAssistantUsage`).
     if (m.usage && m.stopReason !== "aborted" && m.stopReason !== "error") {
       this.lastSettledUsage = m.usage;
+      this.contextAfterCompaction = undefined;
     }
     this.finishReason = mapStopReason(m.stopReason);
     // A model call that SETTLED retires the previous failure. Pi retries inside
@@ -417,6 +429,9 @@ export class PiChatUiStreamMapper {
       ...(this.lastError ? { errorText: this.lastError } : {}),
       ...(this.lastSettledUsage ? { lastSettledUsage: this.lastSettledUsage } : {}),
       ...(this.compaction ? { compaction: this.compaction } : {}),
+      ...(this.contextAfterCompaction !== undefined
+        ? { contextAfterCompaction: this.contextAfterCompaction }
+        : {}),
     };
   }
 }

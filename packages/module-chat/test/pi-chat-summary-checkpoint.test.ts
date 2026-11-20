@@ -19,7 +19,7 @@ import {
 } from "../src/pi-chat/structured-session.ts";
 
 const sdk = await loadPiCodingAgentSdk();
-const { estimateTokens, SessionManager } = sdk;
+const { estimateTokens, getLatestCompactionEntry, SessionManager } = sdk;
 // Not exported by the SDK index: loaded from the package runner-pi resolves, beside its entry.
 const sdkEntry = Bun.resolveSync(
   "@earendil-works/pi-coding-agent",
@@ -95,7 +95,7 @@ const thread = (carrier: AppstrateTurnSummary | undefined): UIMessage[] => [
 function project(branch: UIMessage[]) {
   const turn = buildStructuredPiTurn(branch, MODEL, {
     ...OPTIONS,
-    checkpoint: resolveSummaryCheckpoint(branch),
+    checkpoint: resolveSummaryCheckpoint(branch, MODEL),
   });
   return { turn, ...reconstructPiSession(SessionManager, turn) };
 }
@@ -163,7 +163,7 @@ describe("summary checkpoint projection", () => {
 
   it("projects the whole branch when no turn on it summarized", () => {
     const branch = thread(undefined);
-    expect(resolveSummaryCheckpoint(branch)).toBeNull();
+    expect(resolveSummaryCheckpoint(branch, MODEL)).toBeNull();
     const { session } = project(branch);
     expect(contextText(session.buildSessionContext().messages)).toContain("question résumée");
     expect(session.getBranch().some((entry) => entry.type === "compaction")).toBe(false);
@@ -178,7 +178,7 @@ describe("summary checkpoint projection", () => {
 
   it("projects the whole branch, and says why, when the summary metadata is malformed", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    expect(resolveSummaryCheckpoint(thread(summary("a0", -1)))).toBeNull();
+    expect(resolveSummaryCheckpoint(thread(summary("a0", -1)), MODEL)).toBeNull();
     expect(warn).toHaveBeenCalledWith("chat summary ignored: malformed summary metadata", {
       carrierId: "a1",
     });
@@ -193,9 +193,24 @@ describe("summary checkpoint projection", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
+  it("falls back to an older summary when the newest one's offset is past its message", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const branch: UIMessage[] = [
+      ...thread(summary("a0", 2, "ancien résumé valide")).slice(0, -1),
+      text("u2", "user", "question suivante"),
+      text("a2", "assistant", "réponse", summary("a0", 7, "résumé à l'ancre invalide")),
+      text("u3", "user", "dernière question"),
+    ];
+    expect(resolveSummaryCheckpoint(branch, MODEL)).toMatchObject({
+      summary: { text: "ancien résumé valide" },
+      anchorIndex: 1,
+    });
+    expect(warn.mock.calls[0]?.[0]).toContain("anchor offset is past");
+  });
+
   it("never reads a summary whose kept history starts after the turn that made it", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    expect(resolveSummaryCheckpoint(thread(summary("u2", 0)))).toBeNull();
+    expect(resolveSummaryCheckpoint(thread(summary("u2", 0)), MODEL)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
@@ -232,13 +247,9 @@ describe("summary checkpoint projection", () => {
     ]);
   });
 
-  it("stamps what follows the summary after it, so Pi reads the kept assistants' usage", () => {
+  it("orders the kept assistants after the summary entry, so Pi trusts their usage", () => {
     const { session } = project(thread(summary("a0", 2)));
     const branch = session.getBranch();
-    const summarizedAt = Date.parse(branch[1]!.timestamp);
-    for (const entry of branch.slice(2)) {
-      expect(entry.type === "message" && entry.message.timestamp).toBeGreaterThan(summarizedAt);
-    }
     const estimate = compaction.estimateProjectedContextTokens(
       session.buildSessionProjection(),
       branch,
@@ -250,6 +261,29 @@ describe("summary checkpoint projection", () => {
     expect(estimate.tokens).toBe(
       lastAssistant?.role === "assistant" ? lastAssistant.usage.totalTokens : -1,
     );
+  });
+
+  it("stamps the kept assistants after the summary entry, past Pi's stale-usage guard", async () => {
+    const branch = thread(summary("a0", 2));
+    const turn = buildStructuredPiTurn(branch, MODEL, {
+      ...OPTIONS,
+      checkpoint: resolveSummaryCheckpoint(branch, MODEL),
+    });
+    // The summary entry is stamped when it is appended, later than the projection.
+    await Bun.sleep(5);
+    const { session } = reconstructPiSession(SessionManager, turn);
+    const summaryEntry = getLatestCompactionEntry(session.getBranch());
+    // `_checkCompaction` (agent-session.js): an assistant stamped at or before the latest
+    // summary entry is "from before compaction" and its usage is never read.
+    const fromBeforeCompaction = (message: { timestamp: number }) =>
+      message.timestamp <= new Date(summaryEntry!.timestamp).getTime();
+    const lastAssistant = session
+      .buildSessionContext()
+      .messages.findLast((message) => message.role === "assistant");
+    expect(lastAssistant && fromBeforeCompaction(lastAssistant)).toBe(false);
+    // The projection's own stamps, which reconstruction replaces, would trip the guard.
+    const unstamped = turn.history.findLast((message) => message.role === "assistant");
+    expect(unstamped && fromBeforeCompaction(unstamped)).toBe(true);
   });
 
   it("gives Pi's next summary the previous one, and only the kept history to summarize", () => {

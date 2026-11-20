@@ -20,7 +20,7 @@ import { contextReading, type ConversationContext } from "./turn-context.ts";
  * is the measuring model's tokenizer; another family's commonly counts the same text 10–20 %
  * apart, so a smaller margin would flag a model that in fact still fits.
  */
-export const FIT_MARGIN = 1.2;
+const FIT_MARGIN = 1.2;
 
 /** Pi's own image estimate (`ESTIMATED_IMAGE_CHARS` 4800 / 4 chars per token). */
 export const IMAGE_TOKENS = 1_200;

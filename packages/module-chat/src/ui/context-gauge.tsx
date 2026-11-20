@@ -121,6 +121,9 @@ export function ContextGauge({ className }: { className?: string }) {
         />
         <p className="tabular-nums">{counts}</p>
         <p className="text-muted-foreground">{sentence}</p>
+        {context.summarized ? (
+          <p className="text-muted-foreground">{t("contextUsage.summarized")}</p>
+        ) : null}
         {context.windowAssumed ? (
           <p className="text-muted-foreground">
             {t("contextUsage.windowAssumed", {

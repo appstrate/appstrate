@@ -10,6 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { contextReading } from "../src/ui/turn-context.ts";
 import type { PiUsage } from "../src/pi-chat/pi-events.ts";
 import {
   ChatTurnDeadlineError,
@@ -448,6 +449,20 @@ describe("turnContextOf", () => {
     expect(
       turnContextOf({ compaction: compaction("entry_live") }, MEASURE, ANCHORS).summary?.keptFrom,
     ).toEqual({ messageId: "u3", offset: 0 });
+  });
+
+  it("states the post-summary estimate over the pre-summary measure, and grades it below full", () => {
+    const state = turnContextOf(
+      {
+        lastSettledUsage: used(190_000),
+        compaction: compaction("entry_a2"),
+        contextAfterCompaction: 40_000,
+      },
+      MEASURE,
+      ANCHORS,
+    );
+    expect(state.context).toEqual({ tokens: 40_000, window: 200_000, compactAt: 183_616 });
+    expect(contextReading(state.context!).level).toBe("ok");
   });
 
   it("keeps the summary of a turn whose calls all failed", () => {

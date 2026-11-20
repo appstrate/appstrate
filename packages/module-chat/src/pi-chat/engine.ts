@@ -491,7 +491,12 @@ export function runPiChat(input: PiChatInput): Response {
         const read = input.readAttachment;
         const signal = turnAbort.signal;
         // Messages before a summary's kept history are not sent: their images are not read.
-        const checkpoint = resolveSummaryCheckpoint(input.messages);
+        const historyModel = {
+          api: sessionModel.api,
+          provider: sessionModel.provider,
+          model: sessionModel.id,
+        };
+        const checkpoint = resolveSummaryCheckpoint(input.messages, historyModel);
         const images =
           modelSeesImages && read
             ? await untilAborted(
@@ -505,32 +510,24 @@ export function runPiChat(input: PiChatInput): Response {
         const pdfReceipts = await untilAborted(
           readPromptPdfs(input.messages.at(-1), pdfInput, read, signal),
         );
-        const projectedTurn = buildStructuredPiTurn(
-          input.messages,
-          {
-            api: sessionModel.api,
-            provider: sessionModel.provider,
-            model: sessionModel.id,
-          },
-          {
-            estimateTokens,
-            images,
-            pdfReceipts,
-            modelSeesImages,
-            checkpoint,
-            // The system prompt is part of every request Pi sends, so it counts
-            // toward the context the compaction threshold is measured against.
-            // Still a floor, not a measurement: tool schemas and this turn's own
-            // prompt text are not in it (`projectedTurn.prompt` is not history).
-            // That gap is pre-existing — do not close it silently, `contextTokens`
-            // seeds Pi's compaction threshold via `historyUsage`.
-            baseTokens: estimateTokens({
-              role: "user",
-              content: [{ type: "text", text: system }],
-              timestamp: 0,
-            }),
-          },
-        );
+        const projectedTurn = buildStructuredPiTurn(input.messages, historyModel, {
+          estimateTokens,
+          images,
+          pdfReceipts,
+          modelSeesImages,
+          checkpoint,
+          // The system prompt is part of every request Pi sends, so it counts
+          // toward the context the compaction threshold is measured against.
+          // Still a floor, not a measurement: tool schemas and this turn's own
+          // prompt text are not in it (`projectedTurn.prompt` is not history).
+          // That gap is pre-existing — do not close it silently, `contextTokens`
+          // seeds Pi's compaction threshold via `historyUsage`.
+          baseTokens: estimateTokens({
+            role: "user",
+            content: [{ type: "text", text: system }],
+            timestamp: 0,
+          }),
+        });
         const reconstruction = reconstructPiSession(SessionManager, projectedTurn);
         const sessionManager = reconstruction.session;
         anchors = { origins: reconstruction.origins, branchHeadId: projectedTurn.branchHeadId };

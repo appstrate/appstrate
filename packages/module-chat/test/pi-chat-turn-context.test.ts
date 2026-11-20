@@ -70,6 +70,7 @@ function replaySession(
           summary: "Résumé du fil",
           firstKeptEntryId: keep?.(sessionManager) ?? "entry_live",
           tokensBefore: 150_000,
+          estimatedTokensAfter: 40_000,
         },
         aborted: false,
       };
@@ -197,6 +198,15 @@ describe("chat turn context", () => {
     expect(await closingTurn(turn(call, 200_000))).not.toHaveProperty("summary");
   }, 20_000);
 
+  it("stores Pi's post-summary estimate when the summary followed the last call", async () => {
+    // Pi summarizes after the turn's last reply: that reply measured the history before it.
+    const full = [{ input: 190_000, output: 500, cacheRead: 0, cacheWrite: 0 }];
+    const after = await closingTurn(turn(full, 200_000, { compacts: "after" }));
+    expect(after?.context).toEqual({ tokens: 40_000, window: 200_000, compactAt: 183_616 });
+    const before = await closingTurn(turn(full, 200_000, { compacts: "before" }));
+    expect(before?.context).toMatchObject({ tokens: 190_500 });
+  }, 20_000);
+
   it("names a kept history entry by the branch message it was projected from", async () => {
     const meta = await closingTurn(
       turn(
@@ -216,7 +226,11 @@ describe("chat turn context", () => {
         fails: true,
       }),
     );
-    expect(meta).toMatchObject({ finishReason: "error", summary: { text: "Résumé du fil" } });
-    expect(meta).not.toHaveProperty("context");
+    // No call measured anything: the context is Pi's estimate after its summary.
+    expect(meta).toMatchObject({
+      finishReason: "error",
+      summary: { text: "Résumé du fil" },
+      context: { tokens: 40_000 },
+    });
   }, 20_000);
 });

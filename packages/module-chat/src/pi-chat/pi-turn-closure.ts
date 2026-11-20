@@ -119,15 +119,19 @@ export interface TurnAnchors {
  * The turn's context and summary, spreadable into {@link closePiTurn}'s input.
  *
  * `context`: the last settled call's tokens by Pi's measure over the window the session ran
- * against. Absent when no call settled, when it reported no tokens, or when the turn never bound a
- * model — a zero would claim a measurement.
+ * against, or Pi's estimate after a summary no call followed. Absent when there is neither, when
+ * it is zero, or when the turn never bound a model — a zero would claim a measurement.
  *
  * `summary`: Pi's last summary of the turn, written even when no call settled so a failed turn
  * does not pay for it again. A kept entry the projection did not produce is one of this turn's own,
  * so the kept history starts at the turn's user message.
  */
 export function turnContextOf(
-  measured: { lastSettledUsage?: PiUsage; compaction?: PiCompaction },
+  measured: {
+    lastSettledUsage?: PiUsage;
+    compaction?: PiCompaction;
+    contextAfterCompaction?: number;
+  },
   measure:
     | {
         sizing: { contextWindow: number; compaction: { reserveTokens: number } };
@@ -137,8 +141,10 @@ export function turnContextOf(
     | undefined,
   anchors?: TurnAnchors,
 ): { context?: AppstrateTurnContext; summary?: AppstrateTurnSummary } {
-  const tokens =
-    measured.lastSettledUsage && measure ? measure.contextTokens(measured.lastSettledUsage) : 0;
+  const settled = measured.lastSettledUsage;
+  const tokens = !measure
+    ? 0
+    : (measured.contextAfterCompaction ?? (settled ? measure.contextTokens(settled) : 0));
   const { compaction } = measured;
   return {
     ...(measure && tokens > 0

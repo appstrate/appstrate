@@ -58,7 +58,7 @@ export interface BuildStructuredPiTurnOptions {
   pdfReceipts?: ReadonlyMap<string, string>;
   /** Whether the model accepts image input, for the wording of the pointer lines. */
   modelSeesImages?: boolean;
-  /** The branch's summary ({@link resolveSummaryCheckpoint}); none = the whole history. */
+  /** The branch's summary, already validated ({@link resolveSummaryCheckpoint}); none = the whole history. */
   checkpoint?: SummaryCheckpoint | null;
 }
 
@@ -326,28 +326,48 @@ const turnSummarySchema = z.object({
   tokensBefore: z.number().nonnegative(),
 });
 
+/** How many Pi messages one branch message projects to: the range its `offset` ranks in. */
+function projectedLength(message: UIMessage, model: PiHistoryModel): number {
+  if (message.role === "assistant")
+    return assistantMessages(message, model, () => 0).messages.length;
+  if (message.role !== "user") return 0;
+  const [converted] = messagesWithAttachmentsAsText([message]);
+  return converted && userMessage(converted, () => 0) ? 1 : 0;
+}
+
+/** The checkpoint a branch message's summary gives, or why it gives none. */
+function checkpointAt(
+  branch: readonly UIMessage[],
+  carrier: number,
+  model: PiHistoryModel,
+): { reason: string } | SummaryCheckpoint {
+  const parsed = turnSummarySchema.safeParse(turnMetadataFromMessage(branch[carrier])?.summary);
+  if (!parsed.success) return { reason: "malformed summary metadata" };
+  const { messageId, offset } = parsed.data.keptFrom;
+  const anchorIndex = branch.findLastIndex(
+    (message, index) => index <= carrier && message.id === messageId,
+  );
+  if (anchorIndex < 0) return { reason: "its kept history is not on the branch" };
+  if (offset > 0 && offset >= projectedLength(branch[anchorIndex]!, model)) {
+    return { reason: "its anchor offset is past the message's projection" };
+  }
+  return { summary: parsed.data, anchorIndex };
+}
+
 /**
  * The newest summary on the branch whose kept history starts on the branch, at or before the
  * turn that made it. A summary whose start is not there (the branch was edited under it) is
  * skipped for an older one; none = the whole history is projected.
  */
-export function resolveSummaryCheckpoint(branch: readonly UIMessage[]): SummaryCheckpoint | null {
+export function resolveSummaryCheckpoint(
+  branch: readonly UIMessage[],
+  model: PiHistoryModel,
+): SummaryCheckpoint | null {
   for (let carrier = branch.length - 1; carrier >= 0; carrier -= 1) {
-    const raw = turnMetadataFromMessage(branch[carrier])?.summary;
-    if (raw === undefined) continue;
-    const parsed = turnSummarySchema.safeParse(raw);
-    const anchorIndex = parsed.success
-      ? branch.findLastIndex(
-          (message, index) => index <= carrier && message.id === parsed.data.keptFrom.messageId,
-        )
-      : -1;
-    if (parsed.success && anchorIndex >= 0) return { summary: parsed.data, anchorIndex };
-    logger.warn(
-      parsed.success
-        ? "chat summary ignored: its kept history is not on the branch"
-        : "chat summary ignored: malformed summary metadata",
-      { carrierId: branch[carrier]!.id },
-    );
+    if (turnMetadataFromMessage(branch[carrier])?.summary === undefined) continue;
+    const found = checkpointAt(branch, carrier, model);
+    if ("summary" in found) return found;
+    logger.warn(`chat summary ignored: ${found.reason}`, { carrierId: branch[carrier]!.id });
   }
   return null;
 }
@@ -371,16 +391,15 @@ export function resolveSummaryCheckpoint(branch: readonly UIMessage[]): SummaryC
 export function buildStructuredPiTurn(
   input: UIMessage[],
   model: PiHistoryModel,
-  options: BuildStructuredPiTurnOptions,
-): StructuredPiTurn {
-  const {
+  {
     estimateTokens,
     baseTokens,
     images,
     modelSeesImages = false,
     pdfReceipts,
     checkpoint = null,
-  } = options;
+  }: BuildStructuredPiTurnOptions,
+): StructuredPiTurn {
   const sentImages: AttachmentImages = images ?? new Map();
   const messages = messagesWithAttachmentsAsText(input, {
     modelSeesImages,
@@ -413,15 +432,6 @@ export function buildStructuredPiTurn(
       toolResultCount += assistant.toolResultCount;
     }
     const skip = index === start && checkpoint ? checkpoint.summary.keptFrom.offset : 0;
-    if (skip > 0 && skip >= converted.length) {
-      // The anchor message no longer projects that far: its rank means nothing now.
-      logger.warn("chat summary ignored: its anchor offset is past the message's projection", {
-        anchorId: message.id,
-        offset: skip,
-        projected: converted.length,
-      });
-      return buildStructuredPiTurn(input, model, { ...options, checkpoint: null });
-    }
     converted.forEach((piMessage, offset) => {
       if (offset < skip) return;
       history.push(piMessage);

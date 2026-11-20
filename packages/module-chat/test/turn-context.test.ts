@@ -83,6 +83,14 @@ describe("contextReading", () => {
   });
 
   it("grades a turn that summarized by its tokens alone: the summary is not made again", () => {
-    expect(at(40_000).level).toBe("ok");
+    const summary = { text: "Résumé", keptFrom: { messageId: "u1", offset: 0 }, tokensBefore: 9 };
+    const measure = (tokens: number) => ({ tokens, window: 1_000_000, compactAt: 600_000 });
+    expect(latestConversationContext([assistant("a1", measure(40_000), summary)])).toMatchObject({
+      level: "ok",
+      summarized: true,
+    });
+    expect(latestConversationContext([assistant("a1", measure(600_001), summary)])?.level).toBe(
+      "full",
+    );
   });
 });

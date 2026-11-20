@@ -16,9 +16,9 @@ export function fractionOfWindow(tokens: number, window: number): number {
 }
 
 /**
- * A token count as the compact figure the gauge shows, in the UI language (`128k` / `1.5M` in
+ * A token count as the compact figure the gauge shows, in the UI language (`128K` / `1.5M` in
  * English, `128 k` / `1,5 M` in French — a no-break space, as `Intl` puts it). The tier is chosen
- * by `Intl` after rounding, so `999_600` is `1M`, not `1000k`.
+ * by `Intl` after rounding, so `999_600` is `1M`, not `1000K`.
  */
 export function formatCompactTokens(tokens: number, lang: string): string {
   if (!Number.isFinite(tokens) || tokens < 0) return "0";

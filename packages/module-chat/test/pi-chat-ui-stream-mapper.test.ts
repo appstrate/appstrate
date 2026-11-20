@@ -620,6 +620,23 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
     expect(result.lastSettledUsage).toEqual(usage(1_000, 100));
   });
 
+  it("keeps Pi's post-summary estimate only while no call settled after the summary", () => {
+    const summarized = (after: number): AgentSessionEvent => ({
+      type: "compaction_end",
+      result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, estimatedTokensAfter: after },
+      aborted: false,
+    });
+    const last = run([start, end("stop", usage(190_000, 100)), summarized(40_000)]).mapper.result();
+    expect(last.contextAfterCompaction).toBe(40_000);
+    expect(last.lastSettledUsage).toEqual(usage(190_000, 100));
+    const followed = run([
+      summarized(40_000),
+      start,
+      end("stop", usage(50_000, 100)),
+    ]).mapper.result();
+    expect(followed).not.toHaveProperty("contextAfterCompaction");
+  });
+
   it("ignores an aborted or failed summary", () => {
     const aborted: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: true };
     const failed: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: false };
