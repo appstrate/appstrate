@@ -51,7 +51,7 @@ export function ContextGauge({ className }: { className?: string }) {
   const context = React.useMemo(() => latestConversationContext(messages), [messages]);
   if (!context) return null;
 
-  const summary = t("context.summary", {
+  const summary = t("contextUsage.summary", {
     used: context.tokens,
     max: context.window,
     percent: context.ratio,
@@ -67,19 +67,19 @@ export function ContextGauge({ className }: { className?: string }) {
           size="icon"
           variant="ghost"
           className={cn(COMPOSER_BUTTON_CLASS, LEVEL_CLASS[context.level], className)}
-          aria-label={t("context.label", { summary })}
+          aria-label={t("contextUsage.label", { summary })}
           data-context-level={context.level}
         >
           <Ring ratio={context.ratio} />
         </Button>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" className="w-72 space-y-2 p-3 text-sm">
-        <p className="font-medium">{t("context.title")}</p>
+        <p className="font-medium">{t("contextUsage.title")}</p>
         <div className="flex items-center gap-2">
           <div
             className="bg-muted h-1.5 flex-1 overflow-hidden rounded-full"
             role="meter"
-            aria-label={t("context.title")}
+            aria-label={t("contextUsage.title")}
             aria-valuemin={0}
             aria-valuemax={context.window}
             aria-valuenow={Math.min(context.tokens, context.window)}
@@ -94,19 +94,19 @@ export function ContextGauge({ className }: { className?: string }) {
         <p className="tabular-nums">{summary}</p>
         {context.compactAt !== undefined ? (
           <p className="text-muted-foreground">
-            {t(context.level === "full" ? "context.compactNext" : "context.compactAt", {
+            {t(context.level === "full" ? "contextUsage.compactNext" : "contextUsage.compactAt", {
               threshold: context.compactAt,
             })}
           </p>
         ) : context.level !== "ok" ? (
-          <p className="text-muted-foreground">{t("context.noCompaction")}</p>
+          <p className="text-muted-foreground">{t("contextUsage.noCompaction")}</p>
         ) : null}
         {context.compacted ? (
-          <p className="text-muted-foreground">{t("context.compacted")}</p>
+          <p className="text-muted-foreground">{t("contextUsage.compacted")}</p>
         ) : null}
         {measuredWithOther ? (
           <p className="text-muted-foreground">
-            {t("context.measuredWith", { model: context.modelLabel ?? "" })}
+            {t("contextUsage.measuredWith", { model: context.modelLabel ?? "" })}
           </p>
         ) : null}
       </PopoverContent>
