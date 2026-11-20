@@ -137,21 +137,16 @@ async function admitIssuedTokens(ctx: TokenHookCtx): Promise<void> {
 const isRevokeEndpoint = (ctx: { path?: string }) => ctx.path === "/oauth2/revoke";
 
 /**
- * Delete the refresh token a client just revoked. Better Auth only marks it
- * `revoked`, and a marked token presented again (a retried revoke, a refresh
- * in flight) is read as stolen: every refresh token of the (client, user) pair
- * is deleted, on every endpoint and org. Deleted, a repeat is a plain
- * not-found. Runs only after Better Auth authenticated the client and revoked
- * the row (a row it did not mark, another client's, is left alone); two
- * revokes racing inside Better Auth's own mark remain upstream's.
+ * Delete the refresh token a client just revoked: Better Auth only marks it, and
+ * a marked token presented again reads as stolen, tearing down the (client, user)
+ * family. Runs after Better Auth authenticated the client and marked the row.
+ * Upstream's still: a concurrent refresh between that mark and this delete.
  */
 async function deleteRevokedRefreshToken(ctx: TokenHookCtx): Promise<void> {
   if ((ctx.context as { returned?: unknown }).returned instanceof Error) return;
   const token = (ctx.body as { token?: unknown } | undefined)?.token;
   if (typeof token !== "string" || token.length === 0) return;
-  // No refresh-token prefix or encryption is configured (`auth/plugins.ts`):
-  // the stored value is the digest of the presented token, after the same
-  // scheme stripping the revoke endpoint applies.
+  // Stored as the digest of the token, stripped as the revoke endpoint strips it.
   try {
     await db
       .delete(oauthRefreshToken)
@@ -162,7 +157,7 @@ async function deleteRevokedRefreshToken(ctx: TokenHookCtx): Promise<void> {
         ),
       );
   } catch (err) {
-    // The revoke itself succeeded: a failed cleanup must not turn it into a 500.
+    // The revoke succeeded; a failed cleanup must not make it a 500.
     logger.error("deleting a revoked refresh token failed", {
       module: "oidc",
       error: err instanceof Error ? err.message : String(err),

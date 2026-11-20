@@ -69,7 +69,8 @@ interface McpGrantKey {
 async function raiseWatermarks(tx: Tx, grants: McpGrantKey[]): Promise<void> {
   for (const { userId, clientId, resource } of grants) {
     const binding = parseMcpResourceUri(resource);
-    if (!binding) continue;
+    // Skipping would withdraw a resource with no watermark left to refuse its tokens.
+    if (!binding) throw new Error(`Not an MCP resource URI: ${resource}`);
     const now = new Date();
     await tx
       .insert(oauthGrantState)
@@ -95,10 +96,10 @@ async function raiseWatermarks(tx: Tx, grants: McpGrantKey[]): Promise<void> {
  */
 export async function raiseMcpWatermarksOfUser(executor: DbOrTx, userId: string): Promise<void> {
   await inTransaction(executor, async (tx) => {
-    // Rows locked in (client, resource) byte order, the order `endMcpGrants` takes
-    // them in (`COLLATE "C"` matches its code-unit sort): two writers on one user's grants cannot deadlock.
+    // Same lock order as `endMcpGrants`, so two writers cannot deadlock. Ids and URIs
+    // are ASCII, where `COLLATE "C"` and its code-unit sort agree.
     await tx
-      .select({ id: oauthGrantState.userId })
+      .select({ userId: oauthGrantState.userId })
       .from(oauthGrantState)
       .where(eq(oauthGrantState.userId, userId))
       .orderBy(
@@ -130,6 +131,7 @@ export async function endMcpGrants(tx: Tx, unordered: McpGrantKey[]): Promise<vo
   const grants = [...unordered].sort(
     (a, b) => byCodeUnit(a.clientId, b.clientId) || byCodeUnit(a.resource, b.resource),
   );
+  // Creates and locks each grant's row.
   await raiseWatermarks(tx, grants);
   for (const { userId, clientId, resource } of grants) {
     for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {
@@ -141,6 +143,7 @@ export async function endMcpGrants(tx: Tx, unordered: McpGrantKey[]): Promise<vo
       );
     }
   }
+  // Refuses a token request that read a token before the deletes.
   await raiseWatermarks(tx, grants);
 }
 

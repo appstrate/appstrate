@@ -26,6 +26,7 @@ import {
   type ClientRegistration,
   type McpGrant,
 } from "./mcp-grants.ts";
+import { endMcpGrants } from "../../../services/oauth-token-revocation.ts";
 
 /** Wire shape of one grant (snake_case, with the carve-out 4b names camelCase). */
 export interface AccessGrantDto {
@@ -88,7 +89,7 @@ export async function revokeAllAccessGrantsForUser(
 ): Promise<{ revokedCount: number; mcpGrants: McpGrant[] }> {
   const { revokedCount } = await revokeAllFamiliesForUser(userId, "user_revoked_all");
   const mcpGrants = await listMcpGrantsForUser(userId);
-  for (const grant of mcpGrants) await revokeMcpGrant(grant);
+  if (mcpGrants.length > 0) await db.transaction((tx) => endMcpGrants(tx, mcpGrants));
   return { revokedCount: revokedCount + mcpGrants.length, mcpGrants };
 }
 

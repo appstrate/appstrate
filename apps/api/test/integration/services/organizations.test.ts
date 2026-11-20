@@ -760,7 +760,7 @@ describe("organizations service", () => {
       return { refresh: refresh.length === 0, access: access.length === 0 };
     }
 
-    it("leaving revokes this org's client tokens and leaves the others", async () => {
+    it("leaving deletes this org's client tokens and leaves the others", async () => {
       const org = await createOrganization("Tok Org", "tok-org", userId);
       const other = await createOrganization("Other Tok Org", "other-tok-org", userId);
       const member = await createTestUser();
@@ -783,7 +783,7 @@ describe("organizations service", () => {
       expect(await endedState(stayer)).toEqual({ refresh: false, access: false });
     });
 
-    it("revokes instance-client tokens bound to this org's MCP resource, only those", async () => {
+    it("ends instance-client tokens bound to this org's MCP resource, only those", async () => {
       const org = await createOrganization("Mcp Org", "mcp-org", userId);
       const other = await createOrganization("Other Mcp Org", "other-mcp-org", userId);
       const member = await createTestUser();
@@ -811,7 +811,7 @@ describe("organizations service", () => {
       expect(kept?.resources).toEqual([getMcpOrgResourceUri(other.id)]);
     });
 
-    it("revokes tokens bound to a space of this org's MCP endpoint, not another org's", async () => {
+    it("ends tokens bound to a space of this org's MCP endpoint, not another org's", async () => {
       const org = await createOrganization("Mcp Space Org", "mcp-space-org", userId);
       const other = await createOrganization("Other Mcp Space Org", "other-mcp-space-org", userId);
       const member = await createTestUser();

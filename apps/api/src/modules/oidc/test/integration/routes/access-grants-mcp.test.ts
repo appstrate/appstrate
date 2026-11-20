@@ -136,6 +136,19 @@ function refresh(clientId: string, refreshToken: string, resource: string) {
   });
 }
 
+/** RFC 7009 revocation of a refresh token by the client itself. */
+function revokeRefreshToken(clientId: string, token: string) {
+  return app.request("/api/auth/oauth2/revoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      token,
+      token_type_hint: "refresh_token",
+      client_id: clientId,
+    }).toString(),
+  });
+}
+
 function revokeMine(cookie: string, id: string) {
   return app.request("/api/auth/access-grants/revoke", {
     method: "POST",
@@ -718,16 +731,7 @@ describe("MCP access grants", () => {
         ctx.user.id,
       );
       const tokenA = String(onA.token.refresh_token);
-      const revoke = () =>
-        app.request("/api/auth/oauth2/revoke", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            token: tokenA,
-            token_type_hint: "refresh_token",
-            client_id: clientId,
-          }).toString(),
-        });
+      const revoke = () => revokeRefreshToken(clientId, tokenA);
       expect((await revoke()).status).toBe(200);
       // Gone, not marked: the repeat is a plain refusal (the provider answers
       // 400 where RFC 7009 §2.2 says 200), never a family teardown.
@@ -747,16 +751,7 @@ describe("MCP access grants", () => {
         ctx.user.id,
       );
       const tokenA = String(onA.token.refresh_token);
-      const revoke = () =>
-        app.request("/api/auth/oauth2/revoke", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            token: `Bearer ${tokenA}`,
-            token_type_hint: "refresh_token",
-            client_id: clientId,
-          }).toString(),
-        });
+      const revoke = () => revokeRefreshToken(clientId, `Bearer ${tokenA}`);
       expect((await revoke()).status).toBe(200);
       expect((await revoke()).status).toBe(400);
       await expectRefreshWorks(clientId, String(onB.token.refresh_token), otherResource, otherPath);

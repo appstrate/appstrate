@@ -10436,8 +10436,20 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The token is unknown or already revoked (`invalid_request`). RFC 7009 §2.2 answers 200 there; the provider answers 400. */
+            /** @description `invalid_request` — the token is unknown: one the client already revoked is deleted, and a rotated-out refresh token reads the same (RFC 7009 §2.2 answers 200 for an unknown token; the provider answers 400). `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
+            };
+            /** @description `invalid_client` — missing or invalid client credentials. */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
