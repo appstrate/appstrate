@@ -502,7 +502,11 @@ export const organizationsPaths = {
                       },
                     },
                   },
-                  hasMore: { type: "boolean", description: "Always false: the list is complete." },
+                  hasMore: {
+                    type: "boolean",
+                    description:
+                      "Always false: the list is not paginated. A credential confined to spaces receives only the items of the spaces it may name (see the description).",
+                  },
                 },
               },
               example: {
