@@ -44,7 +44,7 @@ import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
 import { checkMcpGrantAndTouch } from "../services/mcp-grants.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { mcpBindingFromAudiences, parseMcpResourceUri } from "../../../lib/audiences.ts";
+import { mcpBindingFromAudiences } from "../../../lib/audiences.ts";
 import { getApiKeyAllowedScopes } from "../../../lib/permissions.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
@@ -121,31 +121,6 @@ export const oidcAuthStrategy: AuthStrategy = {
       }
     }
 
-    // A token bound to an MCP resource belongs to an MCP access grant (user,
-    // client, resource). Its JWT is verified without a database read, so a
-    // revoked grant's tokens would otherwise stay valid until they expire: the
-    // grant's revocation watermark is checked here, on every request, and the
-    // grant's last use is recorded on the way (`services/mcp-grants.ts`).
-    const mcpResource = claims.audiences.find((aud) => parseMcpResourceUri(aud) !== undefined);
-    if (mcpResource && claims.clientId) {
-      const stillActive = await checkMcpGrantAndTouch({
-        userId: claims.authUserId,
-        clientId: claims.clientId,
-        resource: mcpResource,
-        issuedAt: claims.issuedAt,
-        ip: getClientIpFromRequest(request),
-        userAgent: request.headers.get("user-agent"),
-      });
-      if (!stillActive) {
-        logger.info("OIDC strategy: MCP access grant revoked — rejecting token", {
-          module: "oidc",
-          userId: claims.authUserId,
-          clientId: claims.clientId,
-        });
-        return null;
-      }
-    }
-
     let resolution: AuthResolution | null;
     if (claims.actorType === "user") {
       resolution = await resolveInstanceUser(claims);
@@ -174,7 +149,28 @@ export const oidcAuthStrategy: AuthStrategy = {
     // that of a space API key carrying every grantable scope, so org-only
     // authority (members, org settings, …) stays out of reach. A principal
     // already pinned to a different space contradicts its own audience.
-    const boundSpaceId = mcpBindingFromAudiences(claims.audiences)?.spaceId;
+    const mcpBinding = mcpBindingFromAudiences(claims.audiences);
+    // A token bound to an MCP resource belongs to an MCP access grant. Its JWT
+    // is verified without a database read, so the grant's revocation watermark
+    // is checked here, on every request (`services/mcp-grants.ts`).
+    if (resolution && mcpBinding && claims.clientId) {
+      const stillActive = await checkMcpGrantAndTouch({
+        userId: claims.authUserId,
+        clientId: claims.clientId,
+        binding: mcpBinding,
+        issuedAt: claims.issuedAt,
+        ip: getClientIpFromRequest(request),
+      });
+      if (!stillActive) {
+        logger.info("OIDC strategy: MCP access grant revoked — rejecting token", {
+          module: "oidc",
+          userId: claims.authUserId,
+          clientId: claims.clientId,
+        });
+        return null;
+      }
+    }
+    const boundSpaceId = mcpBinding?.spaceId;
     if (resolution && boundSpaceId !== undefined) {
       if (resolution.spaceId !== undefined && resolution.spaceId !== boundSpaceId) {
         logger.warn("OIDC strategy: token space differs from its audience space — rejecting", {

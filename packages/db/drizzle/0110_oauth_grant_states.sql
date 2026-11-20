@@ -7,7 +7,6 @@ CREATE TABLE "oauth_grant_states" (
 	"tokens_valid_after" timestamp with time zone,
 	"last_used_at" timestamp with time zone,
 	"last_used_ip" text,
-	"last_used_user_agent" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "oauth_grant_states_user_id_client_id_resource_pk" PRIMARY KEY("user_id","client_id","resource")
 );

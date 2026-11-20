@@ -3,20 +3,16 @@
 import { useTranslation } from "react-i18next";
 import { Laptop, Plug } from "lucide-react";
 import { DataTable } from "./data-table";
-import { EmptyState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
 import { SettingsGroup } from "./settings/setting-row";
-import {
-  useCliGrantColumns,
-  useMcpGrantColumns,
-  type AccessGrantRow,
-} from "./access-grant-columns";
+import { useCliGrantColumns, useMcpGrantColumns } from "./access-grant-columns";
+import type { AccessGrant } from "../lib/access-grants";
 
 /**
- * A person's access grants, or an organization's, in two groups: the MCP
- * clients (Claude, Cursor, …) and the CLI / GitHub Action sessions. Both
- * lists come from one response; each group answers its own emptiness.
+ * A person's access grants, or an organization's, in two groups read from one
+ * response: the MCP clients and the CLI / GitHub Action sessions.
  */
-export function AccessGrantSections({
+export function AccessGrantSections<T extends AccessGrant>({
   tableIdPrefix,
   grants,
   isLoading,
@@ -28,62 +24,60 @@ export function AccessGrantSections({
   emptyCliHint,
 }: {
   tableIdPrefix: string;
-  grants: AccessGrantRow[];
+  grants: T[];
   isLoading: boolean;
   error: unknown;
   showHolder: boolean;
   revokingId: string | null;
-  onRevoke?: (grant: AccessGrantRow) => void;
+  onRevoke?: (grant: T) => void;
   emptyMcpHint: string;
   emptyCliHint: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const options = { showHolder, revokingId, onRevoke };
-  const mcpColumns = useMcpGrantColumns(options);
-  const cliColumns = useCliGrantColumns(options);
-  const mcp = grants.filter((g) => g.kind === "mcp");
-  const cli = grants.filter((g) => g.kind === "cli");
+  const mcpColumns = useMcpGrantColumns<T>(options);
+  const cliColumns = useCliGrantColumns<T>(options);
+  if (error) return <ErrorState error={error} />;
 
-  return (
-    <>
-      <SettingsGroup title={t("accessGrants.mcpTitle")}>
-        <DataTable
-          tableId={`${tableIdPrefix}-mcp`}
-          columns={mcpColumns}
-          rows={mcp}
-          rowKey={(g) => g.id}
-          label={t("accessGrants.mcpTitle")}
-          isLoading={isLoading}
-          failure={error}
-          empty={
-            <EmptyState
-              icon={Plug}
-              message={t("accessGrants.mcpEmptyTitle")}
-              hint={emptyMcpHint}
-              compact
-            />
-          }
+  const groups = [
+    {
+      kind: "mcp",
+      title: t("accessGrants.mcpTitle"),
+      columns: mcpColumns,
+      empty: (
+        <EmptyState
+          icon={Plug}
+          message={t("accessGrants.mcpEmptyTitle")}
+          hint={emptyMcpHint}
+          compact
         />
-      </SettingsGroup>
-      <SettingsGroup title={t("accessGrants.cliTitle")}>
-        <DataTable
-          tableId={`${tableIdPrefix}-cli`}
-          columns={cliColumns}
-          rows={cli}
-          rowKey={(g) => g.id}
-          label={t("accessGrants.cliTitle")}
-          isLoading={isLoading}
-          failure={error}
-          empty={
-            <EmptyState
-              icon={Laptop}
-              message={t("devices.emptyTitle")}
-              hint={emptyCliHint}
-              compact
-            />
-          }
+      ),
+    },
+    {
+      kind: "cli",
+      title: t("accessGrants.cliTitle"),
+      columns: cliColumns,
+      empty: (
+        <EmptyState
+          icon={Laptop}
+          message={t("accessGrants.cliEmptyTitle")}
+          hint={emptyCliHint}
+          compact
         />
-      </SettingsGroup>
-    </>
-  );
+      ),
+    },
+  ] as const;
+  return groups.map((group) => (
+    <SettingsGroup key={group.kind} title={group.title}>
+      <DataTable
+        tableId={`${tableIdPrefix}-${group.kind}`}
+        columns={group.columns}
+        rows={grants.filter((g) => g.kind === group.kind)}
+        rowKey={(g) => g.id}
+        label={group.title}
+        isLoading={isLoading}
+        empty={group.empty}
+      />
+    </SettingsGroup>
+  ));
 }

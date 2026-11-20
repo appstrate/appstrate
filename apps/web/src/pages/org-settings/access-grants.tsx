@@ -8,11 +8,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePermissions } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { AccessGrantSections } from "../../components/access-grant-sections";
-import type { AccessGrantRow } from "../../components/access-grant-columns";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { invalidatePaths } from "../../lib/query-keys";
 import {
+  ACCESS_GRANT_PATHS,
   grantHolderLabel,
   grantLabel,
   grantTargetPhrase,
@@ -30,25 +30,18 @@ export function OrgSettingsAccessGrantsPage() {
     "get",
     "/api/orgs/{orgId}/access-grants",
     { params: { path: { orgId: orgId ?? "" } } },
-    {
-      enabled: !!orgId,
-      // Unwrap the list envelope — the universal 2xx list shape here.
-      select: (envelope) => envelope.data,
-    },
+    { enabled: !!orgId, select: (envelope) => envelope.data },
   );
 
   const revoke = $api.useMutation("delete", "/api/orgs/{orgId}/access-grants/{grantId}", {
-    onSuccess: () => {
-      void invalidatePaths(queryClient, ["/api/orgs/{orgId}/access-grants"]);
-    },
+    onSuccess: () => void invalidatePaths(queryClient, [...ACCESS_GRANT_PATHS]),
   });
 
-  const [pendingRevoke, setPendingRevoke] = useState<AccessGrantRow | null>(null);
-  const pending = pendingRevoke as OrgAccessGrant | null;
+  const [pending, setPending] = useState<OrgAccessGrant | null>(null);
 
   return (
     <>
-      <p className="text-muted-foreground mb-4 max-w-prose text-xs">
+      <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
         {t("orgAccessGrants.description")}
       </p>
 
@@ -60,27 +53,27 @@ export function OrgSettingsAccessGrantsPage() {
         error={error}
         showHolder
         revokingId={revoke.isPending ? (revoke.variables?.params.path.grantId ?? null) : null}
-        onRevoke={can("access-grants:delete") ? setPendingRevoke : undefined}
+        onRevoke={can("access-grants:delete") ? setPending : undefined}
         emptyMcpHint={t("orgAccessGrants.mcpEmptyHint")}
-        emptyCliHint={t("orgCliSessions.emptyDescription")}
+        emptyCliHint={t("orgAccessGrants.cliEmptyHint")}
       />
 
       <ConfirmModal
         open={pending !== null}
         title={t("accessGrants.confirmRevokeTitle")}
         description={
-          pending
-            ? pending.kind === "mcp"
+          !pending
+            ? ""
+            : pending.target
               ? t("orgAccessGrants.confirmRevokeMcp", {
                   name: grantLabel(pending, t),
                   user: grantHolderLabel(pending),
-                  target: grantTargetPhrase(pending, t),
+                  target: grantTargetPhrase(pending.target, t),
                 })
-              : t("orgCliSessions.confirmRevokeDescription", {
+              : t("orgAccessGrants.confirmRevokeCli", {
                   device: grantLabel(pending, t),
                   user: grantHolderLabel(pending),
                 })
-            : ""
         }
         confirmLabel={t("devices.revoke")}
         variant="destructive"
@@ -89,10 +82,10 @@ export function OrgSettingsAccessGrantsPage() {
           if (!pending) return;
           revoke.mutate(
             { params: { path: { orgId: orgId ?? "", grantId: pending.id } } },
-            { onSuccess: () => setPendingRevoke(null) },
+            { onSuccess: () => setPending(null) },
           );
         }}
-        onClose={() => setPendingRevoke(null)}
+        onClose={() => setPending(null)}
       />
     </>
   );

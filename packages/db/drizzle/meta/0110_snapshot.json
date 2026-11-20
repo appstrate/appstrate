@@ -1,5 +1,5 @@
 {
-  "id": "637fe54a-b24e-4278-8952-edeefeade80e",
+  "id": "0e91a84c-6edc-4f06-a528-cc7e2eeb8603",
   "prevId": "937a8e4d-684d-4279-91c8-737761d8b32f",
   "version": "7",
   "dialect": "postgresql",
@@ -9208,12 +9208,6 @@
         },
         "last_used_ip": {
           "name": "last_used_ip",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_used_user_agent": {
-          "name": "last_used_user_agent",
           "type": "text",
           "primaryKey": false,
           "notNull": false

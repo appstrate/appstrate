@@ -11,8 +11,7 @@
  * Browser session only, by construction: these are Better Auth endpoints, so
  * the platform auth pipeline (API keys, OAuth bearers, the MCP endpoint's
  * in-process dispatch) never reaches them, and `getSessionFromCtx` resolves a
- * cookie session or nothing. A leaked API key, or an agent acting through an
- * MCP client, cannot list a person's devices or sign them all out.
+ * cookie session or nothing.
  */
 
 import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
@@ -72,29 +71,6 @@ export function accessGrantsPlugin() {
         "/access-grants",
         {
           method: "GET",
-          metadata: {
-            openapi: {
-              description:
-                "List the caller's access grants: CLI sessions and MCP client grants. Browser session only.",
-              responses: {
-                200: {
-                  description: "Grant list",
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "object",
-                        properties: {
-                          object: { type: "string", const: "list" },
-                          data: { type: "array", items: { type: "object" } },
-                          hasMore: { type: "boolean" },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
         },
         async (ctx) => {
           const userId = await requireSessionUserId(ctx);
@@ -107,25 +83,6 @@ export function accessGrantsPlugin() {
         {
           method: "POST",
           body: z.object({ id: z.string().min(1) }).strict(),
-          metadata: {
-            openapi: {
-              description:
-                "End one of the caller's access grants. `revoked: false` when the id names no live grant of theirs — unknown, someone else's and already ended look the same.",
-              responses: {
-                200: {
-                  description: "Revocation outcome",
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "object",
-                        properties: { revoked: { type: "boolean" } },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
         },
         async (ctx) => {
           const userId = await requireSessionUserId(ctx);
@@ -150,25 +107,6 @@ export function accessGrantsPlugin() {
         "/access-grants/revoke-all",
         {
           method: "POST",
-          metadata: {
-            openapi: {
-              description:
-                "End every access grant of the caller, CLI sessions and MCP client grants. Idempotent.",
-              responses: {
-                200: {
-                  description: "Bulk revocation outcome",
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "object",
-                        properties: { revoked_count: { type: "integer", minimum: 0 } },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
         },
         async (ctx) => {
           const userId = await requireSessionUserId(ctx);

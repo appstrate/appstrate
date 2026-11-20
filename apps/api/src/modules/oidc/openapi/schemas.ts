@@ -123,13 +123,11 @@ const accessGrant: Record<string, unknown> = {
     "client_registration",
     "device_name",
     "user_agent",
-    "created_ip",
     "last_used_ip",
     "target",
     "session_count",
     "lastUsedAt",
     "createdAt",
-    "expiresAt",
   ],
   properties: {
     id: {
@@ -157,9 +155,15 @@ const accessGrant: Record<string, unknown> = {
       ...nullableString,
       description: "The device name a CLI session was opened with.",
     },
-    user_agent: nullableString,
-    created_ip: nullableString,
-    last_used_ip: nullableString,
+    user_agent: {
+      ...nullableString,
+      description: "The CLI's user agent. `null` for an MCP grant.",
+    },
+    last_used_ip: {
+      ...nullableString,
+      description:
+        "Where the grant was last used from (a CLI session that never refreshed: where it signed in).",
+    },
     target: {
       description:
         "What the grant reaches. `null` for a CLI session, which acts in every organization of its owner.",
@@ -171,7 +175,7 @@ const accessGrant: Record<string, unknown> = {
           required: ["orgId", "org_name", "spaceId", "space_name"],
           properties: {
             orgId: { type: "string" },
-            org_name: nullableString,
+            org_name: { type: "string" },
             spaceId: nullableString,
             space_name: nullableString,
           },
@@ -185,10 +189,6 @@ const accessGrant: Record<string, unknown> = {
     },
     lastUsedAt: nullableDate,
     createdAt: { type: "string", format: "date-time" },
-    expiresAt: {
-      ...nullableDate,
-      description: "When the grant's last refresh token expires. `null` when none expires.",
-    },
   },
 };
 

@@ -469,7 +469,6 @@ export const oauthGrantState = pgTable(
     tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     lastUsedIp: text("last_used_ip"),
-    lastUsedUserAgent: text("last_used_user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

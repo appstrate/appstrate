@@ -28,6 +28,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../../test/helpers/seed.ts";
+import { deleteSpace, ensurePersonalSpaceFor } from "../../../../../services/spaces.ts";
 import { MCP_ACCEPT } from "../../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../../../../../lib/audiences.ts";
@@ -47,7 +48,7 @@ interface GrantRow {
   client_name: string | null;
   client_origin: string | null;
   client_registration: string | null;
-  user_agent: string | null;
+  last_used_ip: string | null;
   target: {
     orgId: string;
     org_name: string | null;
@@ -56,7 +57,6 @@ interface GrantRow {
   } | null;
   session_count: number;
   lastUsedAt: string | null;
-  expiresAt: string | null;
   user?: { id: string; email: string | null };
   revocable?: boolean;
 }
@@ -84,7 +84,6 @@ function mcpInitialize(path: string, token: string) {
       "content-type": "application/json",
       Accept: MCP_ACCEPT,
       Authorization: `Bearer ${token}`,
-      "user-agent": "claude-code/2.1.0",
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -111,6 +110,19 @@ async function orgGrants(cookie: string, orgId: string): Promise<GrantRow[]> {
   });
   expect(res.status).toBe(200);
   return ((await res.json()) as { data: GrantRow[] }).data;
+}
+
+function refresh(clientId: string, refreshToken: string, resource: string) {
+  return app.request("/api/auth/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+      resource,
+    }).toString(),
+  });
 }
 
 function revokeMine(cookie: string, id: string) {
@@ -173,8 +185,6 @@ describe("MCP access grants", () => {
       });
       expect(grant.session_count).toBe(1);
       expect(grant.lastUsedAt).not.toBeNull();
-      expect(grant.user_agent).toBe("claude-code/2.1.0");
-      expect(grant.expiresAt).not.toBeNull();
     });
 
     it("groups two authorizations of one client into one grant", async () => {
@@ -197,6 +207,37 @@ describe("MCP access grants", () => {
       expect(grants).toHaveLength(2);
       const spaceGrant = grants.find((g) => g.target?.spaceId === space.id);
       expect(spaceGrant?.target?.space_name).toBe("Ops");
+    });
+
+    it("lists a client authorized without offline_access while its token may be in use", async () => {
+      const clientId = await registerClient();
+      const { token } = await authorizationCodeFlow(app, {
+        cookie: ctx.cookie,
+        clientId,
+        redirectUri: REDIRECT_URI,
+        scope: "openid mcp:read mcp:invoke",
+        resource: orgResource,
+      });
+      expect(token.refresh_token).toBeUndefined();
+      expect((await myGrants(ctx.cookie)).filter((g) => g.kind === "mcp")).toHaveLength(0);
+      expect((await mcpInitialize(orgPath, String(token.access_token))).status).toBe(200);
+
+      const [grant] = (await myGrants(ctx.cookie)).filter((g) => g.kind === "mcp");
+      expect(grant?.session_count).toBe(0);
+      await revokeMine(ctx.cookie, grant!.id);
+      expect((await mcpInitialize(orgPath, String(token.access_token))).status).toBe(401);
+    });
+
+    it("drops a grant whose space was deleted", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Gone", visibility: "closed" });
+      await seedSpaceMember({ spaceId: space.id, userId: ctx.user.id, presetRole: "admin" });
+      await connect(
+        ctx.cookie,
+        await registerClient(),
+        getMcpSpaceResourceUri(ctx.orgId, space.id),
+      );
+      await deleteSpace(ctx.orgId, space.id);
+      expect((await myGrants(ctx.cookie)).filter((g) => g.kind === "mcp")).toHaveLength(0);
     });
 
     it("refuses an API key and an MCP bearer: browser session only", async () => {
@@ -238,24 +279,15 @@ describe("MCP access grants", () => {
 
       // The access token is still unexpired, and refused.
       expect((await mcpInitialize(orgPath, bearer)).status).toBe(401);
-      // The refresh token is revoked.
+      // The refresh token is gone.
+      expect((await refresh(clientId, String(first.token.refresh_token), orgResource)).status).toBe(
+        400,
+      );
       const live = await db
-        .select({ revoked: oauthRefreshToken.revoked })
+        .select({ id: oauthRefreshToken.id })
         .from(oauthRefreshToken)
         .where(eq(oauthRefreshToken.clientId, clientId));
-      const refresh = await app.request("/api/auth/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: String(first.token.refresh_token),
-          client_id: clientId,
-          resource: orgResource,
-        }).toString(),
-      });
-      expect(live.length).toBeGreaterThan(0);
-      expect(live.every((r) => r.revoked !== null)).toBe(true);
-      expect(refresh.status).toBe(400);
+      expect(live).toHaveLength(0);
       expect((await myGrants(ctx.cookie)).filter((g) => g.kind === "mcp")).toHaveLength(0);
 
       // Reconnecting goes through the consent screen, and the new token works.
@@ -265,6 +297,28 @@ describe("MCP access grants", () => {
       const again = await connect(ctx.cookie, clientId);
       expect(again.consentShown).toBe(true);
       expect((await mcpInitialize(orgPath, String(again.token.access_token))).status).toBe(200);
+    });
+
+    it("leaves the same client's grant on another endpoint working, refresh included", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Ops", visibility: "closed" });
+      await seedSpaceMember({ spaceId: space.id, userId: ctx.user.id, presetRole: "admin" });
+      const spaceResource = getMcpSpaceResourceUri(ctx.orgId, space.id);
+      const clientId = await registerClient();
+      const onOrg = await connect(ctx.cookie, clientId);
+      const onSpace = await connect(ctx.cookie, clientId, spaceResource);
+      const orgGrant = (await myGrants(ctx.cookie)).find((g) => g.target?.spaceId === null);
+      await revokeMine(ctx.cookie, orgGrant!.id);
+
+      // The revoked grant's client retries its refresh token: refused, and
+      // Better Auth must not take it for a stolen token and wipe the client's
+      // other refresh tokens.
+      expect((await refresh(clientId, String(onOrg.token.refresh_token), orgResource)).status).toBe(
+        400,
+      );
+      const grants = (await myGrants(ctx.cookie)).filter((g) => g.kind === "mcp");
+      expect(grants.map((g) => g.target?.spaceId)).toEqual([space.id]);
+      const refreshed = await refresh(clientId, String(onSpace.token.refresh_token), spaceResource);
+      expect(refreshed.status).toBe(200);
     });
 
     it("records the revocation in the org's audit log", async () => {
@@ -334,6 +388,20 @@ describe("MCP access grants", () => {
       await db
         .delete(oauthResource)
         .where(like(oauthResource.identifier, `${getMcpOrgResourceUri(other.orgId)}%`));
+    });
+
+    it("does not show a member's grant on their personal space", async () => {
+      const member = await memberContext(ctx, "member");
+      const personal = await ensurePersonalSpaceFor(ctx.orgId, member.user.id);
+      await connect(
+        member.cookie,
+        await registerClient(),
+        getMcpSpaceResourceUri(ctx.orgId, personal.id),
+      );
+      expect((await myGrants(member.cookie)).filter((g) => g.kind === "mcp")).toHaveLength(1);
+      expect((await orgGrants(ctx.cookie, ctx.orgId)).filter((g) => g.kind === "mcp")).toHaveLength(
+        0,
+      );
     });
 
     it("refuses a member", async () => {

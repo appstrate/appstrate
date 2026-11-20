@@ -44,6 +44,7 @@ import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { callerOrgRole, callerPersonalOwnerId } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
+import { listSpacesForPrincipal } from "../../services/spaces.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import { listAccessGrantsForOrg, revokeAccessGrantForOrgAdmin } from "./services/access-grants.ts";
 import {
@@ -2689,7 +2690,7 @@ export function createOidcRouter() {
     requireModulePermission("access-grants", "read"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
-      return c.json(listResponse(await listAccessGrantsForOrg(orgId)));
+      return c.json(listResponse(await listAccessGrantsForOrg(orgId, await visibleSpaceIds(c))));
     },
   );
 
@@ -2701,7 +2702,11 @@ export function createOidcRouter() {
     async (c) => {
       const orgId = c.req.param("orgId")!;
       const grantId = c.req.param("grantId")!;
-      const outcome = await revokeAccessGrantForOrgAdmin({ orgId, grantId });
+      const outcome = await revokeAccessGrantForOrgAdmin({
+        orgId,
+        grantId,
+        visibleSpaceIds: await visibleSpaceIds(c),
+      });
       if (!outcome.revoked) {
         // Unknown, outside this org, already ended, or a CLI session shared
         // with another org: one 404, so membership outside the org cannot be
@@ -2734,6 +2739,18 @@ export function createOidcRouter() {
   );
 
   return router;
+}
+
+/** The spaces of the path's org the caller may know exist (RBAC spec §6.3). */
+async function visibleSpaceIds(c: Context<AppEnv>): Promise<Set<string>> {
+  const orgId = c.req.param("orgId")!;
+  const visible = await listSpacesForPrincipal(
+    orgId,
+    callerOrgRole(c, orgId),
+    c.get("user").id,
+    callerPersonalOwnerId(c, orgId),
+  );
+  return new Set(visible.map(({ space }) => space.id));
 }
 
 function prefersHtml(acceptHeader: string | undefined | null): boolean {

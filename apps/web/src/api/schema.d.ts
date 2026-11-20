@@ -5782,13 +5782,14 @@ export interface components {
             client_registration: "metadata_document" | "dynamic" | "managed" | null;
             /** @description The device name a CLI session was opened with. */
             device_name: string | null;
+            /** @description The CLI's user agent. `null` for an MCP grant. */
             user_agent: string | null;
-            created_ip: string | null;
+            /** @description Where the grant was last used from (a CLI session that never refreshed: where it signed in). */
             last_used_ip: string | null;
             /** @description What the grant reaches. `null` for a CLI session, which acts in every organization of its owner. */
             target: null | {
                 orgId: string;
-                org_name: string | null;
+                org_name: string;
                 spaceId: string | null;
                 space_name: string | null;
             };
@@ -5798,11 +5799,6 @@ export interface components {
             lastUsedAt: string | null;
             /** Format: date-time */
             createdAt: string;
-            /**
-             * Format: date-time
-             * @description When the grant's last refresh token expires. `null` when none expires.
-             */
-            expiresAt: string | null;
         };
         /** @description What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 409, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
         AgentConnectionReadiness: {
@@ -6671,13 +6667,14 @@ export interface components {
             client_registration: "metadata_document" | "dynamic" | "managed" | null;
             /** @description The device name a CLI session was opened with. */
             device_name: string | null;
+            /** @description The CLI's user agent. `null` for an MCP grant. */
             user_agent: string | null;
-            created_ip: string | null;
+            /** @description Where the grant was last used from (a CLI session that never refreshed: where it signed in). */
             last_used_ip: string | null;
             /** @description What the grant reaches. `null` for a CLI session, which acts in every organization of its owner. */
             target: null | {
                 orgId: string;
-                org_name: string | null;
+                org_name: string;
                 spaceId: string | null;
                 space_name: string | null;
             };
@@ -6687,11 +6684,6 @@ export interface components {
             lastUsedAt: string | null;
             /** Format: date-time */
             createdAt: string;
-            /**
-             * Format: date-time
-             * @description When the grant's last refresh token expires. `null` when none expires.
-             */
-            expiresAt: string | null;
             user: {
                 id: string;
                 name: string | null;

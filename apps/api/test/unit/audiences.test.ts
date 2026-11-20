@@ -71,9 +71,10 @@ describe("parseMcpResourceUri", () => {
 });
 
 describe("mcpBindingFromAudiences", () => {
-  it("returns the first binding among mixed (non-string included) entries", () => {
-    const aud = ["https://example.test/other", 42, getMcpSpaceResourceUri("org_xyz", sid)];
-    expect(mcpBindingFromAudiences(aud)).toEqual({ orgId: "org_xyz", spaceId: sid });
+  it("returns the first binding among mixed (non-string included) entries, with its URI", () => {
+    const resource = getMcpSpaceResourceUri("org_xyz", sid);
+    const aud = ["https://example.test/other", 42, resource];
+    expect(mcpBindingFromAudiences(aud)).toEqual({ orgId: "org_xyz", spaceId: sid, resource });
   });
 
   it("returns undefined when no entry names an MCP resource", () => {

@@ -3,17 +3,12 @@
 /**
  * MCP access grants — one per (user, OAuth client, MCP resource).
  *
- * An MCP client (Claude Code, claude.ai, Cursor, …) authorizes against the
- * platform's OAuth server and receives tokens audience-bound to exactly one MCP
- * resource: an org endpoint (`/api/mcp/o/:org`) or a space endpoint
- * (`/api/mcp/o/:org/s/:space`). The tokens live in Better Auth's
- * `oauth_refresh_tokens` / `oauth_access_tokens`; what those tables cannot hold
- * lives in `oauth_grant_states` (see `packages/db/src/schema/oidc.ts`).
- *
- * The grant, not the token, is the unit a person reasons about: a refresh
- * rotates rows, and one client may hold several live refresh tokens for the
- * same resource (one per authorization, e.g. two machines sharing a CIMD
- * client). Listing groups them; revoking ends all of them.
+ * An MCP client receives tokens audience-bound to one MCP resource: an org
+ * endpoint (`/api/mcp/o/:org`) or a space endpoint (`/api/mcp/o/:org/s/:space`).
+ * The tokens live in Better Auth's `oauth_refresh_tokens` /
+ * `oauth_access_tokens`; `oauth_grant_states` holds what they cannot: the
+ * revocation watermark and the last use. A grant groups every live refresh
+ * token of its triple (one per authorization), and revoking it ends them all.
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -24,122 +19,95 @@ import {
   oauthConsent,
   oauthGrantState,
   oauthRefreshToken,
+  organizations,
   spaces,
 } from "@appstrate/db/schema";
-import { and, arrayContains, arrayOverlaps, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
-import {
-  getMcpOrgResourceUri,
-  getMcpSpaceResourceUri,
-  parseMcpResourceUri,
-} from "../../../lib/audiences.ts";
+import { and, arrayContains, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { parseMcpResourceUri, type McpResourceBinding } from "../../../lib/audiences.ts";
 import { logger } from "../../../lib/logger.ts";
+
+/** Lifetime of the access tokens `/oauth2/token` mints (`auth/plugins.ts`). */
+export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 
 /** At most one activity write per grant per interval, as for CLI sessions. */
 const LAST_USED_TOUCH_INTERVAL_MS = 60 * 1000;
 
-/** A user agent is display data: bound what one request can make us store. */
-const USER_AGENT_MAX_LENGTH = 512;
-
 /**
- * Hot-path check called by the OIDC strategy for every JWT bound to an MCP
- * resource. Refuses a token issued at or before the grant's revocation
- * watermark, and records the grant's activity at most once a minute.
- *
- * `issuedAt` is the JWT `iat` in seconds. A token issued in the same second as
- * the revocation is refused too: a client reconnecting that fast simply
- * re-authorizes.
- *
- * The activity write is best-effort: it creates the grant's row on first use,
- * and a failure (the space was deleted a moment ago, a transient error) never
- * fails authentication.
+ * Called by the OIDC strategy for every resolved JWT bound to an MCP resource.
+ * Refuses a token issued at or before the grant's watermark (`iat` has
+ * one-second resolution, so a token minted in the revocation's own second is
+ * refused too), and records the grant's last use at most once a minute. The
+ * activity write is best-effort: it never fails authentication.
  */
 export async function checkMcpGrantAndTouch(params: {
   userId: string;
   clientId: string;
-  resource: string;
+  binding: McpResourceBinding & { resource: string };
   issuedAt: number | undefined;
   ip: string | null;
-  userAgent: string | null;
 }): Promise<boolean> {
-  const { userId, clientId, resource, issuedAt, ip, userAgent } = params;
-  const binding = parseMcpResourceUri(resource);
-  if (!binding) return true;
-
+  const { userId, clientId, binding, issuedAt, ip } = params;
   const [row] = await db
     .select({
       tokensValidAfter: oauthGrantState.tokensValidAfter,
       lastUsedAt: oauthGrantState.lastUsedAt,
     })
     .from(oauthGrantState)
-    .where(grantKey(userId, clientId, resource))
+    .where(
+      and(
+        eq(oauthGrantState.userId, userId),
+        eq(oauthGrantState.clientId, clientId),
+        eq(oauthGrantState.resource, binding.resource),
+      ),
+    )
     .limit(1);
 
   if (row?.tokensValidAfter) {
-    // A token without `iat` cannot prove it postdates the revocation.
-    if (issuedAt === undefined) return false;
-    if (issuedAt * 1000 <= row.tokensValidAfter.getTime()) return false;
+    if (issuedAt === undefined || issuedAt * 1000 <= row.tokensValidAfter.getTime()) return false;
   }
 
-  const now = Date.now();
-  const stale = !row?.lastUsedAt || now - row.lastUsedAt.getTime() >= LAST_USED_TOUCH_INTERVAL_MS;
-  if (stale) {
-    const activity = {
-      lastUsedAt: new Date(now),
-      lastUsedIp: ip,
-      lastUsedUserAgent: userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-    };
-    try {
-      await db
-        .insert(oauthGrantState)
-        .values({
-          userId,
-          clientId,
-          resource,
-          orgId: binding.orgId,
-          spaceId: binding.spaceId ?? null,
-          ...activity,
-        })
-        .onConflictDoUpdate({
-          target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
-          // An in-process re-dispatch (the MCP server invoking a REST route)
-          // carries neither the caller's IP nor its user agent: keep the
-          // ones a real request recorded.
-          set: {
-            lastUsedAt: activity.lastUsedAt,
-            lastUsedIp: sql`coalesce(excluded.last_used_ip, ${oauthGrantState.lastUsedIp})`,
-            lastUsedUserAgent: sql`coalesce(excluded.last_used_user_agent, ${oauthGrantState.lastUsedUserAgent})`,
-          },
-        });
-    } catch (err) {
-      logger.warn("oidc: mcp grant activity write failed — auth still allowed", {
-        module: "oidc",
+  const now = new Date();
+  if (row?.lastUsedAt && now.getTime() - row.lastUsedAt.getTime() < LAST_USED_TOUCH_INTERVAL_MS) {
+    return true;
+  }
+  try {
+    await db
+      .insert(oauthGrantState)
+      .values({
+        userId,
         clientId,
-        error: getErrorMessage(err),
+        resource: binding.resource,
+        orgId: binding.orgId,
+        spaceId: binding.spaceId ?? null,
+        lastUsedAt: now,
+        lastUsedIp: ip,
+      })
+      .onConflictDoUpdate({
+        target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
+        // The MCP server's in-process dispatch carries no client IP: keep the
+        // one the client's own request recorded.
+        set: {
+          lastUsedAt: now,
+          lastUsedIp: sql`coalesce(excluded.last_used_ip, ${oauthGrantState.lastUsedIp})`,
+        },
       });
-    }
+  } catch (err) {
+    logger.warn("oidc: mcp grant activity write failed — auth still allowed", {
+      module: "oidc",
+      clientId,
+      error: getErrorMessage(err),
+    });
   }
   return true;
-}
-
-function grantKey(userId: string, clientId: string, resource: string) {
-  return and(
-    eq(oauthGrantState.userId, userId),
-    eq(oauthGrantState.clientId, clientId),
-    eq(oauthGrantState.resource, resource),
-  );
 }
 
 // ─── Listing ─────────────────────────────────────────────────────────────────
 
 /**
- * How the platform knows the client, which decides how far its displayed name
- * can be trusted:
- * - `metadata_document` — CIMD: the `client_id` is an HTTPS URL whose document
- *   the server fetched; its host is the client's verified origin.
- * - `dynamic` — RFC 7591 registration: every field is the registrant's own
- *   claim. A non-loopback redirect host is the only origin it cannot fake
- *   (the code is delivered there).
- * - `managed` — registered by an operator.
+ * How the platform knows the client, which decides how far its declared name
+ * can be trusted: a CIMD metadata document it fetched (the document's host is
+ * verified), an RFC 7591 registration (only a non-loopback redirect host is
+ * beyond the registrant's say), or an operator.
  */
 export type ClientRegistration = "metadata_document" | "dynamic" | "managed";
 
@@ -150,7 +118,9 @@ export interface McpGrant {
   clientId: string;
   resource: string;
   orgId: string;
+  orgName: string;
   spaceId: string | null;
+  spaceName: string | null;
   clientName: string | null;
   clientOrigin: string | null;
   clientRegistration: ClientRegistration;
@@ -158,18 +128,17 @@ export interface McpGrant {
   sessionCount: number;
   lastUsedAt: Date | null;
   lastUsedIp: string | null;
-  lastUsedUserAgent: string | null;
   createdAt: Date;
-  /** When the last refresh token expires; `null` when none expires or there is none. */
-  expiresAt: Date | null;
 }
 
-/** An MCP access token lives 10 minutes (`auth/plugins.ts`). */
-const ACCESS_TOKEN_LIFETIME_MS = 10 * 60 * 1000;
+/**
+ * Whose grants: one user's, or those of `userIds` (an org's current members)
+ * on the org's own endpoint and on the spaces in `spaceIds`.
+ */
+type GrantScope = { userId: string } | { orgId: string; userIds: string[]; spaceIds: Set<string> };
 
 const GRANT_ID_PREFIX = "mcg_";
 
-/** The grant's public id. Not a secret: it only names a grant its reader can already see. */
 function mcpGrantId(userId: string, clientId: string, resource: string): string {
   const digest = new Bun.CryptoHasher("sha256")
     .update(`${userId}\u0000${clientId}\u0000${resource}`)
@@ -181,69 +150,73 @@ export function isMcpGrantId(id: string): boolean {
   return id.startsWith(GRANT_ID_PREFIX);
 }
 
-interface GrantAccumulator {
+interface Candidate {
   userId: string;
   clientId: string;
   resource: string;
+  binding: McpResourceBinding;
   authorizations: Set<string>;
   createdAt: Date;
-  expiresAt: Date | null;
-  neverExpires: boolean;
 }
 
 /**
- * The grants held by one user, or by every user on one org's MCP resources.
- *
  * A grant is listed while it holds a live refresh token, or while an access
  * token minted without one (no `offline_access`) may still be in use: its last
- * use is within an access token's lifetime and postdates its watermark.
+ * use is within an access token's lifetime and after its watermark. A grant
+ * whose org or space no longer exists is not listed.
  */
-async function listMcpGrants(filter: { userId: string } | { orgId: string }): Promise<McpGrant[]> {
+async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
+  if ("userIds" in scope && scope.userIds.length === 0) return [];
   const now = new Date();
+  const inScope = (binding: McpResourceBinding) =>
+    !("orgId" in scope) ||
+    (binding.orgId === scope.orgId &&
+      (binding.spaceId === undefined || scope.spaceIds.has(binding.spaceId)));
+
+  const candidates = new Map<string, Candidate>();
+  const add = (userId: string, clientId: string, resource: string, startedAt: Date) => {
+    const binding = parseMcpResourceUri(resource);
+    if (!binding || !inScope(binding)) return undefined;
+    const id = mcpGrantId(userId, clientId, resource);
+    const candidate = candidates.get(id) ?? {
+      userId,
+      clientId,
+      resource,
+      binding,
+      authorizations: new Set<string>(),
+      createdAt: startedAt,
+    };
+    if (startedAt < candidate.createdAt) candidate.createdAt = startedAt;
+    candidates.set(id, candidate);
+    return candidate;
+  };
+
   const tokenRows = await db
     .select({
+      id: oauthRefreshToken.id,
       userId: oauthRefreshToken.userId,
       clientId: oauthRefreshToken.clientId,
       resources: oauthRefreshToken.resources,
       authorizationCodeId: oauthRefreshToken.authorizationCodeId,
-      id: oauthRefreshToken.id,
       createdAt: oauthRefreshToken.createdAt,
       authTime: oauthRefreshToken.authTime,
-      expiresAt: oauthRefreshToken.expiresAt,
     })
     .from(oauthRefreshToken)
     .where(
       and(
+        "userId" in scope
+          ? eq(oauthRefreshToken.userId, scope.userId)
+          : inArray(oauthRefreshToken.userId, scope.userIds),
         isNull(oauthRefreshToken.revoked),
         or(isNull(oauthRefreshToken.expiresAt), gt(oauthRefreshToken.expiresAt, now)),
-        "userId" in filter
-          ? eq(oauthRefreshToken.userId, filter.userId)
-          : arrayOverlaps(oauthRefreshToken.resources, await orgMcpResources(filter.orgId)),
       ),
     );
-
-  const grants = new Map<string, GrantAccumulator>();
   for (const row of tokenRows) {
     for (const resource of row.resources ?? []) {
-      const binding = parseMcpResourceUri(resource);
-      if (!binding) continue;
-      if ("orgId" in filter && binding.orgId !== filter.orgId) continue;
-      const key = mcpGrantId(row.userId, row.clientId, resource);
       const startedAt = row.authTime ?? row.createdAt ?? now;
-      const acc = grants.get(key) ?? {
-        userId: row.userId,
-        clientId: row.clientId,
-        resource,
-        authorizations: new Set<string>(),
-        createdAt: startedAt,
-        expiresAt: null,
-        neverExpires: false,
-      };
-      acc.authorizations.add(row.authorizationCodeId ?? row.id);
-      if (startedAt < acc.createdAt) acc.createdAt = startedAt;
-      if (row.expiresAt === null) acc.neverExpires = true;
-      else if (!acc.expiresAt || row.expiresAt > acc.expiresAt) acc.expiresAt = row.expiresAt;
-      grants.set(key, acc);
+      add(row.userId, row.clientId, resource, startedAt)?.authorizations.add(
+        row.authorizationCodeId ?? row.id,
+      );
     }
   }
 
@@ -251,88 +224,98 @@ async function listMcpGrants(filter: { userId: string } | { orgId: string }): Pr
     .select()
     .from(oauthGrantState)
     .where(
-      "userId" in filter
-        ? eq(oauthGrantState.userId, filter.userId)
-        : eq(oauthGrantState.orgId, filter.orgId),
+      "userId" in scope
+        ? eq(oauthGrantState.userId, scope.userId)
+        : and(
+            eq(oauthGrantState.orgId, scope.orgId),
+            inArray(oauthGrantState.userId, scope.userIds),
+          ),
     );
   const states = new Map(stateRows.map((s) => [mcpGrantId(s.userId, s.clientId, s.resource), s]));
-  const recent = new Date(now.getTime() - ACCESS_TOKEN_LIFETIME_MS);
-  for (const [key, state] of states) {
-    if (grants.has(key)) continue;
-    if (!state.lastUsedAt || state.lastUsedAt < recent) continue;
+  const accessTokenCutoff = now.getTime() - ACCESS_TOKEN_TTL_SECONDS * 1000;
+  for (const [id, state] of states) {
+    if (candidates.has(id) || !state.lastUsedAt) continue;
+    if (state.lastUsedAt.getTime() < accessTokenCutoff) continue;
     if (state.tokensValidAfter && state.tokensValidAfter >= state.lastUsedAt) continue;
-    grants.set(key, {
-      userId: state.userId,
-      clientId: state.clientId,
-      resource: state.resource,
-      authorizations: new Set(),
-      createdAt: state.createdAt,
-      expiresAt: null,
-      neverExpires: false,
-    });
+    add(state.userId, state.clientId, state.resource, state.createdAt);
   }
-  if (grants.size === 0) return [];
+  if (candidates.size === 0) return [];
 
-  const clientIds = [...new Set([...grants.values()].map((g) => g.clientId))];
-  const clients = await db
-    .select({
-      clientId: oauthClient.clientId,
-      name: oauthClient.name,
-      uri: oauthClient.uri,
-      redirectUris: oauthClient.redirectUris,
-      selfService: oauthClient.selfService,
-      clientDiscoveryId: oauthClient.clientDiscoveryId,
-    })
-    .from(oauthClient)
-    .where(inArray(oauthClient.clientId, clientIds));
+  const all = [...candidates.values()];
+  const clientIds = [...new Set(all.map((c) => c.clientId))];
+  const orgIds = [...new Set(all.map((c) => c.binding.orgId))];
+  const spaceIds = [...new Set(all.flatMap((c) => c.binding.spaceId ?? []))];
+  const [clients, orgRows, spaceRows] = await Promise.all([
+    db
+      .select({
+        clientId: oauthClient.clientId,
+        name: oauthClient.name,
+        uri: oauthClient.uri,
+        redirectUris: oauthClient.redirectUris,
+        selfService: oauthClient.selfService,
+        clientDiscoveryId: oauthClient.clientDiscoveryId,
+      })
+      .from(oauthClient)
+      .where(inArray(oauthClient.clientId, clientIds)),
+    db
+      .select({ id: organizations.id, name: organizations.name })
+      .from(organizations)
+      .where(inArray(organizations.id, orgIds)),
+    spaceIds.length
+      ? db
+          .select({ id: spaces.id, name: spaces.name })
+          .from(spaces)
+          .where(inArray(spaces.id, spaceIds))
+      : [],
+  ]);
   const clientById = new Map(clients.map((c) => [c.clientId, c]));
+  const orgNames = new Map(orgRows.map((o) => [o.id, o.name]));
+  const spaceNames = new Map(spaceRows.map((s) => [s.id, s.name]));
 
-  const result: McpGrant[] = [];
-  for (const [id, g] of grants) {
-    const binding = parseMcpResourceUri(g.resource)!;
-    const client = clientById.get(g.clientId);
+  const grants: McpGrant[] = [];
+  for (const [id, c] of candidates) {
+    const orgName = orgNames.get(c.binding.orgId);
+    const spaceName = c.binding.spaceId ? spaceNames.get(c.binding.spaceId) : null;
+    if (orgName === undefined || spaceName === undefined) continue;
+    const client = clientById.get(c.clientId);
     const state = states.get(id);
-    const identity = describeClient(client, g.clientId);
-    result.push({
+    grants.push({
       id,
-      userId: g.userId,
-      clientId: g.clientId,
-      resource: g.resource,
-      orgId: binding.orgId,
-      spaceId: binding.spaceId ?? null,
+      userId: c.userId,
+      clientId: c.clientId,
+      resource: c.resource,
+      orgId: c.binding.orgId,
+      orgName,
+      spaceId: c.binding.spaceId ?? null,
+      spaceName,
       clientName: client?.name ?? null,
-      ...identity,
-      sessionCount: g.authorizations.size,
+      ...describeClient(client, c.clientId),
+      sessionCount: c.authorizations.size,
       lastUsedAt: state?.lastUsedAt ?? null,
       lastUsedIp: state?.lastUsedIp ?? null,
-      lastUsedUserAgent: state?.lastUsedUserAgent ?? null,
-      createdAt: g.createdAt,
-      expiresAt: g.neverExpires ? null : g.expiresAt,
+      createdAt: c.createdAt,
     });
   }
-  return result;
+  return grants;
 }
 
 export function listMcpGrantsForUser(userId: string): Promise<McpGrant[]> {
   return listMcpGrants({ userId });
 }
 
-export function listMcpGrantsForOrg(orgId: string): Promise<McpGrant[]> {
-  return listMcpGrants({ orgId });
+export function listMcpGrantsForOrg(scope: {
+  orgId: string;
+  userIds: string[];
+  spaceIds: Set<string>;
+}): Promise<McpGrant[]> {
+  return listMcpGrants(scope);
 }
 
-/** The org's MCP resource URIs: its own and one per space. */
-async function orgMcpResources(orgId: string): Promise<string[]> {
-  const rows = await db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
-  return [getMcpOrgResourceUri(orgId), ...rows.map((s) => getMcpSpaceResourceUri(orgId, s.id))];
-}
-
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 function describeClient(
   client:
     | {
-        clientId: string;
         uri: string | null;
         redirectUris: string[];
         selfService: boolean;
@@ -345,10 +328,10 @@ function describeClient(
     return { clientOrigin: hostOf(clientId), clientRegistration: "metadata_document" };
   }
   if (!client || client.selfService) {
-    const redirectHosts = (client?.redirectUris ?? [])
+    const origin = (client?.redirectUris ?? [])
       .map(hostOf)
-      .filter((h): h is string => h !== null && !LOOPBACK_HOSTS.has(h));
-    return { clientOrigin: redirectHosts[0] ?? null, clientRegistration: "dynamic" };
+      .find((host) => host !== null && !LOOPBACK_HOSTS.has(host.replace(/:\d+$/, "")));
+    return { clientOrigin: origin ?? null, clientRegistration: "dynamic" };
   }
   return { clientOrigin: client.uri ? hostOf(client.uri) : null, clientRegistration: "managed" };
 }
@@ -365,72 +348,40 @@ function hostOf(url: string): string | null {
 // ─── Revocation ──────────────────────────────────────────────────────────────
 
 /**
- * End a grant: revoke every token it holds, take its resource out of the
- * user's consent to the client (the next authorization shows the consent
- * screen again), and raise its watermark so an access token already issued is
- * refused on its next request.
+ * End a grant: delete its tokens and the user's consent to the client for its
+ * resource (reconnecting shows the consent screen again), and raise its
+ * watermark so an access token already issued is refused on its next request.
+ *
+ * The refresh tokens are deleted, not marked revoked: Better Auth treats a
+ * revoked refresh token presented again as a stolen one and invalidates every
+ * refresh token of the (client, user) pair, which would end the client's other
+ * grants too. Their access-token rows go with them (`refresh_id` cascade).
  */
-export async function revokeMcpGrant(grant: {
-  userId: string;
-  clientId: string;
-  resource: string;
-}): Promise<void> {
+export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
   const { userId, clientId, resource } = grant;
-  const binding = parseMcpResourceUri(resource);
-  if (!binding) return;
-  const now = new Date();
-  await db.transaction(async (tx) => {
-    await tx
-      .update(oauthRefreshToken)
-      .set({ revoked: now })
-      .where(
-        and(
-          eq(oauthRefreshToken.userId, userId),
-          eq(oauthRefreshToken.clientId, clientId),
-          isNull(oauthRefreshToken.revoked),
-          arrayContains(oauthRefreshToken.resources, [resource]),
-        ),
-      );
-    await tx
-      .update(oauthAccessToken)
-      .set({ revoked: now })
-      .where(
-        and(
-          eq(oauthAccessToken.userId, userId),
-          eq(oauthAccessToken.clientId, clientId),
-          isNull(oauthAccessToken.revoked),
-          arrayContains(oauthAccessToken.resources, [resource]),
-        ),
-      );
-    const consentKey = and(
-      eq(oauthConsent.userId, userId),
-      eq(oauthConsent.clientId, clientId),
-      arrayContains(oauthConsent.resources, [resource]),
+  const ofGrant = <
+    T extends typeof oauthRefreshToken | typeof oauthAccessToken | typeof oauthConsent,
+  >(
+    table: T,
+  ) =>
+    and(
+      eq(table.userId, userId),
+      eq(table.clientId, clientId),
+      arrayContains(table.resources, [resource]),
     );
-    await tx
-      .update(oauthConsent)
-      .set({ resources: sql`array_remove(${oauthConsent.resources}, ${resource})`, updatedAt: now })
-      .where(consentKey);
-    // A consent left covering no resource would let a resource-less request
-    // through without a prompt: it no longer stands for anything the user
-    // agreed to keep.
-    await tx
-      .delete(oauthConsent)
-      .where(
-        and(
-          eq(oauthConsent.userId, userId),
-          eq(oauthConsent.clientId, clientId),
-          sql`cardinality(${oauthConsent.resources}) = 0`,
-        ),
-      );
+  await db.transaction(async (tx) => {
+    await tx.delete(oauthRefreshToken).where(ofGrant(oauthRefreshToken));
+    await tx.delete(oauthAccessToken).where(ofGrant(oauthAccessToken));
+    await tx.delete(oauthConsent).where(ofGrant(oauthConsent));
+    const now = new Date();
     await tx
       .insert(oauthGrantState)
       .values({
         userId,
         clientId,
         resource,
-        orgId: binding.orgId,
-        spaceId: binding.spaceId ?? null,
+        orgId: grant.orgId,
+        spaceId: grant.spaceId,
         tokensValidAfter: now,
       })
       .onConflictDoUpdate({

@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { and, eq, like } from "drizzle-orm";
+import { decodeJwt } from "jose";
 import { oauthGrantState, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -44,14 +45,13 @@ async function registerClient(): Promise<string> {
   return String(((await res.json()) as { client_id: string }).client_id);
 }
 
-function mcpInitialize(orgId: string, token: string, userAgent = "watermark-test/1.0") {
+function mcpInitialize(orgId: string, token: string) {
   return app.request(`/api/mcp/o/${orgId}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       Accept: MCP_ACCEPT,
       Authorization: `Bearer ${token}`,
-      "user-agent": userAgent,
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -103,7 +103,7 @@ describe("MCP access grant watermark", () => {
     return row;
   }
 
-  it("records the grant's first use with its org, IP and user agent", async () => {
+  it("records the grant's first use with its org", async () => {
     const clientId = await registerClient();
     const bearer = await mint(clientId);
     expect((await mcpInitialize(ctx.orgId, bearer)).status).toBe(200);
@@ -114,7 +114,6 @@ describe("MCP access grant watermark", () => {
     expect(row!.orgId).toBe(ctx.orgId);
     expect(row!.spaceId).toBeNull();
     expect(row!.lastUsedAt).toBeInstanceOf(Date);
-    expect(row!.lastUsedUserAgent).toBe("watermark-test/1.0");
     expect(row!.tokensValidAfter).toBeNull();
   });
 
@@ -128,6 +127,20 @@ describe("MCP access grant watermark", () => {
       .set({ tokensValidAfter: new Date(Date.now() + 1000) })
       .where(eq(oauthGrantState.clientId, clientId));
 
+    expect((await mcpInitialize(ctx.orgId, bearer)).status).toBe(401);
+  });
+
+  it("refuses a token issued in the watermark's own second", async () => {
+    const clientId = await registerClient();
+    const bearer = await mint(clientId);
+    const { iat } = decodeJwt(bearer);
+    await db.insert(oauthGrantState).values({
+      userId: ctx.user.id,
+      clientId,
+      resource,
+      orgId: ctx.orgId,
+      tokensValidAfter: new Date(iat! * 1000 + 999),
+    });
     expect((await mcpInitialize(ctx.orgId, bearer)).status).toBe(401);
   });
 

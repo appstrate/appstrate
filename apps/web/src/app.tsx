@@ -369,13 +369,13 @@ const LIST_PAGE: Partial<
 
 /** The settings pages that are a table, not rows of fields; the value says what leads the table. */
 const SETTINGS_TABLES: Partial<
-  Record<RoutePath, { toolbar?: boolean; columns?: boolean; intro?: "heading" | "hint" }>
+  Record<RoutePath, { toolbar?: boolean; columns?: boolean; intro?: "hint"; groups?: number }>
 > = {
   "/org-settings/members": { toolbar: true },
   "/org-settings/spaces": {},
   "/org-settings/proxies": {},
-  "/org-settings/access-grants": { intro: "heading" },
-  "/preferences/devices": { intro: "heading" },
+  "/org-settings/access-grants": { intro: "hint", groups: 2 },
+  "/preferences/devices": { intro: "hint", groups: 2 },
   "/workspace-settings/members": { toolbar: true, intro: "hint" },
   "/workspace-settings/api-keys": { toolbar: true },
   "/workspace-settings/webhooks": {},

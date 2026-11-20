@@ -333,7 +333,6 @@ column oauth_grant_states.client_id text not null
 column oauth_grant_states.created_at timestamp with time zone not null default now()
 column oauth_grant_states.last_used_at timestamp with time zone
 column oauth_grant_states.last_used_ip text
-column oauth_grant_states.last_used_user_agent text
 column oauth_grant_states.org_id uuid not null
 column oauth_grant_states.resource text not null
 column oauth_grant_states.space_id text

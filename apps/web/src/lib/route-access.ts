@@ -86,7 +86,7 @@ export const ROUTE_ACCESS = {
   "/preferences/general": OWN_ACCOUNT,
   "/preferences/appearance": OWN_ACCOUNT,
   "/preferences/security": OWN_ACCOUNT,
-  "/preferences/devices": OWN_ACCOUNT,
+  "/preferences/devices": { ...OWN_ACCOUNT, feature: "oidc" },
   "/preferences/connections": OWN_ACCOUNT,
   "/preferences/mcp-access": OWN_ACCOUNT,
   // Its one read is the list, guarded read|connect; a personal credential's actions need `connect`.

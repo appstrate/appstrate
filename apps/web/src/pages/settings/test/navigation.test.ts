@@ -155,7 +155,6 @@ describe("account section (/preferences)", () => {
     "/preferences/general",
     "/preferences/appearance",
     "/preferences/security",
-    "/preferences/devices",
     "/preferences/connections",
     "/preferences/mcp-access",
   ];
@@ -165,6 +164,11 @@ describe("account section (/preferences)", () => {
     const account = sections.find((section) => section.scope === "account");
     expect(account?.items.map((item): string => item.to)).toEqual(OWN_ACCOUNT_PAGES);
     expect(firstSettingsPath(sections, "account")).toBe("/preferences/general");
+  });
+
+  it("lists devices and apps only with the oidc module, which issues them", () => {
+    expect(destinations(NO_FEATURES, [])).not.toContain("/preferences/devices");
+    expect(destinations(ALL_FEATURES, [])).toContain("/preferences/devices");
   });
 
   it("lists the caller's model keys only where their route opens", () => {
