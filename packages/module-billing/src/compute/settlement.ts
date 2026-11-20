@@ -259,6 +259,7 @@ const SWEEP_INTERVAL_MS = 60_000;
 const DRAIN_TIMEOUT_MS = 60_000;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let stopped = true;
+let sweepIntervalMs = SWEEP_INTERVAL_MS;
 
 /** Ticks between two purges of deleted organizations' rows: hourly at a 60 s cadence. */
 const PURGE_EVERY_TICKS = 60;
@@ -282,15 +283,16 @@ function scheduleNext(): void {
     // Shares the event-poked passes' single flight, so a tick and an event never both read
     // and claim the same window.
     void settleSingleFlight(true).then(maybePurgeOrphans).finally(scheduleNext);
-  }, SWEEP_INTERVAL_MS * jitter);
+  }, sweepIntervalMs * jitter);
   // A trailing tick must not keep the process alive.
   timer.unref?.();
 }
 
-/** Arm the catch-up sweep. Idempotent. */
-export function startComputeSweeper(): void {
+/** Arm the catch-up sweep, every `intervalMs` (a test shortens it). Idempotent. */
+export function startComputeSweeper(intervalMs: number = SWEEP_INTERVAL_MS): void {
   if (!stopped) return;
   stopped = false;
+  sweepIntervalMs = intervalMs;
   scheduleNext();
 }
 
@@ -306,13 +308,13 @@ export function stopComputeSweeper(): void {
  * a wedged pass rolls back on its own and loses nothing (the claims make the next pass redo
  * it), so shutdown must not hang on it.
  */
-export async function drainComputeSweeper(): Promise<void> {
+export async function drainComputeSweeper(timeoutMs: number = DRAIN_TIMEOUT_MS): Promise<void> {
   if (!inFlight) return;
   let deadline: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
     inFlight,
     new Promise<void>((resolve) => {
-      deadline = setTimeout(resolve, DRAIN_TIMEOUT_MS);
+      deadline = setTimeout(resolve, timeoutMs);
       deadline.unref?.();
     }),
   ]);

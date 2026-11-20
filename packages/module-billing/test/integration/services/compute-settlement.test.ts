@@ -7,7 +7,7 @@
  * often it is re-read, the month boundary starting a fresh counter, a bounded replay window
  * for runs that commit late, a failed pass advancing nothing, and the 80 % warning email.
  */
-import { describe, expect, it, beforeEach } from "bun:test";
+import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getBillingDb, truncateBillingTables } from "../../helpers/db.ts";
 import {
@@ -16,10 +16,18 @@ import {
   seedComputeUsage,
   seedTerminalRun,
 } from "../../helpers/seed.ts";
-import { setMockRunsError } from "../../helpers/mock-platform.ts";
+import {
+  releaseMockRunsHang,
+  setMockRunsError,
+  setMockRunsHang,
+} from "../../helpers/mock-platform.ts";
+import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { useBillingTestSeams } from "../../helpers/setup.ts";
 import {
   _awaitSettlementForTests,
+  drainComputeSweeper,
+  startComputeSweeper,
+  stopComputeSweeper,
   ensureComputeCursorSeeded,
   REPLAY_WINDOW_MS,
   requestSettlement,
@@ -29,6 +37,8 @@ import { cancelSubscriptionAndCleanUp } from "../../../src/billing/org-cancellat
 import { readComputeSecondsUsed } from "../../../src/compute/usage.ts";
 import { periodStartOf } from "../../../src/compute/period.ts";
 import { initBillingEmail } from "../../../src/emails/send.ts";
+import { emitComputeSignals } from "../../../src/compute/alerts.ts";
+import { logger } from "../../../src/logger.ts";
 import { computeCursor, computeUsage, settledRuns } from "../../../drizzle/schema.ts";
 import billingModule from "../../../src/index.ts";
 
@@ -485,5 +495,106 @@ describe("org deletion", () => {
     expect(
       await getBillingDb().select().from(settledRuns).where(eq(settledRuns.orgId, orgId)),
     ).toEqual([]);
+  });
+});
+
+/** Poll until `done()` holds, or fail after `ms`: a timer test must not guess a fixed delay. */
+async function waitFor(done: () => Promise<boolean>, ms = 5_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await done())) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await Bun.sleep(10);
+  }
+}
+
+describe("the catch-up timer", () => {
+  beforeEach(async () => {
+    await truncateBillingTables();
+    await seedComputeCursor();
+  });
+
+  it("settles on its own, and stops when asked", async () => {
+    seedTerminalRun({ orgId, durationMs: 12_000, completedAt: NOW });
+
+    startComputeSweeper(5);
+    await waitFor(async () => (await secondsUsed()) === 12);
+
+    stopComputeSweeper();
+    seedTerminalRun({
+      orgId,
+      durationMs: 8_000,
+      completedAt: new Date(NOW.getTime() + 60_000),
+    });
+    await Bun.sleep(100);
+    // Stopped: nothing settles the new run.
+    expect(await secondsUsed()).toBe(12);
+    await drainComputeSweeper();
+  });
+
+  it("purges the rows of deleted organizations once every sixty ticks", async () => {
+    const goneOrg = "00000000-0000-4000-a000-000000000a09";
+    seedOrgMembers(orgId, []);
+    await seedComputeUsage({ orgId, periodStart: THIS_MONTH, secondsUsed: 30 });
+    await seedComputeUsage({ orgId: goneOrg, periodStart: THIS_MONTH, secondsUsed: 99 });
+
+    startComputeSweeper(1);
+    await waitFor(
+      async () => (await getBillingDb().select().from(computeUsage)).length === 1,
+      20_000,
+    );
+    stopComputeSweeper();
+    await drainComputeSweeper();
+
+    const rows = await getBillingDb().select().from(computeUsage);
+    expect(rows.map((r) => r.orgId)).toEqual([orgId]);
+  });
+
+  it("does not wait forever for a pass that never ends", async () => {
+    setMockRunsHang();
+    requestSettlement();
+
+    const started = Date.now();
+    await drainComputeSweeper(50);
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+    releaseMockRunsHang();
+    await _awaitSettlementForTests();
+  });
+});
+
+describe("the warning is never allowed to fail a pass", () => {
+  it("logs an alert that could not be evaluated, and carries on", async () => {
+    const spy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      emitComputeSignals([
+        {
+          orgId: "not-a-uuid",
+          periodStart: THIS_MONTH,
+          addedSeconds: 10,
+          secondsUsed: 10,
+        },
+      ]);
+      await Bun.sleep(100);
+      expect(spy.mock.calls.some((c) => c[0] === "compute warning failed")).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("logs, once, that the quota is reached when a run takes the month to 100 %", async () => {
+    await truncateBillingTables();
+    await seedComputeCursor();
+    await seedBillingAccount({ orgId, planId: "free" });
+    const spy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      seedTerminalRun({ orgId, durationMs: 61_000_000, completedAt: NOW });
+      await settleTerminalRuns();
+      await Bun.sleep(100);
+      expect(
+        spy.mock.calls.filter((c) => String(c[0]).startsWith("Compute quota reached")),
+      ).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
