@@ -561,9 +561,11 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
   // After an actor move the stored picks name the previous identity's connections.
   const picks = draft.picks ?? (draft.actor ? {} : (schedule.connection_overrides ?? {}));
   const actorIsViewer = useIsViewer(actor);
+  const scheduleId = schedule.dependency_overrides ? schedule.id : undefined;
   const readiness = useAgentConnectionReadiness(
     actorIsViewer || integrations?.length === 0 ? undefined : schedule.packageId,
     firedVersion(version),
+    scheduleId,
   );
   const actorName = useActorName(actor);
 
@@ -606,7 +608,12 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
     <AgentIntegrationsBlock
       entries={integrations}
       agentPackageId={schedule.packageId}
-      scheduleOverrides={{ value: picks, onChange: pick, version: firedVersion(version) }}
+      scheduleOverrides={{
+        value: picks,
+        onChange: pick,
+        version: firedVersion(version),
+        scheduleId,
+      }}
       empty={empty}
     />
   ) : (

@@ -39,7 +39,15 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedApiKey,
+  seedPackage,
+  seedSchedule,
+  seedSpace,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../helpers/seed.ts";
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { asc, eq } from "drizzle-orm";
 import {
@@ -250,6 +258,32 @@ describe("/api/integrations/:packageId admin surface", () => {
   }
 
   describe("GET /api/agents/:scope/:name/connection-readiness — per-integration resolution", () => {
+    it("reads a schedule's version pins only for its agent and space with schedules:read", async () => {
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other team" });
+      const seed = (packageId: string, spaceId: string) =>
+        seedSchedule({
+          packageId,
+          spaceId,
+          orgId: ctx.orgId,
+          userId: ctx.user.id,
+        });
+      const matching = await seed(AGENT, ctx.defaultSpaceId);
+      const otherAgent = await seed(REQUIRED_AGENT, ctx.defaultSpaceId);
+      const elsewhere = await seed(AGENT, otherSpace.id);
+      const read = (id: string, headers: Record<string, string> = authHeaders(ctx)) =>
+        app.request(`/api/agents/${AGENT}/connection-readiness?scheduleId=${id}`, { headers });
+      expect((await read(matching.id)).status).toBe(200);
+      expect((await read(otherAgent.id)).status).toBe(404);
+      expect((await read(elsewhere.id)).status).toBe(404);
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["agents:read", "integrations:read"],
+      });
+      expect((await read(matching.id, { Authorization: `Bearer ${key.rawKey}` })).status).toBe(403);
+    });
+
     it("returns the full resolution verdict shape for a declared integration", async () => {
       const connId = await seedPrivateConnectionFor(ctx.user.id);
 

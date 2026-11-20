@@ -778,7 +778,7 @@ export async function listPackageSchedules(
 }
 
 /** The bare schedule row, before any enrichment — what a write path reads to diff against. */
-async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
+export async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)

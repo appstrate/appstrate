@@ -2,7 +2,7 @@
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, schedules, user } from "@appstrate/db/schema";
+import { endUsers, user } from "@appstrate/db/schema";
 
 /** Batch-load user display names by ID. Returns a Map<userId, name>. */
 export async function batchLoadUserNames(userIds: string[]): Promise<Map<string, string>> {
@@ -14,27 +14,34 @@ export async function batchLoadUserNames(userIds: string[]): Promise<Map<string,
   return new Map(rows.filter((r) => r.name).map((r) => [r.id, r.name!]));
 }
 
-/** Resolve each schedule's end-user in the organization and space where it runs. */
+/** Resolve names for the actor and space captured in the schedule read. */
 export async function batchLoadScheduleEndUserNames(
   orgId: string,
-  rows: readonly { id: string; endUserId: string | null }[],
+  rows: readonly { id: string; spaceId: string; endUserId: string | null }[],
 ): Promise<Map<string, string | null>> {
-  const ids = rows.filter((row) => row.endUserId).map((row) => row.id);
-  if (ids.length === 0) return new Map();
+  const actors = rows.flatMap(({ id, spaceId, endUserId }) =>
+    endUserId ? [{ id, spaceId, endUserId }] : [],
+  );
+  if (!actors.length) return new Map();
   const names = await db
     .select({
-      id: schedules.id,
+      id: endUsers.id,
+      spaceId: endUsers.spaceId,
       name: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
     })
-    .from(schedules)
-    .innerJoin(
-      endUsers,
+    .from(endUsers)
+    .where(
       and(
-        eq(endUsers.id, schedules.endUserId),
-        eq(endUsers.spaceId, schedules.spaceId),
-        eq(endUsers.orgId, schedules.orgId),
+        eq(endUsers.orgId, orgId),
+        inArray(endUsers.spaceId, [...new Set(actors.map((a) => a.spaceId))]),
+        inArray(endUsers.id, [...new Set(actors.map((a) => a.endUserId))]),
       ),
-    )
-    .where(and(eq(schedules.orgId, orgId), inArray(schedules.id, ids)));
-  return new Map(names.map((row) => [row.id, row.name]));
+    );
+  const byId = new Map(names.map((row) => [row.id, row]));
+  return new Map(
+    actors.map(({ id, spaceId, endUserId }) => {
+      const actor = byId.get(endUserId);
+      return [id, actor?.spaceId === spaceId ? actor.name : null];
+    }),
+  );
 }

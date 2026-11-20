@@ -8755,6 +8755,8 @@ export interface operations {
     getAgentConnectionReadiness: {
         parameters: {
             query?: {
+                /** @description Apply the stored dependency version overrides of this agent's schedule in the current space. Requires schedules:read. The version parameter selects the agent definition and connection visibility remains the caller's. */
+                scheduleId?: string;
                 /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it, so the modal and badge never disagree with the actual run. Ignored for system agents. */
                 version?: string;
             };

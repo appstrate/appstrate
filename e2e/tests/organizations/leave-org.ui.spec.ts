@@ -231,6 +231,28 @@ test("a member's shared connection can be replaced before removal", async ({
   const replacement = await sharedConnection(apiClient);
   const privateConnection = await connect(apiClient);
   expect(privateConnection).not.toBe(replacement);
+  // The agent now uses an unauthenticated integration. Only the schedule still needs v0.1.
+  const packagePath = `/packages/integrations/${integration}`;
+  const detail = await apiClient.get(packagePath);
+  const { manifest } = await detail.json();
+  delete manifest.auths;
+  const edited = await apiClient.patch(
+    packagePath,
+    {
+      manifest: {
+        ...manifest,
+        schema_version: "0.3",
+        source: {
+          kind: "remote",
+          remote: { url: "https://example.invalid/mcp", transport: "streamable-http" },
+        },
+      },
+    },
+    { "If-Match": detail.headers()["etag"]! },
+  );
+  expect(edited.ok(), await edited.text()).toBe(true);
+  const published = await apiClient.post(`${packagePath}/versions`, { version: "2.0.0" });
+  expect(published.ok(), await published.text()).toBe(true);
   const agent = `${scope}/scheduled`;
   const created = await apiClient.post("/packages/agents", {
     manifest: {
@@ -240,16 +262,24 @@ test("a member's shared connection can be replaced before removal", async ({
       name: agent,
       display_name: "Scheduled",
       description: "Schedule test",
-      dependencies: { integrations: { [integration]: "^0.1.0" } },
+      dependencies: { integrations: { [integration]: "^2.0.0" } },
       integrations_configuration: { [integration]: { tools: ["*"] } },
     },
     content: "Use the selected connection.",
   });
   expect(created.ok(), await created.text()).toBe(true);
+  const ordinary = await apiClient.get(`/agents/${agent}/connection-readiness?version=published`);
+  expect((await ordinary.json()).integrations).toContainEqual(
+    expect.objectContaining({
+      integration_package_id: integration,
+      connection_required: false,
+    }),
+  );
   const schedule = await apiClient.post(`/agents/${agent}/schedules`, {
     name: "Team schedule",
     cron_expression: "0 9 * * *",
     actor: { userId: actor.userId },
+    dependency_overrides: { [integration]: "0.1.0" },
     connection_overrides: { [integration]: [old] },
   });
   expect(schedule.status(), await schedule.text()).toBe(201);
@@ -274,10 +304,16 @@ test("a member's shared connection can be replaced before removal", async ({
   await page.goto("/org-settings/members");
   await openRemoval();
   await expect(page.getByText(/Aucune planification|No .*schedule/i)).toBeVisible();
+  const removed = page.waitForResponse(
+    (r) =>
+      r.request().method() === "DELETE" &&
+      r.url().endsWith(`/api/orgs/${orgId}/members/${departing.userId}`),
+  );
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: /^(Retirer|Remove)$/ })
     .click();
+  expect((await removed).ok()).toBe(true);
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
   expect(await (await apiClient.get(`/schedules/${id}`)).json()).toMatchObject({
     enabled: true,

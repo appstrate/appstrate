@@ -49,6 +49,7 @@ interface ScheduleOverrides {
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;
+  scheduleId?: string;
 }
 
 /** An integration's own detail read, as one row needs it. */
@@ -245,6 +246,7 @@ function IntegrationConnectionCell({
           onChange: (ids) => scheduleOverrides.onChange(packageId, ids),
         }}
         version={scheduleOverrides.version}
+        scheduleId={scheduleOverrides.scheduleId}
       />
     );
   }
