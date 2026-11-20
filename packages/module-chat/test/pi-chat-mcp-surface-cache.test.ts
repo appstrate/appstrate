@@ -664,7 +664,7 @@ describe("inline images from remote integration tools", () => {
 
 describe("temporary connector files", () => {
   it("hands the PDF to the current tool call, streams a receipt, and ignores relayed resource blocks", async () => {
-    const pdf = createTurnPdfInput({ image: true, pdf: true });
+    const pdf = createTurnPdfInput({ api: "openai-responses" }, { pdf: true });
     const added: string[] = [];
     const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, false, {
       ...pdf,

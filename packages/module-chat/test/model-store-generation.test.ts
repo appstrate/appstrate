@@ -82,17 +82,22 @@ describe("the model a conversation is on", () => {
       { id: "responses", apiShape: "openai-responses", input: ["text", "image"] },
       { id: "responses-text", apiShape: "openai-responses", input: ["text"] },
       { id: "messages", apiShape: "anthropic-messages", input: ["text", "image"] },
+      { id: "completions", apiShape: "openai-completions" },
+      { id: "mistral", apiShape: "mistral-conversations", input: ["text", "image"] },
     ]);
-    setSelectedModel("alias");
-    expect(getSelectedModelSendsPdf()).toBe(true);
-    setSelectedModel("responses-unknown");
-    expect(getSelectedModelSendsPdf()).toBe(true);
-    setSelectedModel("responses");
-    expect(getSelectedModelSendsPdf()).toBe(true);
-    setSelectedModel("responses-text");
-    expect(getSelectedModelSendsPdf()).toBe(false);
-    setSelectedModel("messages");
-    expect(getSelectedModelSendsPdf()).toBe(false);
+    const sent = {
+      alias: true,
+      "responses-unknown": true,
+      responses: true,
+      "responses-text": false,
+      messages: true,
+      completions: true,
+      mistral: false,
+    };
+    for (const [id, pdf] of Object.entries(sent)) {
+      setSelectedModel(id);
+      expect([id, getSelectedModelSendsPdf()]).toEqual([id, pdf]);
+    }
   });
 
   it("is the seeded one, not the stored default", () => {

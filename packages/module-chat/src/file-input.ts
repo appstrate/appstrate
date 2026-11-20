@@ -6,8 +6,16 @@
  * impossible; otherwise send, and the provider decides. A field that is not known never blocks.
  */
 
-/** API shapes the chat has a PDF wire format for. */
-export const PDF_WIRE_APIS = ["openai-responses"] as const;
+/**
+ * API shapes the chat has a PDF wire format for, each encoded in `pi-chat/native-pdf.ts`.
+ * Mistral's conversations API takes documents only by hosted URL, so it has none.
+ */
+export const PDF_WIRE_APIS = [
+  "openai-responses",
+  "openai-codex-responses",
+  "anthropic-messages",
+  "openai-completions",
+] as const;
 export type PdfWireApi = (typeof PDF_WIRE_APIS)[number];
 
 export function hasPdfWireFormat(api: string): api is PdfWireApi {

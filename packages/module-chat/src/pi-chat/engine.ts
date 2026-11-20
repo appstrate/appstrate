@@ -350,7 +350,7 @@ export function runPiChat(input: PiChatInput): Response {
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
         const delivery = fileDelivery(model);
-        const pdfInput = createTurnPdfInput(delivery);
+        const pdfInput = createTurnPdfInput(model, delivery);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({

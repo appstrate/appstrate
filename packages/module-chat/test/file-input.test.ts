@@ -17,6 +17,12 @@ describe("fileDelivery", () => {
   });
 
   it("sends a PDF on an API with a wire format unless the model is declared text-only", () => {
+    expect(PDF_WIRE_APIS).toEqual([
+      "openai-responses",
+      "openai-codex-responses",
+      "anthropic-messages",
+      "openai-completions",
+    ]);
     for (const api of PDF_WIRE_APIS) {
       expect(fileDelivery({ api, input: VISION }).pdf).toBe(true);
       expect(fileDelivery({ api, input: null }).pdf).toBe(true);
@@ -25,7 +31,7 @@ describe("fileDelivery", () => {
   });
 
   it("sends no PDF on an API without a wire format, whatever the modalities", () => {
-    for (const api of ["openai-completions", "anthropic-messages", "openai-codex-responses"]) {
+    for (const api of ["mistral-conversations", "google-generative-ai", "an-unknown-api"]) {
       expect(hasPdfWireFormat(api)).toBe(false);
       for (const input of [VISION, TEXT, null]) {
         expect(fileDelivery({ api, input }).pdf).toBe(false);
