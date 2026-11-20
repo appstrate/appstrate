@@ -32,7 +32,9 @@ describe("MemberDepartureImpact", () => {
     const html = render(
       <MemberDepartureImpact impact={{ data: [], isLoading: false, error: null }} />,
     );
-    expect(html).toContain("Aucune planification d’un espace d’équipe ne s’arrêtera.");
+    expect(html).toContain(
+      "Aucune planification d’un espace d’équipe ne sera désactivée par ce retrait.",
+    );
   });
 
   it("points a leaving actor's schedule to reassignment and names the lost integrations", () => {
@@ -81,6 +83,7 @@ describe("MemberDepartureImpact", () => {
         }}
       />,
     );
+    expect(html).toContain("Impossible de savoir quelles planifications seront désactivées.");
     expect(html).not.toContain("Réassigner");
     expect(html).not.toContain("Aucune planification");
   });

@@ -138,6 +138,13 @@ describe("mcp org-wide connection", () => {
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain("goes to your personal space");
     expect(instructions).toContain("personal_space_takes_no_keys");
+    // A team space already chosen (named, or designated by the context) is used; team spaces
+    // are offered only without a destination or when it is a personal space.
+    expect(instructions).toContain(
+      "the destination already chosen wins: the team space the request names, else the one your context designates",
+    );
+    expect(instructions).toContain("Only when there is none, or it is a personal space, offer");
+    expect(instructions).toContain("space-level OIDC client");
     expect(instructions).not.toContain(`Perso (\`${perso.id}\``);
   });
 

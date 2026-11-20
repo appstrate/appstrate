@@ -48,7 +48,14 @@ export function MemberDepartureImpact({
       </div>
     );
   }
-  if (impact.error) return <ErrorState error={impact.error} compact />;
+  if (impact.error) {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">{t("orgSettings.departure.unknown")}</p>
+        <ErrorState error={impact.error} compact />
+      </div>
+    );
+  }
   const items = impact.data;
   if (!items) return null;
   if (items.length === 0) {

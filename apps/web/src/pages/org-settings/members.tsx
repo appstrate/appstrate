@@ -26,6 +26,7 @@ import type { MenuAction } from "../../lib/menu-action";
 import { InvitationsTable } from "../../components/invitations-table";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";
+import { departureConfirmBlocked } from "../../lib/member-departure";
 import { MemberDepartureImpact } from "./member-departure-impact";
 import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
@@ -274,6 +275,7 @@ export function OrgSettingsMembersPage() {
           confirmState ? t("orgSettings.removeMember", { name: confirmState.label }) : ""
         }
         isPending={removeMemberMutation.isPending}
+        confirmDisabled={departureConfirmBlocked(departureImpact)}
         onConfirm={() => {
           if (confirmState) {
             removeMemberMutation.mutate(

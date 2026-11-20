@@ -717,7 +717,7 @@ describe("the persona and the spaces", () => {
 
     describe("without an origin space (the overview)", () => {
       const CARVE_OUT =
-        " — except what a personal space refuses (an API key, an end-user, an OIDC client), for which you offer team spaces first";
+        " — except what a personal space refuses (an API key, an end-user, a space-level OIDC client), for which you offer team spaces first";
       const fallback = (id: string, label: string, carveOut = "") =>
         `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`${carveOut}; when you create something there, name that space in your reply.`;
       const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };

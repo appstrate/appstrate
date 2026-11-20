@@ -351,7 +351,7 @@ type CallerContextOpts = {
  * space refuses to a team space the user picks, and the fallback must not contradict them.
  */
 const PERSONAL_FALLBACK_CARVE_OUT =
-  " — except what a personal space refuses (an API key, an end-user, an OIDC client), for which you offer team spaces first";
+  " — except what a personal space refuses (an API key, an end-user, a space-level OIDC client), for which you offer team spaces first";
 
 /** Render the caller context into a system-prompt block, with the skills it injected. */
 export function formatCallerContext(

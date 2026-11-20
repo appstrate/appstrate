@@ -10,9 +10,9 @@ import { PreviousHomeSchedules } from "../move-home-space-dialog.tsx";
 await i18nReady;
 
 describe("PreviousHomeSchedules", () => {
-  it("says the schedules keep running, in the plural", () => {
+  it("says the schedules stay enabled, in the plural", () => {
     const html = render(<PreviousHomeSchedules state={2} keep space="Marketing" />);
-    expect(html).toContain("2 planifications actives de « Marketing » continueront de tourner.");
+    expect(html).toContain("2 planifications actives de « Marketing » resteront activées.");
   });
 
   it("says a single schedule will be disabled when the package is released", () => {
@@ -27,7 +27,7 @@ describe("PreviousHomeSchedules", () => {
 
   it("falls back to a sentence without a count when unknown", () => {
     const kept = render(<PreviousHomeSchedules state="unknown" keep space="Marketing" />);
-    expect(kept).toContain("Les planifications de « Marketing » continueront de tourner.");
+    expect(kept).toContain("Les planifications de « Marketing » resteront activées.");
     const released = render(
       <PreviousHomeSchedules state="unknown" keep={false} space="Marketing" />,
     );

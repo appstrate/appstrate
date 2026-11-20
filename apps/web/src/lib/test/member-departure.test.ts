@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { departureFixHref, departureFixSection } from "../member-departure.ts";
+import {
+  departureConfirmBlocked,
+  departureFixHref,
+  departureFixSection,
+} from "../member-departure.ts";
 
 const space = { id: "spc_team", name: "Sales" };
 
@@ -32,5 +36,19 @@ describe("departureFixHref", () => {
 
   it("enters the schedule's space from another one", () => {
     expect(departureFixHref(item, "spc_other")).toContain("enterSpace=spc_team");
+  });
+});
+
+describe("departureConfirmBlocked", () => {
+  it("blocks the removal during the first read", () => {
+    expect(departureConfirmBlocked({ isLoading: true, error: null })).toBe(true);
+  });
+
+  it("opens the removal once the impact is loaded", () => {
+    expect(departureConfirmBlocked({ isLoading: false, error: null })).toBe(false);
+  });
+
+  it("keeps the removal open when the read fails", () => {
+    expect(departureConfirmBlocked({ isLoading: false, error: new Error("boom") })).toBe(false);
   });
 });
