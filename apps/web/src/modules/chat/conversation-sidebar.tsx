@@ -373,14 +373,16 @@ function ConversationUsage({
           <FactGrid columns={1}>
             {context ? (
               <Fact label={t("context.info.currentContext")}>
-                {t("contextUsage.counts", {
-                  used: formatCompactTokens(context.tokens, i18n.language),
-                  max: formatContextWindow(
-                    context.window,
-                    context.windowAssumed === true,
-                    i18n.language,
-                  ),
-                })}
+                <span className="whitespace-nowrap tabular-nums">
+                  {t("contextUsage.counts", {
+                    used: formatCompactTokens(context.tokens, i18n.language),
+                    max: formatContextWindow(
+                      context.window,
+                      context.windowAssumed === true,
+                      i18n.language,
+                    ),
+                  })}
+                </span>
               </Fact>
             ) : null}
             {models.length > 0 ? (

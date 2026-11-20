@@ -50,14 +50,14 @@ export function ContextGaugeReadout({
   const share = isActive ? ` · ${formatWindowPercent(fraction, i18n.language)}` : "";
 
   return (
-    <span className="inline-flex items-center gap-1.5 tabular-nums">
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums">
       {/* `value` is clamped: "210000 out of 200000" announces a broken widget. */}
       <Progress
         value={Math.min(value, reading.window)}
         max={reading.window}
         aria-label={isActive ? t("run.contextGaugeAria") : t("run.contextGaugePeakAria")}
         aria-valuetext={windowHint ? `${valueText}. ${windowHint}` : valueText}
-        className="bg-muted-foreground/25 h-1.5 w-14"
+        className="bg-muted-foreground/25 h-1.5 w-14 shrink-0"
       />
       {isActive && !windowHint ? (
         <span>

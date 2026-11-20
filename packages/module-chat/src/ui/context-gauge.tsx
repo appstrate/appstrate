@@ -119,7 +119,7 @@ export function ContextGauge({ className }: { className?: string }) {
           className="h-1.5"
           indicatorClassName={LEVEL_FILL[context.level]}
         />
-        <p className="tabular-nums">{counts}</p>
+        <p className="whitespace-nowrap tabular-nums">{counts}</p>
         <p className="text-muted-foreground tabular-nums">
           {t("contextUsage.shareOfThreshold", {
             share: formatWindowPercent(context.ratio, lang),
