@@ -612,8 +612,13 @@ describe("mcp integration tools", () => {
         expect(items(all.data)[0]!.granted_in.sort()).toEqual(
           [owner.defaultSpaceId, other.id].sort(),
         );
-        const connections = (all.data.integration_tools as { connections: unknown[] }).connections;
-        expect(connections).toHaveLength(1);
+        // One entry per space listing the connection, each naming it.
+        const connections = (
+          all.data.integration_tools as { connections: Array<{ space_id: string }> }
+        ).connections;
+        expect(connections.map((c) => c.space_id).sort()).toEqual(
+          [owner.defaultSpaceId, other.id].sort(),
+        );
 
         const one = await callTool(caller, "search", {
           kinds: ["integration_tool"],

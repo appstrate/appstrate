@@ -128,6 +128,14 @@ function transcript() {
             isError: true,
           });
         }
+        const uri = (msg.params as { arguments?: { uri?: string } }).arguments?.uri;
+        if (uri?.startsWith("skill://")) {
+          return reply({
+            content: [
+              { type: "resource", resource: { uri, mimeType: "text/markdown", text: "# Tone" } },
+            ],
+          });
+        }
         return reply({ content: [{ type: "text", text: "{}" }] });
       }
       if (msg.method === "resources/read") {
@@ -312,9 +320,35 @@ describe("the conversation's forwarded tools and resources", () => {
       await tool("search").execute("c2", { query: "x", space_id: "spc_beta" });
       expect(transport.events).toEqual(["touch spc_beta", "tools/call"]);
 
+      // An operation search reads no space's data; any other kind does.
+      transport.events.length = 0;
+      await tool("search").execute("c4", { kinds: ["operation"] });
+      expect(transport.events).toEqual(["tools/call"]);
+      for (const kinds of [["agent"], ["skill"], ["integration_tool"], ["operation", "agent"]]) {
+        transport.events.length = 0;
+        await tool("search").execute("c5", { kinds });
+        expect(transport.events.slice(0, 2).sort()).toEqual(["touch spc_alpha", "touch spc_beta"]);
+      }
+
       transport.events.length = 0;
       await tool("invoke_operation").execute("c3", { operation_id: "listAgents" });
       expect(transport.events).toEqual(["tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("keeps the text of a skill read through `read` in the replay", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const result = (await tool("read").execute("c1", {
+        uri: "skill://spc_beta/acme/tone/tone/SKILL.md",
+        space_id: "spc_beta",
+      })) as { content: Array<{ text?: string }>; persistedContent?: unknown };
+      expect(result.content.map((block) => block.text).join("")).toContain("# Tone");
+      // No receipt stands in for it: the stored content is the text itself.
+      expect(result.persistedContent).toBeUndefined();
     } finally {
       await built.close();
     }

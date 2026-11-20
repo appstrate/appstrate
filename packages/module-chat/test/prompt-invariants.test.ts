@@ -610,6 +610,9 @@ describe("the persona of a turn that can look but not act", () => {
   it("still teaches discovery and direct file reading", () => {
     expect(DISCOVERY).toContain("`search`");
     expect(DISCOVERY).toContain("`describe`");
+    // An operation lookup names its kind: operations are the one kind searched without reading a space.
+    expect(DISCOVERY).toContain('`kinds: ["operation"]`');
+    expect(FULL).toContain('`kinds: ["operation"]`');
     expect(DISCOVERY).toContain("you can look things up, you cannot act");
     expect(DISCOVERY).toContain("call `read` first");
     expect(DISCOVERY).toContain("Never invent an operationId or argument shape");

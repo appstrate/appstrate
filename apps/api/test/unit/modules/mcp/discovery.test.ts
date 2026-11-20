@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { SkillEntry } from "@appstrate/core/skill-uri";
-import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
+import { deriveMcpSurface, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { operationIdGranted } from "../../../../src/modules/mcp/catalog.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
@@ -43,7 +43,13 @@ const AGENTS = [
   { id: "@acme/draft-only", display_name: "", description: "Not yet published.", published: false },
 ];
 
-function makeTools(permissions: string[], agentsStatus = 200) {
+function makeTools(
+  permissions: string[],
+  agentsStatus = 200,
+  /** Org-wide: spaces whose agents route refuses. */
+  refusingSpaces: string[] = [],
+  orgWide = false,
+) {
   const requests: string[] = [];
   const dispatch: Dispatch = async (req) => {
     const url = new URL(req.url);
@@ -66,8 +72,35 @@ function makeTools(permissions: string[], agentsStatus = 200) {
     }
     return Response.json({ code: "agent_not_found" }, { status: 404 });
   };
+  const surface = deriveMcpSurface(
+    new Set(permissions),
+    undefined,
+    { type: "user", id: "user_1" },
+    true,
+    {
+      credentialProxyOpen: true,
+    },
+  );
+  const space = (id: string) => ({
+    id,
+    name: id,
+    role: "admin",
+    permissions: new Set(permissions),
+    surface,
+  });
+  const orgSpaces = orgWide
+    ? {
+        reachable: [space(SPACE), space("spc_2")],
+        current: space(SPACE),
+        dispatchIn: (spaceId: string): Dispatch =>
+          refusingSpaces.includes(spaceId)
+            ? async () => Response.json({ code: "forbidden" }, { status: 403 })
+            : dispatch,
+      }
+    : undefined;
   const tools = toolsFor({
     origin: "https://test.local",
+    orgSpaces,
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
     ceiling: undefined,
@@ -244,7 +277,7 @@ describe("describe of an agent or a skill", () => {
       .get("describe")!
       .handler({ kind: "agent", id: "@acme/nope" }, noExtra);
     expect(missing.isError).toBe(true);
-    expect(parseResult(missing)).toMatchObject({ kind: "agent", refused: { status: 404 } });
+    expect(parseResult(missing)).toMatchObject({ status: 404, body: { code: "agent_not_found" } });
     expect(await call("describe", { kind: "agent", id: "nope" })).toMatchObject({
       code: "invalid_argument",
       arguments: ["id"],
@@ -285,5 +318,38 @@ describe("describe of an agent or a skill", () => {
       code: "missing_argument",
       arguments: ["kind", "id"],
     });
+  });
+});
+
+describe("search across spaces", () => {
+  const runWith = (result: Record<string, unknown>) =>
+    (result.best_match as { run_with: { arguments: Record<string, unknown> } }).run_with.arguments;
+
+  it("names no space in a best match's run_with unless the call named one", async () => {
+    const { call } = makeTools(READER, 200, [], true);
+    const across = await call("search", { query: "@acme/invoice-sorter", kinds: ["agent"] });
+    expect(runWith(across)).toEqual({ kind: "agent", scope: "@acme", name: "invoice-sorter" });
+    const named = await call("search", {
+      query: "@acme/invoice-sorter",
+      kinds: ["agent"],
+      space_id: SPACE,
+    });
+    expect(runWith(named)).toMatchObject({ space_id: SPACE });
+    const described = await call("describe", {
+      kind: "agent",
+      id: "@acme/invoice-sorter",
+      space_id: SPACE,
+    });
+    expect((described.run_with as { arguments: object }).arguments).toMatchObject({
+      space_id: SPACE,
+    });
+  });
+
+  it("reports a space whose agents route refused, and answers the others", async () => {
+    const { call } = makeTools(READER, 200, ["spc_2"], true);
+    const result = await call("search", { kinds: ["agent"] });
+    const agents = result.agents as { items: Array<{ granted_in: string[] }>; unsearched: unknown };
+    expect(agents.items.every((item) => item.granted_in.join() === SPACE)).toBe(true);
+    expect(agents.unsearched).toEqual([{ space_id: "spc_2", status: 403, code: "forbidden" }]);
   });
 });

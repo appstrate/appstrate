@@ -634,7 +634,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         outcome: event.outcome,
         shownCount: event.shownCount,
         deniedCount: event.deniedCount,
-        spaceId: scope.spaceId,
+        // A search across spaces acted in none of them in particular.
+        ...(event.spaceIds ? { spaceIds: event.spaceIds } : { spaceId: scope.spaceId }),
       });
       if (event.tool === "invoke_operation" && event.outcome === "invoked") {
         // `void`: deliberately off the response path — the rationale, and what

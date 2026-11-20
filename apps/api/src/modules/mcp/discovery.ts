@@ -12,6 +12,7 @@
  */
 
 import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { parseSkillUri, type SkillEntry } from "@appstrate/core/skill-uri";
 import type { DispatchContext } from "./api-call-batch.ts";
@@ -46,9 +47,54 @@ export interface McpSkillReader {
 }
 
 /** A route's refusal, as `invoke_operation` relays one: its status and problem body. */
-interface RouteRefusal {
+export interface RouteRefusal {
   status: number;
   body: unknown;
+}
+
+/** Spaces read at once by a search across spaces. */
+const SPACES_AT_ONCE = 4;
+
+/**
+ * `read` in each of `spaces` (concurrently, bounded), the answers apart from the spaces whose
+ * route refused. `undefined` stands for the one space a pinned connection is in.
+ */
+export async function readSpaces<S, T extends object>(
+  spaces: readonly S[],
+  read: (space: S) => Promise<T | { refused: RouteRefusal }>,
+): Promise<{ answered: { space: S; value: T }[]; refused: { space: S; refused: RouteRefusal }[] }> {
+  const reads = await mapWithConcurrency(spaces, SPACES_AT_ONCE, async (space) => ({
+    space,
+    value: await read(space),
+  }));
+  const answered: { space: S; value: T }[] = [];
+  const refused: { space: S; refused: RouteRefusal }[] = [];
+  for (const { space, value } of reads) {
+    if ("refused" in value) refused.push({ space, refused: value.refused as RouteRefusal });
+    else answered.push({ space, value: value as T });
+  }
+  return { answered, refused };
+}
+
+/** A space of a search across spaces whose read was refused, so its items are absent. */
+interface UnsearchedSpace {
+  space_id: string;
+  status: number;
+  code?: string;
+}
+
+/** The `unsearched` field of a section: the spaces (none for a pinned connection) whose read was refused. */
+export function unsearched(
+  refused: readonly { spaceId: string | undefined; refused: RouteRefusal }[],
+): { unsearched?: UnsearchedSpace[] } {
+  const spaces = refused.flatMap(({ spaceId, refused: route }): UnsearchedSpace[] => {
+    if (!spaceId) return [];
+    const code = asRecord(route.body)?.code;
+    return [
+      { space_id: spaceId, status: route.status, ...(typeof code === "string" ? { code } : {}) },
+    ];
+  });
+  return spaces.length > 0 ? { unsearched: spaces } : {};
 }
 
 export interface AgentHit {
@@ -62,21 +108,25 @@ export interface AgentHit {
 export function dispatchGet(
   ctx: DispatchContext,
   path: string,
-  spaceId?: string,
+  options: { spaceId?: string; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const headers = dispatchHeaders(ctx.authHeaders);
-  if (spaceId) headers.set("x-space-id", spaceId);
+  if (options.spaceId) headers.set("x-space-id", options.spaceId);
   return ctx.dispatch(
-    new Request(new URL(path, ctx.origin).toString(), { method: "GET", headers }),
+    new Request(new URL(path, ctx.origin).toString(), {
+      method: "GET",
+      headers,
+      ...(options.signal ? { signal: options.signal } : {}),
+    }),
   );
 }
 
 /** The agents index of a space (`GET /api/agents`), the one reader of its rows. */
 export async function listAgents(
   ctx: DispatchContext,
-  spaceId?: string,
+  options: { spaceId?: string; signal?: AbortSignal } = {},
 ): Promise<{ agents: AgentHit[] } | { refused: RouteRefusal }> {
-  const response = await dispatchGet(ctx, "/api/agents", spaceId);
+  const response = await dispatchGet(ctx, "/api/agents", options);
   const body = asRecord(await response.json().catch(() => undefined));
   if (!response.ok || !Array.isArray(body?.data)) {
     return { refused: { status: response.status, body: body ?? null } };
@@ -214,6 +264,8 @@ export async function describeSkill(
   reader: McpSkillReader,
   uri: string,
   spaceId: string,
+  /** The `space_id` `read_with` names, org-wide: the space the call named. */
+  readSpaceId?: string,
 ): Promise<{ skill: Record<string, unknown> } | { refusal: Refusal }> {
   const mismatch = skillSpaceRefusal(uri, spaceId, "id");
   if (mismatch) return { refusal: mismatch };
@@ -234,7 +286,10 @@ export async function describeSkill(
       package_id: address.packageId,
       frontmatter: entry.frontmatter,
       resources: entry.resources,
-      read_with: { tool: KIND_USE.skill.tool, arguments: { uri: entry.uri } },
+      read_with: {
+        tool: KIND_USE.skill.tool,
+        arguments: { uri: entry.uri, ...(readSpaceId ? { space_id: readSpaceId } : {}) },
+      },
     },
   };
 }

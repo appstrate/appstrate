@@ -250,14 +250,24 @@ const CONNECT_OPERATIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * `describe`: a described item (the payload carries its `kind`) is what members and servers wrote
+ * (descriptions, schemas, an operation's documented responses): its links are redacted and none
+ * is offered. Any other payload is a refusal the platform wrote, or a route problem it relays.
+ */
+const describeScope: OfferScope = (payload) =>
+  typeof payload === "object" && payload !== null && "kind" in payload
+    ? UNOFFERED(payload)
+    : splitConnectPayload(payload);
+
+/**
  * The tools whose result the platform writes to carry its connect links, each with the subtrees
  * that are not its own. `run_and_wait`: its launch refusal (409 readiness items), never the run's
- * `result`, which the agent wrote. `search` and `describe`: the integration tools' `not_ready`
- * and `unlisted` refusals and their own refusals, never what a member wrote (an agent's or a
- * skill's description, input and output, an item list or `best_match` holding them), nor a
- * remote server's schemas, which stay verbatim. `call_integration_tool`: its refusals and an
- * `api_call` batch's per-request `error`, never the upstream's `body` and `headers` (a remote
- * server's own result comes marked relayed, see {@link offerScopeOf}).
+ * `result`, which the agent wrote. `search`: its integration tools' `not_ready` and `unlisted`
+ * refusals and its own refusals, never what a member or a server wrote (an agent's or a skill's
+ * description, a `best_match`); the operation and integration tool lists stay verbatim, as
+ * written by the platform. `describe`: {@link describeScope}. `call_integration_tool`: its
+ * refusals and an `api_call` batch's per-request `error`, never the upstream's `body` and
+ * `headers` (a remote server's own result comes marked relayed, see {@link offerScopeOf}).
  */
 const OFFER_SOURCES: Readonly<Record<string, OfferScope>> = {
   run_and_wait: scopeOf({ verbatim: [], unoffered: [["result"]] }),
@@ -265,19 +275,7 @@ const OFFER_SOURCES: Readonly<Record<string, OfferScope>> = {
     verbatim: [["operations"], ["integration_tools", "items"]],
     unoffered: [["agents"], ["skills"], ["best_match"]],
   }),
-  describe: scopeOf({
-    verbatim: [["input_schema"], ["output_schema"]],
-    unoffered: [
-      ["input"],
-      ["output"],
-      ["dependencies"],
-      ["frontmatter"],
-      ["description"],
-      ["display_name"],
-      ["run_with"],
-      ["resources"],
-    ],
-  }),
+  describe: describeScope,
   call_integration_tool: scopeOf({
     verbatim: [
       ["results", "*", "body"],

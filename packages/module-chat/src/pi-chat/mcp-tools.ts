@@ -26,6 +26,7 @@ import {
   parseSkillUri,
   parseSkillUriPackage,
   SKILL_DEFINITION_META_KEY,
+  SKILL_URI_PREFIX,
 } from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
@@ -509,15 +510,19 @@ async function enterNamedSpace(
 
 /**
  * Whether a call reads every space of the turn: it omits a `space_id` its tool declares and does
- * not require, so the platform covers each space reached.
+ * not require, so the platform covers each space reached. Not an operation-only search, which
+ * reads the static catalog and the caller's permissions, no space's data.
  */
 function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
   const schema = (inputSchema ?? {}) as {
     properties?: Record<string, unknown>;
     required?: unknown;
   };
+  const kinds = args.kinds;
+  const operationsOnly = Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
   return (
     args.space_id === undefined &&
+    !operationsOnly &&
     schema.properties?.space_id !== undefined &&
     !(Array.isArray(schema.required) && schema.required.includes("space_id"))
   );
@@ -593,14 +598,23 @@ function makeForwardExtension(
               scope,
             );
             const file = await liveResources(resources, opts, toolCallId);
+            // A skill's text stays in the replay, as `read_resource` keeps it.
+            const keepSkill =
+              typeof args.uri === "string" &&
+              args.uri.startsWith(SKILL_URI_PREFIX) &&
+              resources.every((resource) => "text" in resource);
             return withTurnBudgetNote(
               {
                 ...meta,
                 content: [...meta.content, ...file.content],
-                persistedContent: [
-                  ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
-                  ...file.receipts,
-                ],
+                ...(keepSkill
+                  ? {}
+                  : {
+                      persistedContent: [
+                        ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                        ...file.receipts,
+                      ],
+                    }),
               },
               turnBudget,
             );

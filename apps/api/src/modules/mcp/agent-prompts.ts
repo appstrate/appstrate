@@ -66,7 +66,7 @@ async function listPublishedAgents(
   ctx: AgentPromptContext,
   spaceId: string,
 ): Promise<ListedAgent[]> {
-  const listed = await listAgents(ctx, spaceId);
+  const listed = await listAgents(ctx, { spaceId });
   if ("refused" in listed) return [];
   return listed.agents
     .filter((agent) => agent.published)
@@ -109,7 +109,7 @@ async function resolveAgent(
   const response = await dispatchGet(
     ctx,
     `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
-    agent.spaceId,
+    { spaceId: agent.spaceId },
   );
   if (!response.ok) return null;
   const body = (await response.json()) as {

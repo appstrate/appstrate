@@ -163,8 +163,10 @@ export const rateLimit = createRateLimitMiddleware({
  * Keys on the caller's identity at JSON-RPC *envelope* granularity (one POST =
  * one consumed point), independent of how many tools or batched calls the
  * envelope carries. `invoke_operation` re-dispatches through already
- * rate-limited platform routes (defence in depth), but `search`/`describe`
- * touch nothing rate-limited, so this bounds their abuse surface too.
+ * rate-limited platform routes (defence in depth); `search`/`describe` also
+ * dispatch to routes (agents, the credential proxy's listing, which reaches third-party
+ * servers), and a search across spaces dispatches once per space, so this bounds their abuse
+ * surface too.
  *
  * The identity resolver is intentionally exhaustive — MCP access is grantable
  * to API keys, dashboard sessions, AND OIDC end-users, so we cannot assume

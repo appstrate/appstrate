@@ -261,7 +261,7 @@ describe("mcp org-wide connection", () => {
     ).denied.find((op) => op.id === "createAgent");
     expect(row?.granted_in).toEqual([gestion.id]);
 
-    // Granted in every reachable space: all of them in `granted_in`.
+    // Granted where it is searched: that space.
     const everywhere = payload(
       await call("search", {
         query: "listAgents",
@@ -274,7 +274,7 @@ describe("mcp org-wide connection", () => {
       everywhere.data.operations as { items: Array<{ id: string; granted_in?: string[] }> }
     ).items.find((op) => op.id === "listAgents");
     expect(listed).toBeDefined();
-    expect(listed!.granted_in?.sort()).toEqual([defaultSpaceId, gestion.id, lecture.id].sort());
+    expect(listed!.granted_in).toEqual([gestion.id]);
   });
 
   it("lets search omit space_id: an operation granted in one space is listed, naming it", async () => {

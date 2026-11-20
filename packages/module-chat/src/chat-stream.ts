@@ -449,7 +449,9 @@ export async function handleChatStream(
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
     // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
-    // or the space of a file `read_resource` reads, before the call, refused outside the set.
+    // or the space of a file `read_resource` reads, before the call, refused outside the set;
+    // a call omitting an optional `space_id` (a `search`) records every space of the turn unless
+    // it searches operations alone.
     // Skills are procedures, not data: injecting one touches no space.
     const organization: TurnSpaces = {
       spaces,

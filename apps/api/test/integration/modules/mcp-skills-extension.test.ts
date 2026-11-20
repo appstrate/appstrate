@@ -30,6 +30,7 @@ import {
 import {
   seedPackage,
   seedPackageVersion,
+  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
@@ -687,11 +688,44 @@ describe("search across spaces", () => {
     expect(Object.values(grantedIn(one.data, "skills"))).toEqual([[teamB.id]]);
   });
 
-  it("describes the best match in the space it is found in", async () => {
-    const found = await search(ownerHeaders(), { query: "agent-b", kinds: ["agent"] });
-    expect(found.data.best_match).toMatchObject({ kind: "agent", id: AGENT_B });
+  it("describes the best match in the space it is found in, and leaves out one whose describe is refused", async () => {
+    // Unpublished: its detail answers 404, so there is no best match.
+    const unpublished = await search(ownerHeaders(), { query: "agent-b", kinds: ["agent"] });
+    expect(unpublished.data.best_match).toBeUndefined();
+
+    await seedPublishedVersion(AGENT_B, "1.0.0");
+    type RunWith = { run_with: { arguments: Record<string, unknown> }; granted_in?: string[] };
+    const across = await search(ownerHeaders(), { query: "agent-b", kinds: ["agent"] });
+    const best = across.data.best_match as RunWith & { id: string };
+    expect(best.id).toBe(AGENT_B);
+    expect(best.run_with.arguments).toEqual({
+      kind: "agent",
+      scope: "@skillsext",
+      name: "agent-b",
+    });
+    expect(grantedIn(across.data, "agents")[AGENT_B]).toEqual([teamB.id]);
+    const agentNamed = await search(ownerHeaders(), {
+      query: "agent-b",
+      kinds: ["agent"],
+      space_id: teamB.id,
+    });
+    expect((agentNamed.data.best_match as RunWith).run_with.arguments).toMatchObject({
+      space_id: teamB.id,
+    });
     const skill = await search(ownerHeaders(), { query: "team", kinds: ["skill"] });
+    // A cross-space best match names no space to read in.
     expect(skill.data.best_match).toMatchObject({ kind: "skill", id: teamUri() });
+    expect(
+      (skill.data.best_match as { read_with: { arguments: object } }).read_with.arguments,
+    ).toEqual({ uri: teamUri() });
+    const named = await search(ownerHeaders(), {
+      query: "team",
+      kinds: ["skill"],
+      space_id: teamB.id,
+    });
+    expect(
+      (named.data.best_match as { read_with: { arguments: object } }).read_with.arguments,
+    ).toEqual({ uri: teamUri(), space_id: teamB.id });
   });
 
   it("leaves out the agents of a space where the role cannot read them", async () => {

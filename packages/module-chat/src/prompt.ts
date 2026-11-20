@@ -389,11 +389,6 @@ export function formatCallerContext(
           ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`.`
           : "Ask the user which space when the request does not say; never guess it.",
   );
-  if (!(opts.restricted && opts.origin)) {
-    lines.push(
-      "`search` without a `space_id` covers every space of this conversation: each item's `granted_in` names the spaces where it is usable, and acting on it takes the `space_id` of one of them.",
-    );
-  }
   // The set is the union over the turn's spaces: it bounds what the turn may attempt, while
   // each call is decided by the role held in the space it names. Permissions are in the
   // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.

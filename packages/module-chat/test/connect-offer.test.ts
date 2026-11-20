@@ -260,29 +260,25 @@ describe("offerScopeOf", () => {
     expect(JSON.stringify(split.redacted)).not.toContain(STRANGER);
   });
 
-  it("offers a describe refusal, redacts what a member wrote and keeps third-party schemas", () => {
+  it("offers a describe refusal, and nothing of a described item, whatever its kind", () => {
     const scope = offerScopeOf("describe", {});
     expect(scope(refusal(PLATFORM)).offers).toEqual([{ connect_url: PLATFORM }]);
+    // A route problem relayed for an agent that cannot be read.
+    expect(scope({ status: 403, body: refusal(PLATFORM) }).offers).toEqual([
+      { connect_url: PLATFORM },
+    ]);
 
-    const agent = {
-      kind: "agent",
-      id: "@a/b",
-      description: "d",
-      input: { connect_url: STRANGER },
-      run_with: { arguments: { connect_url: STRANGER } },
-    };
-    const split = scope(agent);
-    expect(split.offers).toEqual([]);
-    expect(JSON.stringify(split.redacted)).not.toContain(STRANGER);
-
-    const tool = {
-      kind: "integration_tool",
-      id: "x__find",
-      input_schema: { properties: { q: { connect_url: STRANGER } } },
-      output_schema: { connect_url: STRANGER },
-    };
-    expect(scope(tool)).toEqual({ redacted: tool, offers: [] });
-    expect(scope(tool).redacted).toBe(tool);
+    const link = { connect_url: STRANGER };
+    for (const described of [
+      { kind: "operation", id: "getRun", responses: { 200: { example: link } } },
+      { kind: "agent", id: "@a/b", input: link, run_with: { arguments: link } },
+      { kind: "skill", id: "skill://x", frontmatter: link, resources: [link] },
+      { kind: "integration_tool", id: "x__find", input_schema: { properties: { q: link } } },
+    ]) {
+      const split = scope(described);
+      expect(split.offers).toEqual([]);
+      expect(JSON.stringify(split.redacted)).not.toContain(STRANGER);
+    }
   });
 
   it("leaves a search with nothing to redact untouched", () => {
