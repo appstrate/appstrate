@@ -30,7 +30,7 @@ export interface KeywordScore {
   length: number;
 }
 
-export function keywordScore(name: string, text: string, tokens: readonly string[]): KeywordScore {
+function keywordScore(name: string, text: string, tokens: readonly string[]): KeywordScore {
   return {
     exact: tokens.length > 0 && name.toLowerCase() === tokens.join(" "),
     inName: searchScore(name, tokens),
