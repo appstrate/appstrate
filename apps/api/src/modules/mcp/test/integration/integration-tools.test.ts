@@ -626,6 +626,20 @@ describe("mcp integration tools", () => {
         expect(items(one.data)[0]!.granted_in).toEqual([other.id]);
       });
 
+      it("reports the spaces whose tools a search without space_id read: not the one that closes the proxy", async () => {
+        await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, other.id));
+        const read = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect(read.data.searched_spaces).toEqual([owner.defaultSpaceId]);
+
+        const operations = await callTool(caller, "search", { kinds: ["operation"] });
+        expect(operations.data.searched_spaces).toBeUndefined();
+        const named = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
+          space_id: owner.defaultSpaceId,
+        });
+        expect(named.data.searched_spaces).toBeUndefined();
+      });
+
       it("leaves a space that closes the proxy out of a default search, and refuses the kind named once every space closes it", async () => {
         await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, other.id));
         const defaulted = await callTool(caller, "search", {});

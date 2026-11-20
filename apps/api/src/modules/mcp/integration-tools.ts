@@ -261,6 +261,7 @@ async function readAcrossSpaces(
     truncated_catalogs: [...truncated.values()],
     uncached: [...uncached],
     refusedSpaces: refused,
+    searched: answered.flatMap(({ space }) => (space ? [space.id] : [])),
   };
 }
 
@@ -284,7 +285,7 @@ export async function searchIntegrationTools(
   contextIn: (space: McpSpace | undefined) => IntegrationToolContext,
   query: { tokens: readonly string[]; integration?: string; limit: number; cachedOnly: boolean },
   signal: AbortSignal | undefined,
-): Promise<{ section: Record<string, unknown> } | { refused: RouteRefusal }> {
+): Promise<{ section: Record<string, unknown>; searched: string[] } | { refused: RouteRefusal }> {
   const { tokens, integration, limit, cachedOnly } = query;
   const read = await readAcrossSpaces(spaces, contextIn, { integration, cachedOnly }, signal);
   if (read.refused) return { refused: read.refused };
@@ -358,6 +359,7 @@ export async function searchIntegrationTools(
       ...unsearched(read.refusedSpaces),
       ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
     },
+    searched: read.searched,
   };
 }
 

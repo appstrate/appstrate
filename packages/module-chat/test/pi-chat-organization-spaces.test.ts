@@ -49,6 +49,8 @@ interface RegisteredTool {
 /** Everything the transport saw, in order, with the touches interleaved. */
 function transcript(searchKinds?: string[]) {
   const events: string[] = [];
+  /** The `searched_spaces` the stub's `search` answers with, when set. */
+  const answers: { searched?: unknown } = {};
   const launches: Array<{ spaceHeader: string | null; body: string }> = [];
   const polls: Array<string | null> = [];
   const toolCalls: unknown[] = [];
@@ -142,6 +144,16 @@ function transcript(searchKinds?: string[]) {
             ],
           });
         }
+        if ((msg.params as { name?: string }).name === "search") {
+          const found = {
+            operations: { total: 0, items: [] },
+            ...(answers.searched !== undefined ? { searched_spaces: answers.searched } : {}),
+          };
+          return reply({
+            content: [{ type: "text", text: JSON.stringify(found) }],
+            structuredContent: found,
+          });
+        }
         return reply({ content: [{ type: "text", text: "{}" }] });
       }
       if (msg.method === "resources/read") {
@@ -178,7 +190,7 @@ function transcript(searchKinds?: string[]) {
   }) as typeof fetch;
 
   const lookups: string[] = [];
-  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups };
+  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups, answers };
 }
 
 function organizationOf(
@@ -314,49 +326,56 @@ describe("the conversation's forwarded tools and resources", () => {
     }
   });
 
-  it("reads the kinds the tool offers when `kinds` is omitted: a descriptor offering operations alone records no space", async () => {
-    const transport = transcript(["operation"]);
+  it("records, after a call that omits an optional space_id, the spaces its result says it read, and none before", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_alpha"];
     const { built, tool } = await tools(transport);
     try {
-      await tool("search").execute("c1", { query: "runs" });
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(transport.events).toEqual(["tools/call", "touch spc_alpha"]);
+      expect(text(result)).toContain("searched_spaces");
+
+      // A result that lists none records none.
+      transport.answers.searched = undefined;
+      transport.events.length = 0;
+      await tool("search").execute("c2", { query: "x" });
+      expect(transport.events).toEqual(["tools/call"]);
+
+      // A named space is recorded before the call, as ever.
+      transport.events.length = 0;
+      await tool("search").execute("c3", { query: "x", space_id: "spc_beta" });
+      expect(transport.events).toEqual(["touch spc_beta", "tools/call"]);
+
+      transport.events.length = 0;
+      await tool("invoke_operation").execute("c4", { operation_id: "listAgents" });
       expect(transport.events).toEqual(["tools/call"]);
     } finally {
       await built.close();
     }
   });
 
-  it("records every space of the turn before a call that omits an optional space_id, and none for a required one", async () => {
+  it("withholds the result of a call that read a space outside the turn", async () => {
     const transport = transcript();
+    transport.answers.searched = ["spc_alpha", "spc_elsewhere"];
     const { built, tool } = await tools(transport);
     try {
-      await tool("search").execute("c1", { query: "x" });
-      expect(transport.events.slice(0, 2).sort()).toEqual(["touch spc_alpha", "touch spc_beta"]);
-      expect(transport.events[2]).toBe("tools/call");
-
-      transport.events.length = 0;
-      await tool("search").execute("c2", { query: "x", space_id: "spc_beta" });
-      expect(transport.events).toEqual(["touch spc_beta", "tools/call"]);
-
-      // An operation search reads no space's data; any other kind does.
-      transport.events.length = 0;
-      await tool("search").execute("c4", { kinds: ["operation"] });
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+      expect(text(result)).not.toContain("operations");
       expect(transport.events).toEqual(["tools/call"]);
-      // The filter alone makes it an operations search; beside `integration` it is not.
-      transport.events.length = 0;
-      await tool("search").execute("c6", { tag: "Agents" });
-      expect(transport.events).toEqual(["tools/call"]);
-      transport.events.length = 0;
-      await tool("search").execute("c7", { tag: "Agents", integration: "@acme/crm" });
-      expect(transport.events.slice(0, 2).sort()).toEqual(["touch spc_alpha", "touch spc_beta"]);
-      for (const kinds of [["agent"], ["skill"], ["integration_tool"], ["operation", "agent"]]) {
-        transport.events.length = 0;
-        await tool("search").execute("c5", { kinds });
-        expect(transport.events.slice(0, 2).sort()).toEqual(["touch spc_alpha", "touch spc_beta"]);
-      }
+    } finally {
+      await built.close();
+    }
+  });
 
-      transport.events.length = 0;
-      await tool("invoke_operation").execute("c3", { operation_id: "listAgents" });
-      expect(transport.events).toEqual(["tools/call"]);
+  it("withholds the result of a call whose read spaces cannot be recorded", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_beta"];
+    const { built, tool } = await tools(transport, "spc_beta");
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+      expect(text(result)).not.toContain("operations");
     } finally {
       await built.close();
     }

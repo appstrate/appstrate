@@ -721,6 +721,46 @@ describe("search across spaces", () => {
     expect(Object.values(grantedIn(one.data, "skills"))).toEqual([[teamB.id]]);
   });
 
+  it("answers a search across spaces whose skill archive is unavailable in one: that space is unsearched", async () => {
+    // A skill never served before: a cached archive would not be read again.
+    const broken = "@skillsext/broken";
+    await seedPublishedSkill(broken, "broken", teamB.id);
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey(broken, "1.0.0"));
+    const all = await search(ownerHeaders(), {});
+    expect(all.isError).toBe(false);
+    expect(section(all.data, "operations")).toBeDefined();
+    expect(Object.keys(grantedIn(all.data, "agents"))).toContain(AGENT_A);
+    expect(Object.keys(grantedIn(all.data, "skills"))).toContain(toneUri());
+    expect(
+      (all.data.skills as { unsearched: Array<{ space_id: string; code?: string }> }).unsearched,
+    ).toEqual([
+      expect.objectContaining({ space_id: teamB.id, code: "version_artifact_unavailable" }),
+    ]);
+
+    // Named, the failure answers the call when the kind is named, and drops the kind otherwise.
+    const named = await search(ownerHeaders(), { kinds: ["skill"], space_id: teamB.id });
+    expect(named.isError).toBe(true);
+    expect((await search(ownerHeaders(), { space_id: teamB.id })).data.skills).toBeUndefined();
+  });
+
+  it("reports the spaces a search without space_id read, and nothing otherwise", async () => {
+    const all = await search(ownerHeaders(), { kinds: ["agent", "skill"] });
+    expect((all.data.searched_spaces as string[]).sort()).toEqual(
+      [owner.defaultSpaceId, teamB.id, third.id].sort(),
+    );
+    // Operations read no space data.
+    expect((await search(ownerHeaders(), { kinds: ["operation"] })).data.searched_spaces).toBe(
+      undefined,
+    );
+    // A named space, or a pinned connection, adds no field.
+    const named = await search(ownerHeaders(), { kinds: ["agent"], space_id: teamB.id });
+    expect(named.data.searched_spaces).toBeUndefined();
+    const pinned = await search(inSpace(ownerHeaders(), owner.defaultSpaceId), {
+      kinds: ["agent"],
+    });
+    expect(pinned.data.searched_spaces).toBeUndefined();
+  });
+
   it("describes an agent and a skill in the space it names, the agent's run_with naming it", async () => {
     const describe = async (args: Record<string, unknown>) =>
       parseSearch(await call(ownerHeaders(), "tools/call", { name: "describe", arguments: args }));

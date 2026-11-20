@@ -508,34 +508,56 @@ async function enterNamedSpace(
   return undefined;
 }
 
-/**
- * A search of operations alone: its effective kinds are exactly `["operation"]`: `kinds` when
- * given, else the kinds of the filters passed (`tag`, `integration`), else the kinds the tool
- * offers (`kinds`' enum in its schema).
- */
-function searchesOperationsOnly(inputSchema: unknown, args: Record<string, unknown>): boolean {
-  const filtered = [
-    ...(args.tag !== undefined ? ["operation"] : []),
-    ...(args.integration !== undefined ? ["integration_tool"] : []),
-  ];
-  const offered = (
-    inputSchema as { properties?: { kinds?: { items?: { enum?: unknown } } } } | undefined
-  )?.properties?.kinds?.items?.enum;
-  const kinds = args.kinds ?? (filtered.length > 0 ? filtered : offered);
-  return Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
-}
-
-/** Whether a call omits a `space_id` its tool declares and does not require, so it reads every space of the turn (not an operations-only search). */
-function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
+/** Whether a tool declares a `space_id` it does not require, and the call omits it. */
+function omitsOptionalSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
   const schema = (inputSchema ?? {}) as {
     properties?: Record<string, unknown>;
     required?: unknown;
   };
   return (
     args.space_id === undefined &&
-    !searchesOperationsOnly(inputSchema, args) &&
     schema.properties?.space_id !== undefined &&
     !(Array.isArray(schema.required) && schema.required.includes("space_id"))
+  );
+}
+
+/**
+ * A call that names no space records the spaces its result says it read (`searched_spaces`),
+ * before the result is returned. The refusal that withholds the result when a listed space is not
+ * the turn's or cannot be recorded; `undefined` when every one is recorded.
+ */
+async function enterSearchedSpaces(
+  organization: TurnSpaces,
+  structuredContent: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  const listed = (structuredContent as { searched_spaces?: unknown } | null | undefined)
+    ?.searched_spaces;
+  if (listed === undefined) return undefined;
+  const turnSpaces = new Set(organization.spaces.map((space) => space.id));
+  const ids: unknown[] = Array.isArray(listed) ? listed : [null];
+  const recorded =
+    ids.every((id) => typeof id === "string" && turnSpaces.has(id)) &&
+    (await Promise.all(ids.map((id) => organization.touch(id as string))).then(
+      () => true,
+      () => false,
+    ));
+  return recorded
+    ? undefined
+    : {
+        code: "spaces_not_recorded",
+        error: "The spaces this call read could not be recorded on the conversation.",
+      };
+}
+
+/** A refusal rendered as a tool result, as the platform renders its own (`refusalResult`). */
+function refusalToolResult(
+  refusal: Record<string, unknown>,
+  scope: OfferScope,
+  turnBudget: PiTurnBudget,
+) {
+  return withTurnBudgetNote(
+    mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] }, scope),
+    turnBudget,
   );
 }
 
@@ -571,17 +593,12 @@ function makeForwardExtension(
         if (spaceId !== undefined) {
           const refusal = await enterNamedSpace(organization, spaceId);
           if (refusal) {
-            // Rendered as the platform renders its own refusals (`refusalResult`).
-            return withTurnBudgetNote(
-              mcpResultToPi(
-                { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] },
-                offerScopeOf(toolName, { arguments: args }),
-              ),
+            return refusalToolResult(
+              refusal,
+              offerScopeOf(toolName, { arguments: args }),
               turnBudget,
             );
           }
-        } else if (readsEveryTurnSpace(tool.inputSchema, args)) {
-          await Promise.all(organization.spaces.map((space) => organization.touch(space.id)));
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
@@ -592,6 +609,10 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
+        if (spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)) {
+          const refusal = await enterSearchedSpaces(organization, result.structuredContent);
+          if (refusal) return refusalToolResult(refusal, scope, turnBudget);
+        }
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
             await relayedToolResult(result, scope, opts.modelSeesImages === true),

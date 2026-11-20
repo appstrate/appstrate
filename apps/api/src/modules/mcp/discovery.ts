@@ -14,6 +14,7 @@
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { parseSkillUri } from "@appstrate/core/skill-uri";
+import { ApiError } from "../../lib/errors.ts";
 import type { DispatchContext } from "./api-call-batch.ts";
 import type { SkillServer } from "./skills.ts";
 import { spaceMismatchRefusal } from "./spaces.ts";
@@ -197,13 +198,25 @@ export interface SkillHit {
   granted_in: [string];
 }
 
-/** The published skills of `spaceIds`, as `skills/list` lists them. */
+/**
+ * The published skills of one space, as `skills/list` lists them; the refusal of a space whose
+ * served skills cannot be read (an archive unavailable) instead of a failure of the call.
+ */
 export async function listSkills(
   reader: McpSkillReader,
-  spaceIds: readonly string[],
-): Promise<SkillHit[]> {
-  const entries = await reader.list("published", spaceIds);
-  return entries.flatMap((entry): SkillHit[] => {
+  spaceId: string,
+  requestId: string,
+): Promise<{ skills: SkillHit[] } | { refused: RouteRefusal }> {
+  let entries: Awaited<ReturnType<McpSkillReader["list"]>>;
+  try {
+    entries = await reader.list("published", [spaceId]);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      return { refused: { status: err.status, body: err.toProblemDetail(requestId) } };
+    }
+    throw err;
+  }
+  const skills = entries.flatMap((entry): SkillHit[] => {
     const address = parseSkillUri(entry.uri);
     if (!address) return [];
     return [
@@ -216,6 +229,7 @@ export async function listSkills(
       },
     ];
   });
+  return { skills };
 }
 
 /** The refusal of a skill URI in another space than the one the call entered, or `undefined`. */

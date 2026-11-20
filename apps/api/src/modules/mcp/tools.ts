@@ -417,7 +417,8 @@ interface SearchCall {
 type KindSearch = (
   call: SearchCall,
 ) => Promise<
-  { section: Record<string, unknown>; denied?: number } | { refused: Refusal | RouteRefusal }
+  | { section: Record<string, unknown>; denied?: number; searched?: string[] }
+  | { refused: Refusal | RouteRefusal }
 >;
 
 /**
@@ -649,6 +650,7 @@ function buildSearchTool(
     const sections: Record<string, unknown> = {};
     let shown = 0;
     let denied: number | undefined;
+    const searched = new Set<string>();
     for (const { kind, named, outcome } of outcomes) {
       if ("refused" in outcome) {
         if (named) return refusalResult(outcome.refused);
@@ -657,6 +659,7 @@ function buildSearchTool(
       sections[KINDS[kind].section] = outcome.section;
       shown += Array.isArray(outcome.section.items) ? outcome.section.items.length : 0;
       denied = outcome.denied ?? denied;
+      for (const id of outcome.searched ?? []) searched.add(id);
     }
     emit(ctx, {
       tool: "search",
@@ -665,7 +668,12 @@ function buildSearchTool(
       ...(call.spaces ? { spaceIds: call.spaces.map((space) => space.id) } : {}),
       ...(denied !== undefined ? { deniedCount: denied } : {}),
     });
-    return jsonResult(sections);
+    // Without `space_id`, the spaces whose data was read: what the chat records as read.
+    const readSpaceIds = ctx.orgSpaces && args.space_id === undefined ? [...searched] : [];
+    return jsonResult({
+      ...sections,
+      ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
+    });
   };
 
   return { descriptor, handler };
@@ -761,6 +769,7 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
         .map(({ item }) => ({ ...item.hit, ...(spaces ? { granted_in: item.spaceIds } : {}) })),
       ...unsearched(refused),
     },
+    searched: answered.flatMap(({ space }) => (space ? [space.id] : [])),
   };
 }
 
@@ -770,27 +779,30 @@ async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
   const readable = targets.filter((space) =>
     operationIdGranted("listSkills", space.permissions, ctx.ceiling),
   );
-  const refused = targets
-    .filter((space) => !readable.includes(space))
-    .map((space) => ({
-      space: spaces ? space : undefined,
-      refused: {
-        status: 403,
-        body: {
-          code: "not_granted",
-          error: `Your role does not allow listing skills in space ${space.id}.`,
-        },
-      },
-    }));
-  if (readable.length === 0 && refused[0]) return { refused: refused[0].refused };
-  const skills = await listSkills(
-    ctx.skills,
-    readable.map((space) => space.id),
+  const { answered, refused: unreadable } = await readSpaces(readable, (space) =>
+    listSkills(ctx.skills, space.id, ctx.requestId),
   );
-  const matches = rankByKeywords(skills, tokens, (skill) => ({
-    name: skill.name,
-    text: `${skill.packageId} ${skill.description}`,
-  }));
+  const refused = [
+    ...targets
+      .filter((space) => !readable.includes(space))
+      .map((space) => ({
+        space,
+        refused: {
+          status: 403,
+          body: {
+            code: "not_granted",
+            error: `Your role does not allow listing skills in space ${space.id}.`,
+          },
+        },
+      })),
+    ...unreadable,
+  ].map((entry) => ({ ...entry, space: spaces ? entry.space : undefined }));
+  if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
+  const matches = rankByKeywords(
+    answered.flatMap(({ value }) => value.skills),
+    tokens,
+    (skill) => ({ name: skill.name, text: `${skill.packageId} ${skill.description}` }),
+  );
   return {
     section: {
       total: matches.length,
@@ -799,6 +811,7 @@ async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
         .map(({ item: { granted_in, ...hit } }) => (spaces ? { ...hit, granted_in } : hit)),
       ...unsearched(refused),
     },
+    searched: answered.map(({ space }) => space.id),
   };
 }
 
