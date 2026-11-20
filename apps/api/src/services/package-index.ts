@@ -34,13 +34,15 @@ import { CONFIG_BY_TYPE } from "./package-items/config.ts";
  * `grants`, each space counting the runs its grant admits, and the row is a
  * summary unless one of its spaces grants the content read. `reach` (the
  * caller's `packageAccessSpaces`) is awaited alongside the index's own reads.
+ * `singleSpaceId`: the one space a single-space index lists, whose activations
+ * name each row's `inactive_required_integrations`.
  */
 export async function listAgentIndex(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
   reach: Promise<PackageAccessSpace[]>,
-  launchSpaceId?: string,
+  singleSpaceId?: string,
 ) {
   const permissions = new Map(grants.map((g) => [g.spaceId, g.permissions]));
   const [rows, runningCounts, unreadCounts, accessible] = await Promise.all([
@@ -50,8 +52,8 @@ export async function listAgentIndex(
     reach,
   ]);
   // Single-space index only: an organization row spans spaces, each with its own activations.
-  const inactive = launchSpaceId
-    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), launchSpaceId)
+  const inactive = singleSpaceId
+    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), singleSpaceId)
     : null;
 
   return rows.map((row, i) => {

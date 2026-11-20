@@ -47,6 +47,10 @@
  * before the sidecar receives its spawn plan.
  */
 
+import { and, eq, exists, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { db } from "@appstrate/db/client";
+import { packageDistTags, packages, packageVersions } from "@appstrate/db/schema";
 import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
@@ -219,4 +223,45 @@ export async function selectorlessLaunchManifests(
     const versionId = versionIdOf(row);
     return asRecord(versionId == null ? row.draftManifest : manifests.get(versionId));
   });
+}
+
+/** The manifest a selector-less launch of agent `packageId` runs; null for any other type. */
+export async function selectorlessAgentManifest(
+  packageId: string,
+): Promise<Record<string, unknown> | null> {
+  const [row] = await db
+    .select({
+      type: packages.type,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      latestVersionId: packageDistTags.versionId,
+    })
+    .from(packages)
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (row?.type !== "agent") return null;
+  const [manifest] = await selectorlessLaunchManifests([row]);
+  return manifest!;
+}
+
+/** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
+export function latestTagJoin(packageIdColumn: AnyPgColumn) {
+  return and(
+    eq(packageDistTags.packageId, packageIdColumn),
+    eq(packageDistTags.tag, "latest"),
+    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(packageVersions)
+        .where(
+          and(
+            eq(packageVersions.id, packageDistTags.versionId),
+            eq(packageVersions.packageId, packageIdColumn),
+            eq(packageVersions.yanked, false),
+          ),
+        ),
+    ),
+  );
 }

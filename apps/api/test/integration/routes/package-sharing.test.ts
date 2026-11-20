@@ -1847,6 +1847,23 @@ describe("a share landing ON names the agent's integrations left off there", () 
     expect(res.status, await res.clone().text()).toBe(201);
     expect(((await res.json()) as Body).warnings).toEqual([]);
   });
+
+  it("carries `[]` when a sharer who may activate re-posts onto a row a member switched OFF", async () => {
+    // The re-post leaves the row's state as it stands, so nothing is on to warn about.
+    const sharer = await sharerWith("builder");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    const off = await app.request(`/api/spaces/${teamId}/packages/${AGENT}`, {
+      method: "DELETE",
+      headers: owner(teamId),
+    });
+    expect(off.status, await off.clone().text()).toBe(204);
+
+    const res = await shareWithSpace(sharer.headers(homeId), AGENT, teamId);
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as Body;
+    expect(body.enabled).toBe(false);
+    expect(body.warnings).toEqual([]);
+  });
 });
 
 describe("the placement is judged against the LOCKED home", () => {

@@ -65,12 +65,9 @@ export function isInternalDispatch(headers: Headers): boolean {
 
 /**
  * The `c.env` key of an in-process dispatch confined to one space. Only `dispatchInProcess` passes
- * an env holding it, so it cannot be forged; read by `callerReachableSpaces` alone.
+ * an env holding it, so it cannot be forged; read through {@link dispatchPin}.
  */
-const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
-
-/** Set beside it when the pin is the endpoint's (`/api/mcp/o/:org/s/:space`), not per call. */
-const DISPATCH_ENDPOINT_PIN = Symbol("appstrate.dispatchEndpointPin");
+const DISPATCH_PIN = Symbol("appstrate.dispatchPin");
 
 /** The space a dispatch is confined to; `endpoint`: the pin is its endpoint's, not the call's. */
 export interface DispatchPin {
@@ -79,22 +76,12 @@ export interface DispatchPin {
 }
 
 /** The `app.fetch` env of a dispatch confined to `pin.spaceId`. */
-export function dispatchSpacePinEnv({ spaceId, endpoint }: DispatchPin): Record<symbol, string> {
-  return endpoint
-    ? { [DISPATCH_SPACE_PIN]: spaceId, [DISPATCH_ENDPOINT_PIN]: spaceId }
-    : { [DISPATCH_SPACE_PIN]: spaceId };
+export function dispatchPinEnv(pin: DispatchPin): Record<symbol, DispatchPin> {
+  return { [DISPATCH_PIN]: pin };
 }
 
-/** The space this dispatch's endpoint is pinned to, if it is one. */
-export function dispatchEndpointPin(c: Context): string | undefined {
-  const env = c.env as Record<symbol, unknown> | undefined;
-  const pin = env?.[DISPATCH_ENDPOINT_PIN];
-  return typeof pin === "string" ? pin : undefined;
-}
-
-/** The space this request is a dispatch confined to, if it is one. */
-export function dispatchSpacePin(c: Context): string | undefined {
-  const env = c.env as Record<symbol, unknown> | undefined;
-  const pin = env?.[DISPATCH_SPACE_PIN];
-  return typeof pin === "string" ? pin : undefined;
+/** The pin of this request when it is a confined dispatch. */
+export function dispatchPin(c: Context): DispatchPin | undefined {
+  const env = c.env as Record<symbol, DispatchPin | undefined> | undefined;
+  return env?.[DISPATCH_PIN];
 }

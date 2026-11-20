@@ -976,7 +976,7 @@ export const mePaths = {
                   },
                   agents_total: {
                     type: "integer",
-                    description: "Total runnable agents before the cap.",
+                    description: "Total active agents before the cap.",
                   },
                   skills: {
                     type: "array",

@@ -496,7 +496,8 @@ export function createSchedulesRouter() {
     // Arming a schedule is an execution decision, so it asks the execution
     // question now rather than leaving the first tick to discover it. LISTING
     // the schedules of a switched-off agent is a read and does not.
-    requireActiveAgent(["schedules:write"]),
+    // `agents:run` too: the schedule's actor must hold it in the space (`assertScheduleActorValid`).
+    requireActiveAgent(["schedules:write", "agents:run"]),
     async (c) => {
       const agent = c.get("package");
 

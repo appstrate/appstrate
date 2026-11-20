@@ -290,7 +290,7 @@ export const schedulesPaths = {
         "404": {
           $ref: "#/components/responses/NoPublishedVersion",
           description:
-            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`; its `active_in_spaces` names where it is active).",
+            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`; its `active_in_spaces` names where it is active and the caller holds `schedules:write` and `agents:run`).",
         },
         "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },

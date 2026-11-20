@@ -292,7 +292,7 @@ export async function assertCatalogPackageAccess(
 }
 
 /** {@link assertCatalogPackageAccess} over {@link placementAccessSpaces}: the activation door, which may place. */
-export async function assertPlaceablePackageAccess(c: Context<AppEnv>, packageId: string) {
+export async function assertPackageReachableForPlacement(c: Context<AppEnv>, packageId: string) {
   return assertPackageReachable(c, packageId, placementAccessSpaces);
 }
 
@@ -477,7 +477,7 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 }
 
 /**
- * {@link assertPackagePlacementAccess} as a question, for bundle import: place the
+ * {@link assertPackageShareAccessForPlacement} as a question, for bundle import: place the
  * root here when the caller may ({@link callerPlacementAuthority}), else `null`
  * and `root_active: false`.
  */
@@ -618,11 +618,11 @@ export async function assertPackageShareAccess(
 }
 
 /** {@link assertPackageShareAccess} for a placement WRITE, over {@link placementAccessSpaces}. */
-export async function assertPackagePlacementAccess(
+export async function assertPackageShareAccessForPlacement(
   c: Context<AppEnv>,
   packageId: string,
 ): Promise<PackageAccessRow> {
-  return assertHomeAuthority(c, packageId, "place");
+  return assertHomeAuthority(c, packageId, "share", placementAccessSpaces);
 }
 
 /** The caller as a placer: `shared_by` plus the share rule as a predicate `placePackage` re-asks against the locked home. */
@@ -659,7 +659,12 @@ export async function assertPlacementRemovalAccess(
   // The target is a space the credential may name, whichever side's authority acts: home
   // authority reaches the package, not every space it could be placed in.
   if (!credentialAdmitsSpace(c, targetSpaceId)) throw unnameableSpace(c, targetSpaceId);
-  const { pkg, accessible } = await loadGovernedPackage(c, packageId, "place");
+  const { pkg, accessible } = await loadGovernedPackage(
+    c,
+    packageId,
+    "share",
+    placementAccessSpaces,
+  );
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);
   const ownerId = callerPersonalOwnerId(c, c.get("orgId"));
@@ -695,19 +700,20 @@ export async function assertPlacementRemovalAccess(
   return { pkg, authorityFor };
 }
 
-/** The home-rule verbs; `place` is `share` asked by a placement write, over the credential's reach. */
-type GovernedAction = "write" | "delete" | "share" | "place";
+/** The spaces the home rule reads: {@link packageAccessSpaces}, or {@link placementAccessSpaces} for a placement write. */
+type GovernedReach = (c: Context<AppEnv>) => Promise<PackageAccessSpace[]>;
 
-/** The home rule itself, for each of the four verbs that ask it. */
+/** The home rule itself, for each of the three verbs that ask it. */
 async function assertHomeAuthority(
   c: Context<AppEnv>,
   packageId: string,
-  action: GovernedAction,
+  action: "write" | "delete" | "share",
+  reach: GovernedReach = packageAccessSpaces,
 ): Promise<PackageAccessRow> {
-  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action);
-  const permission = packagePermission(pkg.type, action === "place" ? "share" : action);
+  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action, reach);
+  const permission = packagePermission(pkg.type, action);
   if (holdsHomeAuthority(pkg, accessible, permission)) return pkg;
-  const verb = action === "share" || action === "place" ? "Sharing" : "Modifying";
+  const verb = action === "share" ? "Sharing" : "Modifying";
   return refuseHomeAuthority(
     c,
     packageId,
@@ -722,13 +728,11 @@ async function assertHomeAuthority(
 async function loadGovernedPackage(
   c: Context<AppEnv>,
   packageId: string,
-  action: GovernedAction,
+  action: "write" | "delete" | "share",
+  reach: GovernedReach,
 ): Promise<{ pkg: PackageAccessRow; accessible: PackageAccessSpace[] }> {
   const orgId = c.get("orgId");
-  const [pkg, accessible] = await Promise.all([
-    loadPackageRow(packageId, orgId),
-    action === "place" ? placementAccessSpaces(c) : packageAccessSpaces(c),
-  ]);
+  const [pkg, accessible] = await Promise.all([loadPackageRow(packageId, orgId), reach(c)]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one —
   // the `source` column says the same thing, and {@link isSystemPackageRow} is
@@ -736,7 +740,7 @@ async function loadGovernedPackage(
   // same way with only one of the two columns to hand.
   if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) {
     throw forbidden(
-      action === "share" || action === "place"
+      action === "share"
         ? "Cannot share a system package — it is already readable in every space."
         : "Cannot modify a system package.",
     );

@@ -1502,7 +1502,7 @@ const canonicalRunsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
+            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: connectionConflictContent,
         },

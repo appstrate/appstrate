@@ -13,7 +13,7 @@ import type { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { buildOpenApiSpec } from "../openapi/index.ts";
 import { deriveRouteRequirements, type RouteRequirement } from "./route-requirements.ts";
-import { dispatchSpacePinEnv, type DispatchPin } from "./internal-dispatch.ts";
+import { dispatchPinEnv, type DispatchPin } from "./internal-dispatch.ts";
 import {
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
@@ -99,11 +99,10 @@ function getRegistered(use: string): { app: Hono<AppEnv>; operations: PlatformOp
  * Re-enter the fully-wired platform app in-process (no socket hop). `app.fetch`
  * returns `Response | Promise<Response>`; the async wrapper normalizes it to the
  * `Promise<Response>` callers (the `inProcess` service, the MCP router) expect.
- * `pin` confines the call to one space (`dispatchSpacePin`; `dispatchEndpointPin` when it is the
- * endpoint's).
+ * `pin` confines the call to one space (`dispatchPin`).
  */
 export function dispatchInProcess(request: Request, pin?: DispatchPin): Promise<Response> {
-  const env = pin === undefined ? undefined : dispatchSpacePinEnv(pin);
+  const env = pin === undefined ? undefined : dispatchPinEnv(pin);
   return Promise.resolve(getRegistered("in-process dispatch").app.fetch(request, env));
 }
 

@@ -93,7 +93,7 @@ import {
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
-  assertPackagePlacementAccess,
+  assertPackageShareAccessForPlacement,
   assertPackageShareAccess,
   assertPlacementRemovalAccess,
   callerPlacementAuthority,
@@ -2064,7 +2064,7 @@ export function createPackagesRouter() {
     // Home and target are two spaces of one act: the credential's reach, not the call's.
     const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
-    const pkg = await assertPackagePlacementAccess(c, packageId);
+    const pkg = await assertPackageShareAccessForPlacement(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
     let spaceId: string;
@@ -2161,7 +2161,8 @@ export function createPackagesRouter() {
     }
     // `warnings` only where this caller may activate AND the row is ON: a stored ON state
     // set by the recipient must not leak their personal space's integration state (§3.6).
-    const warnings = enabled && view.enabled ? await activationWarnings(spaceId, packageId) : [];
+    const warnings =
+      enabled && view.enabled ? await activationWarnings(spaceId, packageId, pkg.type) : [];
     return c.json({ object: "package_share", ...view, warnings }, 201);
   });
 
@@ -2198,7 +2199,7 @@ export function createPackagesRouter() {
         throw forbidden("A credential confined to spaces cannot address a person");
       }
       // Home authority is asked before the directory read: no membership leak.
-      if (target !== ownerId) await assertPackagePlacementAccess(c, packageId);
+      if (target !== ownerId) await assertPackageShareAccessForPlacement(c, packageId);
       const membership = await getOrgMember(orgId, target);
       if (!membership) throw notFound(`User '${target}' not found in this organization`);
       // Read-only: a revoke must not create the personal space.
@@ -2491,7 +2492,9 @@ export function createPackagesRouter() {
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
       ...collectLoginCriteriaWarnings(manifest),
-      ...(activated ? await activationWarnings(spaceId, packageId) : []).map((w) => w.message),
+      ...(activated ? await activationWarnings(spaceId, packageId, packageType) : []).map(
+        (w) => w.message,
+      ),
     ];
     return c.json(
       {

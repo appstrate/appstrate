@@ -34,6 +34,7 @@ import {
   localIntegrationManifest,
 } from "../../../../../test/helpers/integration-manifests.ts";
 import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
+import { dispatchPinEnv } from "../../../../lib/internal-dispatch.ts";
 import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../oidc/test/helpers/authorization-code-flow.ts";
@@ -86,13 +87,9 @@ describe("the activation remedy, through every door", () => {
     return `Bearer ${String(token.access_token)}`;
   }
 
-  /** The chat's bearer over `spaceIds`. */
-  function chat(spaceIds: string[]): Record<string, string> {
-    return loopbackHeaders(ctx, ctx.orgId, {
-      orgRole: "owner",
-      permissions: TURN_PERMISSIONS,
-      spaceIds,
-    });
+  /** The chat's bearer over `spaceIds`, its turn carrying `permissions`. */
+  function chat(spaceIds: string[], permissions = TURN_PERMISSIONS): Record<string, string> {
+    return loopbackHeaders(ctx, ctx.orgId, { orgRole: "owner", permissions, spaceIds });
   }
 
   /** `invoke_operation` on `endpoint`: the dispatched route's status and body. */
@@ -291,6 +288,41 @@ describe("the activation remedy, through every door", () => {
       INTEGRATION,
     );
     expect(pinned.status).toBe(404);
+    expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
+  });
+
+  it("places nothing for a chat whose turn lacks the share grant, though its set holds the home", async () => {
+    const withoutShare = TURN_PERMISSIONS.filter((p) => p !== "integrations:share");
+    for (const spaceId of [ctx.defaultSpaceId, vitrine]) {
+      const res = await activateInVitrine(
+        orgEndpoint,
+        chat([ctx.defaultSpaceId, vitrine], withoutShare),
+        INTEGRATION,
+        spaceId,
+      );
+      // It reaches the package, so the refusal is the missing grant, never a 404.
+      expect({ spaceId, status: res.status }).toEqual({ spaceId, status: 403 });
+    }
+    expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
+  });
+
+  it("keeps a per-call dispatch pin for a credential bound to no set", async () => {
+    // A session confined to the target by a per-call pin does not reach the home.
+    const res = await app.request(
+      `/api/spaces/${vitrine}/packages`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: ctx.cookie,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": vitrine,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ packageId: INTEGRATION }),
+      },
+      dispatchPinEnv({ spaceId: vitrine }),
+    );
+    expect(res.status).toBe(404);
     expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
   });
 

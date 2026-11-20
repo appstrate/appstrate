@@ -542,7 +542,7 @@ export const schemas = {
           active_in_spaces: {
             $ref: "#/components/schemas/ActiveInSpaces",
             description:
-              "On an agent-run or inline-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration it requires are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
+              "On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the `version` it names, unlike the selector-less judgment of `agent_not_active_in_space`) are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
           },
         },
       },
@@ -551,19 +551,22 @@ export const schemas = {
   ActiveInSpaces: {
     type: "array",
     description:
-      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule) and the agent (an inline run has no placement) and every integration it requires are placed and active, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` and `agents:run` to create a schedule) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
     items: {
       type: "object",
       required: ["id", "name"],
       properties: {
         id: { type: "string", description: "Space id (`spc_…`)." },
-        name: { type: "string" },
+        name: {
+          type: "string",
+          description: "Space name, as a space listing shows it (not unique).",
+        },
       },
     },
   },
   AgentNotActiveInSpaceProblem: {
     description:
-      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). That list judges the integrations the definition a selector-less launch runs requires (the latest published version, else the draft), whatever `version` the request or the schedule names.",
+      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). Except on a bundle export, which checks no integration, that list judges the integrations the definition a selector-less launch runs requires (the latest published version, else the draft), whatever `version` the request or the schedule names.",
     allOf: [
       { $ref: "#/components/schemas/ProblemDetail" },
       {
@@ -610,7 +613,7 @@ export const schemas = {
       warnings: {
         type: "array",
         description:
-          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, and for a placement left OFF. Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
         items: { $ref: "#/components/schemas/ActivationWarning" },
       },
     },

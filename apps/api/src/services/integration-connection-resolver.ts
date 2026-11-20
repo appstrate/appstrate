@@ -76,7 +76,11 @@ import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
 import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
 import { userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
+import {
+  fetchIntegrationManifest,
+  seedIntegrationManifests,
+  type IntegrationManifestCache,
+} from "./integration-service.ts";
 import {
   authKeyOnUnauthenticatedIntegration,
   authKeysServingSelection,
@@ -953,10 +957,15 @@ interface ResolveConnectionsForRunInput {
 /** The requirement of each integration `agentManifest` declares whose manifest loads. */
 async function requirementsOf(
   agentManifest: Record<string, unknown>,
-  manifestCache?: IntegrationManifestCache,
+  manifestCache: IntegrationManifestCache = new Map(),
 ): Promise<IntegrationRequirement[]> {
+  const entries = parseManifestIntegrations(agentManifest);
+  seedIntegrationManifests(
+    entries.map((entry) => entry.id),
+    manifestCache,
+  );
   const requirements = await Promise.all(
-    parseManifestIntegrations(agentManifest).map((entry) => buildRequirement(entry, manifestCache)),
+    entries.map((entry) => buildRequirement(entry, manifestCache)),
   );
   return requirements.filter((r): r is IntegrationRequirement => r !== null);
 }
@@ -979,14 +988,17 @@ interface InactiveDeclaredIntegration {
 /**
  * Per manifest (input order), the declared integrations not active in `spaceId` — the input of
  * the run gate's `integration_not_active` (an error when `required`), inert ones skipped as the
- * gate skips them. One activation read for every manifest; `manifestCache` loads each
- * integration manifest once.
+ * gate skips them. One manifest read and one activation read for every manifest.
  */
 export async function inactiveDeclaredIntegrations(
   agentManifests: readonly Record<string, unknown>[],
   spaceId: string,
   manifestCache: IntegrationManifestCache = new Map(),
 ): Promise<InactiveDeclaredIntegration[][]> {
+  seedIntegrationManifests(
+    agentManifests.flatMap((manifest) => parseManifestIntegrations(manifest).map((e) => e.id)),
+    manifestCache,
+  );
   const perAgent = await Promise.all(
     agentManifests.map((manifest) => requirementsOf(manifest, manifestCache)),
   );

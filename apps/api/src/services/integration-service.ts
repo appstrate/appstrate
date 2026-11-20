@@ -115,11 +115,36 @@ async function fetchIntegrationManifestUncached(
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
-  if (!pkgRow) return { ok: false, failure: { kind: "not_found" } };
-  if (pkgRow.type !== "integration") {
-    return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
+  return manifestLoadResult(pkgRow);
+}
+
+/** A `packages` row (or its absence) answered as an integration manifest load. */
+function manifestLoadResult(
+  row: { manifest: unknown; type: string } | undefined,
+): IntegrationManifestLoadResult {
+  if (!row) return { ok: false, failure: { kind: "not_found" } };
+  if (row.type !== "integration") {
+    return { ok: false, failure: { kind: "not_integration", actualType: row.type } };
   }
-  return parseIntegrationManifest(pkgRow.manifest);
+  return parseIntegrationManifest(row.manifest);
+}
+
+/**
+ * Seed `cache` with each of `ids` it lacks, from ONE read, answered as
+ * {@link fetchIntegrationManifest} answers a single id.
+ */
+export function seedIntegrationManifests(
+  ids: readonly string[],
+  cache: IntegrationManifestCache,
+): void {
+  const missing = [...new Set(ids)].filter((id) => !cache.has(id));
+  if (missing.length === 0) return;
+  const rows = db
+    .select({ id: packages.id, manifest: packages.draftManifest, type: packages.type })
+    .from(packages)
+    .where(inArray(packages.id, missing))
+    .then((found) => new Map(found.map((row) => [row.id, row])));
+  for (const id of missing) cache.set(id, rows.then((byId) => manifestLoadResult(byId.get(id))));
 }
 
 // ---------------------------------------------------------------------------

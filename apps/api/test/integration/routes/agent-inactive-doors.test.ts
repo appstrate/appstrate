@@ -32,13 +32,21 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedApiKey,
   seedEndUser,
   seedPackage,
   seedSpace,
+  seedSpaceGrant,
+  seedSpaceMember,
   seedSpacePackage,
   seedUnreachableSpace,
 } from "../../helpers/seed.ts";
@@ -394,6 +402,110 @@ describe("a placed-but-switched-off agent", () => {
         activationRefused: false,
       });
     }
+  });
+});
+
+describe("`active_in_spaces` asks each door's own permissions", () => {
+  type Preset = "builder" | "operator" | "runner";
+
+  /** A member who is `builder` here, holds `presets` elsewhere, and exactly `grants` beyond. */
+  async function memberWith(
+    presets: [spaceId: string, preset: Preset][],
+    grants: [spaceId: string, permissions: string[]][] = [],
+  ) {
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    for (const [spaceId, presetRole] of [[ctx.defaultSpaceId, "builder"] as const, ...presets]) {
+      await seedSpaceMember({ spaceId, userId: user.id, presetRole });
+    }
+    for (const [spaceId, permissions] of grants) {
+      await seedSpaceGrant({ orgId: ctx.orgId, spaceId, userId: user.id, permissions });
+    }
+    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId };
+  }
+
+  async function activeInSpacesOf(res: Response) {
+    expect(res.status, await res.clone().text()).toBe(404);
+    return ((await res.json()) as { active_in_spaces?: unknown }).active_in_spaces;
+  }
+
+  it("lists for a schedule only the spaces granting both `schedules:write` and `agents:run`", async () => {
+    const runOnly = await seedSpace({ orgId: ctx.orgId, name: "Run only" });
+    const writeOnly = await seedSpace({ orgId: ctx.orgId, name: "Write only" });
+    const both = await seedSpace({ orgId: ctx.orgId, name: "Both" });
+    for (const space of [runOnly, writeOnly, both]) await seedSpacePackage(space.id, OFF);
+    const h = await memberWith(
+      [
+        [runOnly.id, "operator"],
+        [both.id, "builder"],
+      ],
+      [[writeOnly.id, ["agents:read", "schedules:read", "schedules:write"]]],
+    );
+
+    const res = await app.request(`/api/agents/${OFF}/schedules`, {
+      method: "POST",
+      headers: { ...h, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Nightly", cron_expression: "0 3 * * *" }),
+    });
+    expect(await activeInSpacesOf(res)).toEqual([{ id: both.id, name: "Both" }]);
+  });
+
+  it("lists for a bundle a space whose required integration is off, and none lacking `agents:read`", async () => {
+    const SVC = "@doors/svc";
+    const NEEDY = "@doors/needy-bundle";
+    await seedAgent({
+      id: NEEDY,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        name: NEEDY,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Needy",
+        dependencies: { integrations: { [SVC]: "^1.0.0" } },
+        integrations_configuration: { [SVC]: { tools: ["search"], required: true } },
+      },
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, NEEDY, { enabled: false });
+    await seedPackage({
+      id: SVC,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      source: "local",
+      draftManifest: localIntegrationManifest({
+        name: SVC,
+        auths: {
+          primary: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key"],
+            delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+          },
+        },
+        tools_policy: { search: {} },
+      }) as unknown as Record<string, unknown>,
+    });
+    // The agent is on in both, the integration it requires in neither.
+    const readable = await seedSpace({ orgId: ctx.orgId, name: "Readable" });
+    const runnerOnly = await seedSpace({ orgId: ctx.orgId, name: "Runner only" });
+    for (const space of [readable, runnerOnly]) await seedSpacePackage(space.id, NEEDY);
+    const h = await memberWith([
+      [readable.id, "builder"],
+      [runnerOnly.id, "runner"],
+    ]);
+
+    const bundle = await app.request(`/api/agents/${NEEDY}/bundle?source=draft`, { headers: h });
+    expect(await activeInSpacesOf(bundle)).toEqual([{ id: readable.id, name: "Readable" }]);
+
+    // Control: the run door does check the integration, so it lists neither.
+    const run = await app.request(`/api/agents/${NEEDY}/run`, {
+      method: "POST",
+      headers: { ...h, "Content-Type": "application/json" },
+      body: JSON.stringify({ version: "draft" }),
+    });
+    expect(await activeInSpacesOf(run)).toEqual([]);
   });
 });
 

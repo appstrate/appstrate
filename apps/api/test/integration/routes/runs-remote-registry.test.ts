@@ -30,7 +30,9 @@ import {
   seedPackage,
   seedPackageVersion,
   seedPublishedVersion,
+  seedSpace,
   seedSpaceMember,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { resolveRegistryAgent } from "../../../src/services/registry-run-resolver.ts";
 import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
@@ -622,6 +624,50 @@ describe("POST /api/runs/remote — kind: registry", () => {
         0,
       );
     });
+  });
+
+  it("names in its 409 the caller's other spaces where the agent and its required integration are active", async () => {
+    const INTEG = "@acme/svc";
+    await seedPackage({
+      id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: localIntegrationManifest({
+        name: INTEG,
+        auths: { primary: { type: "api_key" } },
+        tools_policy: { search: {} },
+      }),
+    });
+    // Switched off here, on in `Elsewhere` with the agent.
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG, { enabled: false });
+    await seedRegistryAgent(
+      ctx,
+      {
+        ...publishedManifest("1.2.3"),
+        dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
+        integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
+      } as unknown as Record<string, unknown>,
+      "1.2.3",
+    );
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedSpacePackage(elsewhere.id, "@acme/briefing");
+    await seedSpacePackage(elsewhere.id, INTEG);
+
+    const problem = await expectProblem(
+      await post({
+        source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+      }),
+      409,
+      { code: "missing_integration_connection" },
+    );
+    expect(problem.errors).toEqual([
+      expect.objectContaining({ field: `integrations.${INTEG}`, code: "integration_not_active" }),
+    ]);
+    expect(problem.active_in_spaces).toEqual([{ id: elsewhere.id, name: "Elsewhere" }]);
   });
 
   // The afps-runtime `api_call` tool takes no connection argument, so a remote

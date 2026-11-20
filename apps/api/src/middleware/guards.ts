@@ -11,10 +11,10 @@ import {
 } from "../lib/package-access.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { callerPermissions, type Permission } from "../lib/permissions.ts";
-import { selectorlessAgentManifest } from "../services/space-packages.ts";
+import { selectorlessAgentManifest } from "../services/agent-version-resolver.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
-import { launchSpacesLookup, type LaunchSpace } from "../lib/launch-spaces.ts";
+import { launchSpacesLookup, type LaunchDoor, type LaunchSpace } from "../lib/launch-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -128,9 +128,10 @@ export function requireAgentOrInlineRun() {
  * REPORTS what blocks a run, so inactivity belongs in its payload as a blocking
  * error, and a 404 would blank the panel that explains the refusal.
  *
- * `required`: the door's own permissions, which a space of `active_in_spaces` must grant too.
+ * `required` and `door`: what the door itself demands, which a space of
+ * `active_in_spaces` must meet too.
  */
-export function requireActiveAgent(required: readonly Permission[]) {
+export function requireActiveAgent(required: readonly Permission[], door: LaunchDoor = {}) {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const agent = c.get("package");
     const orgId = c.get("orgId");
@@ -142,11 +143,16 @@ export function requireActiveAgent(required: readonly Permission[]) {
     // a state they are no longer entitled to observe.
     if (block === "not_placed") throw agentNotFound(agent.id);
     if (block === "not_active") {
-      // Judged on the definition a selector-less launch runs, as the run gate would.
-      const manifest = (await selectorlessAgentManifest(agent.id)) ?? agent.manifest;
+      // Judged on the definition a selector-less launch runs, as the run gate would; a
+      // non-agent package reached through an agent route has none and keeps its own.
+      const manifest =
+        door.integrations === false
+          ? agent.manifest
+          : ((await selectorlessAgentManifest(agent.id)) ?? agent.manifest);
       const activeInSpaces = await launchSpacesLookup(
         c,
         required,
+        door,
       )({ packageId: agent.id, manifest });
       throw agentNotActiveInSpace(agent.id, spaceId, activeInSpaces);
     }

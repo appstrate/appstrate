@@ -68,6 +68,7 @@ import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { launchSpacesLookup } from "../lib/launch-spaces.ts";
 import {
   toLaunchOverrides,
   type LaunchOverrides,
@@ -360,6 +361,7 @@ export function createRunsRemoteRouter() {
           spaceId,
           actor,
           launchOverrides,
+          launchSpaces: launchSpacesLookup(c, ["agents:run"]),
         });
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
@@ -376,6 +378,7 @@ export function createRunsRemoteRouter() {
 
         const preflight = await runInlinePreflight({
           authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+          launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"]),
           orgId,
           spaceId,
           actor,

@@ -275,18 +275,18 @@ export async function respondAgentPersistence(
 }
 
 /**
- * The agent index over `grants`: `GET /api/agents` (`launchSpaceId`: its space) and
+ * The agent index over `grants`: `GET /api/agents` (`singleSpaceId`: its space) and
  * `GET /api/orgs/{orgId}/agents`.
  */
 export async function respondAgentIndex(
   c: Context<AppEnv>,
   orgId: string,
   grants: SpaceGrant[],
-  launchSpaceId?: string,
+  singleSpaceId?: string,
 ) {
   return c.json(
     listResponse(
-      await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c), launchSpaceId),
+      await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c), singleSpaceId),
     ),
   );
 }
@@ -675,7 +675,8 @@ export function createAgentsRouter() {
     rateLimit(30),
     requirePermission("agents", "read"),
     requireAgent(),
-    requireActiveAgent(["agents:read"]),
+    // An export checks no integration activation, so neither does `active_in_spaces`.
+    requireActiveAgent(["agents:read"], { integrations: false }),
     async (c) => {
       const scopeParam = c.req.param("scope")!;
       const nameParam = c.req.param("name")!;
