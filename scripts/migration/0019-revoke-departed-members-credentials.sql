@@ -5,6 +5,8 @@
 -- then on (`removeMemberInTx`), so this only repairs the rows it never saw.
 -- `scripts/migration/README.md` → "Detail — Credentials of departed members".
 --
+-- Its `revoked` marks on `oauth_refresh_tokens` each trigger a family teardown since #2325; `0056` deletes them: run 0056 after this script.
+--
 -- ═══ WHAT IT REPAIRS ═══
 --
 -- Until this release a removal deleted the `org_members` row and left the

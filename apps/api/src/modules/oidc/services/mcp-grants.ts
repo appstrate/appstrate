@@ -427,7 +427,7 @@ function hostOf(url: string): string | null {
 
 // ─── Revocation ──────────────────────────────────────────────────────────────
 
-/** End a grant (`endMcpGrants`). */
+/** Ends the grant in its own transaction. */
 export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
   await db.transaction((tx) => endMcpGrants(tx, [grant]));
 }

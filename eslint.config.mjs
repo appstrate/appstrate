@@ -175,6 +175,7 @@ const OAUTH_TOKEN_REVOKED_BANS = [
   `CallExpression[callee.property.name=/^(set|values)$/] > ObjectExpression > ${REVOKED_KEY}`,
   `CallExpression[callee.property.name='values'] > ArrayExpression > ObjectExpression > ${REVOKED_KEY}`,
   `Property[key.name='set'] > ObjectExpression > ${REVOKED_KEY}`,
+  `Property[key.name='update'] > ObjectExpression > ${REVOKED_KEY}`,
 ].map((selector) => ({ selector, message: OAUTH_TOKEN_REVOKED_MESSAGE }));
 
 // Global-stream capture, banned in CLI tests. Two shapes are matched:

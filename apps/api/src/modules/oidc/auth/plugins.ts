@@ -224,9 +224,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // refresh grants with it, anthropics/claude-ai-mcp#1194). With no window
       // (the provider's default, 0), the second is taken for a stolen token and
       // deletes every refresh token of the (client, user) pair, on every
-      // endpoint and org. Within the window, a matching second presentation
-      // gets the first rotation's response again; one that does not match is a
-      // plain `invalid_grant`.
+      // endpoint and org. Within the window (RFC 9700 grace period), whoever
+      // holds the old token gets the successor instead of tripping theft
+      // detection; the stored replay response is encrypted with the Better
+      // Auth secret. Better Auth stores the replay only after the rotation
+      // commits and the response is built, so a truly concurrent second
+      // request gets a plain `invalid_grant`, never a teardown.
       refreshTokenReuseInterval: 30,
       // The provider's own default digest, stated here so the platform can
       // find an authorization code's row by the code a token request carries.
