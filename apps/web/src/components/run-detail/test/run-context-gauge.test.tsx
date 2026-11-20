@@ -10,7 +10,7 @@ import { describe, it, expect } from "bun:test";
 import agentsFr from "../../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import type { RunTurnRow } from "../../log-utils.ts";
-import { formatWindowPercent } from "../../run-context.ts";
+import { formatWindowPercent } from "@appstrate/ui/context-window";
 import { render } from "../../../test/render.tsx";
 import { ContextGaugePeakHint, ContextGaugeReadout } from "../run-context-gauge.tsx";
 
