@@ -45,7 +45,7 @@ import { callerOrgRole, callerPersonalOwnerId } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
-import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
+import { listAccessGrantsForOrg, revokeAccessGrantForOrgAdmin } from "./services/access-grants.ts";
 import {
   createClient,
   deleteClient,
@@ -2665,7 +2665,7 @@ export function createOidcRouter() {
 
   // ── Admin oversight ─────────────────────────────────────────────────────────
   //
-  // `/api/orgs/:orgId/cli-sessions` is mounted at the OIDC module's HTTP
+  // `/api/orgs/:orgId/access-grants` is mounted at the OIDC module's HTTP
   // origin root rather than under `/api/oauth/*` because semantically the
   // resource is an org sub-resource, not an OAuth-client management
   // surface. The platform's `skipOrgContext` rule already covers
@@ -2678,44 +2678,55 @@ export function createOidcRouter() {
   // has already written `orgRole` / `permissions` — ceiling-applied, so a
   // scoped credential keeps its scope. `requireOrgPathMembership` turns
   // non-membership into this family's 403, and
-  // `requireModulePermission("cli-sessions", "read"|"delete")` enforces the
-  // string — same fail-closed primitive as every other module-owned route in
-  // the file. The `cli-sessions` resource is declared by the OIDC module's
+  // `requireModulePermission("access-grants", "read"|"delete")` enforces the
+  // string. The `access-grants` resource is declared by the OIDC module's
   // `permissionsContribution()` and granted to `owner`/`admin` only.
 
   router.get(
-    "/api/orgs/:orgId/cli-sessions",
+    "/api/orgs/:orgId/access-grants",
     rateLimit(120),
     requireOrgPathMembership,
-    requireModulePermission("cli-sessions", "read"),
+    requireModulePermission("access-grants", "read"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
-      const sessions = await listSessionsForOrg(orgId);
-      return c.json(listResponse(sessions));
+      return c.json(listResponse(await listAccessGrantsForOrg(orgId)));
     },
   );
 
   router.delete(
-    "/api/orgs/:orgId/cli-sessions/:familyId",
+    "/api/orgs/:orgId/access-grants/:grantId",
     rateLimit(30),
     requireOrgPathMembership,
-    requireModulePermission("cli-sessions", "delete"),
+    requireModulePermission("access-grants", "delete"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
-      const familyId = c.req.param("familyId")!;
-      const revoked = await revokeFamilyForOrgAdmin({ orgId, familyId });
-      if (!revoked) {
-        // Hide the not-found vs already-revoked vs not-yours distinction
-        // behind a single 404 — admins cannot probe membership of users
-        // outside the org through this endpoint.
-        throw notFound("CLI session not found");
+      const grantId = c.req.param("grantId")!;
+      const outcome = await revokeAccessGrantForOrgAdmin({ orgId, grantId });
+      if (!outcome.revoked) {
+        // Unknown, outside this org, already ended, or a CLI session shared
+        // with another org: one 404, so membership outside the org cannot be
+        // probed through this endpoint.
+        throw notFound("Access grant not found");
       }
-      logger.info("oidc: org admin revoked a CLI session", {
+      if (outcome.kind === "mcp") {
+        await recordAuditFromContext(c, {
+          orgIdOverride: orgId,
+          action: "oauth_grant.revoked",
+          resourceType: "oauth_grant",
+          resourceId: grantId,
+          after: {
+            clientId: outcome.grant.clientId,
+            clientName: outcome.grant.clientName,
+            userId: outcome.grant.userId,
+          },
+        });
+      }
+      logger.info("oidc: org admin revoked an access grant", {
         module: "oidc",
         audit: true,
-        event: "cli.session.org_admin_revoked",
+        event: `${outcome.kind}.grant.org_admin_revoked`,
         orgId,
-        familyId,
+        grantId,
         actorUserId: c.get("user").id,
       });
       return c.body(null, 204);

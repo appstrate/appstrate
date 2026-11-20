@@ -297,6 +297,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
+  AccessGrant: "OIDC access-grants wire; no shared-type (SPA uses the generated spec type)",
+  OrgAccessGrant: "OIDC access-grants wire; no shared-type (SPA uses the generated spec type)",
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",
   IntegrationCredentialsResponse: "sidecar↔platform credential-proxy wire; no SPA consumer",

@@ -143,15 +143,15 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "user-only",
     reason: "Better Auth session whose email matches the invitation",
   },
-  cliListSessions: {
+  listMyAccessGrants: {
     category: "user-only",
     reason: "Better Auth session only (getSessionFromCtx)",
   },
-  cliRevokeAllSessions: {
+  revokeAllMyAccessGrants: {
     category: "user-only",
     reason: "Better Auth session only (getSessionFromCtx)",
   },
-  cliRevokeSession: {
+  revokeMyAccessGrant: {
     category: "user-only",
     reason: "Better Auth session only, scoped to session.user.id",
   },

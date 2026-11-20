@@ -66,6 +66,7 @@ import {
 import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
+import { accessGrantsPlugin } from "./access-grants-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
 
@@ -182,6 +183,8 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // The CLI only substitutes the polling endpoint to receive JWT +
     // rotating refresh instead of a 7-day BA session.
     cliTokenPlugin(),
+    // `/access-grants*` — the caller's CLI sessions and MCP client grants.
+    accessGrantsPlugin(),
     deviceAuthorization({
       expiresIn: "10m",
       // 2s polling interval — RFC 8628 §3.2 suggests 5s as a *default*, not a

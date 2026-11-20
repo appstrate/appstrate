@@ -209,7 +209,7 @@ Logout also cleans the skill installations recorded as belonging to that profile
 
 This immediately changes the generated source directory, not an already loaded Claude session. Run `claude plugin update appstrate@appstrate`, then start a fresh session to apply the installed copy. The next marketplace sync follows the active profile: deleting the default profile may select another configured profile and install its skills; without a configured profile, the setup plugin remains.
 
-The dashboard's **Devices** preferences page (and `GET /api/auth/cli/sessions`) lets you revoke individual sessions. Org admins can revoke any member's CLI sessions via `GET/DELETE /api/orgs/:orgId/cli-sessions[/:familyId]` (requires the `cli-sessions:read|delete` RBAC grant — owners + admins by default).
+The dashboard's **Devices and apps** preferences page (backed by `GET /api/auth/access-grants`) lets you revoke individual sessions. Org admins can revoke a member's CLI sessions via `GET/DELETE /api/orgs/:orgId/access-grants[/:grantId]` (requires the `access-grants:read|delete` RBAC grant — owners + admins by default), unless the member also belongs to another organization.
 
 ---
 

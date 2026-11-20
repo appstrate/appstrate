@@ -454,9 +454,10 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 Management routes over Better Auth plugin tables mirror the table's TS field names (Carve-out 4a chain):
 
 - **OAuth clients** — `/api/oauth/clients`, `/api/oauth/clients/{clientId}`, `…/rotate` (CRUD on the `oauthClient` table): `clientId`, `clientSecret`, `redirectUris`, `postLogoutRedirectUris`, `isFirstParty`, `allowSignup`, `signupRole`, `signupSpaceAssignments`, `referencedOrgId`, `referencedSpaceId`.
-- **CLI sessions** — `/api/auth/cli/*` (`token`, `revoke`, `sessions`, `sessions/revoke`, `sessions/revoke-all`) and `/api/orgs/{orgId}/cli-sessions[/{familyId}]` (the `cliRefreshToken` table): `familyId`, `deviceName`, `userAgent`, `createdIp`, `lastUsedIp`, `userName`, `userEmail`, `revokedCount`.
 
-The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`, the CLI token grant's `client_id`) stay snake_case per RFC 6749 — only the management surface is camelCase. Unlike the other named carve-outs, these names are **surface-scoped**: the OpenAPI gate accepts them only under the paths and components of the two surfaces above, so `clientId` on any other object (the per-space social provider's `client_id`, say) still fails. Treat any new management route over a BA plugin table the same way; for non-plugin tables the default snake_case wire rule applies.
+The access-grants routes (`/api/auth/access-grants*`, `/api/orgs/{orgId}/access-grants*`), which list and end CLI sessions and MCP client grants, are not a pass-through: they shape their own DTO and follow the default snake_case wire rule, with the 4b names camelCase.
+
+The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`, the CLI token grant's `client_id`) stay snake_case per RFC 6749 — only the management surface is camelCase. Unlike the other named carve-outs, these names are **surface-scoped**: the OpenAPI gate accepts them only under the paths and components of the surface above, so `clientId` on any other object (the per-space social provider's `client_id`, say) still fails. Treat any new management route over a BA plugin table the same way; for non-plugin tables the default snake_case wire rule applies.
 
 ---
 
