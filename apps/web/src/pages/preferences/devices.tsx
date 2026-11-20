@@ -11,7 +11,7 @@ import { AccessGrantSections } from "../../components/access-grant-sections";
 import type { AccessGrantRow } from "../../components/access-grant-columns";
 import { $api } from "../../api/client";
 import { invalidatePaths } from "../../lib/query-keys";
-import { grantLabel, grantTargetLabel } from "../../lib/access-grants";
+import { grantLabel, grantTargetPhrase } from "../../lib/access-grants";
 
 const LIST_PATH = "/api/auth/access-grants";
 
@@ -42,12 +42,7 @@ export function PreferencesDevicesPage() {
   return (
     <>
       <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <div className="text-muted-foreground text-sm font-medium">{t("accessGrants.title")}</div>
-          <p className="text-muted-foreground mt-1 max-w-prose text-xs">
-            {t("accessGrants.description")}
-          </p>
-        </div>
+        <p className="text-muted-foreground max-w-prose text-xs">{t("accessGrants.description")}</p>
         {grants.length > 1 && (
           <Button
             variant="outline"
@@ -80,7 +75,7 @@ export function PreferencesDevicesPage() {
             ? pendingRevoke.kind === "mcp"
               ? t("accessGrants.confirmRevokeMcp", {
                   name: grantLabel(pendingRevoke, t),
-                  target: grantTargetLabel(pendingRevoke, t),
+                  target: grantTargetPhrase(pendingRevoke, t),
                 })
               : t("devices.confirmRevokeDescription", { name: grantLabel(pendingRevoke, t) })
             : ""

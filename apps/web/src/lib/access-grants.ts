@@ -56,6 +56,16 @@ export function grantTargetLabel(grant: Pick<AccessGrant, "target">, t: Translat
   return t("accessGrants.targetOrg", { name: target.org_name ?? target.orgId });
 }
 
+/** The same target inside a sentence: « l’organisation Acme », « l’espace Ops ». */
+export function grantTargetPhrase(grant: Pick<AccessGrant, "target">, t: Translate): string {
+  const target = grant.target;
+  if (!target) return t("accessGrants.targetAllOrgsPhrase");
+  if (target.spaceId) {
+    return t("accessGrants.targetSpacePhrase", { name: target.space_name ?? target.spaceId });
+  }
+  return t("accessGrants.targetOrgPhrase", { name: target.org_name ?? target.orgId });
+}
+
 /**
  * The second line under an MCP client's name: where it verifiably comes from
  * (the host of its metadata document, or of its redirect), else what kind of

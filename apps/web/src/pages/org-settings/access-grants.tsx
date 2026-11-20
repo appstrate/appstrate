@@ -15,7 +15,7 @@ import { invalidatePaths } from "../../lib/query-keys";
 import {
   grantHolderLabel,
   grantLabel,
-  grantTargetLabel,
+  grantTargetPhrase,
   type OrgAccessGrant,
 } from "../../lib/access-grants";
 
@@ -48,14 +48,9 @@ export function OrgSettingsAccessGrantsPage() {
 
   return (
     <>
-      <div className="mb-4">
-        <div className="text-muted-foreground text-sm font-medium">
-          {t("orgAccessGrants.title")}
-        </div>
-        <p className="text-muted-foreground mt-1 max-w-prose text-xs">
-          {t("orgAccessGrants.description")}
-        </p>
-      </div>
+      <p className="text-muted-foreground mb-4 max-w-prose text-xs">
+        {t("orgAccessGrants.description")}
+      </p>
 
       <AccessGrantSections
         tableIdPrefix="access-grants-org"
@@ -79,7 +74,7 @@ export function OrgSettingsAccessGrantsPage() {
               ? t("orgAccessGrants.confirmRevokeMcp", {
                   name: grantLabel(pending, t),
                   user: grantHolderLabel(pending),
-                  target: grantTargetLabel(pending, t),
+                  target: grantTargetPhrase(pending, t),
                 })
               : t("orgCliSessions.confirmRevokeDescription", {
                   device: grantLabel(pending, t),

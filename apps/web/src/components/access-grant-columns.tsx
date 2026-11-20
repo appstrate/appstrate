@@ -49,7 +49,7 @@ function useLastUsedColumn(): DataColumn<AccessGrantRow> {
   return {
     id: "lastUsed",
     header: t("devices.lastUsedLabel"),
-    width: 150,
+    width: 170,
     align: "end",
     cell: (grant) =>
       grant.lastUsedAt ? (
@@ -111,7 +111,7 @@ export function useMcpGrantColumns(options: ColumnOptions): DataColumn<AccessGra
     {
       id: "client",
       header: t("accessGrants.clientColumn"),
-      width: 120,
+      width: 150,
       elastic: true,
       identity: true,
       cell: (grant) => {
@@ -121,11 +121,16 @@ export function useMcpGrantColumns(options: ColumnOptions): DataColumn<AccessGra
           grant.session_count > 1
             ? `${origin} · ${t("accessGrants.sessionCount", { count: grant.session_count })}`
             : origin;
+        // The client's user agent rides on the name's hover: it identifies the
+        // client again, and a column of it would squeeze the origin out.
+        const nameTitle = [t("accessGrants.declaredName", { name }), grant.user_agent]
+          .filter(Boolean)
+          .join("\n");
         return (
           <div className="flex min-w-0 items-center gap-2">
             <AccessGrantIcon grant={grant} />
             <div className="min-w-0">
-              <CellText strong title={t("accessGrants.declaredName", { name })}>
+              <CellText strong title={nameTitle}>
                 {name}
               </CellText>
               <CellText title={second}>{second}</CellText>
@@ -138,26 +143,12 @@ export function useMcpGrantColumns(options: ColumnOptions): DataColumn<AccessGra
     {
       id: "target",
       header: t("accessGrants.targetColumn"),
-      width: 80,
+      width: 110,
       elastic: true,
       cell: (grant) => {
         const target = grantTargetLabel(grant, t);
         return <CellText title={target}>{target}</CellText>;
       },
-    },
-    {
-      id: "userAgent",
-      header: t("devices.userAgentLabel"),
-      width: 96,
-      elastic: true,
-      cell: (grant) =>
-        grant.user_agent ? (
-          <CellText mono title={grant.user_agent}>
-            {grant.user_agent}
-          </CellText>
-        ) : (
-          <CellEmpty />
-        ),
     },
     {
       id: "created",
@@ -181,37 +172,33 @@ export function useCliGrantColumns(options: ColumnOptions): DataColumn<AccessGra
     {
       id: "device",
       header: t("orgCliSessions.deviceColumn"),
-      width: 80,
+      width: 150,
       elastic: true,
       identity: true,
-      cell: (grant) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <AccessGrantIcon grant={grant} />
-          <span className="block min-w-0 truncate text-sm font-medium" title={grantLabel(grant, t)}>
-            {grantLabel(grant, t)}
-          </span>
-        </div>
-      ),
+      cell: (grant) => {
+        const name = grantLabel(grant, t);
+        return (
+          <div className="flex min-w-0 items-center gap-2">
+            <AccessGrantIcon grant={grant} />
+            <div className="min-w-0">
+              <CellText strong title={name}>
+                {name}
+              </CellText>
+              {grant.user_agent ? (
+                <CellText mono title={grant.user_agent}>
+                  {grant.user_agent}
+                </CellText>
+              ) : null}
+            </div>
+          </div>
+        );
+      },
     },
     ...(options.showHolder ? [holder] : []),
     {
-      id: "userAgent",
-      header: t("devices.userAgentLabel"),
-      width: 96,
-      elastic: true,
-      cell: (grant) =>
-        grant.user_agent ? (
-          <CellText mono title={grant.user_agent}>
-            {grant.user_agent}
-          </CellText>
-        ) : (
-          <CellEmpty />
-        ),
-    },
-    {
       id: "ip",
       header: t("devices.createdIpLabel"),
-      width: 110,
+      width: 140,
       cell: (grant) => {
         const ip = displayIp(grant.created_ip);
         return ip ? <CellText mono>{ip}</CellText> : <CellEmpty />;
