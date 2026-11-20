@@ -85,6 +85,8 @@ interface StubSurface {
 const EMPTY_SURFACE: StubSurface = { tools: [] };
 let mcpSurface: StubSurface = EMPTY_SURFACE;
 let mcpInitializes = 0;
+/** `tools/call` requests the stub answered. Reset in `afterEach`. */
+let mcpToolCalls = 0;
 
 async function mcpResponse(req: Request): Promise<Response> {
   if (req.method === "GET") return new Response(null, { status: 405 });
@@ -111,6 +113,7 @@ async function mcpResponse(req: Request): Promise<Response> {
   }
   if (msg.method === "tools/list") return json({ tools: mcpSurface.tools });
   if (msg.method === "tools/call" && mcpSurface.call) {
+    mcpToolCalls++;
     return json(
       capture.bodies.length === mcpSurface.call.steps
         ? mcpSurface.call.result
@@ -229,8 +232,30 @@ let providerPark: {
 /** How long the parked request waits for a teardown before reporting none. */
 const PARK_GIVE_UP_MS = 3_000;
 
-/** When set, the provider stub refuses every completion with this status. Reset in `afterEach`. */
-let providerRefusal: number | null = null;
+/** An error the provider stub answers instead of a completion. */
+interface ProviderError {
+  status: number;
+  message: string;
+  type: string;
+}
+const AUTH_REFUSAL: ProviderError = {
+  status: 401,
+  message: "Authentication Fails",
+  type: "authentication_error",
+};
+/**
+ * When set, the provider stub answers request `n` (1-based, every API) with the error it returns,
+ * and with a completion when it returns none. Reset in `afterEach`.
+ */
+let providerRefusal: ((body: string, n: number) => ProviderError | undefined) | null = null;
+
+function refused(body: string): Response | undefined {
+  const error = providerRefusal?.(body, capture.bodies.length);
+  return (
+    error &&
+    Response.json({ error: { message: error.message, type: error.type } }, { status: error.status })
+  );
+}
 
 const server = Bun.serve({
   port: 0,
@@ -239,6 +264,8 @@ const server = Bun.serve({
     if (path.endsWith("/responses")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
+      const refusal = refused(capture.bodies.at(-1)!);
+      if (refusal) return refusal;
       const step = capture.bodies.length;
       const call = connectorCall(step);
       const item = call && {
@@ -277,12 +304,8 @@ const server = Bun.serve({
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      if (providerRefusal !== null) {
-        return Response.json(
-          { error: { message: "Authentication Fails", type: "authentication_error" } },
-          { status: providerRefusal },
-        );
-      }
+      const refusal = refused(capture.bodies.at(-1)!);
+      if (refusal) return refusal;
       if (!providerPark) return openAiSse(connectorCall(capture.bodies.length));
       const park = providerPark;
       park.arrived();
@@ -301,6 +324,8 @@ const server = Bun.serve({
     if (path.endsWith("/v1/messages")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
+      const refusal = refused(capture.bodies.at(-1)!);
+      if (refusal) return refusal;
       return anthropicSse(connectorCall(capture.bodies.length));
     }
     if (path.startsWith("/api/mcp/")) return mcpResponse(req);
@@ -314,6 +339,7 @@ afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
   providerRefusal = null;
+  mcpToolCalls = 0;
   mcpSurface = EMPTY_SURFACE;
 });
 
@@ -744,6 +770,288 @@ describe("runPiChat against a stub provider", () => {
     expect(readAttachment).toHaveBeenCalledTimes(2);
   }, 30_000);
 
+  describe("a file the model refuses", () => {
+    const PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const IMAGE_POINTER = "[image withheld: this model rejected it; any other file was delivered]";
+    const PDF_POINTER = "[PDF withheld: this model rejected it; any other file was delivered]";
+    const WITHHELD_LOG = "chat turn withheld a file the model refused";
+    // DeepSeek's answer to a PDF part on Chat Completions.
+    const FILE_REFUSAL: ProviderError = {
+      status: 400,
+      message: "file must have a file_id or file_data",
+      type: "invalid_request_error",
+    };
+    /** Refuses every request carrying one of `data`. */
+    const refusing =
+      (...data: string[]) =>
+      (body: string) =>
+        data.some((d) => body.includes(d)) ? FILE_REFUSAL : undefined;
+    const vision = (apiShape: OrgModel["apiShape"] = "openai-completions"): OrgModel => ({
+      ...orgModel(),
+      apiShape,
+      pi_provider: apiShape === "anthropic-messages" ? "anthropic" : "openai",
+      input: ["text", "image"],
+    });
+
+    /** A user message attaching one file of each kind named. */
+    function attaching(...kinds: ("image" | "pdf")[]): UIMessage[] {
+      const messages = userTurn("Read these files");
+      for (const kind of kinds) {
+        messages[0]!.parts.push(
+          kind === "image"
+            ? {
+                type: "file",
+                filename: "pixel.png",
+                mediaType: "image/png",
+                url: "appfile://file_live_image",
+              }
+            : {
+                type: "file",
+                filename: "contract.pdf",
+                mediaType: "application/pdf",
+                url: "appfile://file_live_pdf",
+              },
+        );
+      }
+      return messages;
+    }
+    const readFiles: PiChatInput["readAttachment"] = async (uri) =>
+      uri.endsWith("image")
+        ? { mime: "image/png", bytes: Buffer.from(PNG, "base64") }
+        : { mime: "application/pdf", bytes: pdfBytes };
+    const answered = (chunks: Awaited<ReturnType<typeof runTurn>>["chunks"]) =>
+      chunks
+        .filter((c) => c.type === "text-delta")
+        .map((c) => (c as { delta?: string }).delta)
+        .join("");
+    const finishTurn = (chunks: Awaited<ReturnType<typeof runTurn>>["chunks"]) =>
+      (
+        chunks.find((c) => c.type === "finish") as {
+          messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
+        }
+      ).messageMetadata?.appstrate?.turn;
+
+    it("replays a PDF refused on Chat Completions once without it, and the turn answers", async () => {
+      capture.bodies.length = 0;
+      providerRefusal = refusing(pdfData);
+      const { result, warn } = await recordingWarnAndError(() =>
+        runTurn(() => "pdf-refused", undefined, undefined, {
+          model: vision(),
+          messages: attaching("pdf"),
+          readAttachment: readFiles,
+        }),
+      );
+      expect(capture.bodies).toHaveLength(2);
+      expect(capture.bodies[0]).toContain(pdfData);
+      expect(capture.bodies[1]).not.toContain(pdfData);
+      expect(capture.bodies[1]).toContain(PDF_POINTER);
+      // The failed attempt is forgotten: no error reaches the client, the turn ends as a stop.
+      expect(result.chunks.some((chunk) => chunk.type === "error")).toBe(false);
+      expect(answered(result.chunks)).toContain(ANSWER);
+      expect(finishTurn(result.chunks)).toMatchObject({ finishReason: "stop" });
+      expect(JSON.stringify(finishTurn(result.chunks))).not.toContain("errorCategory");
+      expect(warn.filter(([msg]) => msg === MODEL_ERROR_LOG)).toEqual([]);
+      const logged = warn.filter(([msg]) => msg === WITHHELD_LOG);
+      expect(logged).toHaveLength(1);
+      expect(logged[0]![1]).toEqual({
+        orgId: "org_live",
+        presetId: "preset_live",
+        chatSessionId: null,
+        api: "openai-completions",
+        kinds: ["pdf"],
+      });
+    }, 30_000);
+
+    it("keeps the image when only the PDF beside it is refused", async () => {
+      capture.bodies.length = 0;
+      providerRefusal = refusing(pdfData);
+      const { chunks } = await runTurn(() => "pdf-refused", undefined, undefined, {
+        model: vision(),
+        messages: attaching("image", "pdf"),
+        readAttachment: readFiles,
+      });
+      expect(capture.bodies).toHaveLength(2);
+      expect(capture.bodies[0]).toContain(PNG);
+      expect(capture.bodies[1]).toContain(PNG);
+      expect(capture.bodies[1]).toContain(PDF_POINTER);
+      expect(capture.bodies[1]).not.toContain(pdfData);
+      expect(capture.bodies[1]).not.toContain(IMAGE_POINTER);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    }, 30_000);
+
+    const TEXT_TYPES = [
+      { apiShape: "openai-completions", textType: "text" },
+      { apiShape: "anthropic-messages", textType: "text" },
+      { apiShape: "openai-responses", textType: "input_text" },
+    ] as const;
+
+    it.each(TEXT_TYPES)(
+      "withholds the PDF, then the image too, of a $apiShape user message",
+      async ({ apiShape, textType }) => {
+        capture.bodies.length = 0;
+        providerRefusal = refusing(pdfData, PNG);
+        const { chunks } = await runTurn(() => "both-refused", undefined, undefined, {
+          model: vision(apiShape),
+          messages: attaching("image", "pdf"),
+          readAttachment: readFiles,
+        });
+        expect(capture.bodies).toHaveLength(3);
+        expect(capture.bodies[0]).toContain(pdfData);
+        expect(capture.bodies[0]).toContain(PNG);
+        expect(capture.bodies[1]).toContain(PNG);
+        expect(capture.bodies[1]).not.toContain(pdfData);
+        const last = capture.bodies[2]!;
+        expect(last).not.toContain(PNG);
+        expect(last).not.toContain(pdfData);
+        for (const pointer of [IMAGE_POINTER, PDF_POINTER]) {
+          expect(last).toContain(JSON.stringify({ type: textType, text: pointer }).slice(1, -1));
+        }
+        expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+        expect(finishTurn(chunks)).toMatchObject({ finishReason: "stop" });
+      },
+      30_000,
+    );
+
+    it.each(TEXT_TYPES)(
+      "replays a $apiShape step refused for a tool's files without running the tool again",
+      async ({ apiShape }) => {
+        capture.bodies.length = 0;
+        mcpSurface = connectorSurface([{ mimeType: "image/png", blob: PNG }, pdfResource]);
+        providerRefusal = refusing(toolPdfData, PNG);
+        const { chunks } = await runTurn(() => "tool-refused", undefined, undefined, {
+          model: vision(apiShape),
+        });
+        // Step 1 calls the tool, step 2 carries its files and is refused, its replays answer.
+        expect(mcpToolCalls).toBe(1);
+        expect(chunks.filter((chunk) => chunk.type === "tool-input-available")).toHaveLength(1);
+        expect(capture.bodies).toHaveLength(4);
+        expect(capture.bodies[1]).toContain(toolPdfData);
+        expect(capture.bodies[1]).toContain(PNG);
+        expect(capture.bodies[2]).toContain(PNG);
+        expect(capture.bodies[2]).not.toContain(toolPdfData);
+        expect(capture.bodies[3]).not.toContain(PNG);
+        expect(capture.bodies[3]).toContain(IMAGE_POINTER);
+        expect(capture.bodies[3]).toContain(PDF_POINTER);
+        expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+        expect(finishTurn(chunks)).toMatchObject({ finishReason: "stop" });
+      },
+      30_000,
+    );
+
+    it("keeps the first error when every replay is refused the same way", async () => {
+      capture.bodies.length = 0;
+      providerRefusal = (_body, n) => ({
+        ...FILE_REFUSAL,
+        message: `Unsupported parameter: 'temperature' is not supported with this model. (#${n})`,
+      });
+      const { result, warn } = await recordingWarnAndError(() =>
+        runTurn(() => "non-file-4xx", undefined, undefined, {
+          model: vision(),
+          messages: attaching("image", "pdf"),
+          readAttachment: readFiles,
+        }),
+      );
+      // The PDF-less replay, the file-less one, then the first error stands.
+      expect(capture.bodies).toHaveLength(3);
+      expect(capture.bodies[2]).not.toContain(PNG);
+      expect(capture.bodies[2]).not.toContain(pdfData);
+      expect(result.chunks.find((c) => c.type === "error")?.errorText).toBe(
+        "appstrate:chat-turn-error:invalid_request",
+      );
+      expect(finishTurn(result.chunks)).toMatchObject({
+        finishReason: "error",
+        errorCategory: "invalid_request",
+      });
+      const logged = warn.find(([msg]) => msg === MODEL_ERROR_LOG)?.[1] as { err?: string };
+      expect(logged.err).toContain("(#1)");
+      expect(warn.filter(([msg]) => msg === WITHHELD_LOG)).toEqual([]);
+    }, 30_000);
+
+    it("ends a turn stopped during the replay as a stop, not as the refused attempt's error", async () => {
+      capture.bodies.length = 0;
+      providerRefusal = refusing(pdfData);
+      let arrived!: () => void;
+      const replayArrived = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      providerPark = { arrived, settle: () => {} };
+      const stopped = new AbortController();
+      const logs = await recordingWarnAndError(async () => {
+        const turn = runTurn(() => "stop-during-replay", stopped.signal, undefined, {
+          model: vision(),
+          messages: attaching("pdf"),
+          readAttachment: readFiles,
+        });
+        await replayArrived;
+        stopped.abort(new Error("stopped by user"));
+        return turn;
+      });
+      expect(capture.bodies).toHaveLength(2);
+      expect(logs.warn.filter(([msg]) => msg === MODEL_ERROR_LOG)).toEqual([]);
+      expect(logs.warn.filter(([msg]) => msg === WITHHELD_LOG)).toEqual([]);
+      const { chunks } = logs.result;
+      expect(chunks.map((c) => c.type)).not.toContain("error");
+      expect(JSON.stringify(finishTurn(chunks))).not.toContain("errorCategory");
+    }, 30_000);
+
+    it("lets Pi retry a replay that hits a 503", async () => {
+      capture.bodies.length = 0;
+      providerRefusal = (body, n) =>
+        n === 2
+          ? { status: 503, message: "Service unavailable", type: "server_error" }
+          : refusing(pdfData)(body);
+      const { chunks } = await runTurn(() => "replay-503", undefined, undefined, {
+        model: vision(),
+        messages: attaching("pdf"),
+        readAttachment: readFiles,
+      });
+      expect(capture.bodies.length).toBeGreaterThanOrEqual(3);
+      expect(capture.bodies[0]).toContain(pdfData);
+      for (const body of capture.bodies.slice(1)) {
+        expect(body).not.toContain(pdfData);
+        expect(body).toContain(PDF_POINTER);
+      }
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+      expect(answered(chunks)).toContain(ANSWER);
+    }, 30_000);
+
+    it("keeps withholding the refused kind on the later steps of the turn", async () => {
+      capture.bodies.length = 0;
+      const surface = connectorSurface([]);
+      // The replay (request 2) calls the tool; request 3 answers.
+      mcpSurface = { ...surface, call: { ...surface.call!, steps: 2 } };
+      providerRefusal = refusing(pdfData);
+      const { chunks } = await runTurn(() => "later-step", undefined, undefined, {
+        model: vision(),
+        messages: attaching("pdf"),
+        readAttachment: readFiles,
+      });
+      expect(mcpToolCalls).toBe(1);
+      expect(capture.bodies).toHaveLength(3);
+      expect(capture.bodies[2]).not.toContain(pdfData);
+      expect(capture.bodies[2]).toContain(PDF_POINTER);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+      expect(answered(chunks)).toContain(ANSWER);
+    }, 30_000);
+
+    it("replays without a refused image a model of unknown modalities was sent", async () => {
+      capture.bodies.length = 0;
+      providerRefusal = refusing(PNG);
+      const { chunks } = await runTurn(() => "unknown-modalities", undefined, undefined, {
+        model: { ...orgModel(), input: null },
+        messages: attaching("image"),
+        readAttachment: readFiles,
+      });
+      expect(capture.bodies).toHaveLength(2);
+      expect(capture.bodies[0]).toContain(PNG);
+      expect(capture.bodies[1]).not.toContain(PNG);
+      expect(capture.bodies[1]).toContain(IMAGE_POINTER);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+      expect(answered(chunks)).toContain(ANSWER);
+    }, 30_000);
+  });
+
   it("sends an alias's public level as its backing's nearest", async () => {
     // The loopback listing is unprojected: the binding carries the backing
     // (deepseek-flash: off/low/high/max), which Pi's session clamps to.
@@ -843,7 +1151,7 @@ describe("runPiChat against a stub provider", () => {
   it("logs a turn the provider refused once, at warn, with the raw cause", async () => {
     // The stream carries the category alone, and the persistence drain ignores
     // that marker: this line is the only place the provider's answer is kept.
-    providerRefusal = 401;
+    providerRefusal = () => AUTH_REFUSAL;
     const logs = await recordingWarnAndError(() => runTurn(() => "loopback-refused"));
 
     const errorChunk = logs.result.chunks.find((c) => c.type === "error");
@@ -864,7 +1172,7 @@ describe("runPiChat against a stub provider", () => {
     // The commonest failure: the provider answers with an error, the loop
     // returns, nothing throws. The id on the turn is only worth showing if a
     // server log line carries it — with the cause the client never sees.
-    providerRefusal = 401;
+    providerRefusal = () => AUTH_REFUSAL;
     const logged: Array<Record<string, unknown>> = [];
     const spy = (msg: string, data?: Record<string, unknown>) => void logged.push({ msg, ...data });
     const original = { warn: logger.warn, error: logger.error };

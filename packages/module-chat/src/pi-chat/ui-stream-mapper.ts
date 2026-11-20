@@ -378,6 +378,12 @@ export class PiChatUiStreamMapper {
     this.lastError = m.errorMessage;
   }
 
+  /** Retire the recorded failure: the engine replays the failed call (`file-refusal.ts`). */
+  clearFailure(): void {
+    if (this.finishReason === "error") this.finishReason = "stop";
+    this.lastError = undefined;
+  }
+
   /** Model calls completed so far in this turn (see {@link modelCalls}). */
   stepCount(): number {
     return this.modelCalls;

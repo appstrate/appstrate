@@ -55,6 +55,7 @@ import {
 import { ChatTurnDeadlineError, closePiTurn, turnContextOf } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
+import { createFileRefusal } from "./file-refusal.ts";
 import { fileDelivery } from "../file-input.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
@@ -244,6 +245,8 @@ export function runPiChat(input: PiChatInput): Response {
     // Every call records the space it was dispatched in, for the cards that show it later.
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
+  // Replays a request refused with a file once without it; the failed attempt is then forgotten.
+  const fileRefusal = createFileRefusal(model.api, () => mapper.clearFailure());
 
   const stream = createUIMessageStream({
     onError,
@@ -541,6 +544,8 @@ export function runPiChat(input: PiChatInput): Response {
                 ...authExtensions,
                 ...generationExtensions,
                 pdfInput.extension,
+                // Last: it judges and edits the payload exactly as it goes on the wire.
+                fileRefusal.extension,
               ],
               systemPrompt: system,
             }),
@@ -667,8 +672,11 @@ export function runPiChat(input: PiChatInput): Response {
         // localizes the stable category.
         const meta = mapper.result();
         const stepCount = mapper.stepCount();
+        // A replay refused the same way leaves the first failure as the turn's error.
         const turnError =
-          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
+          meta.finishReason === "error"
+            ? (fileRefusal.originalError() ?? meta.errorText ?? "unknown model error")
+            : meta.errorText;
         const closing = closePiTurn({
           error: turnError,
           finishReason: meta.finishReason,
@@ -766,6 +774,17 @@ export function runPiChat(input: PiChatInput): Response {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
         unsubscribe?.();
+        // A file the model refused, once per turn and whatever the outcome; the turn records none.
+        const refusedKinds = fileRefusal.refusedKinds();
+        if (refusedKinds.length) {
+          logger.warn("chat turn withheld a file the model refused", {
+            orgId: input.orgId,
+            presetId: input.presetId,
+            chatSessionId: input.chatSessionId,
+            api: model.api,
+            kinds: refusedKinds,
+          });
+        }
         // Once per turn, on every exit, so a turn that died in construction
         // still reports how far it got (`null` past that point).
         logger.info("chat turn construction", {
