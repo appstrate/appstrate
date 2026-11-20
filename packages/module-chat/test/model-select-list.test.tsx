@@ -69,4 +69,18 @@ describe("composer model list", () => {
     );
     expect(disabledByLabel(html)).toEqual({ Claude: true, Mistral: true, GPT: false });
   });
+
+  it("sets the host's marker after the name of the models it flags", () => {
+    const html = renderToStaticMarkup(
+      <ModelPickerList
+        groups={groups}
+        value={null}
+        onSelect={() => {}}
+        labels={labels}
+        renderAside={(model) => (model.id === "live" ? <i>outgrown</i> : null)}
+      />,
+    );
+    expect(html.match(/<i>outgrown<\/i>/g)).toHaveLength(1);
+    expect(html).toMatch(/GPT<\/span><i>outgrown<\/i>/);
+  });
 });

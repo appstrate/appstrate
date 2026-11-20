@@ -180,6 +180,8 @@ export interface AppstrateTurnContext {
   window: number;
   /** Size past which the engine summarizes the history (`window - reserveTokens`). */
   compactAt: number;
+  /** The model declares no window: `window` is the engine's fallback, not a known size. */
+  windowAssumed?: true;
 }
 
 /**

@@ -14,7 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { derivePiCompactionSettings } from "../src/pi-runner.ts";
-import { DEFAULT_CONTEXT_WINDOW } from "../src/pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 
 describe("derivePiCompactionSettings — reserveTokens", () => {
   it("uses model.maxTokens when populated", () => {

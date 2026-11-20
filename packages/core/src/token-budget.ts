@@ -31,6 +31,14 @@
  */
 
 /**
+ * Limits of a model nothing else sizes: the runner builds it with these, and the chat's
+ * gauge sizes a catalog row the same way. Never left undefined: pi-ai clamps `maxTokens`
+ * against the window, and NaN goes out as `"max_tokens": null`.
+ */
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_MAX_TOKENS = 16_384;
+
+/**
  * Floor on the derived response reserve when no usable `maxTokens` is
  * available. 16384 covers the common "no thinking" Claude / GPT response
  * shape; larger budgets (Sonnet thinking @ 64 k) flow through an explicit

@@ -66,6 +66,8 @@ import { useConversationScope } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { ContextGauge } from "./context-gauge.tsx";
+import { draftCrossesThreshold, estimateDraftTokens } from "./model-fit.ts";
+import { useConversationContext } from "./use-conversation-context.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
@@ -440,6 +442,45 @@ function ComposerAttachmentError() {
   );
 }
 
+/**
+ * Warns when the draft's files would take the conversation past the summarizing threshold: an
+ * estimate that errs low (`estimateDraftTokens`), against the last measure. Nothing before one.
+ */
+function DraftContextNotice() {
+  const { t } = useChatHost();
+  const reading = useConversationContext();
+  const attachments = useAuiState((s) => s.composer.attachments);
+  const readsImages = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelAcceptsImages,
+    getSelectedModelAcceptsImages,
+  );
+  const readsPdf = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelReadsPdf,
+    getSelectedModelReadsPdf,
+  );
+  const draftTokens = React.useMemo(
+    () =>
+      estimateDraftTokens(
+        attachments.map((a) => ({
+          name: a.name,
+          mime: a.file?.type || a.contentType || "",
+          size: a.file?.size ?? 0,
+        })),
+        { readsImages, readsPdf },
+      ),
+    [attachments, readsImages, readsPdf],
+  );
+  if (!reading || !attachments.length || !draftCrossesThreshold(reading.context, draftTokens))
+    return null;
+  return (
+    <Alert role="status" variant="warning" size="sm">
+      <AlertDescription>{t("composer.draftPastThreshold")}</AlertDescription>
+    </Alert>
+  );
+}
+
 /** Sends everything queued as ONE user message, then empties the queue. */
 function sendQueued(aui: ReturnType<typeof useAui>, queue: MessageQueue) {
   const text = joinQueued(queue.getSnapshot().items);
@@ -607,6 +648,7 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
+      <DraftContextNotice />
       <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
         <div className="min-w-0 [grid-area:tools]">{tools}</div>
         <ComposerPrimitive.Input

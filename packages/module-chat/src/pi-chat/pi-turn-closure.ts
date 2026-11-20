@@ -132,6 +132,7 @@ export function turnContextOf(
     | {
         sizing: { contextWindow: number; compaction: { reserveTokens: number } };
         contextTokens: (usage: PiUsage) => number;
+        windowAssumed?: true;
       }
     | undefined,
   anchors?: TurnAnchors,
@@ -146,6 +147,7 @@ export function turnContextOf(
             tokens,
             window: measure.sizing.contextWindow,
             compactAt: measure.sizing.contextWindow - measure.sizing.compaction.reserveTokens,
+            ...(measure.windowAssumed ? { windowAssumed: true as const } : {}),
           },
         }
       : {}),

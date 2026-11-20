@@ -19,6 +19,7 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
+    lang: "en",
     onPackagesChanged: () => {},
     renderSpaces: (spaceIds) => spaceIds.join(", "),
     linkInSpace: (path) => path,

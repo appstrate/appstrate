@@ -245,11 +245,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   //   env    — user-supplied credentials, no Appstrate call
   //   preset — preset id resolved via `/api/models`, LLM traffic routed
   //            through `/api/llm-proxy/<api>/*` with the profile's bearer
-  const { model, apiKey: llmApiKey } = await resolveLlmConfig(
-    modelSource,
-    llmFlagsWithInheritance,
-    resolverInputs,
-  );
+  const {
+    model,
+    apiKey: llmApiKey,
+    contextWindowAssumed,
+  } = await resolveLlmConfig(modelSource, llmFlagsWithInheritance, resolverInputs);
 
   // ─── 3. Load the bundle ────────────────────────────────────────────
   // Two shapes share this path:
@@ -540,6 +540,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     const runner = new PiRunner({
       model,
       apiKey: llmApiKey,
+      ...(contextWindowAssumed ? { contextWindowAssumed } : {}),
       ...(typeof inheritedConfig.generation?.temperature === "number"
         ? { temperature: inheritedConfig.generation.temperature }
         : {}),

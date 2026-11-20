@@ -45,6 +45,8 @@ interface ModelFlags {
 interface ResolvedModel {
   model: Model<Api>;
   apiKey: string;
+  /** The preset declares no window: `model` runs on `DEFAULT_CONTEXT_WINDOW`. */
+  contextWindowAssumed?: true;
 }
 
 interface PresetResolutionInputs {
@@ -219,7 +221,11 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // Placeholder for anthropic — never reaches upstream (see comment above).
   // For other APIs, pi-ai's SDK sends `Authorization: Bearer <apiKey>` natively.
   const apiKey = isAnthropic ? "x-platform-bearer-injected-via-headers" : inputs.bearerToken;
-  return { model, apiKey };
+  return {
+    model,
+    apiKey,
+    ...(preset.contextWindow == null ? { contextWindowAssumed: true as const } : {}),
+  };
 }
 
 /**

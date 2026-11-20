@@ -411,6 +411,16 @@ describe("turnContextOf", () => {
     });
   });
 
+  it("marks a window the model did not declare as assumed", () => {
+    const assumed = { ...MEASURE, windowAssumed: true as const };
+    expect(turnContextOf({ lastSettledUsage: used(48_000) }, assumed).context).toEqual({
+      tokens: 48_200,
+      window: 200_000,
+      compactAt: 183_616,
+      windowAssumed: true,
+    });
+  });
+
   it("states nothing when no call settled, it reported no tokens, or no model was bound", () => {
     expect(turnContextOf({}, MEASURE)).toEqual({});
     const empty = { ...used(0), output: 0 };

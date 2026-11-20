@@ -5,7 +5,11 @@ import { Progress } from "@appstrate/ui/components/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
 import type { RunTurnRow } from "../log-utils";
-import { formatCompactTokens, formatWindowPercent } from "@appstrate/ui/context-window";
+import {
+  formatCompactTokens,
+  formatContextWindow,
+  formatWindowPercent,
+} from "@appstrate/ui/context-window";
 import { readRunContext } from "../run-context";
 
 /**
@@ -28,7 +32,10 @@ export function ContextGaugeReadout({
   const isActive = (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
   const value = isActive ? reading.current : reading.peak;
   const fraction = isActive ? reading.currentFraction : reading.peakFraction;
-  const counts = `${formatCompactTokens(value)} / ${formatCompactTokens(reading.window)}`;
+  const counts = t("run.contextGaugeCounts", {
+    used: formatCompactTokens(value, i18n.language),
+    window: formatContextWindow(reading.window, reading.windowAssumed, i18n.language),
+  });
 
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">

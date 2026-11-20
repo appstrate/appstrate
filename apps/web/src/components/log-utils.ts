@@ -90,6 +90,8 @@ export interface RunTurnRow {
    * (it alone knows the container-side default). Absent when unknown, never zero.
    */
   contextWindow?: number;
+  /** {@link contextWindow} is the runner's fallback: the model declared none. */
+  contextWindowAssumed?: true;
 }
 
 /** `data.event` discriminator carried by per-turn breadcrumb rows. */
@@ -135,6 +137,7 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
       ...(typeof contextWindow === "number" && Number.isFinite(contextWindow)
         ? { contextWindow }
         : {}),
+      ...(d["contextWindowAssumed"] === true ? { contextWindowAssumed: true as const } : {}),
     });
   }
   return rows;

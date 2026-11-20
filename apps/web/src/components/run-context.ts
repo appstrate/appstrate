@@ -19,6 +19,8 @@ interface RunContextReading {
   peak: number;
   /** The window last stated by a turn. */
   window: number;
+  /** That turn's window is the runner's fallback, not one the model declared. */
+  windowAssumed: boolean;
   /** 0..1 shares of {@link window}. */
   currentFraction: number;
   peakFraction: number;
@@ -41,12 +43,14 @@ export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunCon
   // Walk in emitted order rather than sorting by `index`: a malformed index cannot reorder the series.
   // Named `contextWindow`: a local `window` would shadow the global in this browser bundle.
   let contextWindow: number | null = null;
+  let windowAssumed = false;
   let current = 0;
   let peak = 0;
   for (const turn of turns) {
     const stated = turn.contextWindow;
     if (typeof stated === "number" && Number.isFinite(stated) && stated > 0) {
       contextWindow = stated;
+      windowAssumed = turn.contextWindowAssumed === true;
     }
     const tokens = turn.contextTokens;
     if (!Number.isFinite(tokens) || tokens <= 0) continue;
@@ -60,6 +64,7 @@ export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunCon
     current,
     peak,
     window: contextWindow,
+    windowAssumed,
     currentFraction: fractionOfWindow(current, contextWindow),
     peakFraction: fractionOfWindow(peak, contextWindow),
   };

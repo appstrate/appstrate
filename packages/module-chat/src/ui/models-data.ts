@@ -40,6 +40,8 @@ const orgModelOptionSchema = z.object({
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
   input: z.array(z.string()).nullable().optional(),
+  contextWindow: z.number().nullable().optional(),
+  maxTokens: z.number().nullable().optional(),
   billed_to: z.enum(MODEL_PAYERS).nullable().optional(),
   binding: z.enum(MODEL_BINDINGS).optional(),
   credentialId: z.string().nullable().optional(),
@@ -79,6 +81,9 @@ export interface OrgModelOption {
   generation?: ModelGenerationCapabilities | null;
   /** Input modalities the model declares (`["text", "image"]`); `null`/absent = not known (aliases hide it). */
   input?: string[] | null;
+  /** The catalog's limits, cascade applied; `null` when it has none (and always for an alias). */
+  contextWindow?: number | null;
+  maxTokens?: number | null;
 }
 
 /** `GET /api/models`, whole: the cache entry the shell's `$api` models queries share. */

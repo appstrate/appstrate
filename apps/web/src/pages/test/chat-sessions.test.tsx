@@ -90,6 +90,7 @@ function hostWith(granted: string[]): ChatHost {
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
+    lang: "en",
     onPackagesChanged: () => {},
     renderSpaces: () => null,
     linkInSpace: (path, spaceId) => linkedSpacePath(path, spaceId, "spc_a"),

@@ -31,6 +31,8 @@ interface PiChatModelBindingBase {
   model: Model<Api>;
   /** AuthStorage key: the model's Pi provider key. */
   provider: string;
+  /** The row declares no window: {@link model} runs on `buildPiModel`'s fallback. */
+  windowAssumed?: true;
 }
 
 export interface PiProxyModelBinding extends PiChatModelBindingBase {
@@ -120,6 +122,7 @@ export function createPiProxyModelBinding(args: {
   return {
     authMode: "proxy",
     model,
+    ...(args.model.contextWindow == null ? { windowAssumed: true as const } : {}),
     provider: model.provider,
     runtimeApiKey: "proxy",
     authExtension: createPiProxyAuthExtension(args.mintBearer),
@@ -146,6 +149,7 @@ export function createPiOAuthModelBinding(
   return {
     authMode: "oauth2",
     model: piModel,
+    ...(model.contextWindow == null ? { windowAssumed: true as const } : {}),
     provider: piModel.provider,
     runtimeApiKey: model.accessToken,
     metering: { kind: "inline", cost: model.cost },

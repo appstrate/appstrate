@@ -32,20 +32,23 @@ function turn(index: number, contextTokens: number, contextWindow?: number): Run
 /** Peaks at 187k, then compacts down to 128k. */
 const TURNS = [turn(0, 40_000, 200_000), turn(1, 187_000, 200_000), turn(2, 128_000, 200_000)];
 
+const nbsp = "\u00a0";
 const text = (html: string) => html.replace(/<[^>]*>/g, "");
 const valueText = (html: string) => /aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "";
 
 describe("ContextGaugeReadout", () => {
   it("shows the current context and its share while the run is active", () => {
     const html = render(<ContextGaugeReadout turns={TURNS} status="running" />);
-    expect(text(html)).toBe(`128k / 200k · ${formatWindowPercent(0.64, i18n.language)}`);
+    expect(text(html)).toBe(
+      `128${nbsp}k / 200${nbsp}k · ${formatWindowPercent(0.64, i18n.language)}`,
+    );
     expect(html).toContain('aria-valuenow="128000"');
     expect(html).not.toContain("tabindex");
   });
 
   it("shows the peak once the run settled, and says so", () => {
     const html = render(<ContextGaugeReadout turns={TURNS} status="success" />);
-    expect(text(html)).toBe("187k / 200k");
+    expect(text(html)).toBe(`187${nbsp}k / 200${nbsp}k`);
     expect(valueText(html)).toContain("pic atteint");
     expect(html).toContain('tabindex="0"');
     expect(text(render(<ContextGaugePeakHint />))).toBe(agentsFr["run.contextGaugePeakHint"]);
@@ -56,7 +59,7 @@ describe("ContextGaugeReadout", () => {
       <ContextGaugeReadout turns={[turn(0, 210_000, 200_000)]} status="running" />,
     );
     expect(html).toContain('aria-valuenow="200000"');
-    expect(text(html)).toContain("210k / 200k");
+    expect(text(html)).toContain(`210${nbsp}k / 200${nbsp}k`);
   });
 
   it("renders nothing without a window or a measured turn", () => {

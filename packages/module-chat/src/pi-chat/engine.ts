@@ -452,7 +452,11 @@ export function runPiChat(input: PiChatInput): Response {
 
         const piModel = model;
         const sizing = derivePiCompactionSettings(piModel);
-        contextMeasure = { sizing, contextTokens: sdk.calculateContextTokens };
+        contextMeasure = {
+          sizing,
+          contextTokens: sdk.calculateContextTokens,
+          ...(modelBinding.windowAssumed ? { windowAssumed: true as const } : {}),
+        };
         const requestedThinkingLevel =
           input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {

@@ -632,6 +632,7 @@ function buildPiRunner(): PiRunner {
     // No rates reached this container (unpriced model, or a withheld alias
     // rate card). Report no cost rather than a placeholder $0.
     ...(env.modelCost === undefined ? { unpriced: true } : {}),
+    ...(env.modelContextWindow === undefined ? { contextWindowAssumed: true } : {}),
     apiKey: env.modelApiKey,
     systemPrompt,
     ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),

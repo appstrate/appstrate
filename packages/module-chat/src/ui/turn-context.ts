@@ -8,6 +8,7 @@
 import {
   turnMetadataFromMessage,
   type AppstrateTurnContext,
+  type AppstrateTurnMetadata,
 } from "@appstrate/core/chat-turn-metadata";
 import { fractionOfWindow } from "@appstrate/ui/context-window";
 import { sourceMessage } from "./turn-error-state.ts";
@@ -41,13 +42,18 @@ export function contextReading(
 export function latestConversationContext(
   messages: readonly unknown[],
 ): ConversationContext | null {
-  const turns = messages.map((message) => turnMetadataFromMessage(sourceMessage(message)));
-  const measured = turns.findLast((turn) => turn?.context !== undefined);
+  let measured: AppstrateTurnMetadata | null = null;
+  let summarized = false;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const turn = turnMetadataFromMessage(sourceMessage(messages[index]));
+    if (!measured && turn?.context !== undefined) measured = turn;
+    if (turn?.summary !== undefined) summarized = true;
+  }
   if (!measured?.context) return null;
   return {
     ...measured.context,
     ...contextReading(measured.context),
-    summarized: turns.some((turn) => turn?.summary !== undefined),
+    summarized,
     modelId: measured.modelId ?? null,
     modelLabel: measured.modelLabel ?? null,
   };

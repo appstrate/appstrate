@@ -17,6 +17,7 @@ import type { ModelReasoningLevel } from "@appstrate/core/model-generation";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { PiModelDialect } from "@appstrate/core/sidecar-types";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "./model-compat.ts";
 import { deriveProviderFromApi } from "./provider-map.ts";
@@ -42,13 +43,6 @@ export interface PiModelSpec {
   maxTokens?: number | null;
   headers?: Record<string, string>;
 }
-
-/**
- * Limits for a model nothing else sizes. Never left undefined: pi-ai clamps
- * `maxTokens` against the window, and NaN goes out as `"max_tokens": null`.
- */
-export const DEFAULT_CONTEXT_WINDOW = 128_000;
-export const DEFAULT_MAX_TOKENS = 16_384;
 
 /** A record's output cap, or null when it fills the window: no room left for the prompt. */
 export function usableRecordMaxTokens(

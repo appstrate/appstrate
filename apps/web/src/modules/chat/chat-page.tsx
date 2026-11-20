@@ -31,6 +31,7 @@ import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
+import { useTranslation } from "react-i18next";
 import { formatBytes } from "../../lib/format-bytes";
 import { useViewAs } from "../../stores/view-as-store";
 import { useUploadInSpace } from "../../hooks/use-upload";
@@ -105,6 +106,7 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
+  const { i18n } = useTranslation();
   const { known } = useChatFilter();
   // What the chat may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
@@ -220,6 +222,7 @@ export function ChatModulePage() {
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
+              lang={i18n.language}
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
               renderSpaces={renderSpaces}

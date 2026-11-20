@@ -49,7 +49,8 @@ import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { integrationOf } from "./tool-integration.ts";
 import type { ToolIntegration } from "@appstrate/core/integration";
-import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
+import { addRequestUsage } from "./pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
@@ -297,6 +298,8 @@ export interface PiRunnerOptions {
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
   modelCompaction?: boolean;
+  /** {@link model}'s window is `DEFAULT_CONTEXT_WINDOW`, the launcher declared none: turns say so. */
+  contextWindowAssumed?: boolean;
   /** Per-tool-result byte cap on the event sink. Default `DEFAULT_TOOL_RESULT_BYTE_LIMIT`. */
   toolResultByteLimit?: number;
 }
@@ -768,6 +771,7 @@ export class PiRunner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       outputRequired,
       contextWindow: budget.contextWindow,
+      ...(this.opts.contextWindowAssumed ? { contextWindowAssumed: true as const } : {}),
       cost: sessionModel.cost,
       ...(this.opts.unpriced ? { unpriced: true } : {}),
       ...(this.opts.toolResultByteLimit !== undefined
@@ -1439,6 +1443,8 @@ interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
+  /** {@link contextWindow} is the fallback, not a window the model declared. */
+  contextWindowAssumed?: true;
   /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
   /** The session model's rate card: its tiers band the cumulative usage. */
@@ -1632,6 +1638,7 @@ export function installSessionBridge(
                   ...(options.contextWindow !== undefined
                     ? { contextWindow: options.contextWindow }
                     : {}),
+                  ...(options.contextWindowAssumed ? { contextWindowAssumed: true } : {}),
                 },
               ),
             );

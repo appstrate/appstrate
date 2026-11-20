@@ -5,8 +5,6 @@ import {
   addRequestUsage,
   buildPiModel,
   clampPiReasoningLevel,
-  DEFAULT_CONTEXT_WINDOW,
-  DEFAULT_MAX_TOKENS,
   findPiModelsById,
   getPiModel,
   isPiProvider,
@@ -18,6 +16,7 @@ import {
   usageCostUsd,
   type PiTokenCounts,
 } from "../src/pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import { deriveProviderFromApi } from "../src/provider-map.ts";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "../src/model-compat.ts";
 import { capturePayload } from "../src/pi-payload.ts";

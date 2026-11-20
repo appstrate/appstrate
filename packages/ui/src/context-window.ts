@@ -16,16 +16,19 @@ export function fractionOfWindow(tokens: number, window: number): number {
 }
 
 /**
- * A token count as the compact figure the gauge shows (`128k`, `1.0M`).
- * Decimal thousands (not `formatBytes` tiers). The tier is chosen AFTER rounding,
- * so `999_600` becomes `1.0M` rather than `1000k`.
+ * A token count as the compact figure the gauge shows, in the UI language (`128k` / `1.5M` in
+ * English, `128 k` / `1,5 M` in French — a no-break space, as `Intl` puts it). The tier is chosen
+ * by `Intl` after rounding, so `999_600` is `1M`, not `1000k`.
  */
-export function formatCompactTokens(tokens: number): string {
+export function formatCompactTokens(tokens: number, lang: string): string {
   if (!Number.isFinite(tokens) || tokens < 0) return "0";
-  if (tokens < 1000) return String(Math.round(tokens));
-  const thousands = Math.round(tokens / 1000);
-  if (thousands < 1000) return `${thousands}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}M`;
+  return new Intl.NumberFormat(lang, { notation: "compact" }).format(tokens);
+}
+
+/** A window as {@link formatCompactTokens} does, marked `≈` when it is a fallback, not a declared size. */
+export function formatContextWindow(window: number, assumed: boolean, lang: string): string {
+  const figure = formatCompactTokens(window, lang);
+  return assumed ? `≈\u00a0${figure}` : figure;
 }
 
 /** A 0..1 share as a localized percentage (`Intl`: French puts a narrow no-break space before the sign). */

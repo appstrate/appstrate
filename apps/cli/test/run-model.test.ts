@@ -11,7 +11,7 @@ import {
   resolvePresetModel,
   ModelResolutionError,
 } from "../src/commands/run/model.ts";
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import { parseModelSource } from "../src/commands/run.ts";
 import type { ModelPreset } from "../src/lib/models.ts";
 

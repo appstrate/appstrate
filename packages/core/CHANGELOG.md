@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`DEFAULT_CONTEXT_WINDOW`, `DEFAULT_MAX_TOKENS`** (`@appstrate/core/token-budget`, #2324): the
+  limits of a model nothing else sizes (128 000 / 16 384), moved from `@appstrate/runner-pi` so
+  the chat's gauge sizes a catalog row as the runner does.
+- **`AppstrateTurnContext.windowAssumed`** (`@appstrate/core/chat-turn-metadata`, #2324): `true`
+  when the model declares no window and `window` is the engine's fallback. Optional and additive.
 - **`AppstrateTurnContext`, `AppstrateTurnMetadata.context`** (`@appstrate/core/chat-turn-metadata`,
   #2318): the context of a chat turn's last settled model call (`tokens`), the window the engine
   ran against (`window`) and its compaction threshold (`compactAt`). Optional and additive: a
