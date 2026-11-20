@@ -46,7 +46,7 @@ interface OwnedConnection {
 }
 
 /** Lost in `inSpaceId` only, when set: an unshare from one target. */
-export interface LostConnection extends OwnedConnection {
+interface LostConnection extends OwnedConnection {
   inSpaceId?: string;
 }
 
