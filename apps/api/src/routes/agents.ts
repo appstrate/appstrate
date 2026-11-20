@@ -662,7 +662,7 @@ export function createAgentsRouter() {
     rateLimit(30),
     requirePermission("agents", "read"),
     requireAgent(),
-    requireActiveAgent(),
+    requireActiveAgent(["agents:read"]),
     async (c) => {
       const scopeParam = c.req.param("scope")!;
       const nameParam = c.req.param("name")!;

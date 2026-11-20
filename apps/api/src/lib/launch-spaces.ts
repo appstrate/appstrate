@@ -15,6 +15,10 @@ import { activeHereSql } from "../services/package-activation.ts";
 import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
 import { notEphemeralFilter, orgOrSystemFilter } from "./package-helpers.ts";
 import { launchableSpaces } from "./reachable-spaces.ts";
+import type { Permission } from "./permissions.ts";
+import { isInlineShadowPackageId } from "../services/inline-run.ts";
+import { requiredIntegrationIds } from "../services/integration-connection-resolver.ts";
+import type { IntegrationManifestCache } from "../services/integration-service.ts";
 
 /** A space by id and name, as the refusal names it. */
 export interface LaunchSpace {
@@ -22,22 +26,41 @@ export interface LaunchSpace {
   name: string;
 }
 
-/** The spaces where every one of `packageIds` is placed and active, from the caller's reach. */
-export type LaunchSpacesLookup = (packageIds: readonly string[]) => Promise<LaunchSpace[]>;
+/** The launch refused here: the agent and the manifest the gate judged. */
+export interface RefusedLaunch {
+  packageId: string;
+  manifest: Record<string, unknown>;
+  manifestCache?: IntegrationManifestCache;
+}
+
+/**
+ * The spaces where the launch passes both activation checks: the agent placed and active (an
+ * inline run's shadow has no placement) and every integration it requires active.
+ */
+export type LaunchSpacesLookup = (launch: RefusedLaunch) => Promise<LaunchSpace[]>;
 
 /**
  * The lookup for this request: the spaces other than the one it entered where the caller holds
- * `agents:run` ({@link launchableSpaces}: a credential pinned to the space gets `[]`). An end-user
- * acts in its own space only (RBAC spec §7.2): `[]`.
+ * every one of `required`, the permissions of the refusing door ({@link launchableSpaces}: a
+ * credential pinned to the space gets `[]`). An end-user acts in its own space only (RBAC spec
+ * §7.2): `[]`.
  */
-export function launchSpacesLookup(c: Context<AppEnv>): LaunchSpacesLookup {
-  return async (packageIds) => {
+export function launchSpacesLookup(
+  c: Context<AppEnv>,
+  required: readonly Permission[],
+): LaunchSpacesLookup {
+  return async ({ packageId, manifest, manifestCache }) => {
     if (c.get("principalKind") === "end_user") return [];
     const orgId = c.get("orgId");
     const here = c.get("spaceId");
     const candidates = (await launchableSpaces(c, orgId)).filter(
-      (space) => space.id !== here && space.permissions.has("agents:run"),
+      (space) => space.id !== here && required.every((p) => space.permissions.has(p)),
     );
+    if (candidates.length === 0) return [];
+    const packageIds = [
+      ...(isInlineShadowPackageId(packageId) ? [] : [packageId]),
+      ...(await requiredIntegrationIds(manifest, manifestCache)),
+    ];
     return spacesActiveForAll(orgId, packageIds, candidates);
   };
 }

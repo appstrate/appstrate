@@ -961,6 +961,15 @@ async function requirementsOf(
   return requirements.filter((r): r is IntegrationRequirement => r !== null);
 }
 
+/** The integrations `agentManifest` requires: the run gate refuses it where one is not active. */
+export async function requiredIntegrationIds(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<string[]> {
+  const requirements = await requirementsOf(agentManifest, manifestCache);
+  return requirements.filter((req) => req.required).map((req) => req.integrationId);
+}
+
 /** A declared integration not active in the space, with the agent's `required` flag. */
 export interface InactiveDeclaredIntegration {
   integrationId: string;
@@ -969,8 +978,9 @@ export interface InactiveDeclaredIntegration {
 
 /**
  * Per manifest (input order), the declared integrations not active in `spaceId` — the input of
- * the run gate's `integration_not_active` (an error when `required`). One activation read for
- * every manifest; `manifestCache` loads each integration manifest once.
+ * the run gate's `integration_not_active` (an error when `required`), inert ones skipped as the
+ * gate skips them. One activation read for every manifest; `manifestCache` loads each
+ * integration manifest once.
  */
 export async function inactiveDeclaredIntegrations(
   agentManifests: readonly Record<string, unknown>[],
@@ -984,7 +994,7 @@ export async function inactiveDeclaredIntegrations(
   const activeIds = await listActiveIntegrationIds(ids, spaceId);
   return perAgent.map((reqs) =>
     reqs
-      .filter((req) => !activeIds.has(req.integrationId))
+      .filter((req) => !isInert(req) && !activeIds.has(req.integrationId))
       .map(({ integrationId, required }) => ({ integrationId, required })),
   );
 }

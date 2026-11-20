@@ -5811,7 +5811,7 @@ export interface components {
             /** @description Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, and for a placement left OFF. Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it. */
             warnings: components["schemas"]["ActivationWarning"][];
         };
-        /** @description Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds `agents:run` and the packages in question are placed and active, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement. */
+        /** @description Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule) and the agent (an inline run has no placement) and every integration it requires are placed and active, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement. */
         ActiveInSpaces: {
             /** @description Space id (`spc_…`). */
             id: string;
@@ -6549,7 +6549,7 @@ export interface components {
             errors: components["schemas"]["ConnectionResolutionItem"][];
             /** @description On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`. */
             version_ref?: string;
-            /** @description On an agent-run or inline-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration refused `integration_not_active` are active. Connections are judged at launch there. Absent on a schedule write and on readiness. */
+            /** @description On an agent-run or inline-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration it requires are active. Connections are judged at launch there. Absent on a schedule write and on readiness. */
             active_in_spaces?: components["schemas"]["ActiveInSpaces"];
         };
         /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card. */
@@ -22759,7 +22759,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted. */
+                        /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling — and, for an agent switched on in this space, one per integration it declares that is not active there, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };
@@ -22852,7 +22852,7 @@ export interface operations {
                          * @enum {string}
                          */
                         root_type: "agent" | "skill" | "integration";
-                        /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
+                        /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling — and, when `root_active` and the root is an agent, one per integration it declares that is not active in this space, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Empty when nothing is degraded. */
                         warnings: string[];
                     };
                 };
@@ -22919,7 +22919,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted. */
+                        /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling — and, for an agent switched on in this space, one per integration it declares that is not active there, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };

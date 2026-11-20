@@ -27,7 +27,6 @@ import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import { attachConnectOffers } from "./connect/preflight-connect-offer.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import type { LaunchSpacesLookup } from "../lib/launch-spaces.ts";
-import { isInlineShadowPackageId } from "./inline-run.ts";
 
 interface AgentReadinessParams {
   agent: LoadedPackage;
@@ -56,7 +55,7 @@ interface ValidateAgentReadinessParams extends AgentReadinessParams {
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    */
   connectOffers?: ConnectOfferPolicy | null;
-  /** A request's launch: its 409 names, as `active_in_spaces`, where the inactive integrations are not. */
+  /** A request's launch: its 409 names, as `active_in_spaces`, where it would pass activation. */
   launchSpaces?: LaunchSpacesLookup;
 }
 
@@ -193,7 +192,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
 export async function validateAgentReadiness(
   params: ValidateAgentReadinessParams,
 ): Promise<ResolutionFieldError[]> {
-  const { errors, warnings } = await collectAgentReadiness(params);
+  const { errors, resolutionErrors, warnings } = await collectAgentReadiness(params);
   if (errors.length === 0) return withConnectOffers(params, warnings);
 
   // Integration errors get their own 409 envelope with every integration
@@ -219,6 +218,7 @@ export async function validateAgentReadiness(
     // above, which must never carry a bearer capability off-platform.
     throw await withActiveInSpaces(
       params,
+      resolutionErrors,
       missingIntegrationConnection(
         await withConnectOffers(params, integrationErrors),
         params.versionRef,
@@ -252,19 +252,19 @@ async function withConnectOffers(
 
 /**
  * The 409 with `active_in_spaces` when it refuses an `integration_not_active`: the caller's other
- * spaces where the agent (an inline run's has no placement) and every one of those is active.
+ * spaces where this launch passes both activation checks (`LaunchSpacesLookup`).
  */
 async function withActiveInSpaces(
   params: ValidateAgentReadinessParams,
+  resolutionErrors: readonly ConnectionResolutionError[],
   error: ApiError,
 ): Promise<ApiError> {
-  const inactive = (error.fieldErrors ?? [])
-    .filter((e) => e.code === "integration_not_active")
-    .map((e) => e.field.slice("integrations.".length));
-  if (!params.launchSpaces || inactive.length === 0) return error;
-  const agentId = params.agent.id;
-  const packageIds = isInlineShadowPackageId(agentId) ? inactive : [agentId, ...inactive];
-  return error.with({
-    extensions: { ...error.extensions, active_in_spaces: await params.launchSpaces(packageIds) },
+  if (!params.launchSpaces) return error;
+  if (!resolutionErrors.some((e) => e.code === "integration_not_active")) return error;
+  const activeInSpaces = await params.launchSpaces({
+    packageId: params.agent.id,
+    manifest: params.agent.manifest as Record<string, unknown>,
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
+  return error.with({ extensions: { ...error.extensions, active_in_spaces: activeInSpaces } });
 }

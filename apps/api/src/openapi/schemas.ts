@@ -542,7 +542,7 @@ export const schemas = {
           active_in_spaces: {
             $ref: "#/components/schemas/ActiveInSpaces",
             description:
-              "On an agent-run or inline-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration refused `integration_not_active` are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
+              "On an agent-run or inline-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration it requires are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
           },
         },
       },
@@ -551,7 +551,7 @@ export const schemas = {
   ActiveInSpaces: {
     type: "array",
     description:
-      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds `agents:run` and the packages in question are placed and active, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule) and the agent (an inline run has no placement) and every integration it requires are placed and active, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
     items: {
       type: "object",
       required: ["id", "name"],

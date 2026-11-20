@@ -259,6 +259,26 @@ export async function activatePackageWithin(
   return switchOn(false, false);
 }
 
+/** The manifest a selector-less launch of agent `packageId` runs; null for any other type. */
+export async function selectorlessAgentManifest(
+  packageId: string,
+): Promise<Record<string, unknown> | null> {
+  const [row] = await db
+    .select({
+      type: packages.type,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      latestVersionId: packageDistTags.versionId,
+    })
+    .from(packages)
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (row?.type !== "agent") return null;
+  const [manifest] = await selectorlessLaunchManifests([row]);
+  return manifest!;
+}
+
 /** One `warnings[]` item of an activation: a declared integration not active where the agent is now on. */
 export type ActivationWarning = ResolutionFieldError & { required: boolean };
 
@@ -273,22 +293,9 @@ export async function activationWarnings(
   spaceId: string,
   packageId: string,
 ): Promise<ActivationWarning[]> {
-  const [row] = await db
-    .select({
-      type: packages.type,
-      source: packages.source,
-      draftManifest: packages.draftManifest,
-      latestVersionId: packageDistTags.versionId,
-    })
-    .from(packages)
-    .leftJoin(packageDistTags, latestTagJoin(packages.id))
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  if (row?.type !== "agent") return [];
-  const [inactive] = await inactiveDeclaredIntegrations(
-    await selectorlessLaunchManifests([row]),
-    spaceId,
-  );
+  const manifest = await selectorlessAgentManifest(packageId);
+  if (!manifest) return [];
+  const [inactive] = await inactiveDeclaredIntegrations([manifest], spaceId);
   return inactive!.map(({ integrationId, required }) => ({
     ...translateResolutionError({
       integrationId,

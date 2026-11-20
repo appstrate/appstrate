@@ -605,6 +605,49 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(JSON.stringify(verdict)).not.toContain("active_in_spaces");
   });
 
+  it("names no space where another required integration would refuse the launch", async () => {
+    // Required A and B; A active here, B off. S1 holds B but not A; S2 holds both.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION, SECOND_INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    for (const id of [INTEGRATION, SECOND_INTEGRATION]) {
+      await seedPackage({
+        id,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: buildIntegrationManifest(id),
+      });
+    }
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    const s1 = await seedSpace({ orgId: ctx.orgId, name: "S1" });
+    const s2 = await seedSpace({ orgId: ctx.orgId, name: "S2" });
+    for (const spaceId of [s1.id, s2.id]) {
+      await seedSpacePackage(spaceId, AGENT);
+      await seedSpacePackage(spaceId, SECOND_INTEGRATION);
+    }
+    await seedSpacePackage(s2.id, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemDetails & { active_in_spaces?: unknown };
+    expect(body.errors!.find((e) => e.code === "integration_not_active")!.field).toBe(
+      `integrations.${SECOND_INTEGRATION}`,
+    );
+    expect(body.active_in_spaces).toEqual([{ id: s2.id, name: "S2" }]);
+  });
+
   it("reports an inactive integration ONCE — no downstream not_connected", async () => {
     // The install/enable gate is documented as failing fast "rather than a
     // downstream not_connected", and it now does: the connection resolver

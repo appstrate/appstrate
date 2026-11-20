@@ -10,7 +10,8 @@ import {
   isInlineShadowRunReadable,
 } from "../lib/package-access.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { callerPermissions } from "../lib/permissions.ts";
+import { callerPermissions, type Permission } from "../lib/permissions.ts";
+import { selectorlessAgentManifest } from "../services/space-packages.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
 import { launchSpacesLookup, type LaunchSpace } from "../lib/launch-spaces.ts";
@@ -126,8 +127,10 @@ export function requireAgentOrInlineRun() {
  * Readiness (`GET …/connection-readiness`) deliberately does NOT mount this: it
  * REPORTS what blocks a run, so inactivity belongs in its payload as a blocking
  * error, and a 404 would blank the panel that explains the refusal.
+ *
+ * `required`: the door's own permissions, which a space of `active_in_spaces` must grant too.
  */
-export function requireActiveAgent() {
+export function requireActiveAgent(required: readonly Permission[]) {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const agent = c.get("package");
     const orgId = c.get("orgId");
@@ -139,7 +142,13 @@ export function requireActiveAgent() {
     // a state they are no longer entitled to observe.
     if (block === "not_placed") throw agentNotFound(agent.id);
     if (block === "not_active") {
-      throw agentNotActiveInSpace(agent.id, spaceId, await launchSpacesLookup(c)([agent.id]));
+      // Judged on the definition a selector-less launch runs, as the run gate would.
+      const manifest = (await selectorlessAgentManifest(agent.id)) ?? agent.manifest;
+      const activeInSpaces = await launchSpacesLookup(
+        c,
+        required,
+      )({ packageId: agent.id, manifest });
+      throw agentNotActiveInSpace(agent.id, spaceId, activeInSpaces);
     }
     return next();
   }, ACTIVE_AGENT_GATE);

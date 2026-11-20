@@ -35,11 +35,16 @@ import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedPackage,
   seedSpace,
   seedSpacePackage,
   seedUnreachableSpace,
 } from "../../helpers/seed.ts";
 import { isActiveAgentGate, isAgentLookup } from "../../../src/middleware/guards.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -198,6 +203,64 @@ describe("a placed-but-switched-off agent", () => {
 
     const body = (await (await executionDoors(OFF).run()).json()) as { active_in_spaces?: unknown };
     expect(body.active_in_spaces).toEqual([{ id: on.id, name: "On" }]);
+  });
+
+  it("lists no space where an integration the agent requires is off", async () => {
+    // Requires A and B. S1 holds the agent and B, not A; S2 holds all three.
+    const [A, B] = ["@doors/svc-a", "@doors/svc-b"];
+    const NEEDY = "@doors/needy";
+    await seedAgent({
+      id: NEEDY,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        name: NEEDY,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Needy",
+        dependencies: { integrations: { [A]: "^1.0.0", [B]: "^1.0.0" } },
+        integrations_configuration: {
+          [A]: { tools: ["search"], required: true },
+          [B]: { tools: ["search"], required: true },
+        },
+      },
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, NEEDY, { enabled: false });
+    for (const id of [A, B]) {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: id,
+          auths: {
+            primary: {
+              type: "api_key",
+              authorizedUris: ["https://api.example.com/**"],
+              credentialFields: ["api_key"],
+              delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+            },
+          },
+          tools_policy: { search: {} },
+        }) as unknown as Record<string, unknown>,
+      });
+    }
+    const s1 = await seedSpace({ orgId: ctx.orgId, name: "S1" });
+    const s2 = await seedSpace({ orgId: ctx.orgId, name: "S2" });
+    for (const space of [s1, s2]) {
+      await seedSpacePackage(space.id, NEEDY);
+      await seedSpacePackage(space.id, B);
+    }
+    await seedSpacePackage(s2.id, A);
+
+    const res = await executionDoors(NEEDY).run();
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code?: string; active_in_spaces?: unknown };
+    expect(body.code).toBe("agent_not_active_in_space");
+    expect(body.active_in_spaces).toEqual([{ id: s2.id, name: "S2" }]);
   });
 
   it("answers every READ and every CONFIGURE as if the switch did not exist", async () => {

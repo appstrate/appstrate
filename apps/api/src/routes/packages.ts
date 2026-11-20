@@ -2453,11 +2453,15 @@ export function createPackagesRouter() {
     // placement rule is satisfied and the upsert cannot conflict. WARN so a
     // silent non-activation is still visible.
     const spaceId = c.get("spaceId");
-    if (spaceId) {
-      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
-      );
-    }
+    const activated =
+      !!spaceId &&
+      (await activatePackage({ orgId, spaceId }, packageId).then(
+        () => true,
+        (e: unknown) => {
+          logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) });
+          return false;
+        },
+      ));
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     await recordAuditFromContext(c, {
@@ -2478,10 +2482,12 @@ export function createPackagesRouter() {
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
+    // And, for an agent now on here, each declared integration not active in the space.
     const importWarnings = [
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
       ...collectLoginCriteriaWarnings(manifest),
+      ...(activated ? await activationWarnings(spaceId, packageId) : []).map((w) => w.message),
     ];
     return c.json(
       {

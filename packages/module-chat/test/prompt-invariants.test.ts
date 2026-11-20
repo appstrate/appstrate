@@ -149,6 +149,9 @@ describe("full persona invariants", () => {
     // caller-space `required_permissions` enrichment; claiming it would be false.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/so do NOT restart the connect flow/);
+    // The gate checks activation before connections: the integration may not be connected.
+    expect(FULL).toContain("not activated, whether or not it is connected,");
+    expect(FULL).not.toContain("is connected but not activated");
     expect(FULL).toContain("after a failed call, then re-run once");
     // A configuration refusal: offered, never repaired or moved to another space silently.
     expect(FULL).toContain("once the user agrees, call `activatePackage`");

@@ -21,6 +21,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
+import { zipSync } from "fflate";
 import { auditEvents, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -33,6 +34,7 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import {
+  apiIntegrationManifest,
   httpHeaderDelivery,
   localIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
@@ -359,6 +361,69 @@ describe("activating an agent names its integrations left off, and activates non
     const res = await activate(AGENT);
     expect(res.status, await res.clone().text()).toBe(201);
     expect(((await res.json()) as Body).warnings).toEqual([]);
+  });
+
+  it("says nothing of an inert optional integration, which the launch never mentions", async () => {
+    await seedPackage({
+      id: AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        ...agentDeclaring({}),
+        dependencies: { integrations: { [OPTIONAL_OFF]: "^1.0.0" } },
+        integrations_configuration: { [OPTIONAL_OFF]: { required: false } },
+      },
+    });
+    const res = await activate(AGENT);
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(((await res.json()) as Body).warnings).toEqual([]);
+  });
+
+  it("tells the import doors the same, after the agent's own warnings", async () => {
+    // A remote integration, published: the bundle graph resolves it from its stored archive.
+    const REMOTE_OFF = "@doors/remote-off";
+    const remote = apiIntegrationManifest({
+      name: REMOTE_OFF,
+      auths: { primary: { type: "api_key", authorizedUris: ["https://api.example.com/**"] } },
+      tools_policy: { search: {} },
+    }) as unknown as Record<string, unknown>;
+    await seedPackage({
+      id: REMOTE_OFF,
+      orgId: ctx.orgId,
+      type: "integration",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: remote,
+    });
+    await seedPublishedVersion(REMOTE_OFF, "1.0.0", { manifest: remote });
+    const id = `@${ctx.org.slug}/imported`;
+    const enc = (text: string) => new TextEncoder().encode(text);
+    const manifest = {
+      ...agentDeclaring({ [REMOTE_OFF]: true }),
+      name: id,
+      display_name: "Imported",
+    };
+    const afps = zipSync({
+      "manifest.json": enc(JSON.stringify(manifest)),
+      "prompt.md": enc("You are an agent."),
+    });
+    const expected = `Integration '${REMOTE_OFF}' is not active in this space — activate it with POST /api/spaces/${ctx.defaultSpaceId}/packages {"packageId":"${REMOTE_OFF}"}; a launch of this agent here is refused until then.`;
+    for (const [path, prefix] of [
+      ["/api/packages/import", ""],
+      ["/api/packages/import-bundle?force=true", `${id}@0.1.0: `],
+    ] as const) {
+      const form = new FormData();
+      form.append("file", new File([new Uint8Array(afps)], "imported.afps"));
+      const res = await app.request(path, {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: form,
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const { warnings } = (await res.json()) as { warnings?: string[] };
+      expect(warnings, path).toContain(`${prefix}${expected}`);
+    }
+    expect(await placementRow(REMOTE_OFF)).toBeNull();
   });
 
   it("answers `[]` on an integration's own activation", async () => {

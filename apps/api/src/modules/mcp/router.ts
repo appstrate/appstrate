@@ -599,7 +599,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
-      : (request) => dispatchInProcess(request, scope.spaceId, orgSpaces === undefined);
+      : (request) =>
+          dispatchInProcess(request, {
+            spaceId: scope.spaceId,
+            endpoint: orgSpaces === undefined,
+          });
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.

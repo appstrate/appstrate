@@ -72,8 +72,14 @@ const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
 /** Set beside it when the pin is the endpoint's (`/api/mcp/o/:org/s/:space`), not per call. */
 const DISPATCH_ENDPOINT_PIN = Symbol("appstrate.dispatchEndpointPin");
 
-/** The `app.fetch` env of a dispatch confined to `spaceId`; `endpoint`: by its endpoint's pin. */
-export function dispatchSpacePinEnv(spaceId: string, endpoint = false): Record<symbol, string> {
+/** The space a dispatch is confined to; `endpoint`: the pin is its endpoint's, not the call's. */
+export interface DispatchPin {
+  spaceId: string;
+  endpoint?: boolean;
+}
+
+/** The `app.fetch` env of a dispatch confined to `pin.spaceId`. */
+export function dispatchSpacePinEnv({ spaceId, endpoint }: DispatchPin): Record<symbol, string> {
   return endpoint
     ? { [DISPATCH_SPACE_PIN]: spaceId, [DISPATCH_ENDPOINT_PIN]: spaceId }
     : { [DISPATCH_SPACE_PIN]: spaceId };

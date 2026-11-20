@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { spaceDispatcher, type McpSpace } from "../../../../src/modules/mcp/spaces.ts";
+import type { DispatchPin } from "../../../../src/lib/internal-dispatch.ts";
 
 const space = (id: string): McpSpace => ({
   id,
@@ -13,8 +14,8 @@ const space = (id: string): McpSpace => ({
 const spaces = { reachable: [space("spc_a"), space("spc_b")], current: space("spc_a") };
 
 describe("spaceDispatcher", () => {
-  const sent: Array<{ space: string | null; pin: string | undefined }> = [];
-  const send = async (request: Request, pin?: string) => {
+  const sent: Array<{ space: string | null; pin: DispatchPin | undefined }> = [];
+  const send = async (request: Request, pin?: DispatchPin) => {
     sent.push({ space: request.headers.get("x-space-id"), pin });
     return new Response(null);
   };
@@ -27,7 +28,7 @@ describe("spaceDispatcher", () => {
     await spaceDispatcher(spaces, send, true)("spc_b")(request());
     expect(sent).toEqual([
       { space: "spc_b", pin: undefined },
-      { space: "spc_b", pin: "spc_b" },
+      { space: "spc_b", pin: { spaceId: "spc_b" } },
     ]);
   });
 

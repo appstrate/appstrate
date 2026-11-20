@@ -312,7 +312,7 @@ export function createRunsRouter() {
     // The execution gate, and only here: an agent placed in this space but
     // switched off does not run, a rerun of one of its past runs included —
     // `rerun_from` is a body field of THIS route, so it passes the same door.
-    requireActiveAgent(),
+    requireActiveAgent(["agents:run"]),
     runLaunchIdempotency(),
     async (c) => {
       const agent = c.get("package");
@@ -428,7 +428,7 @@ export function createRunsRouter() {
           actor,
           // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
-          launchSpaces: launchSpacesLookup(c),
+          launchSpaces: launchSpacesLookup(c, ["agents:run"]),
           launchOverrides,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
           // preflight seeds the manifests the kickoff will freeze.
@@ -719,7 +719,7 @@ export function createRunsRouter() {
         actor,
         body,
         connectOffers: connectOfferPolicyFromRequest(c),
-        launchSpaces: launchSpacesLookup(c),
+        launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"]),
         authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
       });
 
