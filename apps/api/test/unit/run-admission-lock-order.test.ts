@@ -74,7 +74,7 @@ describe("run-admission lock order", () => {
     );
     // `enforceOrgConcurrencyCap` is where the advisory key is acquired;
     // `.from(files)` … `.for("update")` is the input-file row lock.
-    assertOrder(body, "createRun", "enforceOrgConcurrencyCap(tx, scope)", ".from(files)");
+    assertOrder(body, "createRun", "enforceOrgConcurrencyCap(tx, scope,", ".from(files)");
     expect(body).toContain('.for("update")');
   });
 
@@ -86,7 +86,7 @@ describe("run-admission lock order", () => {
     assertOrder(
       body,
       "createRun",
-      "enforceOrgConcurrencyCap(tx, scope)",
+      "enforceOrgConcurrencyCap(tx, scope,",
       "acquireRunNumberLock(tx, scope, packageId)",
     );
   });
