@@ -353,7 +353,7 @@ export function runPiChat(input: PiChatInput): Response {
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
         const delivery = fileDelivery(model);
-        const pdfInput = createTurnPdfInput(model);
+        const pdfInput = createTurnPdfInput(model, delivery);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
@@ -774,15 +774,15 @@ export function runPiChat(input: PiChatInput): Response {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
         unsubscribe?.();
-        // A file the model refused, once per turn and whatever the outcome; the turn records none.
-        const refusedKinds = fileRefusal.refusedKinds();
-        if (refusedKinds.length) {
-          logger.warn("chat turn withheld a file the model refused", {
+        // Files a replay withheld, once per turn and whatever the outcome; the turn records none.
+        const withheld = fileRefusal.withheldKinds();
+        if (withheld.length) {
+          logger.warn("chat turn withheld files after a provider refusal", {
             orgId: input.orgId,
             presetId: input.presetId,
             chatSessionId: input.chatSessionId,
             api: model.api,
-            kinds: refusedKinds,
+            withheld,
           });
         }
         // Once per turn, on every exit, so a turn that died in construction

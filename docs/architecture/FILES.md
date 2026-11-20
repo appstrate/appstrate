@@ -254,16 +254,16 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces files to external
 **What the chat sends its model.** One rule decides, once per turn, which files reach the model; the server and the composer share it (`fileDelivery`, `packages/module-chat/src/file-input.ts`): block only what is declared impossible, otherwise send.
 
 - **Images** are sent unless the model's modalities are known and lack `image`. Unknown modalities (an alias, a custom model) mean sent, in the chat bindings only; runs keep `buildPiModel`'s text default.
-- **PDFs** are sent when the API shape has a PDF wire format and the model is not declared text-only, since providers read PDF pages as images. `WIRE_PARTS` in `file-input.ts` holds each API's part types for text, images and PDFs, read by the encoders in `pi-chat/native-pdf.ts` and by the refusal replay. Mistral Conversations has no PDF format (documents by hosted URL only), and the composer warns for it.
+- **PDFs** are sent when the API shape has a PDF wire format and the model is not declared text-only, since providers read PDF pages as images. `WIRE_PARTS` in `file-input.ts` holds each API's part types for text, images and PDFs, read by the encoders in `pi-chat/native-pdf.ts` and by the refusal replay. Appstrate's Mistral Conversations adapter has no PDF encoder, so PDFs are not sent to it, and the composer warns for it.
 - **Recency**: images stay in the request for the three most recent user messages, a PDF only on the turn it is attached or read.
 
 Whether a provider accepts a file is not declared per provider: the catalog knows text and image only. The chat sends whenever the API has a format and relies on an in-turn replay, at the cost of one failed request per refusal. Extracting a PDF's text server-side is out of scope.
 
-**The replay** (`pi-chat/file-refusal.ts`). A request that carried a file and fails, after Pi's own retries, as an invalid request (not 408/409, not a context overflow), or with no recognised cause that Pi does not judge transient (Codex reports a refused file without a status), is replayed in the same step with its file parts replaced by a text pointer naming their kind:
+**The replay** (`pi-chat/file-refusal.ts`). A request that carried a file and fails, after Pi's own retries, as an invalid request (not 408/409, not a context overflow), or with no recognised cause that Pi does not judge transient, is replayed in the same step with its file parts replaced by a text pointer naming their kind and saying only that it was withheld. The HTTP error status Pi reports for the attempt (`after_provider_response`) outranks its error text: pi-ai's Codex adapter throws the body's sentence without the status, so a 401, 429 or 5xx there is never replayed, while its refused file, statusless when no response status is seen, still is. An attempt that already streamed text, reasoning or a tool call to the client is never replayed: the turn ends with its error rather than with two answers.
 
 - the PDFs alone first when images rode too, then both kinds if that replay fails under the same category: at most two replays;
 - the provider's wording is never read, so an unrelated 4xx with a file in the request costs up to two extra requests, then the turn reports the first error; a replay failing otherwise reports its own;
-- a replay that succeeds keeps its kinds withheld for the rest of the turn, a statusless failure that was only flaky included;
+- a replay that succeeds keeps its kinds withheld for the rest of the turn, a statusless failure that was only flaky included, and the server logs the kinds withheld (`chat turn withheld files after a provider refusal`), not which one was refused: after the escalation either could be;
 - like Pi's own retries, each failed attempt counts as one model call against the step budget;
 - an API without part types in `WIRE_PARTS` carries no file the replay can see, so it never replays.
 

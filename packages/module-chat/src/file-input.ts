@@ -18,8 +18,8 @@ export interface WireParts {
 
 /**
  * The content part types each API's payload carries: pi-ai's converters write the text and the
- * images, `pi-chat/native-pdf.ts` the PDFs. Mistral's conversations API takes documents only by
- * hosted URL, so it has no PDF. An API missing here is sent no PDF, and none of its parts is
+ * images, `pi-chat/native-pdf.ts` the PDFs. Appstrate's Mistral Conversations adapter has no PDF
+ * encoder, so PDFs are not sent to it. An API missing here is sent no PDF, and none of its parts is
  * recognised as a file.
  */
 export const WIRE_PARTS = {

@@ -3,7 +3,7 @@
 import { sanitizeFilename } from "@appstrate/core/naming";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { ExtensionFactory } from "@appstrate/runner-pi";
-import { fileDelivery, WIRE_PARTS, type PdfWireApi } from "../file-input.ts";
+import { WIRE_PARTS, type FileDelivery, type PdfWireApi } from "../file-input.ts";
 import { logger } from "../logger.ts";
 
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
@@ -237,12 +237,10 @@ const ENCODERS = {
  * messages and attach them at serialization, to the same user or tool result
  * that supplied them. A new turn starts with an empty set.
  */
-export function createTurnPdfInput(model: {
-  api: string;
-  input?: readonly string[] | null;
-  compat?: unknown;
-}): TurnPdfInput {
-  const delivery = fileDelivery(model);
+export function createTurnPdfInput(
+  model: { api: string; compat?: unknown },
+  delivery: FileDelivery,
+): TurnPdfInput {
   // `pdf` holds only for an API with a PDF wire format.
   const api = delivery.pdf ? (model.api as PdfWireApi) : undefined;
   const encoder: PdfEncoder | undefined = api && ENCODERS[api];

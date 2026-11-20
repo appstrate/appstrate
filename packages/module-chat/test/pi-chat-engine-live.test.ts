@@ -257,6 +257,41 @@ function refused(body: string): Response | undefined {
   );
 }
 
+/**
+ * When set, the provider stub answers request `n` (1-based) with a 200 stream that writes `text`
+ * and then fails with `message`, on Chat Completions and Responses. Reset in `afterEach`.
+ */
+let providerStreamFailure:
+  ((body: string, n: number) => { text: string; message: string } | undefined) | null = null;
+
+function failingMidStream(path: string): Response | undefined {
+  const failure = providerStreamFailure?.(capture.bodies.at(-1)!, capture.bodies.length);
+  if (!failure) return undefined;
+  const error = { message: failure.message, type: "invalid_request_error", code: "invalid_file" };
+  const events = path.endsWith("/responses")
+    ? [
+        {
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_partial", role: "assistant", content: [] },
+        },
+        { type: "response.output_text.delta", output_index: 0, delta: failure.text },
+        { type: "error", code: error.code, message: error.message },
+      ]
+    : [
+        {
+          id: "c1",
+          object: "chat.completion.chunk",
+          model: "m",
+          choices: [{ index: 0, delta: { role: "assistant", content: failure.text } }],
+        },
+        { error },
+      ];
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 const server = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -264,7 +299,7 @@ const server = Bun.serve({
     if (path.endsWith("/responses")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      const refusal = refused(capture.bodies.at(-1)!);
+      const refusal = refused(capture.bodies.at(-1)!) ?? failingMidStream(path);
       if (refusal) return refusal;
       const step = capture.bodies.length;
       const call = connectorCall(step);
@@ -304,7 +339,7 @@ const server = Bun.serve({
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      const refusal = refused(capture.bodies.at(-1)!);
+      const refusal = refused(capture.bodies.at(-1)!) ?? failingMidStream(path);
       if (refusal) return refusal;
       if (!providerPark) return openAiSse(connectorCall(capture.bodies.length));
       const park = providerPark;
@@ -339,6 +374,7 @@ afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
   providerRefusal = null;
+  providerStreamFailure = null;
   mcpToolCalls = 0;
   mcpSurface = EMPTY_SURFACE;
 });
@@ -773,9 +809,9 @@ describe("runPiChat against a stub provider", () => {
   describe("a file the model refuses", () => {
     const PNG =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-    const IMAGE_POINTER = "[image withheld: this model rejected it; any other file was delivered]";
-    const PDF_POINTER = "[PDF withheld: this model rejected it; any other file was delivered]";
-    const WITHHELD_LOG = "chat turn withheld a file the model refused";
+    const IMAGE_POINTER = "[image withheld: the provider rejected the request carrying it]";
+    const PDF_POINTER = "[PDF withheld: the provider rejected the request carrying it]";
+    const WITHHELD_LOG = "chat turn withheld files after a provider refusal";
     // DeepSeek's answer to a PDF part on Chat Completions.
     const FILE_REFUSAL: ProviderError = {
       status: 400,
@@ -859,7 +895,7 @@ describe("runPiChat against a stub provider", () => {
         presetId: "preset_live",
         chatSessionId: null,
         api: "openai-completions",
-        kinds: ["pdf"],
+        withheld: ["pdf"],
       });
     }, 30_000);
 
@@ -1001,6 +1037,53 @@ describe("runPiChat against a stub provider", () => {
       expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
       expect(answered(chunks)).toContain(ANSWER);
     }, 30_000);
+
+    const STREAMED = [
+      { apiShape: "openai-completions" },
+      { apiShape: "openai-responses" },
+    ] as const;
+    const PARTIAL = "Le contrat prévoit";
+    const STREAM_FAILURE = "the attached file could not be processed";
+
+    it.each(STREAMED)(
+      "ends a $apiShape turn in its error when the failed attempt already streamed text",
+      async ({ apiShape }) => {
+        capture.bodies.length = 0;
+        providerStreamFailure = (body) =>
+          body.includes(pdfData) ? { text: PARTIAL, message: STREAM_FAILURE } : undefined;
+        const { chunks } = await runTurn(() => "streamed-then-failed", undefined, undefined, {
+          model: vision(apiShape),
+          messages: attaching("pdf"),
+          readAttachment: readFiles,
+        });
+        // No replay: the client already holds the first attempt's words.
+        expect(answered(chunks)).toBe(PARTIAL);
+        expect(capture.bodies).toHaveLength(1);
+        expect(chunks.some((chunk) => chunk.type === "error")).toBe(true);
+        expect(finishTurn(chunks)).toMatchObject({ finishReason: "error" });
+      },
+      30_000,
+    );
+
+    it.each(STREAMED)(
+      "still replays a $apiShape attempt that failed mid-stream before any content",
+      async ({ apiShape }) => {
+        capture.bodies.length = 0;
+        providerStreamFailure = (body) =>
+          body.includes(pdfData) ? { text: "", message: STREAM_FAILURE } : undefined;
+        const { chunks } = await runTurn(() => "failed-before-content", undefined, undefined, {
+          model: vision(apiShape),
+          messages: attaching("pdf"),
+          readAttachment: readFiles,
+        });
+        expect(capture.bodies).toHaveLength(2);
+        expect(capture.bodies[1]).toContain(PDF_POINTER);
+        expect(answered(chunks)).toBe(apiShape === "openai-responses" ? "" : ANSWER);
+        expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+        expect(finishTurn(chunks)).toMatchObject({ finishReason: "stop" });
+      },
+      30_000,
+    );
 
     it("keeps withholding the refused kind on the later steps of the turn", async () => {
       capture.bodies.length = 0;

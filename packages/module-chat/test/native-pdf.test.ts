@@ -33,7 +33,7 @@ interface TestModel {
 /** The turn the engine builds for a model. */
 const turnFor = (model: TestModel) => {
   const delivery = fileDelivery(model);
-  const turn = createTurnPdfInput(model);
+  const turn = createTurnPdfInput(model, delivery);
   expect(turn.unsupported === undefined).toBe(delivery.pdf);
   return turn;
 };

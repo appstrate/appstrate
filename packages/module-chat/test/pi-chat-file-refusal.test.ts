@@ -8,8 +8,8 @@ import { payloadTooLarge } from "@appstrate/core/api-errors";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { createFileRefusal } from "../src/pi-chat/file-refusal.ts";
 
-const IMAGE_POINTER = "[image withheld: this model rejected it; any other file was delivered]";
-const PDF_POINTER = "[PDF withheld: this model rejected it; any other file was delivered]";
+const IMAGE_POINTER = "[image withheld: the provider rejected the request carrying it]";
+const PDF_POINTER = "[PDF withheld: the provider rejected the request carrying it]";
 const text = { type: "text", text: "hi" };
 const image = { type: "image", source: { type: "base64", data: "AAAA" } };
 const pdf = { type: "document", source: { type: "base64", data: "BBBB" } };
@@ -38,9 +38,16 @@ function harness(api = "anthropic-messages") {
   /** The payload as it reaches the wire. */
   const send = (payload: unknown) =>
     handlers.get("before_provider_request")!({ payload }) ?? payload;
+  /** The response Pi saw for the request, as `after_provider_response` reports it. */
+  const respond = (status: number) =>
+    handlers.get("after_provider_response")!({
+      type: "after_provider_response",
+      status,
+      headers: {},
+    });
   const end = (stopReason: string, errorMessage?: string, provider = "anthropic") =>
     handlers.get("turn_end")!({
-      message: { role: "assistant", stopReason, errorMessage, provider },
+      message: { role: "assistant", content: [], stopReason, errorMessage, provider },
     });
   const settle = (outcome = "error") =>
     handlers.get("agent_before_settle")!({
@@ -52,19 +59,20 @@ function harness(api = "anthropic-messages") {
             sourceEntry: {
               type: "message",
               id: "e2",
-              message: { role: "assistant", stopReason: "error" },
+              message: { role: "assistant", content: [], stopReason: "error" },
             },
           },
         ],
       },
     });
   /** One failed request with `payload`, settled: whether a replay was asked for. */
-  const fail = (payload: unknown, error: string, provider?: string) => {
+  const fail = (payload: unknown, error: string, provider?: string, status?: number) => {
     send(payload);
+    if (status !== undefined) respond(status);
     end("error", error, provider);
     return settle() !== undefined;
   };
-  return { refusal, send, end, settle, fail, replays: () => replays };
+  return { refusal, send, respond, end, settle, fail, replays: () => replays };
 }
 
 const REPLAY = {
@@ -85,6 +93,35 @@ describe("which failures are replayed", () => {
     ]) {
       expect(harness("openai-codex-responses").fail(responsesImage, error)).toBe(true);
     }
+  });
+
+  // pi-ai's Codex adapter throws the body's sentence alone; only the response status names it.
+  it("judges a statusless Codex failure by the response status Pi observed", () => {
+    const codex = (error: string, status: number) =>
+      harness("openai-codex-responses").fail(responsesImage, error, "openai-codex", status);
+    expect(
+      codex("You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.", 429),
+    ).toBe(false);
+    expect(codex("Your session has expired. Please sign in again.", 401)).toBe(false);
+    expect(codex("An error occurred while processing your request.", 500)).toBe(false);
+    expect(codex("Invalid file data: 'file_data'.", 400)).toBe(true);
+  });
+
+  it("does not take a successful response's status for the failure later in its stream", () => {
+    const { send, respond, end, settle } = harness("openai-codex-responses");
+    send(responsesImage);
+    respond(200);
+    end("error", "Codex error: invalid_request_error");
+    expect(settle()).toBeDefined();
+  });
+
+  it("does not carry a status over to the next request", () => {
+    const { send, respond, end, settle } = harness("openai-codex-responses");
+    send(responsesImage);
+    respond(429);
+    send(responsesImage);
+    end("error", "Codex error: invalid_request_error");
+    expect(settle()).toBeDefined();
   });
 
   it("does not replay a failure that carried no file", () => {
@@ -174,7 +211,7 @@ describe("the replay", () => {
       messages: [{ role: "user", content: [text, { type: "text", text: IMAGE_POINTER }] }],
     });
     end("stop");
-    expect(refusal.refusedKinds()).toEqual(["image"]);
+    expect(refusal.withheldKinds()).toEqual(["image"]);
     expect(refusal.originalError()).toBeUndefined();
     // A later request of the same turn.
     expect(JSON.stringify(send(withImage))).not.toContain("AAAA");
@@ -213,7 +250,7 @@ describe("the replay", () => {
     send(withImage);
     end("stop");
     expect(settle("completed")).toBeUndefined();
-    expect(refusal.refusedKinds()).toEqual(["image"]);
+    expect(refusal.withheldKinds()).toEqual(["image"]);
   });
 
   it("reports the replay's own error when it fails otherwise", () => {
@@ -223,7 +260,7 @@ describe("the replay", () => {
     end("error", "503 Service unavailable");
     expect(settle()).toBeUndefined();
     expect(refusal.originalError()).toBeUndefined();
-    expect(refusal.refusedKinds()).toEqual([]);
+    expect(refusal.withheldKinds()).toEqual([]);
   });
 
   it("keeps the first error when the replay is refused the same way", () => {
@@ -232,7 +269,7 @@ describe("the replay", () => {
     send(withImage);
     end("error", "400 Unsupported parameter: 'temperature' (again)");
     expect(settle()).toBeUndefined();
-    expect(refusal.refusedKinds()).toEqual([]);
+    expect(refusal.withheldKinds()).toEqual([]);
     expect(refusal.originalError()).toBe("400 Unsupported parameter: 'temperature'");
   });
 
@@ -260,7 +297,7 @@ describe("the replay", () => {
     send(withImage);
     end("aborted");
     expect(settle("aborted")).toBeUndefined();
-    expect(refusal.refusedKinds()).toEqual([]);
+    expect(refusal.withheldKinds()).toEqual([]);
     expect(refusal.originalError()).toBeUndefined();
   });
 });
@@ -274,7 +311,7 @@ describe("a request carrying an image and a PDF", () => {
     expect(replayed).not.toContain("BBBB");
     expect(replayed).toContain(PDF_POINTER);
     end("stop");
-    expect(refusal.refusedKinds()).toEqual(["pdf"]);
+    expect(refusal.withheldKinds()).toEqual(["pdf"]);
   });
 
   it("then withholds both when the PDF-less replay is refused too, at most twice", () => {
@@ -287,7 +324,7 @@ describe("a request carrying an image and a PDF", () => {
     expect(replayed).not.toContain("AAAA");
     expect(replayed).not.toContain("BBBB");
     end("stop");
-    expect(refusal.refusedKinds().sort()).toEqual(["image", "pdf"]);
+    expect(refusal.withheldKinds().sort()).toEqual(["image", "pdf"]);
     expect(replays()).toBe(2);
   });
 
@@ -300,7 +337,7 @@ describe("a request carrying an image and a PDF", () => {
     send(withBoth);
     end("error", "400 third");
     expect(settle()).toBeUndefined();
-    expect(refusal.refusedKinds()).toEqual([]);
+    expect(refusal.withheldKinds()).toEqual([]);
     expect(refusal.originalError()).toBe("400 first");
   });
 });

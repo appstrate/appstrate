@@ -11,15 +11,19 @@ import {
   type ExtensionFactory,
   type Message,
 } from "@appstrate/runner-pi";
-import { describeModelFailure, type ModelErrorCategory } from "@appstrate/core/model-error";
+import {
+  classifyModelError,
+  describeModelFailure,
+  type ModelErrorCategory,
+} from "@appstrate/core/model-error";
 import { wireParts, type WireParts } from "../file-input.ts";
 
 type FileKind = "image" | "pdf";
 
 /** Names the kind, so the model does not doubt the files of the other kind it did receive. */
 const WITHHELD: Record<FileKind, string> = {
-  image: "[image withheld: this model rejected it; any other file was delivered]",
-  pdf: "[PDF withheld: this model rejected it; any other file was delivered]",
+  image: "[image withheld: the provider rejected the request carrying it]",
+  pdf: "[PDF withheld: the provider rejected the request carrying it]",
 };
 
 function partKind(value: object, parts: WireParts): FileKind | undefined {
@@ -83,15 +87,26 @@ type AssistantMessage = Extract<Message, { role: "assistant" }>;
 /** A request timeout and a conflict are 4xx a retry can clear: not a verdict on the file. */
 const TRANSIENT_REQUEST_STATUSES = new Set([408, 409]);
 
+/** A failed attempt, with the HTTP error status its response carried when Pi saw one. */
+interface Attempt {
+  message: AssistantMessage;
+  status?: number;
+}
+
 /**
  * The category a failed call is a refusal candidate under, or undefined when it is not one.
  * An invalid request, or a failure with no recognised cause: Codex reports a refused file with
- * no status. Never auth, quota, throttling, a 5xx, Pi's own transient or overflow verdicts — the
- * llm-proxy's 413 body limit among them.
+ * no status in its text, so the response's status, when observed, outranks the text. Never auth,
+ * quota, throttling, a 5xx, Pi's own transient or overflow verdicts — the llm-proxy's 413 body
+ * limit among them.
  */
-function refusalCategory(message: AssistantMessage): ModelErrorCategory | undefined {
+function refusalCategory({ message, status: observed }: Attempt): ModelErrorCategory | undefined {
   const text = (message.errorMessage ?? "").trim();
-  const { category, status } = describeModelFailure(text);
+  const status = observed ?? describeModelFailure(text).status;
+  const { category } = classifyModelError({
+    message: text,
+    ...(status !== undefined ? { status } : {}),
+  });
   if (category !== "invalid_request" && category !== "unknown") return undefined;
   if (status !== undefined && TRANSIENT_REQUEST_STATUSES.has(status)) return undefined;
   // A known 4xx is authoritative over its prose; Pi's transient patterns judge the rest.
@@ -99,11 +114,24 @@ function refusalCategory(message: AssistantMessage): ModelErrorCategory | undefi
   return isContextOverflow(message) ? undefined : category;
 }
 
+/** The client was already streamed part of this attempt's answer: a replay would add a second. */
+function streamedContent(message: AssistantMessage): boolean {
+  return message.content.some(
+    (part) =>
+      part.type === "toolCall" ||
+      (part.type === "text" && part.text !== "") ||
+      (part.type === "thinking" && part.thinking !== ""),
+  );
+}
+
 interface FileRefusal {
   /** Must be the last `before_provider_request` handler: it reads and edits the payload as sent. */
   extension: ExtensionFactory;
-  /** The kinds a successful replay proved refused this turn, for the server log. */
-  refusedKinds(): FileKind[];
+  /**
+   * The kinds withheld from a replay that then succeeded, for the server log. Not the refused
+   * ones: after the escalation, either kind could have been the cause.
+   */
+  withheldKinds(): FileKind[];
   /** The first failure's text when every replay was refused the same way: the turn's error. */
   originalError(): string | undefined;
 }
@@ -124,7 +152,7 @@ interface Replay {
   /** The failed request's refusal category: a replay failing under it is refused the same way. */
   category: ModelErrorCategory;
   /** The latest replay's own failure, retries included. */
-  last?: AssistantMessage;
+  last?: Attempt;
 }
 
 /** `onReplay` runs when a replay is requested: the failed attempt is no longer the turn's error. */
@@ -135,21 +163,28 @@ export function createFileRefusal(
   // An API without known part types carries no file the refusal can see: it never replays.
   const parts = wireParts(api);
   const withheld = new Set<FileKind>();
-  const refused = new Set<FileKind>();
+  const answeredWithout = new Set<FileKind>();
   let sent: FileKind[] = [];
+  let responseStatus: number | undefined;
   let suspect: Suspect | undefined;
   let replay: Replay | undefined;
   let original: string | undefined;
 
   return {
-    refusedKinds: () => [...refused],
+    withheldKinds: () => [...answeredWithout],
     originalError: () => original,
     extension(pi) {
       pi.on("before_provider_request", ({ payload }) => {
         if (!parts) return;
         const sending = withheld.size ? withholdFiles(payload, withheld, parts) : payload;
         sent = [...fileKindsIn(sending, parts)];
+        responseStatus = undefined;
         return withheld.size ? sending : undefined;
+      });
+      // Only some adapters report a refused response here (Codex does); a 2xx says nothing of a
+      // failure later in its stream.
+      pi.on("after_provider_response", ({ status }) => {
+        responseStatus = status >= 400 ? status : undefined;
       });
       // Errors are judged where Pi settles a run, after its own retries.
       pi.on("turn_end", ({ message }) => {
@@ -158,12 +193,14 @@ export function createFileRefusal(
         if (m.stopReason === "aborted") {
           suspect = replay = undefined;
         } else if (m.stopReason !== "error") {
-          for (const kind of replay?.kinds ?? []) refused.add(kind);
+          for (const kind of replay?.kinds ?? []) answeredWithout.add(kind);
           suspect = replay = original = undefined;
         } else if (replay) {
-          replay.last = m;
+          replay.last = { message: m, status: responseStatus };
         } else {
-          const category = sent.length ? refusalCategory(m) : undefined;
+          const category = sent.length
+            ? refusalCategory({ message: m, status: responseStatus })
+            : undefined;
           suspect = category ? { kinds: sent, error: m.errorMessage ?? "", category } : undefined;
         }
       });
@@ -175,6 +212,10 @@ export function createFileRefusal(
         )?.sourceEntry;
         if (failed?.type !== "message" || failed.message.role !== "assistant") return;
         if (failed.message.stopReason !== "error") return;
+        if (streamedContent(failed.message)) {
+          suspect = replay = undefined;
+          return;
+        }
         const refusedAgain =
           replay?.last !== undefined && refusalCategory(replay.last) === replay.category;
         if (replay && !(refusedAgain && replay.remaining.length)) {

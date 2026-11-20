@@ -124,7 +124,7 @@ describe("readPromptPdfs", () => {
     const read: string[] = [];
     const receipts = await readPromptPdfs(
       user("current", ...uris),
-      createTurnPdfInput({ api: "openai-responses" }),
+      createTurnPdfInput({ api: "openai-responses" }, { image: true, pdf: true }),
       async (uri) => {
         read.push(uri);
         return { mime: "application/pdf", bytes: new TextEncoder().encode("%PDF-1.7") };
@@ -136,7 +136,7 @@ describe("readPromptPdfs", () => {
   });
 
   it("reads no PDF when the turn sends none, and tells the model why", async () => {
-    const turn = createTurnPdfInput({ api: "openai-responses", input: ["text"] });
+    const turn = createTurnPdfInput({ api: "openai-responses" }, { image: false, pdf: false });
     const receipts = await readPromptPdfs(
       user("current", "0.pdf"),
       turn,

@@ -21,7 +21,7 @@ for (const [scenario, title] of [
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNg+M8AAAICAQB7CYF4AAAAAElFTkSuQmCC";
     const rawRefusal = "Cannot decode PNG: incomplete image data";
     // What replaces an image the provider refused (`pi-chat/file-refusal.ts`).
-    const withheld = "[image withheld: this model rejected it; any other file was delivered]";
+    const withheld = "[image withheld: the provider rejected the request carrying it]";
     // The receipt history keeps of a relayed image (`pi-chat/mcp-tools.ts`).
     const receipt = "bytes, read for this turn]";
     let refusals = 0;
