@@ -270,7 +270,7 @@ describe("search and describe on skills", () => {
     expect(searched.skills.items).toEqual([
       {
         id: teamUri(),
-        package_id: TEAM,
+        packageId: TEAM,
         name: "team",
         description: "Sets the team.",
         granted_in: [teamB.id],
@@ -291,15 +291,48 @@ describe("search and describe on skills", () => {
     });
   });
 
-  it("lists nothing in a space where the caller cannot read skills", async () => {
+  it("refuses a space where the caller cannot read skills when the kind is named, and leaves the kind out when it is defaulted", async () => {
     const headers = await guest({
       [owner.defaultSpaceId]: ["mcp:read", "skills:read"],
       [teamB.id]: ["mcp:read"],
     });
-    const searched = (await tool(headers, "search", { kinds: ["skill"], space_id: teamB.id })) as {
-      skills: { total: number };
+    const named = (
+      await call(headers, "tools/call", {
+        name: "search",
+        arguments: { kinds: ["skill"], space_id: teamB.id },
+      })
+    ).result as { isError: boolean; content: Array<{ text: string }> };
+    expect(named.isError).toBe(true);
+    expect(JSON.parse(named.content[0]!.text)).toMatchObject({
+      status: 403,
+      body: { code: "not_granted" },
+    });
+    const defaulted = await tool(headers, "search", { space_id: teamB.id });
+    expect(defaulted.skills).toBeUndefined();
+  });
+
+  it("lists the skills of the other spaces and names the refused one under unsearched, across spaces", async () => {
+    const headers = await guest({
+      [owner.defaultSpaceId]: ["mcp:read", "skills:read"],
+      [teamB.id]: ["mcp:read"],
+    });
+    const searched = (await tool(headers, "search", { kinds: ["skill"] })) as {
+      skills: { items: Array<{ id: string }>; unsearched: Array<{ space_id: string }> };
     };
-    expect(searched.skills.total).toBe(0);
+    expect(searched.skills.items.map((i) => i.id)).toEqual([toneUri()]);
+    expect(searched.skills.unsearched.map((u) => u.space_id)).toEqual([teamB.id]);
+  });
+
+  it("searches the skills of one space without reading the archives of the others", async () => {
+    // A skill never served before: a cached archive would not be read again.
+    const broken = "@skillsext/broken";
+    await seedPublishedSkill(broken, "broken", teamB.id);
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey(broken, "1.0.0"));
+    const searched = (await tool(ownerHeaders(), "search", {
+      kinds: ["skill"],
+      space_id: owner.defaultSpaceId,
+    })) as { skills: { total: number; items: Array<{ id: string }> } };
+    expect(searched.skills.items.map((i) => i.id)).toEqual([toneUri()]);
   });
 });
 

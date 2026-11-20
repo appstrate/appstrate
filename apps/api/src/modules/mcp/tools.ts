@@ -56,6 +56,7 @@ import {
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { parseScopedName } from "@appstrate/core/naming";
 import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
@@ -406,8 +407,8 @@ interface SearchCall {
   limit: number;
   tag: string | undefined;
   integration: string | undefined;
-  /** The call named this kind (in `kinds`, or by one of its filters). */
-  named: boolean;
+  /** `kinds` lists this kind: only then are remote catalogs read from their servers. */
+  live: boolean;
   start: number;
   signal: AbortSignal | undefined;
 }
@@ -520,6 +521,28 @@ function requestedKinds(
   return { kinds, named: new Set(kinds) };
 }
 
+/** A filter passed empty or malformed would widen the search instead of narrowing it: refuse it. */
+function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
+  if (args.integration !== undefined) {
+    const id = args.integration;
+    if (typeof id !== "string" || parseScopedName(id) === null) {
+      return {
+        code: "invalid_argument",
+        error: "`integration` must be an integration's package id, `@scope/name`.",
+        arguments: ["integration"],
+      };
+    }
+  }
+  if (args.tag !== undefined && (typeof args.tag !== "string" || args.tag.trim() === "")) {
+    return {
+      code: "invalid_argument",
+      error: "`tag` must be a non-empty string.",
+      arguments: ["tag"],
+    };
+  }
+  return undefined;
+}
+
 /** Read-only, unless the kind of integration tools is declared: reading its catalog reaches third-party servers. */
 function discoveryAnnotations(title: string, kinds: readonly DiscoveryKind[]): Tool["annotations"] {
   return kinds.includes("integration_tool")
@@ -576,7 +599,8 @@ function buildSearchTool(
                 type: "string",
                 description:
                   "Integration tools only: restrict to one integration, by package id " +
-                  "(`@scope/name`); its remote catalog is read from its server when not cached.",
+                  "(`@scope/name`). Its remote catalog is read from its server only when `kinds` " +
+                  "lists `integration_tool`.",
               },
             }
           : {}),
@@ -595,6 +619,8 @@ function buildSearchTool(
     extra: AppstrateRequestExtra,
   ): Promise<CallToolResult> => {
     const start = performance.now();
+    const invalid = invalidFilter(args);
+    if (invalid) return refusalResult(invalid);
     const requested = requestedKinds(args, kinds);
     if ("code" in requested) return refusalResult(requested);
     const call = {
@@ -616,7 +642,8 @@ function buildSearchTool(
     const outcomes = await Promise.all(
       requested.kinds.map(async (kind) => {
         const named = requested.named.has(kind);
-        return { kind, named, outcome: await KINDS[kind].search({ ...call, named }) };
+        const live = Array.isArray(args.kinds) && named;
+        return { kind, named, outcome: await KINDS[kind].search({ ...call, live }) };
       }),
     );
     const sections: Record<string, unknown> = {};
@@ -738,13 +765,31 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
 }
 
 async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
+  // A skill kind is searched where `listSkills` is granted; elsewhere the space is refused.
+  const targets = spaces ?? [{ id: ctx.scope.spaceId, permissions: ctx.permissions }];
+  const readable = targets.filter((space) =>
+    operationIdGranted("listSkills", space.permissions, ctx.ceiling),
+  );
+  const refused = targets
+    .filter((space) => !readable.includes(space))
+    .map((space) => ({
+      space: spaces ? space : undefined,
+      refused: {
+        status: 403,
+        body: {
+          code: "not_granted",
+          error: `Your role does not allow listing skills in space ${space.id}.`,
+        },
+      },
+    }));
+  if (readable.length === 0 && refused[0]) return { refused: refused[0].refused };
   const skills = await listSkills(
     ctx.skills,
-    spaces?.map((space) => space.id) ?? [ctx.scope.spaceId],
+    readable.map((space) => space.id),
   );
   const matches = rankByKeywords(skills, tokens, (skill) => ({
     name: skill.name,
-    text: `${skill.package_id} ${skill.description}`,
+    text: `${skill.packageId} ${skill.description}`,
   }));
   return {
     section: {
@@ -752,6 +797,7 @@ async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
       items: matches
         .slice(0, limit)
         .map(({ item: { granted_in, ...hit } }) => (spaces ? { ...hit, granted_in } : hit)),
+      ...unsearched(refused),
     },
   };
 }
@@ -766,8 +812,8 @@ function integrationKindRefusal(ctx: McpToolContext): Refusal | undefined {
 }
 
 /**
- * The integration tools section: remote catalogs are read from their servers only when the call
- * named the kind or an integration, from the cache otherwise; across spaces, in those that allow it.
+ * The integration tools section: remote catalogs are read from their servers only when `kinds`
+ * lists the kind, from the cache otherwise; across spaces, in those that allow it.
  */
 async function searchIntegrationKind({
   ctx,
@@ -776,7 +822,7 @@ async function searchIntegrationKind({
   tokens,
   limit,
   integration,
-  named,
+  live,
   start,
   signal,
 }: SearchCall) {
@@ -789,7 +835,7 @@ async function searchIntegrationKind({
     {
       tokens,
       limit,
-      cachedOnly: !named,
+      cachedOnly: !live,
       ...(integration !== undefined ? { integration } : {}),
     },
     signal,

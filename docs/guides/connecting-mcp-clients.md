@@ -402,11 +402,11 @@ role. Runs keep their connections there:
 - **Discovery.** `search` with `kinds: ["integration_tool"]` (or `integration`
   alone) takes an optional `query`, an optional `integration` (`@scope/name`)
   and a `limit`; with neither `query` nor `integration` it lists every tool you
-  can call, under `integration_tools`. A search that names neither that kind nor
-  an `integration` reads remote servers' catalogs from the cache only: no
+  can call, under `integration_tools`. A search whose `kinds` does not list that
+  kind (an `integration` alone included) reads remote servers' catalogs from the cache only: no
   server is contacted, no credential sent, no call journaled; a catalog not yet
   cached lists its tools by declared name (`catalog_unreadable: true`) and the
-  integration is named in `uncached`. Naming the kind or an integration reads
+  integration is named in `uncached`. Listing the kind in `kinds` reads
   cold catalogs from their servers, as described below. The REST route takes
   the same choice as `catalogs=live|cached` (default `live`) and answers
   `uncached` too. `describe` with `kind: "integration_tool"` and a tool's `id`

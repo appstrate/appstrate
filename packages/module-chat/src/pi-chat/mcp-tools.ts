@@ -508,12 +508,21 @@ async function enterNamedSpace(
   return undefined;
 }
 
-/** A search of operations alone: `kinds` is `["operation"]`, or omitted with `tag` and no `integration`. */
-function searchesOperationsOnly(args: Record<string, unknown>): boolean {
-  const { kinds } = args;
-  return kinds === undefined
-    ? args.tag !== undefined && args.integration === undefined
-    : Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
+/**
+ * A search of operations alone: its effective kinds are exactly `["operation"]`: `kinds` when
+ * given, else the kinds of the filters passed (`tag`, `integration`), else the kinds the tool
+ * offers (`kinds`' enum in its schema).
+ */
+function searchesOperationsOnly(inputSchema: unknown, args: Record<string, unknown>): boolean {
+  const filtered = [
+    ...(args.tag !== undefined ? ["operation"] : []),
+    ...(args.integration !== undefined ? ["integration_tool"] : []),
+  ];
+  const offered = (
+    inputSchema as { properties?: { kinds?: { items?: { enum?: unknown } } } } | undefined
+  )?.properties?.kinds?.items?.enum;
+  const kinds = args.kinds ?? (filtered.length > 0 ? filtered : offered);
+  return Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
 }
 
 /** Whether a call omits a `space_id` its tool declares and does not require, so it reads every space of the turn (not an operations-only search). */
@@ -524,7 +533,7 @@ function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>
   };
   return (
     args.space_id === undefined &&
-    !searchesOperationsOnly(args) &&
+    !searchesOperationsOnly(inputSchema, args) &&
     schema.properties?.space_id !== undefined &&
     !(Array.isArray(schema.required) && schema.required.includes("space_id"))
   );

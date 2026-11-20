@@ -433,6 +433,36 @@ describe("search — integration_tool kind", () => {
     });
   });
 
+  it("refuses an empty or malformed `integration` before anything is dispatched, instead of widening to every integration", async () => {
+    for (const integration of ["", "nope", 3]) {
+      const made = makeTools(CALL_OWN);
+      for (const args of [{ integration }, { kinds: ["integration_tool"], integration }]) {
+        const result = await made.byName.get("search")!.handler(args, noExtra);
+        expect(result.isError).toBe(true);
+        expect(parseResult(result)).toMatchObject({
+          code: "invalid_argument",
+          arguments: ["integration"],
+        });
+      }
+      expect(made.listings).toHaveLength(0);
+      expect(made.calls).toHaveLength(0);
+    }
+    const made = makeTools(CALL_OWN);
+    const result = await made.byName.get("search")!.handler({ tag: "" }, noExtra);
+    expect(parseResult(result)).toMatchObject({ code: "invalid_argument", arguments: ["tag"] });
+  });
+
+  it("reads remote catalogs from their servers only when `kinds` lists integration_tool: `integration` alone stays cache-only", async () => {
+    const catalogs = async (args: Record<string, unknown>) => {
+      const made = makeTools(CALL_OWN);
+      await made.byName.get("search")!.handler(args, noExtra);
+      return new URL(made.listings[0]!.url).searchParams.get("catalogs");
+    };
+    expect(await catalogs({ integration: INTEGRATION })).toBe("cached");
+    expect(await catalogs({})).toBe("cached");
+    expect(await catalogs({ kinds: ["integration_tool"], integration: INTEGRATION })).toBeNull();
+  });
+
   /** A `not_ready` entry of the listing. */
   const notReadyRow = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
     integration_package_id: id,

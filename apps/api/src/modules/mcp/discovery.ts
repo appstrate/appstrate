@@ -174,7 +174,8 @@ export async function describeAgent(
   for (const field of AGENT_LAUNCH_FIELDS) {
     if (body[field] !== undefined) agent[field] = body[field];
   }
-  if (launch)
+  // An agent not active in the space cannot be launched there.
+  if (launch && body.active !== false)
     agent.run_with = {
       tool: "run_and_wait",
       arguments: {
@@ -189,7 +190,7 @@ export async function describeAgent(
 
 export interface SkillHit {
   id: string;
-  package_id: string;
+  packageId: string;
   name: string;
   description: string;
   /** The space of its URI: where it is read. */
@@ -201,14 +202,14 @@ export async function listSkills(
   reader: McpSkillReader,
   spaceIds: readonly string[],
 ): Promise<SkillHit[]> {
-  const entries = await reader.list("published");
+  const entries = await reader.list("published", spaceIds);
   return entries.flatMap((entry): SkillHit[] => {
     const address = parseSkillUri(entry.uri);
-    if (!address || !spaceIds.includes(address.spaceId)) return [];
+    if (!address) return [];
     return [
       {
         id: entry.uri,
-        package_id: address.packageId,
+        packageId: address.packageId,
         name: entry.frontmatter.name,
         description: entry.frontmatter.description,
         granted_in: [address.spaceId],
@@ -251,7 +252,7 @@ export async function describeSkill(
   return {
     skill: {
       id: entry.uri,
-      package_id: address.packageId,
+      packageId: address.packageId,
       frontmatter: entry.frontmatter,
       resources: entry.resources,
     },

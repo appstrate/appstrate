@@ -50,6 +50,7 @@ function makeTools(
     orgWide = false,
     readOnlySpaces = [],
     emptySpaces = [],
+    agentActive = true,
   }: {
     agentsStatus?: number;
     /** Org-wide: spaces whose agents route refuses. */
@@ -59,6 +60,8 @@ function makeTools(
     readOnlySpaces?: string[];
     /** Org-wide: spaces listing no agent. */
     emptySpaces?: string[];
+    /** The `active` the agent detail answers. */
+    agentActive?: boolean;
   } = {},
 ) {
   const requests: string[] = [];
@@ -78,6 +81,7 @@ function makeTools(
         version: "1.2.0",
         definition: "published",
         input: { schema: { type: "object", properties: { month: { type: "string" } } } },
+        active: agentActive,
         prompt: "the agent's own prompt, which a launch does not need",
       });
     }
@@ -128,7 +132,10 @@ function makeTools(
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: SPACE },
     skills: {
-      list: async () => [TONE, ELSEWHERE],
+      list: async (_definition, spaceIds) =>
+        [TONE, ELSEWHERE].filter(
+          (entry) => !spaceIds || spaceIds.some((id) => entry.uri.startsWith(`skill://${id}/`)),
+        ),
       entry: async (uri) => [TONE, ELSEWHERE].find((entry) => entry.uri === uri) ?? null,
       read: async () => {
         throw new Error("not read here");
@@ -175,7 +182,7 @@ describe("search over agents and skills", () => {
       items: [
         {
           id: TONE.uri,
-          package_id: "@acme/tone",
+          packageId: "@acme/tone",
           name: "tone",
           description: "Sets the tone of a reply.",
         },
@@ -261,6 +268,13 @@ describe("describe of an agent or a skill", () => {
     expect(agent.prompt).toBeUndefined();
   });
 
+  it("offers no run_with for an agent that is not active in the described space", async () => {
+    const { call } = makeTools(READER, { agentActive: false });
+    const agent = await call("describe", { kind: "agent", id: "@acme/invoice-sorter" });
+    expect(agent.active).toBe(false);
+    expect(agent.run_with).toBeUndefined();
+  });
+
   it("relays the agent route's refusal, and refuses an id that is not an agent's", async () => {
     const { byName, call } = makeTools(READER);
     const missing = await byName
@@ -279,7 +293,7 @@ describe("describe of an agent or a skill", () => {
     expect(await call("describe", { kind: "skill", id: TONE.uri })).toEqual({
       kind: "skill",
       id: TONE.uri,
-      package_id: "@acme/tone",
+      packageId: "@acme/tone",
       frontmatter: TONE.frontmatter,
       resources: TONE.resources,
     });

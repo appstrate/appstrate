@@ -47,7 +47,7 @@ interface RegisteredTool {
 }
 
 /** Everything the transport saw, in order, with the touches interleaved. */
-function transcript() {
+function transcript(searchKinds?: string[]) {
   const events: string[] = [];
   const launches: Array<{ spaceHeader: string | null; body: string }> = [];
   const polls: Array<string | null> = [];
@@ -105,7 +105,13 @@ function transcript() {
               name: "search",
               inputSchema: {
                 type: "object",
-                properties: { query: { type: "string" }, space_id: spaceId },
+                properties: {
+                  query: { type: "string" },
+                  ...(searchKinds
+                    ? { kinds: { type: "array", items: { type: "string", enum: searchKinds } } }
+                    : {}),
+                  space_id: spaceId,
+                },
               },
             },
             {
@@ -302,6 +308,17 @@ describe("the conversation's forwarded tools and resources", () => {
 
       transport.events.length = 0;
       await tool("invoke_operation").execute("c2", { operation_id: "listAgents" });
+      expect(transport.events).toEqual(["tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("reads the kinds the tool offers when `kinds` is omitted: a descriptor offering operations alone records no space", async () => {
+    const transport = transcript(["operation"]);
+    const { built, tool } = await tools(transport);
+    try {
+      await tool("search").execute("c1", { query: "runs" });
       expect(transport.events).toEqual(["tools/call"]);
     } finally {
       await built.close();

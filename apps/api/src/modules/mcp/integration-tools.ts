@@ -178,9 +178,9 @@ export const INTEGRATION_TOOLS_DESCRIPTION =
   " Integration tools are the tools of the integrations you hold a connection of, or that need " +
   "none, in the space: each integration's `api_call` tools and the typed tools of a remote MCP " +
   "server; call one with call_integration_tool, passing its `id` as `tool`. Naming " +
-  "`integration_tool` in `kinds`, or an `integration`, reads remote catalogs from their servers " +
-  "(the connection's credential is sent, journaled as its call); otherwise remote catalogs are " +
-  "read from the cache alone, a cold one's tools are listed by name only " +
+  "`integration_tool` in `kinds` reads remote catalogs from their servers (the connection's " +
+  "credential is sent, journaled as its call); otherwise, an `integration` included, remote " +
+  "catalogs are read from the cache alone, a cold one's tools are listed by name only " +
   "(`catalog_unreadable: true`) and the integration is named in `uncached`.";
 
 /** A listed entry, and the spaces of an org-wide call it is listed in (none when pinned). */
