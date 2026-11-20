@@ -399,14 +399,14 @@ describe("mcp tool round-trip", () => {
     const tools = (envelope.result?.tools as Array<Record<string, unknown>>) ?? [];
     const names = tools.map((t) => t.name);
     expect(names.sort()).toEqual([
-      "describe_operation",
+      "describe",
       "get_me",
       "get_runtime_capabilities",
       "invoke_operation",
       "list_files",
       "read",
       "run_and_wait",
-      "search_operations",
+      "search",
       "validate_package_file",
     ]);
     const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
@@ -415,7 +415,7 @@ describe("mcp tool round-trip", () => {
     expect((getMe.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
     const invoke = tools.find((t) => t.name === "invoke_operation")!;
     expect((invoke.annotations as Record<string, unknown>).destructiveHint).toBe(true);
-    const search = tools.find((t) => t.name === "search_operations")!;
+    const search = tools.find((t) => t.name === "search")!;
     expect((search.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
   });
 
@@ -448,7 +448,7 @@ describe("mcp tool round-trip", () => {
     // the surface, not an empty list — without that control the case above
     // would also pass if the whole list were gone.
     expect(viewer).toContain("list_files");
-    expect(viewer).toContain("search_operations");
+    expect(viewer).toContain("search");
 
     const builder = await listFor("builder");
     expect(builder).toContain("run_and_wait");
@@ -461,9 +461,11 @@ describe("mcp tool round-trip", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "search_operations", arguments: { query: "agent", limit: 3 } },
+      params: { name: "search", arguments: { query: "agent", limit: 3, kinds: ["operation"] } },
     });
-    expect((toolPayload(search.envelope).data.total as number) > 0).toBe(true);
+    expect((toolPayload(search.envelope).data.operations as { total: number }).total > 0).toBe(
+      true,
+    );
 
     // Pick a real GET operation with no path params and invoke it. The
     // underlying route runs through the full pipeline, so the result carries
@@ -667,7 +669,7 @@ describe("mcp tool round-trip", () => {
       return toolPayload(envelope);
     };
 
-    const described = await call(1, "describe_operation", { operation_id: "listSpaceMembers" });
+    const described = await call(1, "describe", { kind: "operation", id: "listSpaceMembers" });
     // The two halves are reported apart: nothing is asked in the caller's own
     // space, `space-members:read` is asked in the one the path names.
     expect(described.data.target_space_permissions).toContain("space-members:read");
@@ -697,13 +699,17 @@ describe("mcp tool round-trip", () => {
     // A target-space operation is a listed one: searching must offer it rather
     // than bury it under `denied`, which is where a caller-space reading of the
     // requirement would have put it.
-    const searched = await call(4, "search_operations", { query: "members", limit: 100 });
-    const listed = (searched.data.operations as Array<{ operation_id: string }>).map(
-      (entry) => entry.operation_id,
-    );
-    const denied = (searched.data.denied as Array<{ operation_id: string }>).map(
-      (entry) => entry.operation_id,
-    );
+    const searched = await call(4, "search", {
+      query: "members",
+      limit: 100,
+      kinds: ["operation"],
+    });
+    const section = searched.data.operations as {
+      items: Array<{ id: string }>;
+      denied: Array<{ id: string }>;
+    };
+    const listed = section.items.map((entry) => entry.id);
+    const denied = section.denied.map((entry) => entry.id);
     expect(listed).toContain("listSpaceMembers");
     expect(denied).not.toContain("listSpaceMembers");
   });
@@ -764,7 +770,7 @@ describe("mcp ceiling guards for a delegated credential", () => {
       jsonrpc: "2.0",
       id: 2,
       method: "tools/call",
-      params: { name: "describe_operation", arguments: { operation_id: "deleteMyConnection" } },
+      params: { name: "describe", arguments: { kind: "operation", id: "deleteMyConnection" } },
     });
     return {
       granted: toolPayload(described.envelope).data.granted,
@@ -901,7 +907,7 @@ describe("mcp audit + rate limiting", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "search_operations", arguments: { query: "agent" } },
+      params: { name: "search", arguments: { query: "agent", kinds: ["operation"] } },
     });
     const rows = await db
       .select()

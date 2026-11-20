@@ -8,12 +8,18 @@
  * ≈ 72K tokens), so instead we expose a tiny fixed surface and let the model
  * discover on demand:
  *
- *   - `search_operations`   — keyword/tag search over the catalog; a keyword
- *                             hit also returns the top match's full schema as
- *                             `best_match`, so the common single-target case
+ *   - `search`              — keyword search over every kind the caller acts on
+ *                             (operations, integration tools, agents, skills); a
+ *                             keyword hit also returns the top match described
+ *                             as `best_match`, so the common single-target case
  *                             skips the separate describe step
- *   - `describe_operation`  — full input schema for one operation
+ *   - `describe`            — everything needed to act on one item
  *   - `invoke_operation`    — execute one operation
+ *
+ * A root tool exists only when it does what `invoke_operation` cannot: relay a
+ * third-party tool result (`call_integration_tool`), launch and wait
+ * (`run_and_wait`), read bytes (`read`), import a package archive. Discovery is
+ * one tool for every kind, description one tool for every kind.
  *
  * `invoke_operation` dispatches **in-process** through the platform's own
  * Hono app (`app.fetch`), re-entering the full auth pipeline + RBAC. The
@@ -101,12 +107,27 @@ import {
 } from "./tool-results.ts";
 import { buildIntegrationTools } from "./integration-tools.ts";
 import {
+  compareKeywordScores,
   DEFAULT_SEARCH_LIMIT,
+  keywordScore,
   MAX_SEARCH_LIMIT,
   rankByKeywords,
   searchLimit,
   searchTokens,
+  type KeywordScore,
 } from "./search.ts";
+import {
+  DISCOVERY_KINDS,
+  KIND_USE,
+  describeAgent,
+  describeSkill,
+  listAgents,
+  listSkills,
+  type AgentHit,
+  type DiscoveryKind,
+  type McpSkillReader,
+  type SkillHit,
+} from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { describeSpace } from "@appstrate/core/mcp-spaces";
 import {
@@ -125,8 +146,8 @@ export type Dispatch = (req: Request) => Promise<Response>;
 
 /** The tools, named for telemetry/audit. */
 export type McpToolName =
-  | "search_operations"
-  | "describe_operation"
+  | "search"
+  | "describe"
   | "invoke_operation"
   | "run_and_wait"
   | "list_files"
@@ -157,7 +178,7 @@ export interface McpToolEvent {
   durationMs: number;
   /** Rows returned to the caller (after `limit`), not rows matched; `call_integration_tool`: its entries. */
   shownCount?: number;
-  /** `search_operations`: matches withheld for lack of permission. */
+  /** `search`: operations withheld for lack of permission. */
   deniedCount?: number;
   /** `invoke_operation`: which operation, its method/path, and the outcome. */
   operationId?: string;
@@ -211,8 +232,8 @@ export interface McpToolContext {
   observe?: McpObserver;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
-  /** `resources/read` of a `skill://` URI, over the spaces the connection reaches (`./skills.ts`). */
-  readSkill: (uri: string) => Promise<ReadResourceResult>;
+  /** The skills the connection reaches, through the Skills extension's reader (`./skills.ts`). */
+  skills: McpSkillReader;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -301,8 +322,8 @@ function fileResourceLink(doc: RunAndWaitFile): {
 /**
  * The full, invoke-ready definition of one operation: parameters, request body,
  * responses, and every referenced component schema inlined. This is the payload
- * `describe_operation` returns, and it is also embedded as `search_operations`'
- * `best_match` so a clear single-hit search needs no follow-up describe call.
+ * `describe` returns for an operation, and `search`'s `best_match` when the top
+ * hit is one, so a clear single-hit search needs no follow-up describe call.
  */
 function describePayload(
   op: CatalogOperation,
@@ -313,7 +334,8 @@ function describePayload(
   return {
     ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
     ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
-    operation_id: op.operationId,
+    kind: "operation",
+    id: op.operationId,
     method: op.method,
     path: op.pathTemplate,
     path_params: op.pathParams,
@@ -366,24 +388,108 @@ function notGrantedRefusal(
   };
 }
 
-function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
-  const descriptor: Tool = {
-    name: "search_operations",
+/** The kinds this caller may search and describe: each is declared only where its read is granted. */
+function discoveryKinds(ctx: McpToolContext): DiscoveryKind[] {
+  const granted = (operationId: string): boolean =>
+    ctx.orgSpaces
+      ? ctx.orgSpaces.reachable.some((s) =>
+          operationIdGranted(operationId, s.permissions, ctx.ceiling),
+        )
+      : operationIdGranted(operationId, ctx.permissions, ctx.ceiling);
+  return DISCOVERY_KINDS.filter((kind) => {
+    switch (kind) {
+      case "operation":
+        return true;
+      case "agent":
+        return granted("listAgents");
+      case "skill":
+        return granted("listSkills");
+      case "integration_tool":
+        return false;
+    }
+  });
+}
+
+/** One kind's hits, with what ranks its best one against the other kinds'. */
+interface KindSection {
+  kind: DiscoveryKind;
+  section: Record<string, unknown>;
+  /** The best hit, when the search had keywords and one matched. */
+  top?: { score: KeywordScore; describe: () => Promise<Record<string, unknown>> };
+}
+
+const KIND_SECTION: Record<DiscoveryKind, string> = {
+  operation: "operations",
+  integration_tool: "integration_tools",
+  agent: "agents",
+  skill: "skills",
+};
+
+function kindsArgument(kinds: readonly DiscoveryKind[]): Record<string, unknown> {
+  return {
+    type: "array",
+    items: { type: "string", enum: [...kinds] },
+    uniqueItems: true,
     description:
-      "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
-      "operationIds with their HTTP method, path, and summary. Use this first to discover " +
-      "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema" +
+      `What to search: ${kinds.map((k) => `\`${k}\``).join(", ")}. Omitted, every kind is ` +
+      "searched.",
+  };
+}
+
+/** The `kinds` a call named, or every declared one; a refusal names an undeclared one. */
+function requestedKinds(
+  raw: unknown,
+  declared: readonly DiscoveryKind[],
+): { kinds: DiscoveryKind[]; explicit: boolean } | Refusal {
+  if (raw === undefined) return { kinds: [...declared], explicit: false };
+  const valid = Array.isArray(raw) && raw.length > 0 && raw.every((k) => typeof k === "string");
+  const unknown = valid
+    ? (raw as string[]).filter((k) => !declared.includes(k as DiscoveryKind))
+    : [];
+  if (!valid || unknown.length > 0) {
+    return {
+      code: "invalid_argument",
+      error: valid
+        ? `Unknown kind(s): ${unknown.join(", ")}.`
+        : "kinds must be a non-empty array of kinds.",
+      arguments: ["kinds"],
+      accepted: [...declared],
+    };
+  }
+  return { kinds: declared.filter((k) => (raw as string[]).includes(k)), explicit: true };
+}
+
+/** `<section> → <tool>` for each kind whose acting tool `surface` declares. */
+function kindUses(kinds: readonly DiscoveryKind[], surface: McpSurface): string {
+  return kinds
+    .filter((kind) => {
+      const { act } = KIND_USE[kind];
+      return act === null || surface[act];
+    })
+    .map((kind) => `${KIND_SECTION[kind]} → ${KIND_USE[kind].tool}`)
+    .join(", ");
+}
+
+function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
+  const { invokes } = surface;
+  const kinds = discoveryKinds(ctx);
+  const uses = kindUses(kinds, surface);
+  const descriptor: Tool = {
+    name: "search",
+    description:
+      `Search what you can act on, by keyword: ${kinds.map((k) => KIND_SECTION[k]).join(", ")}. ` +
+      "Returns one section per kind searched, each with its `total` and its `items`, capped at " +
+      "`limit`; every item carries the `id` describe takes. " +
+      (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
+      "With keywords, `best_match` is the top hit across the kinds, described" +
       (invokes
-        ? " — when it matches your intent you can call invoke_operation directly, no " +
-          "describe_operation needed. "
-        : ", so a clear single hit needs no follow-up describe_operation call. ") +
-      "Operations your role may not invoke are listed separately under `denied` with the " +
-      "permissions they need in YOUR space: report that to the user instead of trying them. " +
-      "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
-      "capped at `limit`.",
+        ? " — when it matches your intent, act on it directly, no describe call needed. "
+        : ", so a clear single hit needs no follow-up describe call. ") +
+      "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
+      "role may not invoke are listed apart under `denied`, with the permissions they need in " +
+      "YOUR space: report that to the user instead of trying them.",
     annotations: {
-      title: "Search API operations",
+      title: "Search",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
@@ -394,12 +500,17 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       properties: {
         query: {
           type: "string",
-          description: "Free-text keywords matched against id/summary/path/tags.",
+          description:
+            "Free-text keywords, matched against each item's id or name and its description.",
         },
-        tag: { type: "string", description: "Restrict to a single OpenAPI tag (e.g. 'Agents')." },
+        kinds: kindsArgument(kinds),
+        tag: {
+          type: "string",
+          description: "Operations only: restrict to one OpenAPI tag (e.g. 'Agents').",
+        },
         limit: {
           type: "integer",
-          description: `Max results (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
+          description: `Max items per kind (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
           minimum: 1,
           maximum: MAX_SEARCH_LIMIT,
         },
@@ -409,47 +520,85 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    const { operations, componentSchemas } = getCatalog();
-    const tag = asString(args.tag)?.toLowerCase();
+    const requested = requestedKinds(args.kinds, kinds);
+    if ("code" in requested) return refusalResult(requested);
     const limit = searchLimit(args.limit);
     const tokens = searchTokens(args.query);
+    const tag = asString(args.tag)?.toLowerCase();
 
-    let matches = [...operations.values()];
-    if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
-
-    const scored = rankByKeywords(
-      matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
-      tokens,
-      (op) => ({
-        name: op.operationId,
-        text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+    const sections = await Promise.all(
+      requested.kinds.map((kind): Promise<KindSection> => {
+        switch (kind) {
+          case "operation":
+            return Promise.resolve(searchOperations(ctx, tokens, tag, limit));
+          case "agent":
+            return searchAgentKind(ctx, surface, tokens, limit);
+          case "skill":
+            return searchSkillKind(ctx, tokens, limit);
+          case "integration_tool":
+            throw new Error("integration_tool is not a declared kind");
+        }
       }),
     );
 
-    // A denied match is answered, not hidden — its id and requirement only.
-    const granted: CatalogOperation[] = [];
-    const denied: CatalogOperation[] = [];
-    for (const op of scored) {
-      (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
+    let best: KindSection["top"];
+    for (const { top } of sections) {
+      if (top && (!best || compareKeywordScores(top.score, best.score, tokens) < 0)) best = top;
     }
-    const shown = granted.slice(0, limit);
-
+    const shown = sections.reduce(
+      (count, { section }) => count + (Array.isArray(section.items) ? section.items.length : 0),
+      0,
+    );
+    const denied = sections.find((s) => s.kind === "operation")?.section.denied_total;
     emit(ctx, {
-      tool: "search_operations",
+      tool: "search",
       durationMs: performance.now() - start,
-      shownCount: shown.length,
-      deniedCount: denied.length,
+      shownCount: shown,
+      ...(typeof denied === "number" ? { deniedCount: denied } : {}),
     });
 
-    // Only the top granted hit carries its schema: one describe saved, response bounded.
-    const top = shown[0];
-    const bestMatch =
-      tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
-
     return jsonResult({
+      ...Object.fromEntries(sections.map(({ kind, section }) => [KIND_SECTION[kind], section])),
+      ...(best ? { best_match: await best.describe() } : {}),
+    });
+  };
+
+  return { descriptor, handler };
+}
+
+function searchOperations(
+  ctx: McpToolContext,
+  tokens: readonly string[],
+  tag: string | undefined,
+  limit: number,
+): KindSection {
+  const { operations, componentSchemas } = getCatalog();
+  let matches = [...operations.values()];
+  if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
+  const fields = (op: CatalogOperation) => ({
+    name: op.operationId,
+    text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+  });
+  const scored = rankByKeywords(
+    matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
+    tokens,
+    fields,
+  );
+
+  // A denied match is answered, not hidden — its id and requirement only.
+  const granted: CatalogOperation[] = [];
+  const denied: CatalogOperation[] = [];
+  for (const op of scored) {
+    (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
+  }
+  const shown = granted.slice(0, limit);
+  const top = shown[0];
+  return {
+    kind: "operation",
+    section: {
       total: granted.length,
-      operations: shown.map((op) => ({
-        operation_id: op.operationId,
+      items: shown.map((op) => ({
+        id: op.operationId,
         method: op.method,
         path: op.pathTemplate,
         summary: op.summary,
@@ -458,37 +607,129 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       })),
       denied_total: denied.length,
       denied: denied.slice(0, limit).map((op) => ({
-        operation_id: op.operationId,
+        id: op.operationId,
         required_permissions: op.requirement.requirements,
         ...deniedCeiling(op, ctx),
         ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
-      best_match: bestMatch,
-    });
+    },
+    ...(tokens.length > 0 && top
+      ? {
+          top: {
+            score: keywordScore(fields(top).name, fields(top).text, tokens),
+            describe: async () => describePayload(top, componentSchemas, ctx),
+          },
+        }
+      : {}),
   };
-
-  return { descriptor, handler };
 }
 
-function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
+async function searchAgentKind(
+  ctx: McpToolContext,
+  surface: McpSurface,
+  tokens: readonly string[],
+  limit: number,
+): Promise<KindSection> {
+  const listed = await listAgents(ctx);
+  if ("refused" in listed) return { kind: "agent", section: { refused: listed.refused } };
+  const fields = (agent: AgentHit) => ({
+    name: agent.id,
+    text: `${agent.title} ${agent.description}`,
+  });
+  const matches = rankByKeywords(listed.agents, tokens, fields);
+  const top = matches[0];
+  return {
+    kind: "agent",
+    section: { total: matches.length, items: matches.slice(0, limit) },
+    ...(tokens.length > 0 && top
+      ? {
+          top: {
+            score: keywordScore(fields(top).name, fields(top).text, tokens),
+            describe: () => describeAgentPayload(ctx, surface, top.id),
+          },
+        }
+      : {}),
+  };
+}
+
+async function searchSkillKind(
+  ctx: McpToolContext,
+  tokens: readonly string[],
+  limit: number,
+): Promise<KindSection> {
+  const skills = await listSkills(ctx.skills, ctx.scope.spaceId);
+  const fields = (skill: SkillHit) => ({
+    name: skill.name,
+    text: `${skill.package_id} ${skill.description}`,
+  });
+  const matches = rankByKeywords(skills, tokens, fields);
+  const top = matches[0];
+  return {
+    kind: "skill",
+    section: { total: matches.length, items: matches.slice(0, limit) },
+    ...(tokens.length > 0 && top
+      ? {
+          top: {
+            score: keywordScore(fields(top).name, fields(top).text, tokens),
+            describe: () => describeSkillPayload(ctx, top.id),
+          },
+        }
+      : {}),
+  };
+}
+
+/** An agent's `describe` payload, its route's refusal relayed as `invoke_operation` relays one. */
+async function describeAgentPayload(
+  ctx: McpToolContext,
+  surface: McpSurface,
+  id: string,
+): Promise<Record<string, unknown>> {
+  const described = await describeAgent(
+    ctx,
+    id,
+    surface.runs ? { spaceId: ctx.orgSpaces?.current.id } : null,
+  );
+  if ("agent" in described) return { kind: "agent", ...described.agent };
+  if ("refused" in described) return { kind: "agent", id, refused: described.refused };
+  return { kind: "agent", id, refusal: described.refusal };
+}
+
+async function describeSkillPayload(
+  ctx: McpToolContext,
+  uri: string,
+): Promise<Record<string, unknown>> {
+  const described = await describeSkill(ctx.skills, uri);
+  return "skill" in described
+    ? { kind: "skill", ...described.skill }
+    : { kind: "skill", id: uri, refusal: described.refusal };
+}
+
+function buildDescribeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
+  const { invokes } = surface;
+  const kinds = discoveryKinds(ctx);
   const descriptor: Tool = {
-    name: "describe_operation",
+    name: "describe",
     description:
-      "Return the full OpenAPI definition for one operation (parameters, request body, " +
-      "responses) with all referenced component schemas inlined, " +
-      (invokes
-        ? "so you can construct a valid invoke_operation call. "
-        : "so you can see exactly what it takes and what it answers with. ") +
-      "It also reports whether your role clears the route's guards (`granted`) and which " +
-      "permissions the route requires in YOUR space (`required_permissions`). " +
-      "`target_space_permissions` is separate on purpose: those are decided in the space the " +
-      "path names, not here, so they never make an operation unavailable to you. " +
-      "`ceiling_permissions` apply only when you act through a delegated credential (API key, " +
-      "OAuth token): its scopes must include each, so they make an operation unavailable when " +
-      "your credential's scopes omit one, whatever your role holds. A granted " +
-      "operation can still be refused on the record it acts on; that refusal names its reason.",
+      "Return everything needed to act on one item search returned, by its `kind` and `id`. " +
+      "An `operation`: its full OpenAPI definition (parameters, request body, responses) with " +
+      "every referenced component schema inlined" +
+      (invokes ? ", to build a valid invoke_operation call (its `id` is the `operation_id`)" : "") +
+      "; whether your role clears the route's guards (`granted`) and the permissions it requires " +
+      "in YOUR space (`required_permissions`). `target_space_permissions` are decided in the " +
+      "space the path names, never here; `ceiling_permissions` apply only through a delegated " +
+      "credential (API key, OAuth token), whose scopes must include each. A granted operation " +
+      "can still be refused on the record it acts on; that refusal names its reason." +
+      (kinds.includes("agent")
+        ? " An `agent`: its launch contract at the definition a launch by you runs (input " +
+          "schema, stored values, locked fields, output, declared integrations)" +
+          (surface.runs ? " and the `run_with` call that launches it." : ".")
+        : "") +
+      (kinds.includes("skill")
+        ? " A `skill`: its frontmatter and the `skill://` URI of each of its files, to read " +
+          "with read."
+        : ""),
     annotations: {
-      title: "Describe API operation",
+      title: "Describe",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
@@ -497,47 +738,76 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       type: "object",
       additionalProperties: false,
       properties: {
-        operation_id: {
+        kind: {
+          type: "string",
+          enum: [...kinds],
+          description: "The item's kind, as search returned it.",
+        },
+        id: {
           type: "string",
           description:
-            "The operationId, as returned by search_operations (or already known). Not " +
-            "needed when search_operations already returned a matching best_match.",
+            "The item's `id`, as search returned it (or already known: an operationId, an agent's " +
+            "`@scope/name`, a skill's `skill://` URI). Not needed when search's best_match already " +
+            "described it.",
         },
       },
-      required: ["operation_id"],
+      required: ["kind", "id"],
     },
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    const operationId = asString(args.operation_id);
+    const kind = asString(args.kind) as DiscoveryKind | undefined;
+    const id = asString(args.id);
     // A malformed call is a refusal result, not a failed execution: the model
     // sees what is missing and can self-correct.
-    if (!operationId) {
+    const missing = [...(kind ? [] : ["kind"]), ...(id ? [] : ["id"])];
+    if (missing.length > 0) {
       return refusalResult({
         code: "missing_argument",
-        error: "operation_id is required.",
-        arguments: ["operation_id"],
+        error: missing.map((name) => `${name} is required.`).join(" "),
+        arguments: missing,
       });
     }
-
-    const { operations, componentSchemas } = getCatalog();
-    const op = operations.get(operationId);
-    if (!op) {
+    if (!kinds.includes(kind!)) {
       return refusalResult({
-        code: "unknown_operation",
-        error: `Unknown operationId: ${operationId}. Find it with search_operations.`,
-        arguments: ["operation_id"],
+        code: "invalid_argument",
+        error: `Unknown kind: ${kind}.`,
+        arguments: ["kind"],
+        accepted: [...kinds],
       });
     }
+    const observe = () => emit(ctx, { tool: "describe", durationMs: performance.now() - start });
 
-    emit(ctx, {
-      tool: "describe_operation",
-      durationMs: performance.now() - start,
-      operationId,
-    });
-
-    return jsonResult(describePayload(op, componentSchemas, ctx));
+    switch (kind!) {
+      case "operation": {
+        const { operations, componentSchemas } = getCatalog();
+        const op = operations.get(id!);
+        if (!op) {
+          return refusalResult({
+            code: "unknown_operation",
+            error: `Unknown operationId: ${id}. Find it with search.`,
+            arguments: ["id"],
+          });
+        }
+        emit(ctx, { tool: "describe", durationMs: performance.now() - start, operationId: id });
+        return jsonResult(describePayload(op, componentSchemas, ctx));
+      }
+      case "agent": {
+        const payload = await describeAgentPayload(ctx, surface, id!);
+        observe();
+        if (payload.refusal) return refusalResult(payload.refusal as Refusal);
+        return jsonResult(payload, payload.refused !== undefined);
+      }
+      case "skill": {
+        const payload = await describeSkillPayload(ctx, id!);
+        observe();
+        if (payload.refusal) return refusalResult(payload.refusal as Refusal);
+        return jsonResult(payload);
+      }
+      case "integration_tool":
+        throw new Error("integration_tool is not a declared kind");
+    }
   };
 
   return { descriptor, handler };
@@ -722,7 +992,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "invoke_operation",
     description:
-      "Execute an Appstrate API operation. Call describe_operation first to learn its " +
+      "Execute an Appstrate API operation. Call describe first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
       "the request is validated and authorized exactly as the equivalent REST call. " +
       "Optimistic concurrency: a result carries `etag` when the resource is versioned — " +
@@ -815,7 +1085,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       });
       return refusalResult({
         code: "unknown_operation",
-        error: `Unknown operationId: ${operationId}. Find it with search_operations.`,
+        error: `Unknown operationId: ${operationId}. Find it with search.`,
         arguments: ["operation_id"],
       });
     }
@@ -1560,7 +1830,7 @@ function buildReadTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Read a resource by its URI: an `appfile://` file (from list_files, a run's output or an " +
       "attachment) through the file's own ACL, or a skill file by its `skill://` URI (from " +
-      'search with `kinds: ["skill"]`, or describe of a skill), the same bytes `resources/read` ' +
+      "search or describe of a skill), the same bytes `resources/read` " +
       "serves. A skill's `SKILL.md` is at its `uri`; replace `SKILL.md` with a path its " +
       "`resources` list to read another of its files. Small text and binary files are returned " +
       "as embedded MCP resources; an oversized or non-downloadable file returns " +
@@ -1617,7 +1887,7 @@ function buildReadTool(ctx: McpToolContext): AppstrateToolDefinition {
  */
 async function readSkillResource(ctx: McpToolContext, uri: string): Promise<ReadResourceResult> {
   try {
-    return await ctx.readSkill(uri);
+    return await ctx.skills.read(uri);
   } catch (err) {
     if (!(err instanceof McpError)) throw err;
     throw new ToolRefusal({
@@ -1942,8 +2212,8 @@ function refuseUndeclaredArguments(
  */
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
   const tools = [
-    buildSearchTool(ctx, surface.invokes),
-    buildDescribeTool(ctx, surface.invokes),
+    buildSearchTool(ctx, surface),
+    buildDescribeTool(ctx, surface),
     ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
@@ -1973,8 +2243,8 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
  * re-checked there. Exhaustive, so a new tool must decide.
  */
 const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
-  search_operations: null,
-  describe_operation: null,
+  search: null,
+  describe: null,
   invoke_operation: "invokes",
   run_and_wait: "runs",
   list_files: "listsFiles",

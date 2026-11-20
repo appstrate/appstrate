@@ -585,7 +585,7 @@ interface HintOptions {
  * {@link activePackagesFilter}, the run gate's own predicate: a system package,
  * or a placement row that says `enabled`. The list is capped (`limit`) so a
  * large catalog doesn't bloat the payload — the long tail stays reachable
- * via `search_operations`.
+ * via `search`.
  *
  * Bounded IN SQL. One get_me call runs it twice (agents, then skills): the
  * activation filter and the LIMIT sit in the query, so only the

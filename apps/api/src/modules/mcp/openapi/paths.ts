@@ -4,7 +4,7 @@
  * OpenAPI paths for the MCP module's own endpoints. These document the
  * transport + discovery surface for human/API consumers; the platform's
  * ~250 operations are NOT re-listed here — they are discovered at runtime
- * through the `search_operations` / `describe_operation` MCP tools, with
+ * through the `search` / `describe` MCP tools, with
  * `run_and_wait` as the run-launch shortcut.
  */
 
@@ -34,8 +34,8 @@ const spacePathParameter = {
 /** The tool surface, shared by the organization and space endpoints. */
 const MCP_TOOLS_DESCRIPTION =
   "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
-  "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-  "`describe_operation`, `read`, `validate_package_file`, " +
+  "declares follow the caller's permissions: the read-only set (`search`, " +
+  "`describe`, `read`, `validate_package_file`, " +
   "`get_runtime_capabilities` and `get_me`) is always present, " +
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +

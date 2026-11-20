@@ -43,8 +43,8 @@ import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
-  SearchOperationsToolUI,
-  DescribeOperationToolUI,
+  SearchToolUI,
+  DescribeToolUI,
   ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
@@ -138,8 +138,8 @@ export function Thread({
         {/* Register the rich tool cards (these render nothing themselves). */}
         <InvokeOperationToolUI />
         <RunAndWaitToolUI />
-        <SearchOperationsToolUI />
-        <DescribeOperationToolUI />
+        <SearchToolUI />
+        <DescribeToolUI />
         <ImportPackageFileToolUI />
 
         {/* Empty: composer centered mid-screen for a strong first impression.

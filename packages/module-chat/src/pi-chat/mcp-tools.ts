@@ -3,9 +3,8 @@
 /**
  * Build the Pi extension factories that expose the platform's own MCP tools
  * to the in-process Pi chat session — exactly the tools the platform MCP server
- * declares to the caller (`search_operations` / `describe_operation` /
- * `invoke_operation`, `run_and_wait`, `search_integration_tools` /
- * `call_integration_tool`, and whatever it adds later), so the assistant pilots
+ * declares to the caller (`search` / `describe` / `invoke_operation`,
+ * `run_and_wait`, `call_integration_tool`, and whatever it adds later), so the assistant pilots
  * the platform with the caller's own permissions, through the one door every
  * MCP client uses.
  *

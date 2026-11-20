@@ -241,6 +241,53 @@ describe("the read tool on skill://", () => {
   });
 });
 
+describe("search and describe on skills", () => {
+  const tool = async (
+    headers: Record<string, string>,
+    name: string,
+    args: Record<string, unknown>,
+  ) =>
+    (
+      (await call(headers, "tools/call", { name, arguments: args })).result as {
+        structuredContent: Record<string, unknown>;
+      }
+    ).structuredContent;
+
+  it("lists the skills of the space the call names, and describes one as skills/get does", async () => {
+    const searched = (await tool(ownerHeaders(), "search", {
+      kinds: ["skill"],
+      space_id: teamB.id,
+    })) as { skills: { items: Array<Record<string, string>> } };
+    expect(searched.skills.items).toEqual([
+      { id: teamUri(), package_id: TEAM, name: "team", description: "Sets the team." },
+    ]);
+    const described = await tool(ownerHeaders(), "describe", {
+      kind: "skill",
+      id: teamUri(),
+      space_id: teamB.id,
+    });
+    const listed = (await call(ownerHeaders(), "skills/list", {})).result?.skills as Entry[];
+    const entry = listed.find((e) => e.uri === teamUri())!;
+    expect(described).toMatchObject({
+      kind: "skill",
+      id: teamUri(),
+      frontmatter: entry.frontmatter,
+      resources: entry.resources,
+    });
+  });
+
+  it("lists nothing in a space where the caller cannot read skills", async () => {
+    const headers = await guest({
+      [owner.defaultSpaceId]: ["mcp:read", "skills:read"],
+      [teamB.id]: ["mcp:read"],
+    });
+    const searched = (await tool(headers, "search", { kinds: ["skill"], space_id: teamB.id })) as {
+      skills: { total: number };
+    };
+    expect(searched.skills.total).toBe(0);
+  });
+});
+
 describe("skills/get on a draft", () => {
   const draftUri = () => `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
 

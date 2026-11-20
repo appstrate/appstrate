@@ -60,8 +60,12 @@ function makeTools(
     dispatch,
     actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
-    readSkill: async () => {
-      throw new Error("no skill reads here");
+    skills: {
+      list: async () => [],
+      entry: async () => null,
+      read: async () => {
+        throw new Error("no skill reads here");
+      },
     },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
@@ -147,8 +151,12 @@ describe("credential proxy closed in the space", () => {
     dispatch: async () => new Response("{}", { status: 200 }),
     actor: { type: "user", id: "user_1" } as Actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
-    readSkill: async () => {
-      throw new Error("no skill reads here");
+    skills: {
+      list: async () => [],
+      entry: async () => null,
+      read: async () => {
+        throw new Error("no skill reads here");
+      },
     },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
@@ -190,8 +198,8 @@ describe("buildMcpTools declarations", () => {
     expect(declared).not.toContain("run_and_wait");
     expect(declared).not.toContain("list_files");
     // The control: discovery is behind the transport's own gate, so it stays.
-    expect(declared).toContain("search_operations");
-    expect(declared).toContain("describe_operation");
+    expect(declared).toContain("search");
+    expect(declared).toContain("describe");
   });
 
   it("withholds run_and_wait until the caller can launch AND read the run back", () => {
@@ -221,11 +229,11 @@ describe("buildMcpTools declarations", () => {
   // the route its tool dispatches to (`runAgent`+`getRun`, `runInline`,
   // `listFiles`, `importBundle`), so any drift between the two is a diff here.
   const ALWAYS = [
-    "describe_operation",
+    "describe",
     "get_me",
     "get_runtime_capabilities",
     "read",
-    "search_operations",
+    "search",
     "validate_package_file",
   ];
   const cases: Array<{
@@ -342,33 +350,36 @@ describe("validate_package_file arguments", () => {
   });
 });
 
-describe("search_operations", () => {
+describe("search", () => {
   it("returns keyword matches with method/path/summary", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
+    const res = await byName.get("search")!.handler({ query: "agent" }, noExtra);
     const body = parseResult(res);
-    const ops = body.operations as Array<Record<string, unknown>>;
+    const ops = (body.operations as { items: Array<Record<string, unknown>> }).items;
     expect(ops.length).toBeGreaterThan(0);
-    expect(typeof ops[0]!.operation_id).toBe("string");
+    expect(typeof ops[0]!.id).toBe("string");
     expect(typeof ops[0]!.method).toBe("string");
   });
 
   it("caps results at the requested limit", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const res = await byName.get("search_operations")!.handler({ limit: 3 }, noExtra);
+    const res = await byName.get("search")!.handler({ limit: 3, kinds: ["operation"] }, noExtra);
     const body = parseResult(res);
-    expect((body.operations as unknown[]).length).toBeLessThanOrEqual(3);
+    expect((body.operations as { items: unknown[] }).items.length).toBeLessThanOrEqual(3);
   });
 
   it("embeds the top match's full schema as best_match on a keyword search", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
+    const res = await byName
+      .get("search")!
+      .handler({ query: "agent", kinds: ["operation"] }, noExtra);
     const body = parseResult(res);
     const best = body.best_match as Record<string, unknown> | undefined;
     expect(best).toBeDefined();
     // best_match is the FULL describe payload, not the compact list row.
-    const ops = body.operations as Array<Record<string, unknown>>;
-    expect(best!.operation_id).toBe(ops[0]!.operation_id);
+    const ops = (body.operations as { items: Array<Record<string, unknown>> }).items;
+    expect(best!.kind).toBe("operation");
+    expect(best!.id).toBe(ops[0]!.id);
     expect(typeof best!.method).toBe("string");
     expect(typeof best!.path).toBe("string");
     expect("request_body" in best!).toBe(true);
@@ -380,14 +391,14 @@ describe("search_operations", () => {
     // never contradicted: a discovery-only caller is not sent to a tool it is
     // not shown.
     const description = (permissions: string[]): string =>
-      makeTools(permissions).byName.get("search_operations")!.descriptor.description!;
+      makeTools(permissions).byName.get("search")!.descriptor.description!;
     expect(description(["mcp:read"])).not.toContain("invoke_operation");
     expect(description(["mcp:read", "mcp:invoke"])).toContain("invoke_operation");
   });
 
   it("omits best_match when there is no query (plain catalog listing)", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const res = await byName.get("search_operations")!.handler({ limit: 5 }, noExtra);
+    const res = await byName.get("search")!.handler({ limit: 5, kinds: ["operation"] }, noExtra);
     const body = parseResult(res);
     expect(body.best_match).toBeUndefined();
   });
@@ -401,27 +412,28 @@ describe("search_operations", () => {
 
     async function searchAgents(): Promise<{
       operations: Array<Record<string, unknown>>;
-      denied: Array<{ operation_id: string; required_permissions: string[] }>;
+      denied: Array<{ id: string; required_permissions: string[] }>;
       body: Record<string, unknown>;
+      section: Record<string, unknown>;
     }> {
       const { byName } = makeTools(VIEWER);
       const res = await byName
-        .get("search_operations")!
-        .handler({ query: "agent", limit: 100 }, noExtra);
+        .get("search")!
+        .handler({ query: "agent", limit: 100, kinds: ["operation"] }, noExtra);
       const body = parseResult(res);
+      const section = body.operations as Record<string, unknown>;
       return {
-        operations: body.operations as Array<Record<string, unknown>>,
-        denied: body.denied as Array<{ operation_id: string; required_permissions: string[] }>,
+        operations: section.items as Array<Record<string, unknown>>,
+        denied: section.denied as Array<{ id: string; required_permissions: string[] }>,
         body,
+        section,
       };
     }
 
     it("answers a denied match under `denied`, never under `operations`", async () => {
       const { operations, denied } = await searchAgents();
-      const shown = operations.map((op) => op.operation_id);
-      const refused = new Map(
-        denied.map((row) => [row.operation_id, row.required_permissions] as const),
-      );
+      const shown = operations.map((op) => op.id);
+      const refused = new Map(denied.map((row) => [row.id, row.required_permissions] as const));
 
       // `POST /api/agents/{scope}/{name}/run` is guarded by `agents:run`, which
       // this set does not hold; `GET /api/agents` is `agents:read|agents:run`,
@@ -436,58 +448,60 @@ describe("search_operations", () => {
     });
 
     it("counts only granted matches and never points best_match at a denied one", async () => {
-      const { operations, denied, body } = await searchAgents();
+      const { operations, denied, body, section } = await searchAgents();
       // `limit: 100` is the tool's maximum: the granted half fitting under it
       // is what makes `total === operations.length` a statement about
       // filtering rather than about truncation.
       expect(operations.length).toBeLessThan(100);
-      expect(body.total).toBe(operations.length);
+      expect(section.total).toBe(operations.length);
       // The denied half is real, so a `total` counting both would be caught here.
       expect(denied.length).toBeGreaterThan(0);
       // `denied` is capped at `limit`; `denied_total` is not, so the model can
       // tell "three you may not call" from "eighty".
-      expect(body.denied_total as number).toBeGreaterThanOrEqual(denied.length);
-      if (denied.length < 100) expect(body.denied_total).toBe(denied.length);
+      expect(section.denied_total as number).toBeGreaterThanOrEqual(denied.length);
+      if (denied.length < 100) expect(section.denied_total).toBe(denied.length);
       const best = body.best_match as Record<string, unknown>;
-      expect(best.operation_id).toBe(operations[0]!.operation_id);
+      expect(best.id).toBe(operations[0]!.id);
       expect(best.granted).toBe(true);
-      expect(denied.map((row) => row.operation_id)).not.toContain(best.operation_id);
+      expect(denied.map((row) => row.id)).not.toContain(best.id);
     });
   });
 
-  it("best_match is identical to what describe_operation returns for that id", async () => {
+  it("best_match is identical to what describe returns for that id", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const searchRes = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
+    const searchRes = await byName
+      .get("search")!
+      .handler({ query: "agent", kinds: ["operation"] }, noExtra);
     const best = parseResult(searchRes).best_match as Record<string, unknown>;
     const describeRes = await byName
-      .get("describe_operation")!
-      .handler({ operation_id: best.operation_id }, noExtra);
+      .get("describe")!
+      .handler({ kind: "operation", id: best.id }, noExtra);
     expect(parseResult(describeRes)).toEqual(best);
   });
 });
 
-describe("describe_operation", () => {
+describe("describe", () => {
   it("returns the operation definition", async () => {
     const op = firstOp(() => true);
     const { byName } = makeTools(["mcp:read"]);
     const res = await byName
-      .get("describe_operation")!
-      .handler({ operation_id: op.operationId }, noExtra);
+      .get("describe")!
+      .handler({ kind: "operation", id: op.operationId }, noExtra);
     const body = parseResult(res);
     expect(body.method).toBe(op.method);
     expect(body.path).toBe(op.pathTemplate);
   });
 
   it.each(["runInline", "runAgent"])(
-    "keeps the full %s operation available to describe_operation",
+    "keeps the full %s operation available to describe",
     async (operationId) => {
       const { byName } = makeTools(["mcp:read"]);
       const res = await byName
-        .get("describe_operation")!
-        .handler({ operation_id: operationId }, noExtra);
+        .get("describe")!
+        .handler({ kind: "operation", id: operationId }, noExtra);
       const body = parseResult(res);
 
-      expect(body.operation_id).toBe(operationId);
+      expect(body.id).toBe(operationId);
       expect(body).toHaveProperty("request_body");
       expect(body).toHaveProperty("referenced_schemas");
     },
@@ -505,7 +519,7 @@ describe("describe_operation", () => {
     ): Promise<Record<string, unknown>> {
       const { byName } = makeTools(permissions);
       return parseResult(
-        await byName.get("describe_operation")!.handler({ operation_id: operationId }, noExtra),
+        await byName.get("describe")!.handler({ kind: "operation", id: operationId }, noExtra),
       );
     }
 
@@ -564,8 +578,12 @@ describe("describe_operation", () => {
             dispatch: async () => new Response("{}"),
             actor: { type: "user", id: "user_1" },
             scope: { orgId: "org_1", spaceId: "spc_1" },
-            readSkill: async () => {
-              throw new Error("no skill reads here");
+            skills: {
+              list: async () => [],
+              entry: async () => null,
+              read: async () => {
+                throw new Error("no skill reads here");
+              },
             },
             fileAccess: async () => ({ grants: [] }),
             authorizeBundle: async () => {},
@@ -577,8 +595,8 @@ describe("describe_operation", () => {
       const granted = async (ceiling: ReadonlySet<string> | undefined) =>
         parseResult(
           await toolsWith(ceiling)
-            .get("describe_operation")!
-            .handler({ operation_id: "deleteMyConnection" }, noExtra),
+            .get("describe")!
+            .handler({ kind: "operation", id: "deleteMyConnection" }, noExtra),
         ).granted;
 
       expect(await granted(new Set(["integrations:read"]))).toBe(false);
@@ -588,31 +606,33 @@ describe("describe_operation", () => {
       // The denial names the scope that refused it.
       const search = parseResult(
         await toolsWith(new Set(["integrations:read"]))
-          .get("search_operations")!
-          .handler({ query: "deleteMyConnection" }, noExtra),
+          .get("search")!
+          .handler({ query: "deleteMyConnection", kinds: ["operation"] }, noExtra),
       );
-      const denied = search.denied as { operation_id: string; ceiling_permissions?: string[] }[];
-      expect(
-        denied.find((d) => d.operation_id === "deleteMyConnection")?.ceiling_permissions,
-      ).toEqual(["integrations:disconnect"]);
+      const denied = (
+        search.operations as { denied: { id: string; ceiling_permissions?: string[] }[] }
+      ).denied;
+      expect(denied.find((d) => d.id === "deleteMyConnection")?.ceiling_permissions).toEqual([
+        "integrations:disconnect",
+      ]);
     });
   });
 
   it("refuses an unknown operationId as an isError tool result", async () => {
     const { byName } = makeTools(["mcp:read"]);
     const res = await byName
-      .get("describe_operation")!
-      .handler({ operation_id: "doesNotExist" }, noExtra);
+      .get("describe")!
+      .handler({ kind: "operation", id: "doesNotExist" }, noExtra);
     expect(res.isError).toBe(true);
     expect(parseResult(res)).toMatchObject({
       code: "unknown_operation",
-      arguments: ["operation_id"],
+      arguments: ["id"],
     });
   });
 
-  it("refuses a missing operation_id as an isError tool result", async () => {
+  it("refuses a missing kind and id as an isError tool result", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    const res = await byName.get("describe_operation")!.handler({}, noExtra);
+    const res = await byName.get("describe")!.handler({}, noExtra);
     expect(res.isError).toBe(true);
     expect(parseResult(res)).toMatchObject({ code: "missing_argument" });
   });
@@ -1007,7 +1027,7 @@ describe("invoke_operation", () => {
   it("errors when required path params are missing", async () => {
     // Deliberately an `isError` TOOL result, not a protocol error: which
     // path params an operation needs is per-operation knowledge the model
-    // recovers via describe_operation — keep the failure model-visible.
+    // recovers via describe — keep the failure model-visible.
     const op = firstOp((o) => o.pathParams.length > 0);
     const { byName, calls } = makeTools(["mcp:invoke"]);
     const res = await byName
@@ -1253,8 +1273,8 @@ describe("undeclared tool arguments", () => {
   it("lets every declared argument through", async () => {
     const { byName, calls } = makeTools(ADMIN_LIKE);
     await byName
-      .get("search_operations")!
-      .handler({ query: "agent", tag: "Agents", limit: 1 }, noExtra);
+      .get("search")!
+      .handler({ query: "agent", tag: "Agents", limit: 1, kinds: ["operation"] }, noExtra);
     await byName.get("get_me")!.handler({}, noExtra);
     expect(calls).toHaveLength(1);
   });
@@ -1283,8 +1303,8 @@ describe("structured tool output", () => {
   it("answers each JSON tool with structuredContent, mirrored as text", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const cases: Array<[string, Record<string, unknown>, () => Response]> = [
-      ["search_operations", { query: "agent" }, fileList],
-      ["describe_operation", { operation_id: op.operationId }, fileList],
+      ["search", { query: "agent", kinds: ["operation"] }, fileList],
+      ["describe", { kind: "operation", id: op.operationId }, fileList],
       ["invoke_operation", { operation_id: op.operationId }, fileList],
       ["get_me", {}, fileList],
       ["list_files", {}, fileList],

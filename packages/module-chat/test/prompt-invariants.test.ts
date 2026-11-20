@@ -188,7 +188,7 @@ describe("full persona invariants", () => {
     expect(REDUCED).not.toContain("list the exact tool names the task needs");
   });
 
-  // `describe_operation` answers with the operation's definition; the integration comes from the call.
+  // `describe` answers with the operation's definition; the integration comes from the call.
   it("reads an integration's tool names with invoke_operation, naming the field that holds each", () => {
     expect(FULL).toContain(
       'read it with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
@@ -607,15 +607,15 @@ describe("the persona of a turn that can look but not act", () => {
   });
 
   it("still teaches discovery and direct file reading", () => {
-    expect(DISCOVERY).toContain("search_operations");
-    expect(DISCOVERY).toContain("describe_operation");
+    expect(DISCOVERY).toContain("search");
+    expect(DISCOVERY).toContain("describe");
     expect(DISCOVERY).toContain("you can look things up, you cannot act");
     expect(DISCOVERY).toContain("call `read` first");
     expect(DISCOVERY).toContain("Never invent an operationId or argument shape");
     // Control: the discovery tools are named to the full persona too, so their
     // presence here is not an artifact of a branch only this turn renders.
-    expect(FULL).toContain("search_operations");
-    expect(FULL).toContain("describe_operation");
+    expect(FULL).toContain("search");
+    expect(FULL).toContain("describe");
   });
 
   it("still carries the permission list, without promising an attempt", () => {

@@ -94,7 +94,7 @@ const spaceArgument = (spaceId: string): string => `"space_id": ${JSON.stringify
 
 const fileStep = (space: string): string =>
   "File fields (`format: uri` with a `contentMediaType`) take a URI, never `data:`. For each " +
-  "local file, read only `createUpload`'s body shape with `describe_operation`, call it " +
+  "local file, read only `createUpload`'s body shape with `describe` (kind `operation`), call it " +
   "with `invoke_operation` (ignore its `runAgent` and `data:` advice), both with " +
   `\`${space}\`, run \`curl --fail -X PUT --upload-file <path>\` to the returned \`url\` with ` +
   "each returned header as `-H`, and pass the returned `upload://` `uri`. An `appfile://` URI " +

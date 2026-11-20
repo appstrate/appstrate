@@ -141,7 +141,7 @@ test.describe("MCP over an API key (full stack)", () => {
     // `apps/api/src/modules/mcp/tools.ts` (`buildMcpTools`).
     expect(names).toEqual([
       "call_integration_tool",
-      "describe_operation",
+      "describe",
       "get_me",
       "get_runtime_capabilities",
       "import_package_file",
@@ -149,8 +149,8 @@ test.describe("MCP over an API key (full stack)", () => {
       "list_files",
       "read",
       "run_and_wait",
+      "search",
       "search_integration_tools",
-      "search_operations",
       "validate_package_file",
     ]);
 
@@ -158,14 +158,15 @@ test.describe("MCP over an API key (full stack)", () => {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "search_operations", arguments: { query: "space", limit: 5 } },
+      params: { name: "search", arguments: { query: "space", limit: 5, kinds: ["operation"] } },
     });
     const searchPayload = toolPayload(search.envelope);
     expect(searchPayload.isError).toBe(false);
     // `total` counts the matches this key may invoke (#1493 split the result
     // into granted and `denied`); the owner-inherited key is granted some.
-    expect(searchPayload.data.total).toBeGreaterThan(0);
-    expect(searchPayload.data.operations).not.toHaveLength(0);
+    const operations = searchPayload.data.operations as { total: number; items: unknown[] };
+    expect(operations.total).toBeGreaterThan(0);
+    expect(operations.items).not.toHaveLength(0);
 
     // invoke a stable, side-effect-free GET (lists the org's spaces).
     const invoke = await mcpRpc(request, url, headers, {

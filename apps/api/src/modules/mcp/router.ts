@@ -172,11 +172,11 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * per-operation OpenAPI schemas can't (purpose, entity model, the `@` scope
  * rule, async-run + SSE-not-callable behaviour), plus a GENERATED operation
  * index (`buildOperationIndex()`) so a client can pick an operationId directly
- * and skip a search_operations round-trip.
+ * and skip a search round-trip.
  *
  * Still maintenance-free: the index is derived from the live catalog, so the
- * surface grows without editing this text. describe_operation (or
- * search_operations' best_match) remains the source of truth for input schemas.
+ * surface grows without editing this text. describe (or search's
+ * best_match) remains the source of truth for input schemas.
  */
 export function buildServerInstructions(
   permissions: ReadonlySet<string>,
@@ -212,8 +212,8 @@ export function buildServerInstructions(
   // Discovery-only (`mcp:read` alone): the operationId goes no further than describe.
   const verbs = invokes ? "discover and call" : "discover and inspect";
   const pickOperation = invokes
-    ? "then call describe_operation for its input schema and invoke_operation to run it"
-    : "then call describe_operation for what it does and the shape of its input";
+    ? "then call describe for its input schema and invoke_operation to run it"
+    : "then call describe for what it does and the shape of its input";
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
@@ -230,7 +230,7 @@ export function buildServerInstructions(
 `
     : "";
   const heavyListBullet = invokes
-    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
     : "";
   const integrationListing = listsIntegrations
@@ -239,7 +239,7 @@ export function buildServerInstructions(
   // Everything about launching a run — intro sentences, run bullets, readiness
   // and connect guidance — is absent together for a caller who cannot launch.
   const runIntro = runs
-    ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe_operation and invoke_operation.`
+    ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe and invoke_operation.`
     : "";
   // A `done:false` run is still going. An external client waits on it; the chat
   // gets `done:false` at the end of its turn budget, too late for a long-poll.
@@ -283,10 +283,10 @@ export function buildServerInstructions(
 - Codes \`auth_key_serves_no_selected_tool\` and \`auth_key_on_unauthenticated_integration\` on \`integrations.<id>\` are not connection problems at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, or one of an integration that declares no auth method, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
 - Code \`required_integration_unbound\` on \`integrations.<id>\` is not a connect problem: the agent requires that integration and a pin, or a stored schedule's \`connection_overrides\`, binds it to none (\`[]\`). It clears by naming a connection in that layer, or in \`connection_overrides\` (a run override outranks a member pin, not an admin pin); tell the user which. In \`connection_overrides\`, \`[]\` runs without the integration, and for a required one answers \`required_integration_unbound\` unless an admin imposes a set; connections an admin imposes on the integration (an admin pin or an enforced org default) stay bound whatever you pass, so the override only adds to them (\`[]\` adds nothing) and a connection outside a set that allows no additions answers \`override_outranked\`.`
     : "";
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step; it also finds the agents you can run and the skills you can read, by keyword. Never guess an operationId or body shape: describe (or search's best_match) is the source of truth for the input schema.${runIntro}
 
 ## Core model
-Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
+Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Org & space context
 ${orgSpaces ? orgWideSpaceContext : pinnedSpaceContext}
@@ -698,8 +698,12 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       scope,
       fileAccess: () => requestFileAccess(c),
       orgSpaces,
-      // The `read` tool serves `skill://` through the Skills extension's own reader.
-      readSkill: skills.read,
+      // `search`, `describe` and `read` reach skills through the Skills extension's own reader.
+      skills: {
+        list: () => skills.list("published"),
+        entry: skills.entry,
+        read: skills.read,
+      },
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)

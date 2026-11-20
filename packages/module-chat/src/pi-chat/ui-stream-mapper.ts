@@ -37,7 +37,7 @@ import type {
 
 /**
  * Strip an `mcp__<server>__` prefix so tool names match the bare MCP names
- * (`mcp__platform__search_operations` → `search_operations`). Tool names may
+ * (`mcp__platform__search` → `search`). Tool names may
  * themselves contain `__`, so we split on the delimiter and drop exactly the
  * `mcp` + server segments. Non-MCP names pass through.
  */
