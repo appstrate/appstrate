@@ -37,6 +37,8 @@ claude mcp add --transport http appstrate-acme https://appstrate.example.com/api
 
 The token you get is bound to that one organization's MCP endpoint (and to the endpoints of its spaces). It is refused everywhere else on the platform, including on another organization's MCP endpoint, so it cannot be reused against the rest of the REST API. A token issued for one space's URL works on that URL only.
 
+Every client you authorize this way is listed under **Settings → Account → Devices and apps**, with the endpoint it reaches and when it last acted. Revoking it there cuts it off on its next request, and reconnecting asks for your consent again. An organization admin sees and can revoke the clients its members authorized on the organization and the spaces they can see, under **Settings → Organization → Devices and apps**.
+
 Self-hosting, this flow needs the instance to be reachable over **HTTPS** at its public `APP_URL` (an `http://localhost` instance is for development only), and the `oidc` module, which is in the default `MODULES`.
 
 ## Connect with an API key

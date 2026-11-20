@@ -108,6 +108,109 @@ const socialProviderView: Record<string, unknown> = {
   },
 };
 
+const nullableString = { type: ["string", "null"] };
+const nullableDate = { type: ["string", "null"], format: "date-time" };
+
+/** One access grant — `AccessGrantDto` in `../services/access-grants.ts`. */
+const accessGrant: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "kind",
+    "client_name",
+    "client_origin",
+    "client_registration",
+    "device_name",
+    "user_agent",
+    "last_used_ip",
+    "target",
+    "session_count",
+    "lastUsedAt",
+    "createdAt",
+  ],
+  properties: {
+    id: {
+      type: "string",
+      description: "`crf_…` for a CLI session, `mcg_…` for an MCP client grant.",
+    },
+    kind: { type: "string", enum: ["cli", "mcp"] },
+    client_name: {
+      ...nullableString,
+      description:
+        "The name the client declared when it registered. `null` for a CLI session (the platform's own CLI).",
+    },
+    client_origin: {
+      ...nullableString,
+      description:
+        "Where the client comes from: the host of its metadata document URL (CIMD, verified), or of a non-loopback redirect URI its dynamic registration declared (not necessarily the one an authorization used). `null` when it declared only loopback redirects.",
+    },
+    client_registration: {
+      type: ["string", "null"],
+      enum: ["metadata_document", "dynamic", "managed", null],
+      description:
+        "How the client is known: a fetched metadata document (CIMD), a dynamic registration (RFC 7591), or an operator. `null` for a CLI session.",
+    },
+    device_name: {
+      ...nullableString,
+      description: "The device name a CLI session was opened with.",
+    },
+    user_agent: {
+      ...nullableString,
+      description: "The CLI's user agent. `null` for an MCP grant.",
+    },
+    last_used_ip: {
+      ...nullableString,
+      description:
+        "Where the grant was last used from (a CLI session that never refreshed: where it signed in).",
+    },
+    target: {
+      description:
+        "What the grant reaches. `null` for a CLI session, which acts in every organization of its owner.",
+      oneOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["orgId", "org_name", "spaceId", "space_name"],
+          properties: {
+            orgId: { type: "string" },
+            org_name: { type: "string" },
+            spaceId: nullableString,
+            space_name: nullableString,
+          },
+        },
+      ],
+    },
+    session_count: {
+      type: "integer",
+      minimum: 0,
+      description: "Live authorizations held under the grant (devices sharing one MCP client).",
+    },
+    lastUsedAt: nullableDate,
+    createdAt: { type: "string", format: "date-time" },
+  },
+};
+
+const orgAccessGrant: Record<string, unknown> = {
+  ...accessGrant,
+  required: [...(accessGrant.required as string[]), "user", "revocable"],
+  properties: {
+    ...(accessGrant.properties as Record<string, unknown>),
+    user: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "name", "email"],
+      properties: { id: { type: "string" }, name: nullableString, email: nullableString },
+    },
+    revocable: {
+      type: "boolean",
+      description:
+        "`false` for a CLI session of a member who also belongs to another organization: it serves every organization of its owner, so an admin of one cannot end it.",
+    },
+  },
+};
+
 export const oidcSchemas = {
   OAuthClientObject: oauthClientObject,
   OAuthClientWithSecret: {
@@ -120,4 +223,6 @@ export const oidcSchemas = {
   },
   SmtpConfigView: smtpConfigView,
   SocialProviderView: socialProviderView,
+  AccessGrant: accessGrant,
+  OrgAccessGrant: orgAccessGrant,
 };

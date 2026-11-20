@@ -66,6 +66,8 @@ import {
 import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
+import { accessGrantsPlugin } from "./access-grants-plugin.ts";
+import { ACCESS_TOKEN_TTL_SECONDS, hashOAuthToken } from "../services/mcp-grants.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
 
@@ -182,6 +184,8 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // The CLI only substitutes the polling endpoint to receive JWT +
     // rotating refresh instead of a 7-day BA session.
     cliTokenPlugin(),
+    // `/access-grants*` — the caller's CLI sessions and MCP client grants.
+    accessGrantsPlugin(),
     deviceAuthorization({
       expiresIn: "10m",
       // 2s polling interval — RFC 8628 §3.2 suggests 5s as a *default*, not a
@@ -215,6 +219,10 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // clean and is silently ignored. Checking the literal against the interface
     // first restores TS2353. Do not remove.
     oauthProvider({
+      accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      // The provider's own default digest, stated here so the platform can
+      // find an authorization code's row by the code a token request carries.
+      storeTokens: { hash: hashOAuthToken },
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
       // No session manages OAuth clients through the plugin's client CRUD

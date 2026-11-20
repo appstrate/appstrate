@@ -124,7 +124,7 @@ const SPACING_UTILITY_BANS = [
 const ROW_ACTION_BANS = [
   {
     selector:
-      "JSXOpeningElement[name.name='TableRowActions'] > JSXAttribute:not([name.name=/^(menuLabel|isPending|renaming|actions)$/])",
+      "JSXOpeningElement[name.name='TableRowActions'] > JSXAttribute:not([name.name=/^(menuLabel|isPending|renaming|disabledReason|actions)$/])",
     message: "TableRowActions takes the menu's own props only: put the action in the menu.",
   },
   {

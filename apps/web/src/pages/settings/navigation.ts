@@ -66,7 +66,7 @@ export function visibleSettingsSections(
         entry("/org-settings/models", BrainCircuit, "providers.col.models"),
         entry("/org-settings/proxies", Globe, "proxies.tabTitle"),
         entry("/org-settings/oauth", KeyRound, "orgSettings.tabOauth"),
-        entry("/org-settings/cli-sessions", Laptop, "orgSettings.tabCliSessions"),
+        entry("/org-settings/access-grants", Laptop, "orgSettings.tabAccessGrants"),
         entry("/org-settings/billing", CreditCard, "billing.tabTitle"),
       ],
     },

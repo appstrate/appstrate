@@ -546,6 +546,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/access-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's access grants
+         * @description Everything the caller has let act for them outside the browser: CLI sessions (one per device) and MCP client grants (one per client and MCP endpoint). Browser session only — an API key or an OAuth bearer cannot reach it. Most recent activity first.
+         */
+        get: operations["listMyAccessGrants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/access-grants/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End one of the caller's access grants
+         * @description End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are revoked, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.
+         */
+        post: operations["revokeMyAccessGrant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/access-grants/revoke-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End every access grant of the caller
+         * @description End every CLI session and MCP client grant of the caller, as `revoke` does for one. Idempotent: an account with none returns `{ revoked_count: 0 }`. Browser session only.
+         */
+        post: operations["revokeAllMyAccessGrants"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/bootstrap/redeem": {
         parameters: {
             query?: never;
@@ -580,66 +640,6 @@ export interface paths {
          * @description Revoke a CLI refresh token's family. Idempotent. Per RFC 7009 §2.2 the response is uniform (`{ revoked: true }`) even when the token is unknown or client-mismatched — the underlying hit/miss discriminator is kept in the audit log only, so a caller cannot probe token validity through the response shape.
          */
         post: operations["cliRevoke"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/cli/sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the caller's active CLI sessions
-         * @description List the caller's active CLI sessions (one entry per device). Cookie auth required — the listing is scoped to `c.get("user").id` derived from the BA session. `current` is always `false` for cookie callers because the dashboard does not present a refresh token.
-         */
-        get: operations["cliListSessions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/cli/sessions/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Revoke a single CLI session owned by the caller
-         * @description Revoke a single CLI session owned by the caller. Cookie auth required. `revoked: false` is returned when the family does not exist, does not belong to the caller, or has already been revoked — the route layer does not distinguish these cases at the HTTP shape so an attacker who somehow guessed a `family_id` cannot probe ownership through the response.
-         */
-        post: operations["cliRevokeSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/cli/sessions/revoke-all": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Revoke every active CLI session belonging to the caller
-         * @description Revoke every active CLI session belonging to the caller. Server primitive backing `appstrate logout --all`. Cookie auth required. Idempotent — calling on an account with no active sessions returns `{ revokedCount: 0 }`.
-         */
-        post: operations["cliRevokeAllSessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3056,6 +3056,46 @@ export interface paths {
         patch: operations["updateOrganization"];
         trace?: never;
     };
+    "/api/orgs/{orgId}/access-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the access grants reaching an organization (admin)
+         * @description Every grant that reaches `orgId`: the CLI sessions of its current members, and the MCP client grants bound to its MCP endpoint or to one of its spaces' endpoints. Each row names its holder. A CLI session acts in every organization of its owner, so `revocable` is `false` for one whose owner also belongs to another organization. Requires `access-grants:read` (owner/admin).
+         */
+        get: operations["listOrgAccessGrants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/access-grants/{grantId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End an access grant reaching an organization (admin)
+         * @description End a member's CLI session (reason `org_admin_revoked`) or an MCP client grant bound to this organization, with the same effect as the holder ending it themselves. 404 when the id names no grant this organization can see, or a CLI session whose owner also belongs to another organization — the cases are not told apart, so membership outside the organization cannot be probed. Requires `access-grants:delete` (owner/admin).
+         */
+        delete: operations["revokeOrgAccessGrant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/agents": {
         parameters: {
             query?: never;
@@ -3217,48 +3257,6 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgId}/cli-sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List CLI sessions for org members (admin)
-         * @description Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.
-         *
-         *     CLI sessions are user-scoped, NOT space-scoped: a session is created by `appstrate login` against a user account, and is reusable across every space the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which space(s) that member operates in — an admin auditing one space surface still sees CLI sessions that the same human is using to drive a different space in the same org.
-         */
-        get: operations["listOrgCliSessions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgId}/cli-sessions/{familyId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Revoke a member's CLI session (admin)
-         * @description Force a member's CLI session out from the dashboard. Logged with `revoked_reason='org_admin_revoked'` so the audit trail distinguishes admin force-outs from user-initiated logouts and reuse-detection revocations. Returns 404 when the family is unknown, doesn't belong to a current member of `orgId`, or has already been revoked — the route layer collapses these cases so an admin cannot probe membership outside the org through this endpoint.
-         */
-        delete: operations["revokeOrgCliSession"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5768,6 +5766,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AccessGrant: {
+            /** @description `crf_…` for a CLI session, `mcg_…` for an MCP client grant. */
+            id: string;
+            /** @enum {string} */
+            kind: "cli" | "mcp";
+            /** @description The name the client declared when it registered. `null` for a CLI session (the platform's own CLI). */
+            client_name: string | null;
+            /** @description Where the client comes from: the host of its metadata document URL (CIMD, verified), or of a non-loopback redirect URI its dynamic registration declared (not necessarily the one an authorization used). `null` when it declared only loopback redirects. */
+            client_origin: string | null;
+            /**
+             * @description How the client is known: a fetched metadata document (CIMD), a dynamic registration (RFC 7591), or an operator. `null` for a CLI session.
+             * @enum {string|null}
+             */
+            client_registration: "metadata_document" | "dynamic" | "managed" | null;
+            /** @description The device name a CLI session was opened with. */
+            device_name: string | null;
+            /** @description The CLI's user agent. `null` for an MCP grant. */
+            user_agent: string | null;
+            /** @description Where the grant was last used from (a CLI session that never refreshed: where it signed in). */
+            last_used_ip: string | null;
+            /** @description What the grant reaches. `null` for a CLI session, which acts in every organization of its owner. */
+            target: null | {
+                orgId: string;
+                org_name: string;
+                spaceId: string | null;
+                space_name: string | null;
+            };
+            /** @description Live authorizations held under the grant (devices sharing one MCP client). */
+            session_count: number;
+            /** Format: date-time */
+            lastUsedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
         /** @description What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 409, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
         AgentConnectionReadiness: {
             /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
@@ -6618,6 +6650,47 @@ export interface components {
             expiresAt: number | null;
             /** @description Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. Omitted when the provider surfaced none. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as. */
             account_id?: string;
+        };
+        OrgAccessGrant: {
+            /** @description `crf_…` for a CLI session, `mcg_…` for an MCP client grant. */
+            id: string;
+            /** @enum {string} */
+            kind: "cli" | "mcp";
+            /** @description The name the client declared when it registered. `null` for a CLI session (the platform's own CLI). */
+            client_name: string | null;
+            /** @description Where the client comes from: the host of its metadata document URL (CIMD, verified), or of a non-loopback redirect URI its dynamic registration declared (not necessarily the one an authorization used). `null` when it declared only loopback redirects. */
+            client_origin: string | null;
+            /**
+             * @description How the client is known: a fetched metadata document (CIMD), a dynamic registration (RFC 7591), or an operator. `null` for a CLI session.
+             * @enum {string|null}
+             */
+            client_registration: "metadata_document" | "dynamic" | "managed" | null;
+            /** @description The device name a CLI session was opened with. */
+            device_name: string | null;
+            /** @description The CLI's user agent. `null` for an MCP grant. */
+            user_agent: string | null;
+            /** @description Where the grant was last used from (a CLI session that never refreshed: where it signed in). */
+            last_used_ip: string | null;
+            /** @description What the grant reaches. `null` for a CLI session, which acts in every organization of its owner. */
+            target: null | {
+                orgId: string;
+                org_name: string;
+                spaceId: string | null;
+                space_name: string | null;
+            };
+            /** @description Live authorizations held under the grant (devices sharing one MCP client). */
+            session_count: number;
+            /** Format: date-time */
+            lastUsedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            user: {
+                id: string;
+                name: string | null;
+                email: string | null;
+            };
+            /** @description `false` for a CLI session of a member who also belongs to another organization: it serves every organization of its owner, so an admin of one cannot end it. */
+            revocable: boolean;
         };
         OrgDetail: {
             id: string;
@@ -9813,6 +9886,117 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    listMyAccessGrants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Grant list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["AccessGrant"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description Authentication required (`unauthorized`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
+            };
+        };
+    };
+    revokeMyAccessGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Revocation outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked: boolean;
+                    };
+                };
+            };
+            /** @description Authentication required (`unauthorized`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
+            };
+        };
+    };
+    revokeAllMyAccessGrants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bulk revocation outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked_count: number;
+                    };
+                };
+            };
+            /** @description Authentication required (`unauthorized`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
+            };
+        };
+    };
     redeemBootstrapToken: {
         parameters: {
             query?: never;
@@ -9932,130 +10116,6 @@ export interface operations {
                 };
             };
             /** @description `invalid_client` — unknown or disabled client, or one not registered for the CLI grant types. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error?: string;
-                        error_description?: string;
-                    };
-                };
-            };
-        };
-    };
-    cliListSessions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Session list. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: {
-                            familyId: string;
-                            deviceName: string | null;
-                            userAgent: string | null;
-                            createdIp: string | null;
-                            lastUsedIp: string | null;
-                            /** Format: date-time */
-                            lastUsedAt: string | null;
-                            /** Format: date-time */
-                            createdAt: string;
-                            /** Format: date-time */
-                            expiresAt: string;
-                            current: boolean;
-                        }[];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            /** @description Authentication required (`unauthorized`). */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error?: string;
-                        error_description?: string;
-                    };
-                };
-            };
-        };
-    };
-    cliRevokeSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    familyId: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Revocation outcome. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        revoked?: boolean;
-                    };
-                };
-            };
-            /** @description Authentication required (`unauthorized`). */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error?: string;
-                        error_description?: string;
-                    };
-                };
-            };
-        };
-    };
-    cliRevokeAllSessions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bulk revocation outcome. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        revokedCount?: number;
-                    };
-                };
-            };
-            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -20433,6 +20493,68 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listOrgAccessGrants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Grants reaching the organization. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    RateLimit: components["headers"]["RateLimit"];
+                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["OrgAccessGrant"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller lacks `access-grants:read` in the organization. */
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    revokeOrgAccessGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                grantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller lacks `access-grants:delete` in the organization. */
+            403: components["responses"]["Forbidden"];
+            /** @description No grant of this organization under that id, or one this admin may not end. */
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     listOrgAgents: {
         parameters: {
             query?: never;
@@ -20960,84 +21082,6 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    listOrgCliSessions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                orgId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Active org CLI sessions */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    RateLimit: components["headers"]["RateLimit"];
-                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: {
-                            familyId: string;
-                            userId: string;
-                            userEmail: string | null;
-                            userName: string | null;
-                            deviceName: string | null;
-                            userAgent: string | null;
-                            createdIp: string | null;
-                            lastUsedIp: string | null;
-                            /** Format: date-time */
-                            lastUsedAt: string | null;
-                            /** Format: date-time */
-                            createdAt: string;
-                            /** Format: date-time */
-                            expiresAt: string;
-                            current: boolean;
-                        }[];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            /** @description Caller is not an admin/owner of the org. */
-            403: components["responses"]["Forbidden"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    revokeOrgCliSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                orgId: string;
-                familyId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Revoked. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            /** @description Caller is not an admin/owner of the org. */
-            403: components["responses"]["Forbidden"];
-            /** @description Session not found / not in this org / already revoked. */
-            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };

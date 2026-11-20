@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for the dashboard-facing CLI session endpoints (issue #251):
+ * The personal access-grants endpoints, on their CLI half:
  *
- *   GET  /api/auth/cli/sessions
- *   POST /api/auth/cli/sessions/revoke      body: { familyId }
- *   POST /api/auth/cli/sessions/revoke-all
+ *   GET  /api/auth/access-grants
+ *   POST /api/auth/access-grants/revoke      body: { id }
+ *   POST /api/auth/access-grants/revoke-all
  *
  * Covers:
  *   - List shape — head-of-family rows only, sorted by last activity, with
@@ -14,7 +14,7 @@
  *   - Per-user scoping — user A cannot see / revoke user B's sessions.
  *   - Single revocation — flips `revoked_reason='user_revoked'` on the
  *     entire family, idempotent on the second call.
- *   - Bulk revocation — `revokeCount` matches the number of distinct
+ *   - Bulk revocation — `revoked_count` matches the number of distinct
  *     families newly revoked, ignores already-revoked families.
  *   - Active filter — expired families are excluded from the listing
  *     even if `revoked_at IS NULL`.
@@ -115,7 +115,7 @@ async function loginCliFor(
   return { refreshToken: body.refresh_token, familyId: row.familyId };
 }
 
-describe("GET /api/auth/cli/sessions (#251)", () => {
+describe("GET /api/auth/access-grants (CLI sessions)", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -140,24 +140,26 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
       .set({ lastUsedAt: new Date(Date.now() - 60 * 60 * 1000) })
       .where(eq(cliRefreshToken.familyId, second.familyId));
 
-    const list = await app.request("/api/auth/cli/sessions", {
+    const list = await app.request("/api/auth/access-grants", {
       method: "GET",
       headers: { Cookie: cookie },
     });
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
-      data: Array<{ familyId: string; deviceName: string | null; current: boolean }>;
+      data: Array<{ id: string; kind: string; device_name: string | null; target: unknown }>;
     };
     expect(body.data.length).toBe(2);
     // laptop (no last_used → ranked by createdAt = newer) comes first.
-    expect(body.data[0]!.deviceName).toBe("laptop");
-    expect(body.data[1]!.deviceName).toBe("workstation");
-    expect(body.data[0]!.current).toBe(false);
-    expect(body.data[0]!.familyId).toBe(first.familyId);
+    expect(body.data[0]!.device_name).toBe("laptop");
+    expect(body.data[1]!.device_name).toBe("workstation");
+    expect(body.data[0]!.kind).toBe("cli");
+    // A CLI session acts in every org of its owner: it names no target.
+    expect(body.data[0]!.target).toBeNull();
+    expect(body.data[0]!.id).toBe(first.familyId);
   });
 
   it("rejects unauthenticated callers with 401", async () => {
-    const list = await app.request("/api/auth/cli/sessions", { method: "GET" });
+    const list = await app.request("/api/auth/access-grants", { method: "GET" });
     expect(list.status).toBe(401);
   });
 
@@ -167,20 +169,20 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
     await loginCliFor(a.cookie);
     await loginCliFor(b.cookie);
 
-    const aList = await app.request("/api/auth/cli/sessions", {
+    const aList = await app.request("/api/auth/access-grants", {
       method: "GET",
       headers: { Cookie: a.cookie },
     });
-    const aBody = (await aList.json()) as { data: Array<{ familyId: string }> };
+    const aBody = (await aList.json()) as { data: Array<{ id: string }> };
     expect(aBody.data.length).toBe(1);
 
-    const bList = await app.request("/api/auth/cli/sessions", {
+    const bList = await app.request("/api/auth/access-grants", {
       method: "GET",
       headers: { Cookie: b.cookie },
     });
-    const bBody = (await bList.json()) as { data: Array<{ familyId: string }> };
+    const bBody = (await bList.json()) as { data: Array<{ id: string }> };
     expect(bBody.data.length).toBe(1);
-    expect(bBody.data[0]!.familyId).not.toBe(aBody.data[0]!.familyId);
+    expect(bBody.data[0]!.id).not.toBe(aBody.data[0]!.id);
   });
 
   it("excludes revoked and expired families from the listing", async () => {
@@ -198,13 +200,13 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(cliRefreshToken.familyId, expired.familyId));
 
-    const res = await app.request("/api/auth/cli/sessions", {
+    const res = await app.request("/api/auth/access-grants", {
       method: "GET",
       headers: { Cookie: cookie },
     });
-    const body = (await res.json()) as { data: Array<{ familyId: string }> };
+    const body = (await res.json()) as { data: Array<{ id: string }> };
     expect(body.data.length).toBe(1);
-    expect(body.data[0]!.familyId).toBe(active.familyId);
+    expect(body.data[0]!.id).toBe(active.familyId);
     // Sanity: the active row really is owned by the caller.
     const [row] = await db
       .select()
@@ -215,7 +217,7 @@ describe("GET /api/auth/cli/sessions (#251)", () => {
   });
 });
 
-describe("POST /api/auth/cli/sessions/revoke (#251)", () => {
+describe("POST /api/auth/access-grants/revoke (CLI sessions)", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -228,10 +230,10 @@ describe("POST /api/auth/cli/sessions/revoke (#251)", () => {
     const { cookie } = await signUp("d@example.com", "D");
     const { familyId } = await loginCliFor(cookie);
 
-    const res = await app.request("/api/auth/cli/sessions/revoke", {
+    const res = await app.request("/api/auth/access-grants/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify({ familyId }),
+      body: JSON.stringify({ id: familyId }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { revoked: boolean };
@@ -254,10 +256,10 @@ describe("POST /api/auth/cli/sessions/revoke (#251)", () => {
     const b = await signUp("e2@example.com", "E2");
     const { familyId: bFamily } = await loginCliFor(b.cookie);
 
-    const res = await app.request("/api/auth/cli/sessions/revoke", {
+    const res = await app.request("/api/auth/access-grants/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: a.cookie },
-      body: JSON.stringify({ familyId: bFamily }),
+      body: JSON.stringify({ id: bFamily }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { revoked: boolean };
@@ -275,15 +277,15 @@ describe("POST /api/auth/cli/sessions/revoke (#251)", () => {
   it("is idempotent — second revoke on an already-revoked family returns false", async () => {
     const { cookie } = await signUp("f@example.com", "F");
     const { familyId } = await loginCliFor(cookie);
-    await app.request("/api/auth/cli/sessions/revoke", {
+    await app.request("/api/auth/access-grants/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify({ familyId }),
+      body: JSON.stringify({ id: familyId }),
     });
-    const second = await app.request("/api/auth/cli/sessions/revoke", {
+    const second = await app.request("/api/auth/access-grants/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify({ familyId }),
+      body: JSON.stringify({ id: familyId }),
     });
     expect(second.status).toBe(200);
     const body = (await second.json()) as { revoked: boolean };
@@ -291,16 +293,16 @@ describe("POST /api/auth/cli/sessions/revoke (#251)", () => {
   });
 
   it("rejects unauthenticated callers with 401", async () => {
-    const res = await app.request("/api/auth/cli/sessions/revoke", {
+    const res = await app.request("/api/auth/access-grants/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ familyId: "crf_anything" }),
+      body: JSON.stringify({ id: "crf_anything" }),
     });
     expect(res.status).toBe(401);
   });
 });
 
-describe("POST /api/auth/cli/sessions/revoke-all (#251)", () => {
+describe("POST /api/auth/access-grants/revoke-all (CLI sessions)", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -315,13 +317,13 @@ describe("POST /api/auth/cli/sessions/revoke-all (#251)", () => {
     const f2 = await loginCliFor(cookie);
     const f3 = await loginCliFor(cookie);
 
-    const res = await app.request("/api/auth/cli/sessions/revoke-all", {
+    const res = await app.request("/api/auth/access-grants/revoke-all", {
       method: "POST",
       headers: { Cookie: cookie },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { revokedCount: number };
-    expect(body.revokedCount).toBe(3);
+    const body = (await res.json()) as { revoked_count: number };
+    expect(body.revoked_count).toBe(3);
 
     for (const f of [f1, f2, f3]) {
       const rows = await db
@@ -342,7 +344,7 @@ describe("POST /api/auth/cli/sessions/revoke-all (#251)", () => {
     await loginCliFor(a.cookie);
     const { familyId: bFamily } = await loginCliFor(b.cookie);
 
-    const res = await app.request("/api/auth/cli/sessions/revoke-all", {
+    const res = await app.request("/api/auth/access-grants/revoke-all", {
       method: "POST",
       headers: { Cookie: a.cookie },
     });
@@ -356,19 +358,19 @@ describe("POST /api/auth/cli/sessions/revoke-all (#251)", () => {
     expect(bRow?.revokedAt).toBeNull();
   });
 
-  it("returns revokedCount: 0 when the caller has no active sessions", async () => {
+  it("returns revoked_count: 0 when the caller has no active sessions", async () => {
     const { cookie } = await signUp("i@example.com", "I");
-    const res = await app.request("/api/auth/cli/sessions/revoke-all", {
+    const res = await app.request("/api/auth/access-grants/revoke-all", {
       method: "POST",
       headers: { Cookie: cookie },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { revokedCount: number };
-    expect(body.revokedCount).toBe(0);
+    const body = (await res.json()) as { revoked_count: number };
+    expect(body.revoked_count).toBe(0);
   });
 
   it("rejects unauthenticated callers with 401", async () => {
-    const res = await app.request("/api/auth/cli/sessions/revoke-all", { method: "POST" });
+    const res = await app.request("/api/auth/access-grants/revoke-all", { method: "POST" });
     expect(res.status).toBe(401);
   });
 });

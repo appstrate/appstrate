@@ -353,7 +353,7 @@ const schedulesRouter = createSchedulesRouter();
 // Org context for the `/api/orgs/:orgId*` family, where the org comes from the
 // PATH. Mounted here — before the orgs router AND before every module router
 // below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
-// `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+// `access-grants`) inherits it instead of deriving its own, ceiling-free, set.
 app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
 // Organization routes (no org context needed — self-managed auth)
