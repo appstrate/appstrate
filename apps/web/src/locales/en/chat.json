@@ -238,6 +238,7 @@
   "contextUsage.compactNext": "{{threshold}}-token threshold reached: the history will be summarized before the next message.",
   "contextUsage.windowAssumed": "This model declares no context window: {{window}} is an assumed value.",
   "contextUsage.summarized": "The oldest messages are summarized.",
+  "contextUsage.shareOfThreshold": "{{share}} of the summary threshold ({{threshold}} tokens).",
   "contextUsage.measuredWith": "Measured with {{model}}.",
   "contextUsage.measuredWithReadAgainst": "Last measured with {{model}}, read against the window and threshold of {{selected}}.",
   "context.info.usageTitle": "Models and tokens",

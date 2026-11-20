@@ -356,6 +356,7 @@
   "run.contextGaugePeakAria": "Contexte maximal atteint sur la fenêtre du modèle",
   "run.contextGaugeValueText": "{{used}} tokens sur {{window}} — contexte actuel",
   "run.contextGaugePeakValueText": "{{used}} tokens sur {{window}} — pic atteint pendant l'exécution",
+  "run.contextGaugeWindowAssumed": "Fenêtre supposée : le modèle n’en déclare pas, {{window}} est la valeur par défaut.",
   "run.contextGaugePeakHint": "Pic de contexte : le maximum atteint pendant l'exécution. Après un résumé de l'historique, le contexte de fin peut être bien plus bas.",
   "run.usageEstimatedApiCost": "Coût API estimé",
   "run.costUnpricedTooltip": "Aucun tarif n'est disponible pour ce modèle : le coût de cette exécution n'a pas pu être calculé. Un zéro ici signifierait « aucun tarif », pas « gratuit ».",

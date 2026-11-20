@@ -120,6 +120,12 @@ export function ContextGauge({ className }: { className?: string }) {
           indicatorClassName={LEVEL_FILL[context.level]}
         />
         <p className="tabular-nums">{counts}</p>
+        <p className="text-muted-foreground tabular-nums">
+          {t("contextUsage.shareOfThreshold", {
+            share: formatWindowPercent(context.ratio, lang),
+            threshold: formatCompactTokens(context.compactAt, lang),
+          })}
+        </p>
         <p className="text-muted-foreground">{sentence}</p>
         {context.summarized ? (
           <p className="text-muted-foreground">{t("contextUsage.summarized")}</p>

@@ -502,8 +502,7 @@ export function reconstructPiSession<T extends SessionManagerLike>(
     turn.summary.tokensBefore,
   );
   const summarizedAt = Date.parse(session.getEntry(compactionId)!.timestamp);
-  rest.forEach((message, index) =>
-    append({ ...message, timestamp: summarizedAt + 1 + index }, index + 1),
-  );
+  // One stamp for all of them: later ones would run ahead of a summary Pi makes during the turn.
+  rest.forEach((message, index) => append({ ...message, timestamp: summarizedAt + 1 }, index + 1));
   return { session, origins };
 }

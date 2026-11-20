@@ -356,6 +356,7 @@
   "run.contextGaugePeakAria": "Peak context reached out of the model window",
   "run.contextGaugeValueText": "{{used}} tokens out of {{window}} — current context",
   "run.contextGaugePeakValueText": "{{used}} tokens out of {{window}} — peak reached during the run",
+  "run.contextGaugeWindowAssumed": "Assumed window: the model declares none, {{window}} is the default.",
   "run.contextGaugePeakHint": "Peak context: the highest point reached during the run. After the history is summarized, the context it ended on can be much lower.",
   "run.usageEstimatedApiCost": "Estimated API cost",
   "run.costUnpricedTooltip": "No pricing is available for this model, so this run's cost could not be computed. A zero here would mean \"no rates\", not \"free\".",

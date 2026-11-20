@@ -113,6 +113,12 @@ export function turnNoticeChunks(id: string, text: string): UIMessageChunk[] {
 export interface TurnAnchors {
   origins: ReadonlyMap<string, MessageOrigin>;
   branchHeadId: string;
+  /**
+   * What the next turn sends after a summary anchored on this turn's user message: the system
+   * prompt, the summary and this whole turn, estimated. Pi's own estimate counts only the part of
+   * the turn it kept, and the next turn reprojects all of it.
+   */
+  estimateRestart: (summary: string) => number;
 }
 
 /**
@@ -142,10 +148,15 @@ export function turnContextOf(
   anchors?: TurnAnchors,
 ): { context?: AppstrateTurnContext; summary?: AppstrateTurnSummary } {
   const settled = measured.lastSettledUsage;
-  const tokens = !measure
-    ? 0
-    : (measured.contextAfterCompaction ?? (settled ? measure.contextTokens(settled) : 0));
   const { compaction } = measured;
+  const keptFrom = compaction && anchors?.origins.get(compaction.firstKeptEntryId);
+  const afterSummary =
+    measured.contextAfterCompaction === undefined || !compaction || !anchors
+      ? undefined
+      : keptFrom
+        ? measured.contextAfterCompaction
+        : anchors.estimateRestart(compaction.summary);
+  const tokens = !measure ? 0 : (afterSummary ?? (settled ? measure.contextTokens(settled) : 0));
   return {
     ...(measure && tokens > 0
       ? {
@@ -161,10 +172,7 @@ export function turnContextOf(
       ? {
           summary: {
             text: compaction.summary,
-            keptFrom: anchors.origins.get(compaction.firstKeptEntryId) ?? {
-              messageId: anchors.branchHeadId,
-              offset: 0,
-            },
+            keptFrom: keptFrom ?? { messageId: anchors.branchHeadId, offset: 0 },
             tokensBefore: compaction.tokensBefore,
           },
         }

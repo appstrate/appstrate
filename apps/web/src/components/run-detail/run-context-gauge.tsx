@@ -14,7 +14,8 @@ import { readRunContext } from "../run-context";
 
 /**
  * Context occupancy: active shows the CURRENT context, terminal the PEAK; they diverge when the
- * runner compacted, so `aria-valuetext` names the reading and the terminal one has a tooltip.
+ * runner compacted, so `aria-valuetext` names the reading and the terminal one has a tooltip; so
+ * does a window the runner assumed (`≈`), which the value text names too.
  * `contextTokens` exists only at turn boundaries: no interpolation (it would hide the compaction
  * drop). Renders nothing without a truthful reading (`readRunContext`).
  */
@@ -37,6 +38,17 @@ export function ContextGaugeReadout({
     window: formatContextWindow(reading.window, reading.windowAssumed, i18n.language),
   });
 
+  const windowHint = reading.windowAssumed
+    ? t("run.contextGaugeWindowAssumed", {
+        window: formatCompactTokens(reading.window, i18n.language),
+      })
+    : null;
+  const valueText = t(isActive ? "run.contextGaugeValueText" : "run.contextGaugePeakValueText", {
+    used: value.toLocaleString(i18n.language),
+    window: reading.window.toLocaleString(i18n.language),
+  });
+  const share = isActive ? ` · ${formatWindowPercent(fraction, i18n.language)}` : "";
+
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
       {/* `value` is clamped: "210000 out of 200000" announces a broken widget. */}
@@ -44,28 +56,25 @@ export function ContextGaugeReadout({
         value={Math.min(value, reading.window)}
         max={reading.window}
         aria-label={isActive ? t("run.contextGaugeAria") : t("run.contextGaugePeakAria")}
-        aria-valuetext={t(
-          isActive ? "run.contextGaugeValueText" : "run.contextGaugePeakValueText",
-          {
-            used: value.toLocaleString(i18n.language),
-            window: reading.window.toLocaleString(i18n.language),
-          },
-        )}
+        aria-valuetext={windowHint ? `${valueText}. ${windowHint}` : valueText}
         className="bg-muted-foreground/25 h-1.5 w-14"
       />
-      {isActive ? (
+      {isActive && !windowHint ? (
         <span>
-          {counts} · {formatWindowPercent(fraction, i18n.language)}
+          {counts}
+          {share}
         </span>
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={0} className="cursor-default underline decoration-dotted">
               {counts}
+              {share}
             </span>
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-xs">
-            <ContextGaugePeakHint />
+          <TooltipContent side="bottom" className="flex max-w-xs flex-col gap-1">
+            {isActive ? null : <ContextGaugePeakHint />}
+            {windowHint ? <span className="block text-xs">{windowHint}</span> : null}
           </TooltipContent>
         </Tooltip>
       )}

@@ -95,6 +95,10 @@ function replaySession(
   };
 }
 
+/** The context tokens the turn stored. */
+const storedTokens = (meta: Record<string, unknown> | undefined) =>
+  (meta?.context as { tokens?: number } | undefined)?.tokens;
+
 /** The `finish` chunk's turn metadata, read off the SSE body. */
 async function closingTurn(res: Response): Promise<Record<string, unknown> | undefined> {
   const body = await res.text();
@@ -201,10 +205,21 @@ describe("chat turn context", () => {
   it("stores Pi's post-summary estimate when the summary followed the last call", async () => {
     // Pi summarizes after the turn's last reply: that reply measured the history before it.
     const full = [{ input: 190_000, output: 500, cacheRead: 0, cacheWrite: 0 }];
-    const after = await closingTurn(turn(full, 200_000, { compacts: "after" }));
+    const keep = (session: { getBranch(): Array<{ id: string }> }) => session.getBranch()[1]!.id;
+    const after = await closingTurn(turn(full, 200_000, { compacts: "after", keep }, HISTORY));
     expect(after?.context).toEqual({ tokens: 40_000, window: 200_000, compactAt: 183_616 });
-    const before = await closingTurn(turn(full, 200_000, { compacts: "before" }));
+    const before = await closingTurn(turn(full, 200_000, { compacts: "before", keep }, HISTORY));
     expect(before?.context).toMatchObject({ tokens: 190_500 });
+  }, 20_000);
+
+  it("estimates the turn the next one resends when Pi kept only part of this turn", async () => {
+    // Pi's estimate counts what it kept; the next turn resends this whole turn after the summary.
+    const full = [{ input: 190_000, output: 500, cacheRead: 0, cacheWrite: 0 }];
+    const meta = await closingTurn(turn(full, 200_000, { compacts: "after" }, HISTORY));
+    expect(meta?.summary).toMatchObject({ keptFrom: { messageId: "u1", offset: 0 } });
+    expect(storedTokens(meta)).toBeGreaterThan(0);
+    expect(storedTokens(meta)).not.toBe(40_000);
+    expect(storedTokens(meta)).not.toBe(190_500);
   }, 20_000);
 
   it("names a kept history entry by the branch message it was projected from", async () => {
@@ -226,11 +241,8 @@ describe("chat turn context", () => {
         fails: true,
       }),
     );
-    // No call measured anything: the context is Pi's estimate after its summary.
-    expect(meta).toMatchObject({
-      finishReason: "error",
-      summary: { text: "Résumé du fil" },
-      context: { tokens: 40_000 },
-    });
+    // No call measured anything: the context is the estimate of what the next turn resends.
+    expect(meta).toMatchObject({ finishReason: "error", summary: { text: "Résumé du fil" } });
+    expect(storedTokens(meta)).toBeGreaterThan(0);
   }, 20_000);
 });

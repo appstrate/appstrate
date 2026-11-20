@@ -432,6 +432,7 @@ describe("turnContextOf", () => {
   const ANCHORS = {
     origins: new Map([["entry_a2", { messageId: "a2", offset: 1 }]]),
     branchHeadId: "u3",
+    estimateRestart: (summary: string) => 1_000 + summary.length,
   };
   const compaction = (firstKeptEntryId: string) => ({
     summary: "Résumé",
@@ -463,6 +464,20 @@ describe("turnContextOf", () => {
     );
     expect(state.context).toEqual({ tokens: 40_000, window: 200_000, compactAt: 183_616 });
     expect(contextReading(state.context!).level).toBe("ok");
+  });
+
+  it("estimates the whole turn after a summary Pi cut inside it, which the next turn resends", () => {
+    const state = turnContextOf(
+      {
+        lastSettledUsage: used(190_000),
+        compaction: compaction("entry_live"),
+        contextAfterCompaction: 40_000,
+      },
+      MEASURE,
+      ANCHORS,
+    );
+    expect(state.context?.tokens).toBe(1_000 + "Résumé".length);
+    expect(state.summary?.keptFrom).toEqual({ messageId: "u3", offset: 0 });
   });
 
   it("keeps the summary of a turn whose calls all failed", () => {

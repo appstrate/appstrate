@@ -284,6 +284,19 @@ describe("summary checkpoint projection", () => {
     // The projection's own stamps, which reconstruction replaces, would trip the guard.
     const unstamped = turn.history.findLast((message) => message.role === "assistant");
     expect(unstamped && fromBeforeCompaction(unstamped)).toBe(true);
+    // A summary Pi makes during the turn is never older than the kept assistants: one stamp.
+    const kept = session.getBranch().slice(2);
+    expect(
+      new Set(kept.map((entry) => entry.type === "message" && entry.message.timestamp)).size,
+    ).toBe(1);
+    // A live summary follows a model call; 2 ms stands for that, past the single +1 ms stamp.
+    await Bun.sleep(2);
+    const later = session.appendCompaction("résumé du tour", null, 1);
+    const lastKept = kept.at(-1)!;
+    expect(
+      lastKept.type === "message" &&
+        lastKept.message.timestamp <= new Date(session.getEntry(later)!.timestamp).getTime(),
+    ).toBe(true);
   });
 
   it("gives Pi's next summary the previous one, and only the kept history to summarize", () => {

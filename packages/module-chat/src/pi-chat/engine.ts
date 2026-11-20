@@ -510,6 +510,9 @@ export function runPiChat(input: PiChatInput): Response {
         const pdfReceipts = await untilAborted(
           readPromptPdfs(input.messages.at(-1), pdfInput, read, signal),
         );
+        const textTokens = (text: string) =>
+          estimateTokens({ role: "user", content: [{ type: "text", text }], timestamp: 0 });
+        const baseTokens = textTokens(system);
         const projectedTurn = buildStructuredPiTurn(input.messages, historyModel, {
           estimateTokens,
           images,
@@ -522,15 +525,28 @@ export function runPiChat(input: PiChatInput): Response {
           // prompt text are not in it (`projectedTurn.prompt` is not history).
           // That gap is pre-existing — do not close it silently, `contextTokens`
           // seeds Pi's compaction threshold via `historyUsage`.
-          baseTokens: estimateTokens({
-            role: "user",
-            content: [{ type: "text", text: system }],
-            timestamp: 0,
-          }),
+          baseTokens,
         });
         const reconstruction = reconstructPiSession(SessionManager, projectedTurn);
         const sessionManager = reconstruction.session;
-        anchors = { origins: reconstruction.origins, branchHeadId: projectedTurn.branchHeadId };
+        const { origins } = reconstruction;
+        anchors = {
+          origins,
+          branchHeadId: projectedTurn.branchHeadId,
+          // The turn's own entries are the ones the projection did not append.
+          estimateRestart: (summary) =>
+            sessionManager
+              .getBranch()
+              .reduce(
+                (sum, entry) =>
+                  entry.type === "message" &&
+                  entry.message.role !== "system" &&
+                  !origins.has(entry.id)
+                    ? sum + estimateTokens(entry.message)
+                    : sum,
+                baseTokens + textTokens(summary),
+              ),
+        };
         timings.projectionMs = Date.now() - projectionStartedAt;
         logger.info("Pi chat session reconstructed", {
           chatSessionId: input.chatSessionId,

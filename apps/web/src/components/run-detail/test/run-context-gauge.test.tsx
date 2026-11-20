@@ -54,6 +54,16 @@ describe("ContextGaugeReadout", () => {
     expect(text(render(<ContextGaugePeakHint />))).toBe(agentsFr["run.contextGaugePeakHint"]);
   });
 
+  it("marks an assumed window and says why, in the value text and a hint", () => {
+    const assumed = [{ ...turn(0, 64_000, 128_000), contextWindowAssumed: true as const }];
+    const html = render(<ContextGaugeReadout turns={assumed} status="running" />);
+    expect(text(html)).toBe(
+      `64${nbsp}k / ≈${nbsp}128${nbsp}k · ${formatWindowPercent(0.5, i18n.language)}`,
+    );
+    expect(valueText(html)).toContain("Fenêtre supposée");
+    expect(html).toContain('tabindex="0"');
+  });
+
   it("clamps the bar's value past a stale window, keeping the raw count in the text", () => {
     const html = render(
       <ContextGaugeReadout turns={[turn(0, 210_000, 200_000)]} status="running" />,

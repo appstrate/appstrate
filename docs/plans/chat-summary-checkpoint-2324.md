@@ -105,10 +105,17 @@ Décisions d'implémentation (lot 1) :
   du dernier appel, mesuré avant. Pi la calcule en caractères/4 sur la projection de la session,
   message `system` du tour compris (prompt système), donc sans plancher supplémentaire. Un appel
   abouti après le résumé (résumé d'avant requête ou de dépassement) remet l'usage réel.
+  - Exception : quand Pi a coupé dans le tour en cours (ancre repliée sur son message
+    utilisateur, décision 3), son estimation ne compte que la part du tour qu'il a gardée, alors
+    que le tour suivant renvoie tout le tour. `context.tokens` est alors estimé par le moteur :
+    prompt système + résumé + toutes les entrées du tour (`TurnAnchors.estimateRestart`).
 - `offset` = rang dans la projection d'un `UIMessage` (un message utilisateur : 0 ; un assistant :
   un message par étape, plus les résultats d'outils, dans l'ordre).
-- Horodatage : après `appendCompaction`, la reconstruction relit l'horodatage de l'entrée et
-  restampe chaque message suivant à `t + 1 + i`.
+- Horodatage : après `appendCompaction`, la reconstruction relit l'horodatage `t` de l'entrée et
+  restampe tous les messages suivants à `t + 1`, un seul horodatage (l'ordre vient de l'arbre
+  d'entrées). `t + 1 + i` les aurait poussés de N ms dans le futur : un résumé fait pendant le
+  tour, horodaté `new Date()`, aurait pu être plus ancien qu'eux et laisser Pi lire leur usage
+  périmé (`agent-session.js` ~2593).
 
 Ajout d'export dans `@appstrate/core` : entrée au CHANGELOG sous `[Unreleased]`.
 
@@ -120,10 +127,9 @@ Ajout d'export dans `@appstrate/core` : entrée au CHANGELOG sous `[Unreleased]`
 - `turnContextOf` reçoit la table de correspondance (ci-dessous) et traduit
   `firstKeptEntryId` en `keptFrom`. Identifiant absent de la table : entrée du tour en cours,
   donc ancre sur `branchHeadId`.
-- Aujourd'hui `turnContextOf` ne rend rien quand aucun appel n'a abouti. Un tour qui a résumé
-  puis échoué doit quand même écrire son point de reprise : séparer la mesure (`tokens`) du
-  point de reprise, ou décider que ce cas reste perdu. À trancher à l'implémentation ; la
-  première option évite de repayer le résumé après un échec fournisseur.
+- Tranché : la mesure (`turn.context`) et le point de reprise (`turn.summary`) sont séparés. Un
+  tour qui a résumé puis échoué sans appel abouti écrit quand même son point de reprise, ce qui
+  évite de repayer le résumé après un échec fournisseur.
 
 ### Projection (`structured-session.ts`)
 
@@ -178,6 +184,9 @@ Unitaires, avec le vrai `SessionManager` de Pi :
 De bout en bout : modèle d'organisation à petite fenêtre pour franchir le seuil, deux tours.
 Le premier résume une fois. Le second ne fait aucun appel de résumé, et sa requête commence
 par le résumé du premier. Vérifier aussi le rechargement de la page et la reprise de flux.
+Cette propriété sur deux tours réels est vérifiée par l'E2E navigateur, pas par un test
+unitaire : les tests unitaires fixent chaque maillon (capture, projection, reconstruction,
+garde d'horodatage de Pi) séparément.
 
 ## Lot 2 : usage compté par appel (fait)
 
@@ -213,7 +222,7 @@ n'est pas dimensionnée par la réserve.
 
 ## Ordre et découpage
 
-Une branche, quatre commits : lot 1, lot 2, lot 3, puis l'affichage. Le lot 1 supprime le coût
+Tout est livré dans cette branche : lots 1 à 3 et l'affichage. Le lot 1 supprime le coût
 récurrent ; le lot 2 rend mesurable ce qu'il reste ; le lot 3 change un seuil.
 
 Le lot 1 change la forme des métadonnées de tour lues par le navigateur : API et interface

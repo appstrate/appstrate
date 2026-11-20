@@ -48,6 +48,7 @@ export function latestConversationContext(
     const turn = turnMetadataFromMessage(sourceMessage(messages[index]));
     if (!measured && turn?.context !== undefined) measured = turn;
     if (turn?.summary !== undefined) summarized = true;
+    if (measured && summarized) break;
   }
   if (!measured?.context) return null;
   return {

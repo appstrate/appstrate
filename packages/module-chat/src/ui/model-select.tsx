@@ -34,14 +34,14 @@ const FIT_KEY: Record<ModelFit, string> = {
   threshold: "model.fit.threshold",
 };
 
-function FitMarker({ fit }: { fit: ModelFit }) {
+/** Under the name, as the picker's reason line: legible on touch, no tooltip needed. */
+function FitNote({ fit }: { fit: ModelFit }) {
   const { t } = useChatHost();
-  const text = t(FIT_KEY[fit]);
   return (
-    <span title={text} className="text-warning inline-flex shrink-0">
-      <TriangleAlertIcon aria-hidden className="size-3.5" />
-      <span className="sr-only">{text}</span>
-    </span>
+    <div className="text-muted-foreground flex items-start gap-1 text-xs">
+      <TriangleAlertIcon aria-hidden className="text-warning mt-px size-3 shrink-0" />
+      <span>{t(FIT_KEY[fit])}</span>
+    </div>
   );
 }
 
@@ -167,9 +167,9 @@ export function ModelSelect({
               value={selectedId}
               onSelect={(id) => id !== null && onSelect(id)}
               selectable={isModelSelectable}
-              renderAside={(model) => {
+              renderNote={(model) => {
                 const fit = fits?.get(model.id);
-                return fit ? <FitMarker fit={fit} /> : null;
+                return fit ? <FitNote fit={fit} /> : null;
               }}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
