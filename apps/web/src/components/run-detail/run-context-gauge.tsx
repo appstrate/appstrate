@@ -5,7 +5,8 @@ import { Progress } from "@appstrate/ui/components/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
 import type { RunTurnRow } from "../log-utils";
-import { formatCompactTokens, formatWindowPercent, readRunContext } from "../run-context";
+import { formatCompactTokens, formatWindowPercent } from "@appstrate/ui/context-window";
+import { readRunContext } from "../run-context";
 
 /**
  * Context occupancy: active shows the CURRENT context, terminal the PEAK; they diverge when the

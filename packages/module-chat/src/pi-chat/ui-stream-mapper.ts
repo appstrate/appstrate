@@ -74,6 +74,10 @@ interface PiChatResultMeta {
   usage: TokenUsage;
   finishReason: PiFinishReason;
   errorText?: string;
+  /** Usage of the turn's last settled call, which `usage` (a sum over calls) cannot give back. */
+  lastSettledUsage?: PiUsage;
+  /** Pi summarized the history during the turn. */
+  compacted: boolean;
 }
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
@@ -154,6 +158,8 @@ export class PiChatUiStreamMapper {
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
+  private lastSettledUsage: PiUsage | undefined;
+  private compacted = false;
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -173,6 +179,7 @@ export class PiChatUiStreamMapper {
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
+      aborted?: boolean;
     };
     switch (e.type) {
       case "message_start":
@@ -219,6 +226,9 @@ export class PiChatUiStreamMapper {
         // a `handleRunFailure` message that never got a `message_end` is the
         // only assistant entry in its list, so it is still captured.
         this.captureFailure(lastAssistantMessage(e.messages ?? []));
+        return [];
+      case "compaction_end":
+        if (!e.aborted && e.result !== undefined) this.compacted = true;
         return [];
       default:
         return [];
@@ -329,6 +339,10 @@ export class PiChatUiStreamMapper {
     const m = assistantView(message);
     if (!m) return;
     if (m.usage) this.accUsage = addRequestUsage(this.accUsage, m.usage, this.cost);
+    // Pi's own rule for a call that measured something (`getLastAssistantUsage`).
+    if (m.usage && m.stopReason !== "aborted" && m.stopReason !== "error") {
+      this.lastSettledUsage = m.usage;
+    }
     this.finishReason = mapStopReason(m.stopReason);
     // A model call that SETTLED retires the previous failure. Pi retries inside
     // one turn, so an early 503 the next call recovered from is no longer this
@@ -379,6 +393,8 @@ export class PiChatUiStreamMapper {
       usage: this.accUsage,
       finishReason: this.finishReason,
       ...(this.lastError ? { errorText: this.lastError } : {}),
+      ...(this.lastSettledUsage ? { lastSettledUsage: this.lastSettledUsage } : {}),
+      compacted: this.compacted,
     };
   }
 }

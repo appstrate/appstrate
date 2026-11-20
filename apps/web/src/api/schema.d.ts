@@ -20799,6 +20799,8 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ChatSession"] & {
                         messages: components["schemas"]["ChatMessage"][];
+                        /** @description Tokens of every model call metered for the conversation's turns. Runs launched from it are metered to the run. */
+                        usage: components["schemas"]["TokenUsage"];
                     };
                 };
             };
