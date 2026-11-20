@@ -237,11 +237,16 @@ export const chatPaths = {
                   { $ref: "#/components/schemas/ChatSession" },
                   {
                     type: "object",
-                    required: ["messages"],
+                    required: ["messages", "usage"],
                     properties: {
                       messages: {
                         type: "array",
                         items: { $ref: "#/components/schemas/ChatMessage" },
+                      },
+                      usage: {
+                        $ref: "#/components/schemas/TokenUsage",
+                        description:
+                          "Tokens of every model call metered for the conversation's turns. Runs launched from it are metered to the run.",
                       },
                     },
                   },
