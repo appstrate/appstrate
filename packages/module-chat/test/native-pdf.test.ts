@@ -17,7 +17,7 @@ function transform(turn: TurnPdfInput, input: unknown[]) {
   return hook({ payload: { input } })?.input ?? input;
 }
 
-const VISION = { api: "openai-responses" as const, input: ["text", "image"] };
+const SENT = { image: true, pdf: true };
 
 const pdf = { name: "contract.pdf", data: btoa("%PDF-1.7\ncontract") };
 const nativeFile = {
@@ -27,7 +27,7 @@ const nativeFile = {
 };
 
 it("keeps attached and tool-returned PDFs on their source through the tool-less closing prompt", () => {
-  const turn = createTurnPdfInput(VISION);
+  const turn = createTurnPdfInput(SENT);
   const attachment = turn.add(pdf);
   const tool = turn.add(pdf, "call_1|fc_1");
   const text = (value: string) => ({ type: "input_text", text: value });
@@ -54,23 +54,23 @@ it("keeps attached and tool-returned PDFs on their source through the tool-less 
   expect(JSON.stringify(wire)).not.toContain(attachment.reference!);
   const unrelated = [historyPrompt, historyResult, closing];
   expect(transform(turn, unrelated)).toEqual(unrelated);
-  expect(transform(createTurnPdfInput(VISION), input)).toEqual(input);
+  expect(transform(createTurnPdfInput(SENT), input)).toEqual(input);
 });
 
 it("caps cumulative file bytes before sending, including across function calls", () => {
-  const turn = createTurnPdfInput(VISION);
+  const turn = createTurnPdfInput(SENT);
   const full = { ...pdf, data: Buffer.alloc(RESOURCE_BLOB_MAX_BYTES).toString("base64") };
   const receipt = turn.add(full, "first|item");
   expect(receipt.note).toContain(pdf.name);
   expect(turn.add(full, "first|item")).toBe(receipt);
   expect(turn.add(pdf, "second|item").note).toContain("size limit");
-  expect(createTurnPdfInput(VISION).add({ ...full, data: full.data + "AAAA" }).note).toContain(
+  expect(createTurnPdfInput(SENT).add({ ...full, data: full.data + "AAAA" }).note).toContain(
     "size limit",
   );
 });
 
-it("reports an unsupported adapter without exposing the PDF as text", () => {
-  const turn = createTurnPdfInput({ api: "openai-completions", input: ["text", "image"] });
+it("reports a PDF the turn does not deliver without exposing it as text", () => {
+  const turn = createTurnPdfInput({ image: true, pdf: false });
   expect(turn.supported).toBe(false);
   const receipt = turn.add(pdf);
   expect(receipt.note).toContain("does not accept PDF");
@@ -79,14 +79,8 @@ it("reports an unsupported adapter without exposing the PDF as text", () => {
   expect(transform(turn, input)).toEqual(input);
 });
 
-it("has no PDF input on a model without vision, whatever its adapter", () => {
-  const turn = createTurnPdfInput({ api: "openai-responses", input: ["text"] });
-  expect(turn.supported).toBe(false);
-  expect(turn.add(pdf).note).toContain("does not accept PDF");
-});
-
 it("attaches a PDF to its own call only, a grammar tool's output included, and drops a foreign reference", () => {
-  const turn = createTurnPdfInput(VISION);
+  const turn = createTurnPdfInput(SENT);
   const mine = turn.add(pdf, "call_a|fc_a");
   const text = (value: string) => ({ type: "input_text", text: value });
   // Call B carries call A's reference: it is not B's file, and it never reaches the wire as text.

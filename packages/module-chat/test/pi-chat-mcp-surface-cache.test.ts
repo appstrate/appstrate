@@ -10,6 +10,7 @@
  * "zero hops" cannot pass by going around the seam.
  */
 
+import type { FileDelivery } from "../src/file-input.ts";
 import { createTurnPdfInput } from "../src/pi-chat/native-pdf.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { describe, expect, it } from "bun:test";
@@ -230,7 +231,7 @@ function buildTurn(
   signal = new AbortController().signal,
   listsSkills = false,
   pdfInput?: ReturnType<typeof createTurnPdfInput>,
-  modelSeesImages = true,
+  fileDelivery: FileDelivery = { image: true, pdf: true },
 ) {
   return buildPlatformMcpTools({
     url: MCP_URL,
@@ -243,7 +244,7 @@ function buildTurn(
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
     listsSkills,
-    modelSeesImages,
+    fileDelivery,
     pdfInput,
   });
 }
@@ -642,15 +643,10 @@ describe("inline images from remote integration tools", () => {
   ] as const) {
     it(`explains a skipped image for ${name}`, async () => {
       const stub = mcpStub([block]);
-      const turn = await buildTurn(
-        stub,
-        "file-reader",
-        undefined,
-        undefined,
-        false,
-        undefined,
-        seesImages,
-      );
+      const turn = await buildTurn(stub, "file-reader", undefined, undefined, false, undefined, {
+        image: seesImages,
+        pdf: seesImages,
+      });
       try {
         const call = register(turn.extensionFactories).find(
           (t) => t.name === "call_integration_tool",
@@ -668,7 +664,7 @@ describe("inline images from remote integration tools", () => {
 
 describe("temporary connector files", () => {
   it("hands the PDF to the current tool call, streams a receipt, and ignores relayed resource blocks", async () => {
-    const pdf = createTurnPdfInput({ api: "openai-responses", input: ["text", "image"] });
+    const pdf = createTurnPdfInput({ image: true, pdf: true });
     const added: string[] = [];
     const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, false, {
       ...pdf,

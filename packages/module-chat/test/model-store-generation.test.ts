@@ -18,8 +18,8 @@ import {
   editGenerationSettings,
   getCompatibleGenerationSettings,
   getSelectedModel,
-  getSelectedModelAcceptsImages,
-  getSelectedModelReadsPdf,
+  getSelectedModelSendsImages,
+  getSelectedModelSendsPdf,
   setModelCatalog,
   setSelectedModel,
   subscribeModel,
@@ -60,34 +60,39 @@ beforeEach(reset);
 afterEach(reset);
 
 describe("the model a conversation is on", () => {
-  it("reports the selected model's image support, including an alias with hidden capabilities", () => {
+  it("sends an image unless the catalog declares the model text-only, aliases included", () => {
     setModelCatalog([
       { id: "alias" },
       { id: "text", input: ["text"] },
       { id: "vision", input: ["text", "image"] },
     ]);
-    expect(getSelectedModelAcceptsImages()).toBeNull();
+    expect(getSelectedModelSendsImages()).toBe(true);
+    setSelectedModel("alias");
+    expect(getSelectedModelSendsImages()).toBe(true);
     setSelectedModel("text");
-    expect(getSelectedModelAcceptsImages()).toBe(false);
+    expect(getSelectedModelSendsImages()).toBe(false);
     setSelectedModel("vision");
-    expect(getSelectedModelAcceptsImages()).toBe(true);
+    expect(getSelectedModelSendsImages()).toBe(true);
   });
 
-  it("reports PDF support only for a vision model on the Responses adapter, null when unknown", () => {
+  it("sends a PDF unless the API shape has no wire format or the model is text-only", () => {
     setModelCatalog([
       { id: "alias" },
+      { id: "responses-unknown", apiShape: "openai-responses" },
       { id: "responses", apiShape: "openai-responses", input: ["text", "image"] },
       { id: "responses-text", apiShape: "openai-responses", input: ["text"] },
       { id: "messages", apiShape: "anthropic-messages", input: ["text", "image"] },
     ]);
     setSelectedModel("alias");
-    expect(getSelectedModelReadsPdf()).toBeNull();
+    expect(getSelectedModelSendsPdf()).toBe(true);
+    setSelectedModel("responses-unknown");
+    expect(getSelectedModelSendsPdf()).toBe(true);
     setSelectedModel("responses");
-    expect(getSelectedModelReadsPdf()).toBe(true);
+    expect(getSelectedModelSendsPdf()).toBe(true);
     setSelectedModel("responses-text");
-    expect(getSelectedModelReadsPdf()).toBe(false);
+    expect(getSelectedModelSendsPdf()).toBe(false);
     setSelectedModel("messages");
-    expect(getSelectedModelReadsPdf()).toBe(false);
+    expect(getSelectedModelSendsPdf()).toBe(false);
   });
 
   it("is the seeded one, not the stored default", () => {

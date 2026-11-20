@@ -55,6 +55,7 @@ import {
 import { ChatTurnDeadlineError, closePiTurn, turnContextOf } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
+import { fileDelivery } from "../file-input.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
@@ -348,13 +349,13 @@ export function runPiChat(input: PiChatInput): Response {
         // MCP client it goes on to open — `finally` cannot close what was never
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
-        const pdfInput = createTurnPdfInput(model);
-        const modelSeesImages = model.input.includes("image");
+        const delivery = fileDelivery(model);
+        const pdfInput = createTurnPdfInput(delivery);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
               ...platformMcp,
-              modelSeesImages,
+              fileDelivery: delivery,
               pdfInput,
               writeChunk: write,
               signal: turnAbort.signal,
@@ -445,7 +446,7 @@ export function runPiChat(input: PiChatInput): Response {
         const read = input.readAttachment;
         const signal = turnAbort.signal;
         const images =
-          modelSeesImages && read
+          delivery.image && read
             ? await untilAborted(
                 loadAttachmentImages(
                   input.messages,
@@ -468,7 +469,7 @@ export function runPiChat(input: PiChatInput): Response {
             estimateTokens,
             images,
             pdfReceipts,
-            modelSeesImages,
+            fileDelivery: delivery,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
             // Still a floor, not a measurement: tool schemas and this turn's own

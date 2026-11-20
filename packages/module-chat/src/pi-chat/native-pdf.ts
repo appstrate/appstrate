@@ -2,8 +2,8 @@
 
 import { sanitizeFilename } from "@appstrate/core/naming";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
-import type { Api, ExtensionFactory } from "@appstrate/runner-pi";
-import { readsPdfNatively } from "../pdf-input.ts";
+import type { ExtensionFactory } from "@appstrate/runner-pi";
+import type { FileDelivery } from "../file-input.ts";
 
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
 const REFERENCE = /\[pdf:[0-9a-f-]{36}\]/g;
@@ -37,8 +37,8 @@ export interface TurnPdfInput {
  * messages and attach them at serialization, to the same user or tool result
  * that supplied them. A new turn starts with an empty set.
  */
-export function createTurnPdfInput(model: { api: Api; input: readonly string[] }): TurnPdfInput {
-  const supported = readsPdfNatively(model);
+export function createTurnPdfInput(delivery: FileDelivery): TurnPdfInput {
+  const supported = delivery.pdf;
   const files: {
     source?: string;
     receipt: PdfReceipt & { reference: string };

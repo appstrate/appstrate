@@ -403,7 +403,7 @@ describe("attachment images in the projected turn", () => {
   it("puts the prompt message's images on the prompt and the replayed ones on their own turn", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, {
       ...OPTIONS,
-      modelSeesImages: true,
+      fileDelivery: { image: true, pdf: true },
       images: new Map([
         ["u1", new Map([["appfile://file_old", image]])],
         ["u2", new Map([["appfile://file_new", image]])],
@@ -421,7 +421,7 @@ describe("attachment images in the projected turn", () => {
   it("tells a model that sees images which pixels were left out", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, {
       ...OPTIONS,
-      modelSeesImages: true,
+      fileDelivery: { image: true, pdf: true },
       images: new Map([["u2", new Map([["appfile://file_new", image]])]]),
     });
     const first = JSON.stringify(turn.history[0]);
