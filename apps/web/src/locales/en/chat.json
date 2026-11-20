@@ -17,7 +17,7 @@
   "thread.disclaimer": "AI can make mistakes. Check before you confirm.",
   "thread.scrollToBottom": "Scroll to bottom",
   "turn.stepLimitReached": "Partial answer: step limit reached.",
-  "context.label": "Conversation context",
+  "context.label": "Conversation context: {{summary}}",
   "context.collapse": "Collapse conversation context",
   "context.error": "The conversation context could not be loaded.",
   "context.unsaved": "Send a first message to create this conversation.",
@@ -226,5 +226,12 @@
   "threads.results": "Results",
   "threads.noResults": "No conversation matches.",
   "threads.search.placeholder": "Search",
-  "threads.search.clear": "Clear search"
+  "threads.search.clear": "Clear search",
+  "context.title": "Conversation context",
+  "context.summary": "{{used, number(notation: compact; maximumFractionDigits: 1)}} / {{max, number(notation: compact; maximumFractionDigits: 1)}} tokens ({{percent, number(style: percent; maximumFractionDigits: 0)}})",
+  "context.compactAt": "The history is summarized automatically past {{threshold, number(notation: compact; maximumFractionDigits: 1)}} tokens.",
+  "context.compactNext": "{{threshold, number(notation: compact; maximumFractionDigits: 1)}}-token threshold reached: the history will be summarized on the next message.",
+  "context.noCompaction": "Automatic summarizing is off for this model: past its window, a request may be refused.",
+  "context.compacted": "The history was summarized during the last turn.",
+  "context.measuredWith": "Measured with {{model}}; the selected model may have another window."
 }

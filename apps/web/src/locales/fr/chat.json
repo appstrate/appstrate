@@ -17,7 +17,7 @@
   "thread.disclaimer": "L’IA peut se tromper. Vérifiez avant de confirmer.",
   "thread.scrollToBottom": "Aller en bas",
   "turn.stepLimitReached": "Réponse partielle : limite d'étapes atteinte.",
-  "context.label": "Contexte de la conversation",
+  "context.label": "Contexte de la conversation : {{summary}}",
   "context.collapse": "Replier le contexte de la conversation",
   "context.error": "Le contexte de la conversation n’a pas pu être chargé.",
   "context.unsaved": "Envoyez un premier message pour créer cette conversation.",
@@ -226,5 +226,12 @@
   "threads.results": "Résultats",
   "threads.noResults": "Aucune conversation ne correspond.",
   "threads.search.placeholder": "Rechercher",
-  "threads.search.clear": "Effacer la recherche"
+  "threads.search.clear": "Effacer la recherche",
+  "context.title": "Contexte de la conversation",
+  "context.summary": "{{used, number(notation: compact; maximumFractionDigits: 1)}} / {{max, number(notation: compact; maximumFractionDigits: 1)}} tokens ({{percent, number(style: percent; maximumFractionDigits: 0)}})",
+  "context.compactAt": "L’historique sera résumé automatiquement au-delà de {{threshold, number(notation: compact; maximumFractionDigits: 1)}} tokens.",
+  "context.compactNext": "Seuil de {{threshold, number(notation: compact; maximumFractionDigits: 1)}} tokens atteint : l’historique sera résumé au prochain message.",
+  "context.noCompaction": "Le résumé automatique est désactivé pour ce modèle : au-delà de la fenêtre, la requête peut être refusée.",
+  "context.compacted": "L’historique a été résumé pendant le dernier tour.",
+  "context.measuredWith": "Mesuré avec {{model}} ; le modèle choisi peut avoir une autre fenêtre."
 }
