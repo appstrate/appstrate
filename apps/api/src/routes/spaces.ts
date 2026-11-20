@@ -67,8 +67,9 @@ import {
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
+  assertCatalogPackageAccess,
   assertPlaceablePackageAccess,
-  assertPackageShareAccess,
+  assertPackagePlacementAccess,
   callerPlacementAuthority,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
@@ -316,9 +317,9 @@ async function coarseSpacePackageGate(
  *      ({@link coarseSpacePackageGate}). A caller holding none of the four
  *      strings this op can require is refused without the row being looked up,
  *      so the route is not an enumeration oracle.
- *   2. **Catalog lookup**, through `assertPlaceablePackageAccess` — the
- *      reachability rule the READ routes obey, over the credential's reach
- *      (activation may place, judged in the home), for all three ops, so `POST`,
+ *   2. **Catalog lookup** — the reachability rule the READ routes obey
+ *      (`assertCatalogPackageAccess`; over the credential's reach for
+ *      `activate`, which may place: `assertPlaceablePackageAccess`), so `POST`,
  *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
@@ -349,7 +350,11 @@ async function gateSpacePackageWrite(
 ): Promise<void> {
   const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
-  const { type } = await assertPlaceablePackageAccess(c, packageId);
+  // Activation may place, judged in the home; configure and deactivate act on the placement here.
+  const { type } =
+    op === "activate"
+      ? await assertPlaceablePackageAccess(c, packageId)
+      : await assertCatalogPackageAccess(c, packageId);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every
@@ -797,11 +802,11 @@ export function createSpacesRouter() {
   //
   // Idempotent upsert: 201 when this call put the package on, 200 when it
   // already was. If not placed here it can place it, but only with
-  // `<type>:share` in the home (`assertPackageShareAccess`), so activation is no
+  // `<type>:share` in the home (`assertPackagePlacementAccess`), so activation is no
   // way around `share`; an API key never carries it.
   //
   // No permission guard is mounted: the gate below reads the package's own rows
-  // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
+  // (`gateSpacePackageWrite`, `assertPackagePlacementAccess`).
   router.post("/:id/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("id")!;
@@ -819,7 +824,7 @@ export function createSpacesRouter() {
       : await activatePackage(scope, data.packageId, {
           placeAs: await callerPlacementAuthority(
             c,
-            (await assertPackageShareAccess(c, data.packageId)).type,
+            (await assertPackagePlacementAccess(c, data.packageId)).type,
           ),
         });
     // True only if this call turned the package on (a default-on package was already active).

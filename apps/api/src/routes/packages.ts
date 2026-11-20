@@ -93,6 +93,7 @@ import {
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
+  assertPackagePlacementAccess,
   assertPackageShareAccess,
   assertPlacementRemovalAccess,
   callerPlacementAuthority,
@@ -2063,7 +2064,7 @@ export function createPackagesRouter() {
     // Home and target are two spaces of one act: the credential's reach, not the call's.
     const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
-    const pkg = await assertPackageShareAccess(c, packageId);
+    const pkg = await assertPackagePlacementAccess(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
     let spaceId: string;
@@ -2196,7 +2197,7 @@ export function createPackagesRouter() {
         throw forbidden("A credential confined to spaces cannot address a person");
       }
       // Home authority is asked before the directory read: no membership leak.
-      if (target !== ownerId) await assertPackageShareAccess(c, packageId);
+      if (target !== ownerId) await assertPackagePlacementAccess(c, packageId);
       const membership = await getOrgMember(orgId, target);
       if (!membership) throw notFound(`User '${target}' not found in this organization`);
       // Read-only: a revoke must not create the personal space.

@@ -18,7 +18,10 @@ import { truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
 import {
+  seedApiKey,
+  seedEndUser,
   seedPackage,
+  seedPackageShare,
   seedPublishedVersion,
   seedSpace,
   seedSpacePackage,
@@ -289,6 +292,83 @@ describe("the activation remedy, through every door", () => {
     );
     expect(pinned.status).toBe(404);
     expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
+  });
+
+  it("places nothing from a set that excludes the home, nor for a key or an end-user of the target", async () => {
+    const other = (await seedSpace({ orgId: ctx.orgId, name: "Autre" })).id;
+    const unlimited = await activateInVitrine(
+      orgEndpoint,
+      chat([vitrine, other]),
+      INTEGRATION,
+      vitrine,
+    );
+    expect(unlimited.status).toBe(404);
+
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: vitrine,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:read", "integrations:install", "spaces:read"],
+    });
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: vitrine });
+    const pinned = { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" };
+    for (const headers of [pinned, { ...pinned, "Appstrate-User": endUser.id }]) {
+      const res = await app.request(`/api/spaces/${vitrine}/packages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ packageId: INTEGRATION }),
+      });
+      expect([403, 404]).toContain(res.status);
+    }
+    expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
+  });
+
+  it("refuses another organization's package through the chat", async () => {
+    const stranger = await createTestContext({ orgSlug: "stranger" });
+    const FOREIGN = "@stranger/svc";
+    await seedPackage({
+      id: FOREIGN,
+      orgId: stranger.orgId,
+      homeSpaceId: stranger.defaultSpaceId,
+      type: "integration",
+      source: "local",
+    });
+    const res = await activateInVitrine(
+      orgEndpoint,
+      chat([ctx.defaultSpaceId, vitrine]),
+      FOREIGN,
+      vitrine,
+    );
+    expect(res.status).toBe(404);
+    expect(await rowIn(vitrine, FOREIGN)).toBeNull();
+  });
+
+  it("withdraws a share on the home's authority through the chat only when its set holds the home", async () => {
+    await seedPackageShare(vitrine, INTEGRATION, ctx.user.id);
+    const revoke = (headers: Record<string, string>) =>
+      invoke(orgEndpoint, headers, {
+        operation_id: "revokePackageShare",
+        space_id: vitrine,
+        path_params: { scope: "@remedy", name: "svc", target: vitrine },
+      });
+    // The turn carries no deactivation grant: only the home's `share` can withdraw it.
+    expect((await revoke(chat([vitrine]))).status).toBe(403);
+    expect(await rowIn(vitrine, INTEGRATION)).toEqual({ enabled: false });
+    expect((await revoke(chat([ctx.defaultSpaceId, vitrine]))).status).toBe(204);
+    expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
+  });
+
+  it("lists a package's shares only on the home's authority in the space the call entered", async () => {
+    await seedPackageShare(vitrine, INTEGRATION, ctx.user.id);
+    const list = (spaceId: string) =>
+      invoke(orgEndpoint, chat([ctx.defaultSpaceId, vitrine]), {
+        operation_id: "listPackageShares",
+        space_id: spaceId,
+        path_params: { scope: "@remedy", name: "svc" },
+      });
+    expect((await list(ctx.defaultSpaceId)).status).toBe(200);
+    // Entered in the target, the read reaches the target alone: no home authority there.
+    expect((await list(vitrine)).status).toBe(403);
   });
 
   it("switches on an agent placed in the target but off there, through every door", async () => {
