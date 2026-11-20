@@ -174,6 +174,7 @@
   "threads.settings.openFor": "Paramètres de « {{title}} »",
   "threads.actions.openFor": "Actions de « {{title}} »",
   "model.loadFailed": "Modèles indisponibles",
+  "composer.tools": "Outils et réglages",
   "composer.settings": "Réglages de l’assistant",
   "composer.skills": "Compétences…",
   "composer.creationMode": "Mode création",

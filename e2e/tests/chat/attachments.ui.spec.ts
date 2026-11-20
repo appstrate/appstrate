@@ -111,6 +111,8 @@ test.describe("staged attachment touch targets", () => {
     }, testInfo) => {
       await page.setViewportSize(viewport);
       await page.goto("/chat");
+      // A phone's attach is a row of the "+" panel.
+      if (viewport.width < 768) await page.getByTestId("composer-plus").tap();
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: /^Joindre des fichiers/ }).tap();
       const contents = "Compte rendu de la réunion.";

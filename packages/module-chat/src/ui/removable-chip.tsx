@@ -43,7 +43,6 @@ export function RemovableChip({
     // `rest` carries what a Radix trigger (`asChild`) passes: ref, handlers, data-state.
     <span
       {...rest}
-      data-composer-chip=""
       className={cn(
         badgeVariants({ variant: "secondary" }),
         "text-muted-foreground desktop-pointer:h-7 desktop-pointer:pr-1 h-10 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-0 pl-2.5 font-normal",

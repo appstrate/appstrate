@@ -4,7 +4,7 @@
 
 /** The composer's `<textarea>`: compact, borderless, inside the composer card. */
 export const COMPOSER_INPUT_CLASS =
-  "placeholder:text-muted-foreground [grid-area:input] max-h-40 min-h-10 desktop-pointer:min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
+  "placeholder:text-muted-foreground max-h-40 min-h-10 desktop-pointer:min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
@@ -14,6 +14,34 @@ export const READING_TEXT_DENSE_CLASS = "text-base md:text-xs";
 
 /** Secondary text (a chip, a meta line, a status): 14 px on a phone, never smaller. */
 export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
+
+/**
+ * The composer's row, below the field's own text. From `md` up the field takes a line to itself
+ * with the tools, the model picker and send on the line under it. On a phone it is ONE line, always:
+ * the "+" (all the tools), the field, the model picker, send. The row keeps its bottom edge when the
+ * field grows to several lines.
+ */
+export const COMPOSER_ROW_CLASS =
+  "flex items-center gap-x-2 gap-y-1 md:flex-wrap max-md:flex-nowrap max-md:items-end";
+
+/**
+ * The field: a line of its own from `md`, the stretchy cell of the phone's line (as tall as its
+ * buttons). Empty, it shows one line of its placeholder, never the two a narrow screen would wrap.
+ */
+export const COMPOSER_FIELD_CLASS =
+  "md:order-first md:basis-full max-md:min-h-10 max-md:min-w-0 max-md:flex-1 max-md:py-2 max-md:[&:placeholder-shown]:max-h-10 max-md:[&:placeholder-shown]:overflow-hidden max-md:[&:placeholder-shown]:py-0 max-md:[&:placeholder-shown]:leading-10 short-landscape:basis-0 short-landscape:grow";
+
+/** Send's cell: with the field on the same line in a short landscape (the keyboard leaves a sliver). */
+export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 short-landscape:order-first";
+
+/** The tools' cell: the desktop's settings and chips (`flex-1`), on a phone just the "+". */
+export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
+
+/**
+ * The model picker's cell: pushed right on a desktop; on a phone it takes only what it needs, at
+ * most 40 % of the line (the field keeps the rest), and its name truncates.
+ */
+export const COMPOSER_SLOT_CLASS = "ml-auto min-w-0 max-md:ml-0 max-md:max-w-[40%] max-md:shrink-0";
 
 /** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
 export const SEARCH_INPUT_CLASS =
@@ -41,5 +69,5 @@ export const THREAD_FOOTER_CLASS =
 /** The line under the composer, as the conversation skeleton draws it too. */
 export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
 
-/** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
-export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:group-focus-within/footer:hidden`;
+/** Under the composer from `md` up; a phone has it as the last line of the "+" panel. */
+export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:hidden`;

@@ -4,7 +4,14 @@ import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
-import { DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
+import {
+  COMPOSER_FIELD_CLASS,
+  COMPOSER_ROW_CLASS,
+  COMPOSER_SEND_CLASS,
+  COMPOSER_SLOT_CLASS,
+  COMPOSER_TOOLS_CLASS,
+  DISCLAIMER_TEXT_CLASS,
+} from "./phone-text.ts";
 
 /**
  * A saved conversation while its history loads: the turns it will show, in
@@ -76,21 +83,28 @@ export function ComposerSkeleton({
 }) {
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className="group/composer chat-composer-grid" data-rest="">
-        <div className="text-muted-foreground desktop-pointer:min-h-9 flex min-h-10 min-w-0 items-center overflow-hidden py-1 text-base [grid-area:input]">
-          {placeholder}
-        </div>
-        <div className="min-w-0 [grid-area:tools]">
-          <div className="flex items-center gap-1.5 max-md:[&>:not(:first-child)]:hidden">
+      <div className={COMPOSER_ROW_CLASS}>
+        <div className={COMPOSER_TOOLS_CLASS}>
+          <div className="flex items-center gap-1.5">
             <Skeleton className={COMPOSER_BUTTON_CLASS} />
-            <Skeleton className={COMPOSER_BUTTON_CLASS} />
-            {limited && <Skeleton className="desktop-pointer:h-7 h-10 w-44 rounded-full" />}
+            <Skeleton className={cn(COMPOSER_BUTTON_CLASS, "max-md:hidden")} />
+            {limited && (
+              <Skeleton className="desktop-pointer:h-7 h-10 w-44 rounded-full max-md:hidden" />
+            )}
           </div>
         </div>
-        {/* No slot for the context gauge: nothing says before load that a conversation has a
-            measure, and a reserved hole that collapses shifts more than a gauge that appears. */}
-        <Skeleton className="desktop-pointer:h-[30px] h-10 w-32 rounded-md [grid-area:model] max-md:hidden" />
-        <div className="flex items-center gap-2 [grid-area:send]">
+        <div
+          className={cn(
+            "text-muted-foreground desktop-pointer:min-h-9 flex min-w-0 items-center overflow-hidden py-1 text-base",
+            COMPOSER_FIELD_CLASS,
+          )}
+        >
+          {placeholder}
+        </div>
+        <div className={COMPOSER_SLOT_CLASS}>
+          <Skeleton className="desktop-pointer:h-[30px] h-10 w-32 rounded-md max-md:w-10" />
+        </div>
+        <div className={COMPOSER_SEND_CLASS}>
           <Skeleton className={COMPOSER_BUTTON_CLASS} />
         </div>
       </div>
