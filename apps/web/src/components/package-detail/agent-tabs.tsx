@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { ScopedRunList } from "../scoped-run-list";
 import { SchedulesTable } from "../schedules-table";
 import { useScheduleColumns } from "../schedule-columns";
@@ -17,7 +16,8 @@ import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
-import { NewScheduleModal } from "../new-schedule-modal";
+import { deedEntry } from "../space-deed";
+import { useScheduleCreation } from "./use-schedule-creation";
 import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
@@ -44,16 +44,20 @@ export function AgentRunsTab({
   );
 }
 
+/**
+ * The agent's schedules: the working space's, or, in « Tous les espaces », every space's the reader
+ * reaches, each row naming its space and opening there.
+ */
 export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
-  const schedulesQuery = useSchedules(packageId);
+  const { on: spanning } = useOverviewMode();
+  const schedulesQuery = useSchedules(packageId, { spanning });
   const schedules = schedulesQuery.data;
   const list = useLocalListParams();
   const states = list.values("state", ["active", "disabled"] as const);
-  const columns = useScheduleColumns({ showAgentName: false });
-  const { can } = usePermissions();
-  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
+  const columns = useScheduleColumns({ showAgentName: false, spanning });
+  const create = useScheduleCreation(packageId, detail);
 
   if (detail && schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
@@ -103,28 +107,26 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
             <NoMatchState message={t("detail.schedulesTable.noMatch")} onReset={list.reset} />
           ) : (
             <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
-              {can("schedules:write") && (
-                <EmptyStateAction
-                  action={{
-                    label: t("schedule.titleNew"),
-                    onSelect: () => setNewScheduleOpen(true),
-                  }}
-                />
-              )}
+              <EmptyStateAction
+                action={{
+                  label: t("schedule.titleNew"),
+                  ...deedEntry(create.deed),
+                }}
+              />
             </EmptyState>
           )
         }
       />
-      {newScheduleOpen && (
-        <NewScheduleModal initialAgentId={packageId} onClose={() => setNewScheduleOpen(false)} />
-      )}
+      {create.dialog}
     </>
   );
 }
 
+/** The agent's memory: the working space's, or, in « Tous les espaces », every space's the reader reaches. */
 export function AgentMemoryTab({ packageId }: { packageId: string }) {
   const requestedType = useConsumedSearchParam("agentMemory");
+  const { on: spanning } = useOverviewMode();
   const initialTypes: Array<"pinned" | "archive"> =
     requestedType === "pinned" || requestedType === "archive" ? [requestedType] : [];
-  return <MemoryPanel packageId={packageId} initialTypes={initialTypes} />;
+  return <MemoryPanel packageId={packageId} initialTypes={initialTypes} spanning={spanning} />;
 }

@@ -28,7 +28,7 @@ export function FilePreview({
       // DialogContent is a grid with auto rows — pin the body row to the
       // remaining height (minmax(0,1fr)) so the iframe previews stretch to the
       // full modal height instead of their intrinsic size.
-      className="h-[85vh] max-w-5xl grid-rows-[auto_minmax(0,1fr)]"
+      className="h-[85dvh] max-w-5xl grid-rows-[auto_minmax(0,1fr)]"
     >
       {/* The modal already titles the file; the frame carries the rest. */}
       <FileArtifact

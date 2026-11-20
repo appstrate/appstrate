@@ -398,7 +398,7 @@ describe("main", () => {
   });
 
   it("POSITIVE CONTROL: FAILS when a MODULE schema key has no row, naming its file", async () => {
-    // The gap this union closes: `packages/module-ee/src/env.ts` declares seven
+    // The gap this union closes: `packages/module-billing/src/env.ts` declares seven
     // variables, and the gate read `packages/env` alone — a key added there was
     // documented nowhere and passed both env gates.
     const r = await run(

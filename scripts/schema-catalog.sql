@@ -18,7 +18,7 @@
 --             < scripts/schema-catalog.sql | diff packages/db/schema-catalog.txt -
 --
 -- Deliberately left out:
---   * `ee_*` tables — `@appstrate/module-ee` migrates them under its own
+--   * `ee_*` tables — `@appstrate/module-billing` migrates them under its own
 --     journal (`drizzle.ee_migrations`) at init, not through `migrate.ts`;
 --   * `sso_*` tables — `@appstrate/ee` (root `ee/`) likewise, under
 --     `drizzle.appstrate_ee_migrations`;

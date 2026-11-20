@@ -8,8 +8,9 @@
  * (`chat_sessions.space_id`) is not an owner; the TOUCHED set (the origin space
  * plus `chat_session_spaces`) is what spaces filter it by, and it is visible to its
  * author only while they reach, with `chat:read`, every space of that set. A
- * conversation may be limited (`restricted`) to its origin space. Sessions are
- * personal: every query filters by (orgId, userId).
+ * conversation may be limited (`restricted`) to its origin space; one without an
+ * origin takes it only by being limited there (PATCH), and keeps it once set.
+ * Sessions are personal: every query filters by (orgId, userId).
  *
  * Persistence is server-authoritative and has exactly TWO writers, both in
  * `persistence.ts`. `POST /api/orgs/:orgId/chat` is the only one on a request
@@ -36,9 +37,9 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
 import {
   PERMISSION_REQUIREMENT_MARKER,
   reportPermissionDenial,
@@ -56,7 +57,13 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import { createSession, sessionVisible, touchedSpaceIds, touchedUnder } from "./persistence.ts";
+import {
+  createSession,
+  sessionVisible,
+  touchedSpaceIds,
+  touchedUnder,
+  writingOriginSpace,
+} from "./persistence.ts";
 import {
   readableSpaceIds,
   spacesHolding,
@@ -93,9 +100,16 @@ export const updateSessionSchema = z
     title: z.string().min(1).max(200).optional(),
     /** Limit (`true`, needs an origin space the caller can act in) or lift (`false`) it. */
     restricted: z.boolean().optional(),
+    /** The origin space of a conversation without one, given only by limiting it there. */
+    spaceId: z.string().min(1).optional(),
   })
+  .strict()
   .refine((body) => body.title !== undefined || body.restricted !== undefined, {
     error: "title or restricted is required",
+  })
+  .refine((body) => body.spaceId === undefined || body.restricted === true, {
+    error: "spaceId needs restricted: true",
+    path: ["spaceId"],
   });
 
 type SessionRow = typeof chatSessions.$inferSelect;
@@ -392,38 +406,79 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       return c.json({ ...dto, messages: messages.map(toMessageDto) });
     },
 
-    // PATCH …/sessions/:id — rename, limit to the origin space, or lift the limit
+    // PATCH …/sessions/:id — rename, limit to the origin space (giving one to a conversation
+    // without it), or lift the limit
     update: async (c: Context<ChatEnv>) => {
       const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
-      const { title, restricted } = await readJsonBody(c, updateSessionSchema);
-      // Limiting needs an origin space the caller can still act in; lifting is always allowed.
-      if (restricted && !canActIn(c.get("reachable"), session.spaceId)) {
+      const { title, restricted, spaceId } = await readJsonBody(c, updateSessionSchema);
+      const reachable = c.get("reachable");
+      // The origin is immutable once set: a conversation without one takes it by being limited.
+      if (spaceId !== undefined) {
+        if (session.spaceId !== null) {
+          throw invalidRequest(
+            "spaceId is set only on a conversation without an origin space",
+            "spaceId",
+          );
+        }
+        if (!canActIn(reachable, spaceId)) {
+          throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+        }
+      } else if (restricted && !canActIn(reachable, session.spaceId)) {
+        // Limiting needs an origin space the caller can still act in; lifting is always allowed.
         throw invalidRequest(
           "restricted needs an origin space this conversation can act in",
           "restricted",
         );
       }
       // The turn in flight keeps the reach it was minted with, so the limit changes between turns.
-      const limitChanges = restricted !== undefined && restricted !== session.restricted;
-      const updated = await db
-        .update(chatSessions)
-        .set({
-          ...(title === undefined ? {} : { title }),
-          ...(restricted === undefined ? {} : { restricted }),
-          // Renaming reorders the sidebar; limiting or lifting the limit does not (as pins don't).
-          ...(title === undefined ? {} : { updatedAt: new Date() }),
-        })
-        .where(
-          and(
-            eq(chatSessions.id, session.id),
-            limitChanges ? isNull(chatSessions.activeStreamId) : undefined,
-          ),
-        )
-        .returning({ id: chatSessions.id });
+      const write = () =>
+        db.transaction(async (tx) => {
+          const rows = await tx
+            .update(chatSessions)
+            .set({
+              ...(title === undefined ? {} : { title }),
+              ...(restricted === undefined ? {} : { restricted }),
+              ...(spaceId === undefined ? {} : { spaceId }),
+              // Renaming reorders the sidebar; limiting or lifting the limit does not (as pins don't).
+              ...(title === undefined ? {} : { updatedAt: new Date() }),
+            })
+            .where(
+              and(
+                eq(chatSessions.id, session.id),
+                restricted === undefined
+                  ? undefined
+                  : or(
+                      eq(chatSessions.restricted, restricted),
+                      isNull(chatSessions.activeStreamId),
+                    ),
+                spaceId === undefined ? undefined : isNull(chatSessions.spaceId),
+              ),
+            )
+            .returning({ id: chatSessions.id });
+          // The origin is touched by definition: a space touched before becomes the origin, once.
+          if (rows.length > 0 && spaceId !== undefined) {
+            await tx
+              .delete(chatSessionSpaces)
+              .where(
+                and(
+                  eq(chatSessionSpaces.sessionId, session.id),
+                  eq(chatSessionSpaces.spaceId, spaceId),
+                ),
+              );
+          }
+          return rows;
+        });
+      const updated = await (spaceId === undefined ? write() : writingOriginSpace(write));
       if (updated.length === 0) {
-        throw limitChanges
-          ? conflict("chat_turn_in_flight", "The limit cannot change while a turn is running.")
-          : notFound("Chat session not found");
+        const latest = await getOwnedSession(session.id, sessionScope(c));
+        // Another request gave the conversation its origin first.
+        if (spaceId !== undefined && latest.spaceId !== null) {
+          throw invalidRequest(
+            "spaceId is set only on a conversation without an origin space",
+            "spaceId",
+          );
+        }
+        throw conflict("chat_turn_in_flight", "The limit cannot change while a turn is running.");
       }
       notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);

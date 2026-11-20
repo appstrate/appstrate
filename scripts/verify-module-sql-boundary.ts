@@ -3,7 +3,7 @@
 /**
  * Architecture test — a module with its own database touches its OWN tables only.
  * `apps/api/src/modules/README.md` rule 4: such a module reads platform data through
- * `ctx.services`, never a SQL join across the licence boundary. Per module package owning a
+ * `ctx.services`, never a SQL join across the module boundary. Per module package owning a
  * migration journal, this refuses any `@appstrate/db` / `packages/db/` import and any foreign
  * table named in raw SQL. Scope: only SQL written literally in the module is read.
  * Usage: bun scripts/verify-module-sql-boundary.ts
@@ -187,7 +187,7 @@ export function reviewModuleSql(
       problems.push(
         `${file} imports \`${spec}\` — the platform's drizzle schema. Module \`${moduleId}\` ` +
           `keeps its tables in the platform database, so a table object imported here joins ` +
-          `across the licence boundary and compiles. Read platform data through \`ctx.services\`.`,
+          `across the module boundary and compiles. Read platform data through \`ctx.services\`.`,
       );
     }
 

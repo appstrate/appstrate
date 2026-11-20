@@ -13,19 +13,22 @@ import { DetailBar } from "../components/detail-bar";
 import { DetailSectionCard } from "../components/detail-section-card";
 import { HeaderActionButton } from "../components/header-action-button";
 import { NotificationDetailSkeleton } from "../components/loading-skeletons";
-import { ResourceErrorState } from "../components/page-states";
+import { UnreadableDetail } from "../components/unreadable-detail";
+import { SpaceNameOf } from "../components/space-name";
 import { RunStatusBadge } from "../components/status-badge";
 import { notificationRow } from "../lib/notification-row";
 import { useMarkRead, useNotification } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
-import { useCanReach } from "../hooks/use-can-reach";
+import { useCanReachInSpace } from "../hooks/use-can-reach";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { isQueryInFlight } from "../lib/query-state";
 
 export function NotificationDetailPage() {
   const { t } = useTranslation(["common", "agents"]);
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const canReach = useCanReach();
+  const canReach = useCanReachInSpace();
+  const { on: overview } = useOverviewMode();
   const query = useNotification(id);
   const { data: notification, error } = query;
   const { data: agents, isLoading: agentsLoading } = useAgents();
@@ -40,10 +43,24 @@ export function NotificationDetailPage() {
 
   // The title waits for the agent names, like the bell's rows: it never shows the raw id first.
   if (isQueryInFlight(query) || agentsLoading) return <NotificationDetailSkeleton />;
-  if (error || !notification) return <ResourceErrorState error={error} />;
+  if (error || !notification) {
+    return (
+      <UnreadableDetail
+        kind="notification"
+        id={id ?? ""}
+        error={error}
+        pending={<NotificationDetailSkeleton />}
+      />
+    );
+  }
 
   const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
-  const view = notificationRow(notification, (packageId) => agentNames.get(packageId), canReach, t);
+  const view = notificationRow(
+    notification,
+    (packageId) => agentNames.get(packageId),
+    (target) => canReach(target, notification.spaceId),
+    t,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -56,6 +73,12 @@ export function NotificationDetailPage() {
         }
         badge={view.status ? <RunStatusBadge status={view.status} /> : undefined}
         trail={[{ label: t("notifications.ariaLabel") }]}
+        // In « Tous les espaces » the switcher does not name the space the page entered.
+        spaces={
+          overview ? (
+            <SpaceNameOf spaceId={notification.spaceId} size="sm" className="shrink-0" />
+          ) : undefined
+        }
         meta={<span className="truncate">{view.meta}</span>}
         actions={
           view.target && (

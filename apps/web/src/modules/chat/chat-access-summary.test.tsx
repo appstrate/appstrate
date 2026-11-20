@@ -17,7 +17,7 @@
  * asserted there rather than through markup this renderer cannot produce.
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -32,10 +32,9 @@ installFakeStorage({
 });
 
 const { ChatAccessSummary, ChatCapabilityList } = await import("./chat-access-summary.tsx");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
 const { $api } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
+const { renderInSpace } = await import("../../test/space-context.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
@@ -91,6 +90,8 @@ function summary(options: {
   otherSpaces?: ReturnType<typeof spaceFixture>[];
   /** The conversation's stored scope (`undefined`: loading); none stored yet by default. */
   conversation?: { spaceId: string | null; restricted: boolean } | null;
+  /** « Tous les espaces » chosen (it is on only when two spaces admit a list). */
+  overview?: boolean;
 }): string {
   const qc = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   qc.setQueryData(
@@ -118,28 +119,16 @@ function summary(options: {
     );
   }
 
-  // `renderToStaticMarkup` takes zustand's SERVER snapshot, so the current org
-  // and space are seeded on `getInitialState` — `localStorage` would be too
-  // late, the stores read it at their first import anywhere in the suite.
-  const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
-    ...orgStore.getInitialState(),
-    id: ORG_ID,
-  });
-  const spaceSnapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
-    ...spaceStore.getInitialState(),
-    id: SPACE_ID,
-  });
-  try {
-    return render(
-      <ChatAccessSummary conversation={"conversation" in options ? options.conversation : null} />,
-      {
-        queryClient: qc,
-      },
-    );
-  } finally {
-    orgSnapshot.mockRestore();
-    spaceSnapshot.mockRestore();
-  }
+  return renderInSpace(
+    <ChatAccessSummary conversation={"conversation" in options ? options.conversation : null} />,
+    {
+      queryClient: qc,
+      overview: options.overview ?? false,
+      orgId: ORG_ID,
+      spaceId: SPACE_ID,
+      userId: "u_chat",
+    },
+  );
 }
 
 describe("the chat access summary", () => {
@@ -240,6 +229,41 @@ describe("the chat access summary", () => {
     expect(row(judged(true), callApi)).toContain(granted);
   });
 
+  it("names, in « Tous les espaces », the spaces granting each granted row, and none out of it", () => {
+    const chatPermissions = ["chat:write", "chat:read", "mcp:read", "mcp:invoke", "files:read"];
+    const studio = {
+      ...spaceFixture({ kind: "preset", key: "operator", name: "operator" }),
+      id: "spc_studio",
+      name: "Studio",
+      isDefault: false,
+      permissions: [...chatPermissions, "agents:run", "runs:read"],
+    };
+    const vault = { ...studio, id: "spc_vault", name: "Coffre", permissions: chatPermissions };
+    const rows = (overview: boolean) =>
+      [
+        ...summary({
+          seedSpaces: true,
+          spaceRole: null,
+          otherSpaces: [studio, vault],
+          overview,
+        }).matchAll(/<li[^>]*>(.*?)<\/li>/g),
+      ].map((m) => m[1]!);
+    const row = (items: string[], key: string) =>
+      items.find((li) => li.includes(i18n.t(`chat:access.capability.${key}`)))!;
+
+    const across = rows(true);
+    // One space grants running agents, both browse files: the stack's tooltip names them.
+    expect(row(across, "runAgents")).toContain('data-testid="space-tile-stack"');
+    expect(row(across, "runAgents")).toContain('aria-label="Studio"');
+    expect(row(across, "browseFiles")).toContain('aria-label="Studio, Coffre"');
+    // A row no acting space grants reads refused, with no tiles.
+    expect(row(across, "schedule")).not.toContain("space-tile-stack");
+    expect(row(across, "schedule")).toContain(i18n.t("chat:access.denied"));
+
+    // With a space selected the section is unchanged.
+    expect(rows(false).some((li) => li.includes("space-tile-stack"))).toBe(false);
+  });
+
   it("holds its box while the conversation's scope loads", () => {
     const html = summary({ seedSpaces: true, spaceRole: null, conversation: undefined });
     expect(html).toContain("animate-pulse");
@@ -256,8 +280,20 @@ describe("the capability list", () => {
   // The popover body is portalled and closed in this harness, so the list is
   // rendered on its own — it is the part whose structure carries the meaning.
   const capabilities = [
-    { id: "a", labelKey: "access.capability.runAgents", held: () => true, verdict: "granted" },
-    { id: "b", labelKey: "access.capability.schedule", held: () => false, verdict: "denied" },
+    {
+      id: "a",
+      labelKey: "access.capability.runAgents",
+      held: () => true,
+      verdict: "granted",
+      spaceIds: ["spc_a"],
+    },
+    {
+      id: "b",
+      labelKey: "access.capability.schedule",
+      held: () => false,
+      verdict: "denied",
+      spaceIds: [],
+    },
   ] as const;
 
   it("puts each verdict in the SAME item as the capability it judges", () => {
@@ -291,6 +327,7 @@ describe("the capability list", () => {
         labelKey: "access.capability.createPackages",
         held: () => true,
         verdict,
+        spaceIds: ["spc_a"],
       },
     ];
     const html = render(<ChatCapabilityList capabilities={create("off")} />);

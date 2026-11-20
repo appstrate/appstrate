@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "@appstrate/core/list-query";
+import { closedSet, parseStrictQuery } from "../lib/list-query.ts";
 import { listAgentIndex } from "../services/package-index.ts";
 import {
   listPinnedSlots,
@@ -97,23 +98,18 @@ export const agentInputSettingsSchema = z
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the
  * persistence GET / DELETE routes into a {@link PersistenceScope}.
- * Returns `null` when the caller did not supply `actor_type` (i.e. no
- * scope override) and throws `invalidRequest` when the combination is
- * malformed.
+ * Omitting both fields leaves the actor scope unrestricted for authorized callers.
  */
 function scopeFromQueryParams(
   actorTypeParam: string | undefined,
   actorIdParam: string | undefined,
-): PersistenceScope | null {
-  if (!actorTypeParam) return null;
-  if (actorTypeParam === "shared") return { type: "shared" };
-  if (actorTypeParam === "user" && actorIdParam) {
-    return { type: "user", id: actorIdParam };
+): PersistenceScope | undefined {
+  if (actorTypeParam === undefined && actorIdParam === undefined) return undefined;
+  if (actorTypeParam === "shared" && actorIdParam === undefined) return { type: "shared" };
+  if ((actorTypeParam === "user" || actorTypeParam === "end_user") && actorIdParam) {
+    return { type: actorTypeParam, id: actorIdParam };
   }
-  if (actorTypeParam === "end_user" && actorIdParam) {
-    return { type: "end_user", id: actorIdParam };
-  }
-  throw invalidRequest("Invalid actor_type / actor_id combination");
+  throw invalidRequest("Invalid actor_type / actor_id combination", "actor_id");
 }
 
 /**
@@ -186,6 +182,95 @@ async function requireBundleDependencyReadPermissions(
     const dependency = await assertCatalogPackageAccess(c, parsed.packageId);
     await assertPackageCopyAllowed(c, dependency, copySource);
   }
+}
+
+/**
+ * The query of both persistence reads. `actor_type` / `actor_id` are honoured
+ * only in a space whose grant holds `persistence:delete`.
+ */
+const persistenceQuerySchema = z
+  .object({
+    kind: closedSet(["pinned", "memory"]),
+    actor_type: closedSet(["user", "end_user", "shared"]),
+    actor_id: z.string().optional(),
+    runId: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * The persistence snapshot of `packageId` over `grants`, each row naming its `spaceId`:
+ * `GET /api/agents/{scope}/{name}/persistence` (one grant) and
+ * `GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence` (one grant per space). The actor
+ * partition is judged per space: a grant holding `persistence:delete` sees every actor's rows
+ * there (or the `actor_type` it names); any other sees its own actor scope plus the shared rows.
+ */
+export async function respondAgentPersistence(
+  c: Context<AppEnv>,
+  packageId: string,
+  grants: readonly SpaceGrant[],
+) {
+  const query = parseStrictQuery(c, persistenceQuerySchema);
+  const wantsPinned = query.kind !== "memory";
+  const wantsMemory = query.kind !== "pinned";
+  const runIdParam = query.runId;
+
+  const overrideScope = scopeFromQueryParams(query.actor_type, query.actor_id);
+  const callerScope = scopeFromActor(getActor(c));
+
+  const perSpace = await Promise.all(
+    grants.map(async ({ spaceId, permissions }) => {
+      // `persistence:read` gates the route and every role holds it, so the
+      // cross-actor view is gated on `persistence:delete`, the admin-grade
+      // action of this family. A reader naming no actor then sees every
+      // actor's rows; `runId` only filters rows, never changes whose.
+      const readsEveryActor = permissions.has("persistence:delete");
+      const visibleScope = readsEveryActor ? overrideScope : callerScope;
+      const [pinned, memories] = await Promise.all([
+        wantsPinned ? listPinnedSlots(packageId, spaceId, visibleScope, runIdParam) : [],
+        wantsMemory ? listMemories(packageId, spaceId, visibleScope, runIdParam) : [],
+      ]);
+      return {
+        pinned: pinned.map((slot) => ({
+          id: slot.id,
+          key: slot.key,
+          content: slot.content,
+          runId: slot.runId,
+          actor_type: slot.actorType,
+          actor_id: slot.actorId,
+          createdAt: slot.createdAt?.toISOString() ?? null,
+          updatedAt: slot.updatedAt?.toISOString() ?? null,
+          spaceId,
+        })),
+        memories: memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          runId: m.runId,
+          actor_type: m.actorType,
+          actor_id: m.actorId,
+          pinned: m.pinned,
+          createdAt: m.createdAt?.toISOString() ?? null,
+          spaceId,
+        })),
+      };
+    }),
+  );
+
+  // Each space's order holds across spaces: pinned slots newest update first, memories oldest first.
+  const time = (value: string | null) => (value ? Date.parse(value) : 0);
+  const pinned = perSpace
+    .flatMap((space) => space.pinned)
+    .sort((a, b) => time(b.updatedAt) - time(a.updatedAt));
+  const memories = perSpace
+    .flatMap((space) => space.memories)
+    .sort((a, b) => time(a.createdAt) - time(b.createdAt));
+
+  // One resource, not a list: a snapshot of both halves under the SAME
+  // actor-scope resolution, never paginated; `kind` narrows it.
+  return c.json({
+    object: "agent_persistence",
+    pinned: wantsPinned ? pinned : undefined,
+    memories: wantsMemory ? memories : undefined,
+  });
 }
 
 /** The agent index over `grants`: `GET /api/agents` and `GET /api/orgs/{orgId}/agents`. */
@@ -442,78 +527,7 @@ export function createAgentsRouter() {
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requirePermission("persistence", "read"),
     requireAgentOrInlineRun(),
-    async (c) => {
-      const agent = c.get("package");
-      const spaceId = c.get("spaceId");
-      const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actor_type");
-      const actorIdParam = c.req.query("actor_id");
-      const runIdParam = c.req.query("runId");
-
-      // Default scope = caller's actor.
-      const callerScope = scopeFromActor(getActor(c));
-
-      // Optional explicit scope override. `persistence:read` gates the route
-      // and every role holds it, so the cross-actor view is gated on
-      // `persistence:delete` instead — the admin-grade action of this family.
-      // Everyone else stays narrowed to their own actor scope.
-      const canReadEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
-
-      const scopeOverride = canReadEveryActor
-        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
-        : null;
-      const scope = scopeOverride ?? callerScope;
-
-      const wantsPinned = !kindParam || kindParam === "pinned";
-      const wantsMemory = !kindParam || kindParam === "memory";
-      if (kindParam && !wantsPinned && !wantsMemory) {
-        throw invalidRequest("kind must be 'pinned' or 'memory'");
-      }
-
-      // A cross-actor reader naming no actor sees every actor's rows, in both
-      // halves, with or without `runId` — which only filters rows, never
-      // widens or narrows the actor scope. Everyone else is narrowed to their
-      // scope (own + shared).
-      const visibleScope = canReadEveryActor && !scopeOverride ? undefined : scope;
-
-      const [pinned, memories] = await Promise.all([
-        wantsPinned
-          ? listPinnedSlots(agent.id, spaceId, visibleScope, runIdParam)
-          : Promise.resolve([]),
-        wantsMemory
-          ? listMemories(agent.id, spaceId, visibleScope, runIdParam)
-          : Promise.resolve([]),
-      ]);
-
-      // One resource, not a list: a snapshot of both halves under the SAME
-      // actor-scope resolution, never paginated; `kind` narrows it.
-      return c.json({
-        object: "agent_persistence",
-        pinned: wantsPinned
-          ? pinned.map((slot) => ({
-              id: slot.id,
-              key: slot.key,
-              content: slot.content,
-              runId: slot.runId,
-              actor_type: slot.actorType,
-              actor_id: slot.actorId,
-              createdAt: slot.createdAt?.toISOString() ?? null,
-              updatedAt: slot.updatedAt?.toISOString() ?? null,
-            }))
-          : undefined,
-        memories: wantsMemory
-          ? memories.map((m) => ({
-              id: m.id,
-              content: m.content,
-              runId: m.runId,
-              actor_type: m.actorType,
-              actor_id: m.actorId,
-              pinned: m.pinned,
-              createdAt: m.createdAt?.toISOString() ?? null,
-            }))
-          : undefined,
-      });
-    },
+    (c) => respondAgentPersistence(c, c.get("package").id, [callerSpaceGrant(c)]),
   );
 
   // DELETE /api/agents/:scope/:name/persistence/memories/:id
@@ -578,21 +592,13 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
-      const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actor_type");
-      const actorIdParam = c.req.query("actor_id");
+      const {
+        kind: kindParam,
+        actor_type: actorTypeParam,
+        actor_id: actorIdParam,
+      } = parseStrictQuery(c, persistenceQuerySchema.omit({ runId: true }));
 
-      // Same actor-override guard the GET path applies: only a holder of
-      // `persistence:delete` may target another actor's rows (or omit the
-      // scope to bulk-wipe every actor). Everyone else is narrowed to their
-      // own actor scope, so they cannot delete another actor's
-      // memories/checkpoints by supplying an arbitrary actor_type / actor_id.
-      const callerScope = scopeFromActor(getActor(c));
-      const canTouchEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
-      const scopeOverride = canTouchEveryActor
-        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
-        : null;
-      const scope = canTouchEveryActor ? (scopeOverride ?? undefined) : callerScope;
+      const scope = scopeFromQueryParams(actorTypeParam, actorIdParam);
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;

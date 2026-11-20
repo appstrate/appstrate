@@ -17,7 +17,7 @@ Apache-2.0 file may import it statically (`verify:module-isolation`).
 - **Tables in the platform database, journal of its own.** `init()` migrates
   `sso_connections`, `sso_domains` and `sso_sessions` from `drizzle/` under
   `drizzle.appstrate_ee_migrations` (distinct from the platform's and from
-  `@appstrate/module-ee`'s), so it needs PostgreSQL and refuses to start on
+  `@appstrate/module-billing`'s), so it needs PostgreSQL and refuses to start on
   PGlite. Platform rows are reached through `ctx.services` only
   (`verify:module-sql-boundary`); no foreign key crosses the boundary, and
   `onOrgDelete` drops an organization's rows.

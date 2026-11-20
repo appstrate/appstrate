@@ -131,7 +131,7 @@ export const ROUTE_ACCESS = {
   "/org-settings/billing": {
     feature: "billing",
     anyOf: ["billing:read"],
-    operations: ["getEeBillingAccount"],
+    operations: ["getBillingAccount"],
   },
   "/org-settings/enterprise-sso": {
     feature: "enterpriseSso",
@@ -210,11 +210,6 @@ export const isOverlayPath = (path: string) =>
 
 /** The overlay tree's not-found routes: an unmatched address under an overlay is answered there, not by the dashboard. */
 export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefix}/*`);
-
-/** The agent page's Connexions section: its integration reads are not implied by the route. */
-export function agentConnectionsTabVisible(can: (permission: Permission) => boolean): boolean {
-  return can("integrations:read");
-}
 
 /** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */
 type RouteVerdict = "absent" | "granted" | "denied";

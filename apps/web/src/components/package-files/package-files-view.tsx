@@ -31,7 +31,7 @@ import { ApiError } from "../../api/client";
 import { useUrlModal } from "../../hooks/use-url-modal";
 import { usePackageVersions } from "../../hooks/use-packages";
 import { matchesSearch } from "../../lib/strings";
-import { isPinnedEntry, previewBlockReason } from "../../lib/package-file-tree";
+import { isPinnedEntry, pickActiveEntry, previewBlockReason } from "../../lib/package-file-tree";
 import { fileTextOperation, type DraftFile } from "../../lib/package-file-drafts";
 import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
@@ -108,10 +108,7 @@ export function PackageFilesView({
 
   const visibleFiles = (entries ?? []).filter((file) => matchesSearch(query, [file.path]));
   const mainFile = initialPath ?? PACKAGE_CONTENT_FILE[type];
-  const activeFile =
-    visibleFiles.find((file) => file.path === selectedPath) ??
-    visibleFiles.find((file) => file.path === mainFile) ??
-    visibleFiles[0];
+  const activeFile = pickActiveEntry(visibleFiles, selectedPath, mainFile);
   const editedFile = editingPath ? entries?.find((file) => file.path === editingPath) : undefined;
 
   const publishedVersions = versions?.filter((version) => !version.yanked) ?? [];

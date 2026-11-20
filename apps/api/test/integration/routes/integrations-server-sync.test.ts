@@ -4,7 +4,7 @@
  * MCP server on loopback (reached through the operator's `EGRESS_ALLOW_INTERNAL_HOSTS` opt-in),
  * called through the credential proxy with the caller's connection.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
@@ -16,6 +16,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
+import { drainJournal, journaledCalls } from "../../helpers/connection-calls.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -118,6 +119,9 @@ const sync = (ctx: TestContext, body?: unknown) =>
 
 describe("POST /api/integrations/{packageId}/discover", () => {
   let ctx: TestContext;
+
+  // A row written after the test would land in the next test's database.
+  afterEach(drainJournal);
 
   beforeEach(async () => {
     await truncateAll();
@@ -640,14 +644,12 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
   });
 
   const unauthenticated = (url: string) =>
-    ({
-      type: "integration",
-      schema_version: "0.3",
-      name: OPEN_ID,
-      version: "1.0.0",
-      display_name: "Open",
-      source: { kind: "remote", remote: { url, transport: "streamable-http" } },
-    }) as unknown as IntegrationManifest;
+    remoteIntegrationManifest({ name: OPEN_ID, displayName: "Open", url });
+
+  const journaled = () => journaledCalls(ctx, OPEN_ID);
+
+  // A row written after the test would land in the next test's database.
+  afterEach(drainJournal);
 
   const syncOpen = (caller: TestContext = ctx) =>
     getTestApp().request(`/api/integrations/${OPEN_ID}/discover`, {
@@ -673,6 +675,52 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
     expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
     expect(open.authorizations.length).toBeGreaterThan(0);
     expect(open.authorizations.every((a) => a === null)).toBe(true);
+    // Journaled like any operation outside a run: one row, without a connection.
+    const rows = await journaled();
+    expect(rows.map((row) => [row.connectionId, row.actorId, row.outcome])).toEqual([
+      [null, ctx.user.id, "200"],
+    ]);
+  });
+
+  it("refuses a server the egress guard refuses, before any exchange", async () => {
+    await seedProxyIntegration(ctx, unauthenticated("http://mcp.untrusted.test/mcp"));
+    const res = await syncOpen();
+    expect(res.status).toBe(403);
+    expect(res.headers.get("proxy-status")).toContain("error=destination_ip_prohibited");
+    expect((await res.json()) as { code: string; detail: string }).toMatchObject({
+      code: "blocked_target",
+      detail: "The MCP server at http://mcp.untrusted.test is refused by the egress guard.",
+    });
+    expect(await journaled()).toEqual([]);
+  });
+
+  it("follows a redirect to the same host on another port with its body", async () => {
+    const redirecting = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(null, { status: 307, headers: { Location: open.url } }),
+    });
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(`http://127.0.0.1:${redirecting.port}/mcp`));
+      const res = await syncOpen();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { tools: { name: string }[] };
+      expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    } finally {
+      redirecting.stop(true);
+    }
+  });
+
+  it("synchronizes in a space that closes the credential proxy: the sync asks no proxy right", async () => {
+    await seedProxyIntegration(ctx, unauthenticated(open.url));
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+    const res = await syncOpen();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tools: { name: string }[] };
+    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
   });
 
   it("answers 502 when the server asks for a credential: never authorized ad hoc", async () => {

@@ -23,7 +23,9 @@ import { ConnectionDeleteConfirm } from "../../components/integration-connect/co
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
+import { useSpaces } from "../../hooks/use-spaces";
+import { connectionRowConfigures } from "../../lib/space-lists";
 import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../../components/integration-connect/connection-share-editor";
 
@@ -47,11 +49,13 @@ function ConnectionRow({
   sharing: boolean;
 }) {
   const { t } = useTranslation(["settings", "common", "agents"]);
-  const { can } = usePermissions();
+  const orgId = useCurrentOrgId();
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  const { data: spaces } = useSpaces();
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // A pin or default names it: delete answers 409 until removed there.
-  const lockKey = connectionLockHintKey(conn.locked_by, can("integrations:configure"));
+  const configures = connectionRowConfigures(conn, orgId, spaces, orgPermissions);
+  const lockKey = connectionLockHintKey(conn.locked_by, configures);
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");
   const canShare = conn.allowed_actions.includes("share");

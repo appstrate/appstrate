@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
+  heldLocalUrl,
   type ConversationSidebarState,
 } from "./conversation-sidebar-state";
 
@@ -103,5 +104,27 @@ describe("conversation sidebar state", () => {
     expect(conversationSidebarReducer(fromThread, { type: "close-file" })).toMatchObject({
       expanded: false,
     });
+  });
+
+  it("holds a picked file's object URL while it shows, collapsed included, and lets go after", () => {
+    const picked = {
+      local: new File(["# hi"], "notes.md", { type: "text/markdown" }),
+      url: "blob:x",
+    };
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-file",
+      file: picked,
+    });
+    expect(shown).toMatchObject({ expanded: true, activeTab: "files", selectedFile: picked });
+    expect(heldLocalUrl(shown)).toBe("blob:x");
+
+    // Still drawn while the panel slides out.
+    const collapsed = conversationSidebarReducer(shown, { type: "toggle" });
+    expect(heldLocalUrl(collapsed)).toBe("blob:x");
+    expect(heldLocalUrl(conversationSidebarReducer(collapsed, { type: "toggle" }))).toBeNull();
+
+    expect(heldLocalUrl(conversationSidebarReducer(shown, { type: "close-file" }))).toBeNull();
+    const replaced = conversationSidebarReducer(shown, { type: "show-file", file: file("file_a") });
+    expect(heldLocalUrl(replaced)).toBeNull();
   });
 });

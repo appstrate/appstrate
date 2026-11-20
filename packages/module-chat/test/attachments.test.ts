@@ -30,11 +30,12 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
-import { resolveChatAttachment } from "../../../apps/api/src/services/files.ts";
+import { readChatAttachment, resolveChatAttachment } from "../../../apps/api/src/services/files.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "../src/attachments.ts";
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { persistUserMessage } from "../src/persistence.ts";
+import { ensurePersonalSpaceFor } from "../../../apps/api/src/services/spaces.ts";
 
 // Boot the platform app once (registers routes, storage, DB) — this test drives
 // the services directly, so the handle itself is not referenced.
@@ -84,30 +85,39 @@ function fileMessage(id: string, uri: string, name: string, mime = "text/plain")
   } as UIMessage;
 }
 
-/** Bind the platform seam to a (user, session) — mirrors the chat-stream call. */
-function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, sessionId: string) {
+/**
+ * Bind the platform seam to a (user, session) — mirrors the chat-stream call: the turn acts in a
+ * team space, and the personal space the uploads are staged in is only reached.
+ */
+function resolverFor(
+  scope: { orgId: string; spaceId: string; teamSpaceId: string },
+  userId: string,
+  sessionId: string,
+) {
   return (uri: string) =>
     resolveChatAttachment({
       orgId: scope.orgId,
       userId,
       chatSessionId: sessionId,
       uri,
-      // These cases materialize the session owner's own uploads; the container
-      // ACL never widens, so the narrowest set is the honest one to hand it.
-      spaces: [{ id: scope.spaceId, permissions: new Set() }],
+      // The container ACL never widens: the narrowest set is the honest one.
+      spaces: [{ id: scope.teamSpaceId, permissions: new Set() }],
+      personalSpaceId: scope.spaceId,
       beforeResolve: async () => {},
     });
 }
 
 describe("chat attachments", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; spaceId: string };
+  let scope: { orgId: string; spaceId: string; teamSpaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
     _resetCacheForTesting();
     ctx = await createTestContext({ orgSlug: "chatattach" });
-    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    // The composer stages every attachment in the caller's personal space.
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    scope = { orgId: ctx.orgId, spaceId: personal.id, teamSpaceId: ctx.defaultSpaceId };
   });
 
   it("materializes an upload:// part into a session-scoped file and rewrites it to appfile://", async () => {
@@ -129,7 +139,7 @@ describe("chat attachments", () => {
     expect(filePart.url.startsWith("appfile://")).toBe(true);
     expect(filePart.providerMetadata?.appstrate?.size).toBe(bytes.byteLength);
     // The space it lives in travels with it: a download after the working space changes reads there.
-    expect(filePart.providerMetadata?.appstrate?.spaceId).toBe(ctx.defaultSpaceId);
+    expect(filePart.providerMetadata?.appstrate?.spaceId).toBe(scope.spaceId);
 
     // A durable file row exists, anchored to the chat session, attributed
     // to its owner, purpose user_upload.
@@ -265,5 +275,105 @@ describe("chat attachments", () => {
     // No file row survives the rejected materialization.
     const rows = await db.select().from(files).where(eq(files.chatSessionId, sessionId));
     expect(rows.length).toBe(0);
+  });
+  describe("readChatAttachment (the pixels of an attachment, for a vision model)", () => {
+    const PNG = new Uint8Array(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+
+    /** Materialize `bytes` as an attachment of a fresh session and return its appfile:// URI. */
+    async function attach(name: string, bytes: Uint8Array, mime: string): Promise<string> {
+      const sessionId = await createSession(ctx.orgId, ctx.defaultSpaceId, ctx.user.id);
+      const uploadId = await stageUpload(scope, ctx.user.id, name, bytes, mime);
+      const resolved = await resolverFor(scope, ctx.user.id, sessionId)(`upload://${uploadId}`);
+      return resolved.uri;
+    }
+
+    const request = (
+      uri: string,
+      over: { userId?: string; maxBytes?: number; permissions?: string[] } = {},
+    ) => ({
+      orgId: ctx.orgId,
+      userId: over.userId ?? ctx.user.id,
+      uri,
+      chatSessionId: null,
+      spaces: [{ id: scope.spaceId, permissions: new Set(over.permissions ?? ["files:read"]) }],
+      personalSpaceId: null,
+      kind: "image" as const,
+      beforeResolve: async () => {},
+      maxBytes: over.maxBytes ?? 4096,
+    });
+
+    it("returns the bytes and the normalized mime of an image the owner attached", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      const image = await readChatAttachment(request(uri));
+      expect(image).toEqual({
+        mime: "image/png",
+        bytes: PNG,
+      });
+    });
+
+    it("reads a PDF only when requested as a PDF", async () => {
+      const bytes = new TextEncoder().encode("%PDF-1.7\n%%EOF");
+      const uri = await attach("contract.pdf", bytes, "application/pdf");
+      expect(await readChatAttachment({ ...request(uri), kind: "pdf" })).toEqual({
+        bytes,
+        mime: "application/pdf",
+      });
+      expect(await readChatAttachment(request(uri))).toBeNull();
+    });
+
+    it("is null for a file that is not an image a provider accepts", async () => {
+      const text = await attach("note.txt", new TextEncoder().encode("hi"), "text/plain");
+      const svg = await attach("logo.svg", new TextEncoder().encode("<svg/>"), "image/svg+xml");
+      expect(await readChatAttachment(request(text))).toBeNull();
+      expect(await readChatAttachment(request(svg))).toBeNull();
+    });
+
+    it("is null past the caller's byte cap", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      expect(await readChatAttachment(request(uri, { maxBytes: PNG.byteLength - 1 }))).toBeNull();
+    });
+
+    it("is null for another user's file (container ACL) and for a space the caller cannot reach", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+      expect(await readChatAttachment(request(uri, { userId: other.id }))).toBeNull();
+      expect(await readChatAttachment({ ...request(uri), spaces: [] })).toBeNull();
+    });
+
+    it("touches only a readable file's space, before a read can proceed", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      const spaces: string[] = [];
+      const refuse = async (id: string) => {
+        spaces.push(id);
+        throw new Error("Space refused");
+      };
+      expect(
+        await readChatAttachment({ ...request(uri, { permissions: [] }), beforeResolve: refuse }),
+      ).toBeNull();
+      expect(spaces).toEqual([]);
+      await expect(readChatAttachment({ ...request(uri), beforeResolve: refuse })).rejects.toThrow(
+        "Space refused",
+      );
+      expect(spaces).toEqual([scope.spaceId]);
+    });
+
+    it("is null once `files:read` is withdrawn, re-asked at every read (between two turns)", async () => {
+      const uri = await attach("chart.png", PNG, "image/png");
+      expect(await readChatAttachment(request(uri))).not.toBeNull();
+      // Same owner, same file, same space: only the grant changed since the attach.
+      expect(await readChatAttachment(request(uri, { permissions: ["chat:write"] }))).toBeNull();
+    });
+
+    it("is null for a malformed or non-appfile URI", async () => {
+      expect(await readChatAttachment(request("upload://upl_x"))).toBeNull();
+      expect(await readChatAttachment(request("https://evil.example.com/a.png"))).toBeNull();
+      expect(await readChatAttachment(request("appfile://not-a-file"))).toBeNull();
+    });
   });
 });

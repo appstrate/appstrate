@@ -19,13 +19,12 @@
  */
 
 import type { Context } from "hono";
-import { safeValidateUIMessages, type UIMessage } from "ai";
+import { safeValidateUIMessages, type UIMessage, type UIMessageChunk } from "ai";
 import { z } from "zod";
 import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
@@ -34,7 +33,11 @@ import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
-import { materializeUserAttachments } from "./attachments.ts";
+import {
+  materializeUserAttachments,
+  uploadResolutionsChunk,
+  withStoredHistoryFiles,
+} from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
@@ -51,6 +54,7 @@ import {
   type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
+  storedFileParts,
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
@@ -285,17 +289,19 @@ export async function handleChatStream(
   // origin space narrow it once its row is known (`turn` below).
   const reachable = c.get("reachable");
   const acting = actingSpaces(reachable);
+  // Where the conversation's own uploads live, reached through it rather than through a space.
+  const personalSpaceId = reachable.find((space) => space.personal)?.id ?? null;
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = await readJsonBody(c, chatStreamSchema);
-  // Only the new message is validated: earlier turns are the server's own rows.
+  // The client sends its selected history branch along with the new message.
   const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
   if (!validated.success) {
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
   }
-  const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
+  let messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
   // The origin space and limit ride the turn but are read only by the turn that CREATES the
   // conversation (`ensureSession` validates them then): an existing one keeps its own.
   const asksOrigin = body.spaceId !== undefined || body.restricted === true;
@@ -305,11 +311,9 @@ export async function handleChatStream(
   const sessionId = body.id;
   let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
-  // Session id to stamp on this turn's `llm_usage` row. Only set when the row
-  // for that session is (or will be) persisted this turn — the same condition
-  // that runs `ensureSession` below — so the ledger's `chat_session_id` FK is
-  // always satisfiable. Ephemeral turns record un-attributed usage (null).
-  const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
+  // The session the turn persists to, null for an ephemeral turn: every use of the
+  // conversation's id below takes this one, so a turn reaches what it attached.
+  const chatSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
   const turnStart = Date.now();
 
@@ -357,6 +361,18 @@ export async function handleChatStream(
           originRequest,
         )
       : Promise.resolve(ephemeralConversation());
+  // The earlier turns' files, read once the row is known to be the caller's. An ephemeral
+  // turn has no stored row, so its history carries no file.
+  const historyFiles = conversation.then(() =>
+    sessionId && lastMessage?.id
+      ? storedFileParts(
+          sessionId,
+          messages
+            .slice(0, -1)
+            .flatMap((message) => (typeof message.id === "string" ? [message.id] : [])),
+        )
+      : new Map(),
+  );
 
   const origin = selfOrigin();
   // Single platform-call seam: re-enter the platform app in-process (or loopback
@@ -389,7 +405,7 @@ export async function handleChatStream(
       // The session id rides the SIGNED loopback claims (not a header) so the
       // llm-proxy can attribute a proxy-routed turn's usage to the chat session
       // without trusting anything spoofable.
-      { chatSessionId: meteringSessionId },
+      { chatSessionId },
     );
   const inferenceHeaders: Record<string, string> = {
     Authorization: `Bearer ${mintInferenceAuth()}`,
@@ -432,23 +448,21 @@ export async function handleChatStream(
     // only a `manual` turn lists the spaces' skills on the user's request.
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
-    // before the act (see `touchSessionSpace`; the origin space is touched by definition).
-    // The tools refuse a space outside the set — unknown, unreachable, or reached without one
-    // of the grants — before they record: nothing is recorded and the call is not made. Skills
-    // are procedures, not data: injecting one touches no space; only a call or a
-    // `read_resource` naming a space does.
+    // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
+    // or the space of a file `read_resource` reads, before the call, refused outside the set.
+    // Skills are procedures, not data: injecting one touches no space.
     const organization: TurnSpaces = {
       spaces,
       touch: async (touchedSpaceId) => {
-        if (!sessionId || !lastMessage?.id) return;
+        if (!chatSessionId) return;
         await touchSessionSpace(
-          { id: sessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
+          { id: chatSessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
           touchedSpaceId,
         );
       },
-      spaceOfUri: async (uri) => {
+      fileSpace: async (uri) => {
         const fileId = parseFileUri(uri);
-        return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
+        return fileId ? fileSpaceId(orgId, fileId, { chatSessionId, personalSpaceId }) : undefined;
       },
     };
     return {
@@ -539,8 +553,9 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn]);
+  const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }, stored] =
+    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyFiles]);
+  messages = withStoredHistoryFiles(messages, stored);
   let chosen;
   try {
     chosen = pickModel(models, modelId);
@@ -597,7 +612,7 @@ export async function handleChatStream(
   const rejection = await deps.checkUsageAllowed({
     orgId,
     presetId: chosen.id,
-    sessionId: meteringSessionId,
+    sessionId: chatSessionId,
     userId: user.id,
   });
   if (rejection) {
@@ -690,27 +705,29 @@ export async function handleChatStream(
   // stores only `appfile://`) and before it reaches the engine (the model is
   // shown the attachment as a text line, never a raw file URL). After the claim,
   // because resolving an attachment touches its space on the conversation, which a
-  // refused turn must not widen. Only the last message can carry fresh uploads —
-  // earlier turns already hold rewritten `appfile://` URIs.
-  if (sessionId && lastMessage) {
-    // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
-    // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
-    // `runs:read-all` widens to the whole space's run outputs — must still resolve when
-    // they attach it. Picker and attach answer the same set.
-    const attachmentSpaces = spaces.map((space) => ({
-      id: space.id,
-      permissions: new Set(space.permissions),
-    }));
+  // refused turn must not widen. Only the last message can carry fresh uploads:
+  // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
+  // A file resolves in the turn's spaces; the conversation's own uploads in the caller's personal
+  // space, which a limited turn does not act in.
+  const attachmentSpaces = spaces.map((space) => ({
+    id: space.id,
+    permissions: new Set(space.permissions),
+  }));
+  // What the browser's optimistic `upload://` parts became, for the stream to tell it.
+  let uploadResolutions: UIMessageChunk | null = null;
+  if (chatSessionId && lastMessage) {
+    const sent = lastMessage;
     try {
       lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
         return deps.resolveChatAttachment({
           orgId,
           userId: user.id,
-          chatSessionId: sessionId,
+          chatSessionId,
           uri,
           spaces: attachmentSpaces,
-          // The space the file belongs to is touched by the session that comes to hold it,
-          // before anything is materialized there.
+          personalSpaceId,
+          // A gallery file's space is touched by the session that comes to hold it, before
+          // it is attached; an upload lands in the personal space and touches none.
           beforeResolve: organization.touch,
         });
       });
@@ -720,6 +737,7 @@ export async function handleChatStream(
       throw err;
     }
     messages[messages.length - 1] = lastMessage;
+    uploadResolutions = uploadResolutionsChunk(sent, lastMessage);
   }
 
   let userMessageId: string | undefined;
@@ -817,6 +835,8 @@ export async function handleChatStream(
       injectedSkills,
       // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
+      // The conversation issuing its requests: a run it launches may take its own files.
+      chatSessionId,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -837,9 +857,21 @@ export async function handleChatStream(
         modelLabel: chosen.label ?? chosen.modelId,
         orgId,
         userId: user.id,
-        chatSessionId: meteringSessionId,
+        chatSessionId,
         requestId,
         messages,
+        ...(uploadResolutions ? { leadingChunks: [uploadResolutions] } : {}),
+        readAttachment: (uri, options) =>
+          deps.readChatAttachment({
+            orgId,
+            userId: user.id,
+            uri,
+            spaces: attachmentSpaces,
+            personalSpaceId,
+            chatSessionId,
+            beforeResolve: organization.touch,
+            ...options,
+          }),
         system,
         generation: generationSettings,
         platformMcp: {

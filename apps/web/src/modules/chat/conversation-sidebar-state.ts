@@ -2,12 +2,20 @@
 
 export type ConversationSidebarTab = "runs" | "files" | "info";
 
-export interface SidebarFile {
+export interface StoredSidebarFile {
   id: string;
   name: string;
   /** The file's space when it is not the working one (a conversation's file elsewhere). */
   spaceId?: string;
 }
+
+/** A file picked in the composer, not yet sent: the browser's copy behind an object URL. */
+export interface LocalSidebarFile {
+  local: File;
+  url: string;
+}
+
+export type SidebarFile = StoredSidebarFile | LocalSidebarFile;
 
 export interface ConversationSidebarState {
   expanded: boolean;
@@ -67,4 +75,12 @@ export function conversationSidebarReducer(
     case "conversation-change":
       return { ...state, selectedFile: null };
   }
+}
+
+/**
+ * The object URL of the picked file the panel holds, revoked once it holds another or none. A
+ * collapsed panel still holds it: it stays drawn while the panel slides out.
+ */
+export function heldLocalUrl(state: ConversationSidebarState): string | null {
+  return state.selectedFile && "local" in state.selectedFile ? state.selectedFile.url : null;
 }

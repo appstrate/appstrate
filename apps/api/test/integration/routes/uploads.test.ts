@@ -17,7 +17,13 @@ import { db } from "@appstrate/db/client";
 import { auditEvents, uploads } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 
 const app = getTestApp();
@@ -59,6 +65,45 @@ describe("POST /api/uploads", () => {
       size: 1024,
       mime: "application/pdf",
     });
+  });
+
+  it("stages into the caller's personal space, which no other credential names", async () => {
+    // The chat's composer stages every attachment there (#2287).
+    const member = await memberContext(ctx, "member");
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, member.user.id);
+    const stage = (headers: Record<string, string>) =>
+      app.request("/api/uploads", {
+        method: "POST",
+        headers: { ...headers, "X-Space-Id": personal.id, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "joint.txt", size: 8, mime: "text/plain" }),
+      });
+
+    const res = await stage(authHeaders(member));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db
+      .select({ spaceId: uploads.spaceId })
+      .from(uploads)
+      .where(eq(uploads.id, id));
+    expect(row?.spaceId).toBe(personal.id);
+
+    // Not even an organization owner reaches someone else's personal space.
+    expect((await stage(authHeaders(ctx))).status).toBe(404);
+    // An API key is pinned to its own space.
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: member.user.id,
+      scopes: ["agents:run"],
+    });
+    expect((await stage({ Authorization: `Bearer ${key.rawKey}` })).status).toBe(403);
+    // The same key stages in its own space: the refusal is the space, not the key.
+    const own = await app.request("/api/uploads", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "joint.txt", size: 8, mime: "text/plain" }),
+    });
+    expect(own.status).toBe(201);
   });
 
   it("returns an app-domain proxy upload URL when no public storage endpoint is configured", async () => {

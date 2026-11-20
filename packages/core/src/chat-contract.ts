@@ -78,8 +78,8 @@ export type ChatModelResolution =
   | { subscription: true; model: SubscriptionChatModel };
 
 /**
- * A chat composer file attachment to resolve to a durable file. The chat
- * module has no DB access, so it hands these plain fields across `ctx.services`
+ * A chat composer file attachment to resolve to a durable file. The chat module
+ * does not resolve files itself: it hands these plain fields across `ctx.services`
  * and the platform builds the scope/actor + materializes/validates server-side.
  */
 export interface ChatAttachmentRequest {
@@ -94,8 +94,9 @@ export interface ChatAttachmentRequest {
   uri: string;
   /**
    * The spaces the attachment may resolve in, each with the caller's effective
-   * permission set there: every space the caller may chat in (the acting set). The attachment resolves in the
-   * space its file (or upload) belongs to, which must be one of these; a
+   * permission set there: the turn's spaces. A stored file resolves in the space it belongs
+   * to, which must be one of these unless the conversation already holds it in
+   * `personalSpaceId`; an `upload://` must be staged in `personalSpaceId` and resolves there. A
    * permission set decides how wide a container ACL reads there — with
    * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,
    * which is what the file gallery the user picked it from already shows;
@@ -103,10 +104,15 @@ export interface ChatAttachmentRequest {
    */
   spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
   /**
+   * The caller's personal space when the caller reaches it (none under a role preview): where an
+   * upload is staged, and where the files this conversation holds are read, under `files:read`
+   * alone, whether or not the turn acts there.
+   */
+  personalSpaceId: string | null;
+  /**
    * Called with the space the attachment belongs to, once it is one of `spaces` and BEFORE
-   * anything is created or read in it: a rejection refuses the attachment, so an upload is
-   * never materialized into a space the caller was refused. The conversation records the
-   * space as touched here.
+   * anything is read in it: a rejection refuses the attachment. The conversation records the
+   * space as touched here. A file the conversation holds in `personalSpaceId` touches none.
    */
   beforeResolve: (spaceId: string) => Promise<void>;
 }
@@ -125,6 +131,24 @@ export interface ResolvedChatAttachment {
   size: number;
   /** The space the file belongs to: where it resolved. */
   spaceId: string;
+}
+
+/**
+ * Read bytes for one model input under the current turn's file ACL. Unlike a materialization, a
+ * read needs no conversation: `chatSessionId` is null on an unpersisted turn, whose reads reach
+ * no conversation's files.
+ */
+export interface ChatAttachmentRead extends Omit<ChatAttachmentRequest, "chatSessionId"> {
+  chatSessionId: string | null;
+  kind: "image" | "pdf";
+  signal?: AbortSignal;
+  /** Reject a larger file before reading or allocating its bytes. */
+  maxBytes: number;
+}
+
+export interface ChatAttachmentContent {
+  mime: string;
+  bytes: Uint8Array;
 }
 
 /** One chat turn's metered usage — inserted as an `llm_usage` row (runId null). */

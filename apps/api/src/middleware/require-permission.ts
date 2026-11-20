@@ -112,9 +112,9 @@ export function requireAnyPermission(permissions: readonly string[]) {
 const CEILING_REQUIREMENT = Symbol.for("appstrate.ceilingRequirement");
 
 /**
- * Middleware factory: cap an act authorized by OWNERSHIP with the credential's
- * scope ceiling. Not a role grant — a caller without the permission still acts
- * on what it owns, so `permissions` is not consulted; only a delegated
+ * Middleware factory: cap an act authorized by OWNERSHIP, or a read decided per
+ * space in the service (a file by id, in its own space), with the credential's
+ * scope ceiling. Not a role grant: `permissions` is not consulted; only a delegated
  * credential (API key, OIDC token) whose ceiling omits it is refused, with the
  * same audit hook and 403 as {@link requirePermission} (RBAC spec §7.1).
  * A cookie session carries no ceiling and always passes.

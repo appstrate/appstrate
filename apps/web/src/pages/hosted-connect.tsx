@@ -179,7 +179,7 @@ export function HostedConnectPage() {
   };
 
   return (
-    <div className="bg-background text-foreground flex min-h-screen items-center justify-center p-4">
+    <div className="bg-background text-foreground flex min-h-dvh items-center justify-center p-4">
       {/* The install block is a shell script — wrapping it into a 28rem column
           would make it unreadable, so that one phase gets a wider page. */}
       <div className={`flex w-full flex-col gap-6 ${handoffSteps ? "max-w-2xl" : "max-w-md"}`}>

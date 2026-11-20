@@ -11,22 +11,16 @@
 import type { ServedSkill } from "./served-skill.ts";
 
 export interface ServedSkillCache {
-  get: (key: string) => ServedSkill | undefined;
-  set: (key: string, skill: ServedSkill) => void;
+  load: (key: string, read: () => Promise<ServedSkill | null>) => Promise<ServedSkill | null>;
 }
 
 /**
- * The key of a published version of a skill in a space. The archive integrity
+ * The key of a published version of a skill. The archive integrity
  * tells apart two archives published under one version, by a package deleted
  * and created again.
  */
-export function servedSkillCacheKey(
-  spaceId: string,
-  packageId: string,
-  version: string,
-  integrity: string,
-): string {
-  return JSON.stringify([spaceId, packageId, version, integrity]);
+export function servedSkillCacheKey(packageId: string, version: string, integrity: string): string {
+  return JSON.stringify([packageId, version, integrity]);
 }
 
 function servedBytes(skill: ServedSkill): number {
@@ -39,6 +33,7 @@ function servedBytes(skill: ServedSkill): number {
 export function createServedSkillCache(maxBytes: number): ServedSkillCache {
   // A Map iterates in insertion order: re-inserting on use keeps the least recently used first.
   const entries = new Map<string, { skill: ServedSkill; bytes: number }>();
+  const pending = new Map<string, Promise<ServedSkill | null>>();
   let total = 0;
 
   const remove = (key: string) => {
@@ -49,23 +44,32 @@ export function createServedSkillCache(maxBytes: number): ServedSkillCache {
   };
 
   return {
-    get: (key) => {
+    async load(key, read) {
       const entry = entries.get(key);
-      if (!entry) return undefined;
-      entries.delete(key);
-      entries.set(key, entry);
-      return entry.skill;
-    },
-    set: (key, skill) => {
-      remove(key);
-      const bytes = servedBytes(skill);
-      if (bytes > maxBytes) return;
-      for (const oldest of entries.keys()) {
-        if (total + bytes <= maxBytes) break;
-        remove(oldest);
+      if (entry) {
+        entries.delete(key);
+        entries.set(key, entry);
+        return entry.skill;
       }
-      entries.set(key, { skill, bytes });
-      total += bytes;
+      const loading = pending.get(key);
+      if (loading) return loading;
+      const result = read()
+        .then((skill) => {
+          if (!skill) return null;
+          const bytes = servedBytes(skill);
+          if (bytes <= maxBytes) {
+            for (const oldest of entries.keys()) {
+              if (total + bytes <= maxBytes) break;
+              remove(oldest);
+            }
+            entries.set(key, { skill, bytes });
+            total += bytes;
+          }
+          return skill;
+        })
+        .finally(() => pending.delete(key));
+      pending.set(key, result);
+      return result;
     },
   };
 }

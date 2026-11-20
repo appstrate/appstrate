@@ -358,7 +358,7 @@ const config: KnipConfig = {
    * runs; none of them is reachable from a workspace this config models, and
    * its dependencies resolve from its own `node_modules`. Without this, every
    * file in it reads as unused. Its build, type check and link check run in
-   * `.github/workflows/docs-site.yml`; `lint` and `verify:license-boundary`
+   * `.github/workflows/docs-site.yml`; `lint` and `verify:license-headers`
    * still cover its tracked sources here.
    */
   ignore: ["docs/web/**"],
@@ -468,7 +468,7 @@ const config: KnipConfig = {
        * exact: a new module dependency is not silently covered, it has to be
        * named here.
        */
-      ignoreDependencies: ["@appstrate/(module-(chat|claude-code|codex|ee|observability)|ee)"],
+      ignoreDependencies: ["@appstrate/(module-(billing|chat|claude-code|codex|observability)|ee)"],
     },
 
     // The one workspace whose entries are NOT derived from its manifest:
@@ -559,9 +559,9 @@ const config: KnipConfig = {
     // Plus `test/requirements.ts`, which only the root test preload and the
     // tier-0 runner read (`test/setup/modules.ts`); this is the one module that
     // declares it.
-    "packages/module-ee": {
+    "packages/module-billing": {
       entry: [
-        ...manifestEntries("packages/module-ee"),
+        ...manifestEntries("packages/module-billing"),
         "test/tables.ts",
         "test/requirements.ts",
         // Not at the workspace root, so knip's drizzle plugin does not find it.
@@ -572,7 +572,7 @@ const config: KnipConfig = {
     "packages/module-observability": {
       entry: [...manifestEntries("packages/module-observability"), "test/tables.ts"],
     },
-    // The commercial root package: same shape as module-ee (own journal, own truncate list,
+    // The commercial root package: same shape as module-billing (own journal, own truncate list,
     // Postgres-only test requirement, drizzle config run by `db:generate`).
     ee: {
       entry: [

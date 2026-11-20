@@ -13,6 +13,7 @@ import { ConfirmModal } from "../confirm-modal";
 import { FormModal } from "../form-modal";
 import { ConnectionCheckboxList } from "./connection-checkbox-list";
 import { useUpsertIntegrationPin } from "../../hooks/use-integrations";
+import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { errorMessage } from "../../lib/mutation-error";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import {
@@ -175,6 +176,7 @@ export function PinFormFields({
   onChange: (patch: Partial<PinDraft>) => void;
 }) {
   const { t } = useTranslation("settings");
+  const spaceWording = useWorkingSpaceWording("settings");
   return (
     <>
       <FormItem id="pin-form-agent" label={t("integration.admin.pinManagement.colAgent")}>
@@ -230,7 +232,12 @@ export function PinFormFields({
         </FormItem>
         {verdict.refusal && (
           <p className="text-muted-foreground text-xs" data-testid="pin-form-mode-refusal">
-            {t(ADDITIONS_REFUSAL_KEYS[verdict.refusal])}
+            {verdict.refusal === "inactive_agent"
+              ? spaceWording(
+                  ADDITIONS_REFUSAL_KEYS.inactive_agent,
+                  "integration.admin.pinManagement.additionsInactiveAgentIn",
+                )
+              : t(ADDITIONS_REFUSAL_KEYS[verdict.refusal])}
           </p>
         )}
       </div>

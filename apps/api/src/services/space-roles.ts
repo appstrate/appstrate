@@ -13,7 +13,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgInvitations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
-import { isForeignKeyViolation, isUniqueViolation } from "../lib/db-helpers.ts";
+import { isForeignKeyViolation } from "@appstrate/db/errors";
+import { isUniqueViolation } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {

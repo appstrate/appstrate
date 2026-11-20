@@ -265,9 +265,18 @@ describe("personal spaces — nobody else reaches one", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      packages: { skill: { id: string }[]; integration: { id: string }[] };
+      packages: {
+        skill: { id: string }[];
+        integration: { id: string; placements: { space_id: string; state: string }[] }[];
+      };
     };
-    expect(body.packages.integration.map((pkg) => pkg.id)).not.toContain("@system/unoffered");
+    // A system package is placed in every space by construction, a personal one
+    // included; the deployment does not offer this one, so it is off there — the
+    // same answer a team space gets, not an absence.
+    const unoffered = body.packages.integration.find((pkg) => pkg.id === "@system/unoffered");
+    expect(unoffered?.placements).toEqual([
+      expect.objectContaining({ space_id: personalId, state: "none" }),
+    ]);
     expect(body.packages.skill.map((pkg) => pkg.id)).toContain(SECRET);
     expect(body.packages.skill.map((pkg) => pkg.id)).not.toContain(teamPackage);
   });

@@ -52,7 +52,7 @@ import {
 } from "@appstrate/core/run-and-wait-client";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
-import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -78,8 +78,9 @@ import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
-  getFileForActor,
-  streamFileContent,
+  resolveFileAcrossSpaces,
+  type FileAccess,
+  readStoredFileBytes,
   projectFileMetadata,
   type FileCapabilities,
 } from "../../services/files.ts";
@@ -188,6 +189,8 @@ export interface McpToolContext {
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
+  /** How a file read by id reaches the file's own space (`requestFileAccess`), read on use. */
+  fileAccess: () => Promise<FileAccess>;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
@@ -1599,8 +1602,8 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 /**
  * The file read shared by `read_file` and `resources/read`, through the files
- * service's container ACL (`getFileForActor`, as the REST route) and straight
- * from storage (`streamFileContent`, so no presigned redirect to follow). A bad
+ * service's container ACL in the file's own space (`resolveFileAcrossSpaces`) and straight
+ * from storage (`readStoredFileBytes`, so no presigned redirect to follow). A bad
  * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
  *
  * Returns, each under ~1 MB: `text` for a textual file up to
@@ -1653,7 +1656,14 @@ function buildFileResourceReader(ctx: McpToolContext): {
         });
       }
 
-      const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
+      // `files:read` is asked in the file's own space, which may be another reached space or,
+      // for the issuing conversation's upload, the personal space.
+      const resolved = await resolveFileAcrossSpaces(
+        ctx.scope.orgId,
+        ctx.actor,
+        docId,
+        await ctx.fileAccess(),
+      );
       if (!resolved) {
         throw new ToolRefusal({
           code: "not_found",
@@ -1678,18 +1688,23 @@ function buildFileResourceReader(ctx: McpToolContext): {
       }
 
       // Downloadable → serve the bytes from storage directly (no 307 to follow).
-      if (isTextShapedMime(normalizeMime(row.mime)) && row.size <= RESOURCE_TEXT_MAX_BYTES) {
-        const stream = await streamFileContent(row.storageKey);
-        if (stream) {
-          const text = await new Response(stream).text();
-          return { contents: [{ uri: canonicalUri, mimeType: row.mime, text }] };
-        }
-      } else if (row.size <= RESOURCE_BLOB_MAX_BYTES) {
-        const stream = await streamFileContent(row.storageKey);
-        if (stream) {
-          const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-          const blob = Buffer.from(bytes).toString("base64");
-          return { contents: [{ uri: canonicalUri, mimeType: row.mime, blob }] };
+      const textFile = isTextShapedMime(normalizeMime(row.mime));
+      if (row.size <= (textFile ? RESOURCE_TEXT_MAX_BYTES : RESOURCE_BLOB_MAX_BYTES)) {
+        const bytes = await readStoredFileBytes(row);
+        if (bytes) {
+          const content = textFile
+            ? { text: new TextDecoder().decode(bytes) }
+            : { blob: Buffer.from(bytes).toString("base64") };
+          return {
+            contents: [
+              {
+                uri: canonicalUri,
+                mimeType: row.mime,
+                ...content,
+                _meta: { [FILE_NAME_META_KEY]: row.name },
+              },
+            ],
+          };
         }
       }
 
@@ -1741,9 +1756,9 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "its own or shared into the space. An entry flagged `needs_reconnection` has no healthy " +
       "connection: its owner must reconnect it before use. " +
       (surface.proxies
-        ? "The integration tools you can call with them are listed by `search_integration_tools`; " +
-          "integrations active in the space without a usable connection are listed there under " +
-          "`not_ready`. "
+        ? "The integration tools you can call with them are listed by `search_integration_tools`, " +
+          "with those of active integrations that need no connection; integrations active in the " +
+          "space that need one and lack a usable connection are listed there under `not_ready`. "
         : surface.proxiesClosed
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "

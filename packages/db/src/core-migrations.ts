@@ -3,7 +3,7 @@
 /**
  * The platform's core migrations on PostgreSQL, shared by the boot and by the standalone
  * migrator (`migrate.ts`). Free of `./client.ts` and `getEnv()`: the migrate container carries
- * `DATABASE_URL` and nothing else. Core journal only; `@appstrate/module-ee` applies its own.
+ * `DATABASE_URL` and nothing else. Core journal only; `@appstrate/module-billing` applies its own.
  */
 
 import { resolve } from "node:path";
@@ -101,7 +101,7 @@ export async function assertCoreMigrationsApplied(databaseUrl: string): Promise<
       "Apply them by running `bun packages/db/src/migrate.ts` with this DATABASE_URL " +
       "(the compose `appstrate-migrate` service does exactly that), or set " +
       "MIGRATIONS_ON_BOOT=apply to let the application migrate at boot. " +
-      "This check covers the core journal only: @appstrate/module-ee's own journal is " +
+      "This check covers the core journal only: @appstrate/module-billing's own journal is " +
       "not verified here, the module applies it itself at init.",
   );
 }

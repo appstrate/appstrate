@@ -25,14 +25,14 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
-  useAttachAvailability,
   useConversationScope,
-  useOriginSpaceLabel,
-  useOriginSpaceNode,
+  useSpaceName,
+  type LimitUnavailableReason,
 } from "./conversation-scope.ts";
 import {
   setPackageAuthoringEnabled,
@@ -44,14 +44,13 @@ import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
+import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
-const ICON_BUTTON = "text-muted-foreground size-8 shrink-0 rounded-lg";
-
-const LIMIT_REASON_KEY = {
+const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
-  "no-space": "composer.limit.noSpace",
+  "no-acting-space": "composer.limit.noActingSpace",
   outside: "composer.limit.outside",
-} as const;
+};
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
@@ -70,14 +69,9 @@ export function ComposerTools({
   showPicker,
   authorsPackages,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds, can } = useChatHost();
+  const { t, can } = useChatHost();
   const scope = useConversationScope();
-  const attach = useAttachAvailability();
-  // The plain name, for the accessible names: the node below carries a tile the name does not.
-  const spaceLabel = useOriginSpaceLabel();
-  const limit = limitAvailability(scope, actingSpaceIds);
-  // The space as the host names it; without an origin, the sentence stays generic.
-  const spaceNode = useOriginSpaceNode();
+  const origin = useSpaceName(scope.originSpaceId);
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
   const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
@@ -87,27 +81,18 @@ export function ComposerTools({
   // restore (Radix reads it as a focus-outside): open it once the menu is gone.
   const openSkillsAfterClose = useRef(false);
 
+  // A phone's resting composer is one line, attach and send around the field: every tool after the
+  // attach button shows once the composer is touched (`data-rest` is the composer's).
   const cluster = (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <AttachButton
-        label={t("composer.attach")}
-        // An upload lands in the working space: where the chat does not act, or off the origin
-        // of a limited conversation.
-        unavailableReason={
-          attach.available
-            ? null
-            : attach.reason === "limited"
-              ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
-              : t("composer.attachUnavailable")
-        }
-      />
+    <div className="flex min-w-0 items-center gap-1.5 max-md:flex-wrap max-md:group-data-[rest]/composer:[&>:not(:first-child)]:hidden">
+      <AttachButton />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className={ICON_BUTTON}
+            className={COMPOSER_TOOL_BUTTON_CLASS}
             aria-label={t("composer.settings")}
             data-testid="composer-settings-trigger"
           >
@@ -134,25 +119,7 @@ export function ComposerTools({
               {t("composer.skills")}
             </DropdownMenuItem>
           )}
-          {limit.available ? (
-            <DropdownMenuCheckboxItem
-              checked={scope.restricted}
-              disabled={scope.pending}
-              onCheckedChange={scope.setRestricted}
-              aria-label={t("composer.limit", { name: spaceLabel })}
-              data-testid="composer-limit-item"
-            >
-              {sentenceWithNode(t, "composer.limit", spaceNode)}
-            </DropdownMenuCheckboxItem>
-          ) : (
-            // A turn generating, no origin space (« Tous les espaces »), or one the chat cannot act in.
-            <UnavailableItem
-              icon={<MapPinIcon />}
-              label={t("composer.limit.generic")}
-              reason={t(LIMIT_REASON_KEY[limit.reason])}
-              testId="composer-limit-item"
-            />
-          )}
+          <LimitMenuEntry />
           {authorsPackages && (
             <DropdownMenuCheckboxItem
               checked={creationMode}
@@ -204,12 +171,18 @@ export function ComposerTools({
       {scope.restricted && (
         <RemovableChip
           icon={<MapPinIcon />}
-          removeLabel={t("composer.limit.undo", { name: spaceLabel })}
+          removeLabel={
+            origin
+              ? t("composer.limit.undo", { name: origin.label })
+              : t("composer.limit.undoGeneric")
+          }
           removeDisabled={scope.generating || scope.pending}
-          onRemove={() => scope.setRestricted(false)}
+          onRemove={scope.lift}
           data-testid="composer-limit-chip"
         >
-          {sentenceWithNode(t, "composer.limitChip", spaceNode)}
+          {origin
+            ? sentenceWithNode(t, "composer.limitChip", origin.node)
+            : t("composer.limitChip.generic")}
         </RemovableChip>
       )}
       {showPicker && (
@@ -237,22 +210,52 @@ export function ComposerTools({
   );
 }
 
-/** A menu item that cannot be chosen here, with the reason under its label. */
-function UnavailableItem({
-  icon,
-  label,
-  reason,
-  testId,
-}: {
-  icon: ReactNode;
-  label: ReactNode;
-  reason: ReactNode;
-  testId: string;
-}) {
-  return (
-    <DropdownMenuItem disabled data-testid={testId}>
-      {icon}
-      <LabelWithHint label={label} hint={reason} />
+/**
+ * The settings menu's limit entry, as {@link limitAvailability} decides: one click limiting to the
+ * space it names, the host's sub-menu of the acting spaces for a conversation without an origin,
+ * or an inert entry giving the reason.
+ */
+export function LimitMenuEntry() {
+  const { t, actingSpaceIds, SpaceChoiceMenu } = useChatHost();
+  const scope = useConversationScope();
+  const limit = limitAvailability(scope, actingSpaceIds);
+  // The space a click limits to: the origin, or the one acting space.
+  const named = limit.kind === "toggle" ? limit.spaceId : null;
+  const space = useSpaceName(named);
+  return limit.kind === "toggle" ? (
+    // The origin, or the one space the chat acts in: one click limits there.
+    <DropdownMenuCheckboxItem
+      checked={scope.restricted}
+      disabled={scope.pending}
+      onCheckedChange={(on) => (on ? scope.limitTo(limit.spaceId) : scope.lift())}
+      aria-label={space ? t("composer.limit", { name: space.label }) : t("composer.limit.generic")}
+      data-testid="composer-limit-item"
+    >
+      {space ? sentenceWithNode(t, "composer.limit", space.node) : t("composer.limit.generic")}
+    </DropdownMenuCheckboxItem>
+  ) : limit.kind === "choose" ? (
+    // No origin and several acting spaces: the space picked becomes the origin.
+    <SpaceChoiceMenu
+      label={t("composer.limit.choose")}
+      spaceIds={limit.spaceIds}
+      onPick={scope.limitTo}
+      trigger={
+        <>
+          <MapPinIcon />
+          {t("composer.limit.generic")}
+        </>
+      }
+      testId="composer-limit-item"
+    />
+  ) : (
+    // A turn generating, no space to act in, an origin the chat no longer acts in, or the
+    // acting set not known yet (no reason then).
+    <DropdownMenuItem disabled data-testid="composer-limit-item">
+      <MapPinIcon />
+      <LabelWithHint
+        label={t("composer.limit.generic")}
+        hint={limit.reason && t(LIMIT_REASON_KEY[limit.reason])}
+      />
     </DropdownMenuItem>
   );
 }
@@ -267,47 +270,45 @@ function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
   );
 }
 
-/**
- * Opens the file dialog. Unavailable (`unavailableReason` set), it stays in place, disabled, with the
- * reason in a tooltip: a disabled button fires no pointer events, so the tooltip hangs on a
- * focusable wrapper that also carries the reason for a screen reader.
- */
-function AttachButton({
-  label,
-  unavailableReason,
-}: {
-  label: string;
-  unavailableReason: ReactNode | null;
-}) {
+/** The attach button opens the native picker: files always go to the caller's personal space. */
+function AttachButton() {
+  const { t, attachTarget } = useChatHost();
+  const label = t("composer.attach");
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      disabled={unavailableReason !== null}
-      className={ICON_BUTTON}
+      disabled={"unavailable" in attachTarget}
+      className={COMPOSER_TOOL_BUTTON_CLASS}
       aria-label={label}
     >
       <PaperclipIcon />
     </Button>
   );
-  if (unavailableReason === null) {
+  if ("spaceId" in attachTarget) {
     return (
-      <ComposerPrimitive.AddAttachment multiple asChild>
-        {button}
-      </ComposerPrimitive.AddAttachment>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-64 text-xs">
+          {t("composer.attachHint")}
+        </TooltipContent>
+      </Tooltip>
     );
   }
+  const reason = t(attachUnavailableKey(attachTarget.unavailable));
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span tabIndex={0} className="inline-flex shrink-0">
           {button}
-          <span className="sr-only">{unavailableReason}</span>
+          <span className="sr-only">{reason}</span>
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 text-xs">
-        {unavailableReason}
+        {reason}
       </TooltipContent>
     </Tooltip>
   );

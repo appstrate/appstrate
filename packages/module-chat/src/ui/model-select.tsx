@@ -77,7 +77,7 @@ export function ModelSelect({
           disabled
           aria-hidden
           tabIndex={-1}
-          className="bg-muted h-auto max-w-64 animate-pulse justify-start gap-1.5 border-transparent px-2.5 py-1 font-normal text-transparent shadow-none disabled:opacity-100 [&_svg]:size-3.5"
+          className="bg-muted desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] animate-pulse justify-start gap-1.5 border-transparent px-2.5 py-1 font-normal text-transparent shadow-none disabled:opacity-100 [&_svg]:size-3.5"
         >
           <SlidersHorizontalIcon className="size-3.5 shrink-0" />
           <span className="font-medium">{t("model.select")}</span>
@@ -91,7 +91,7 @@ export function ModelSelect({
           variant="outline"
           size="sm"
           disabled
-          className="h-auto max-w-64 justify-start gap-1.5 px-2.5 py-1 text-left font-normal shadow-none [&_svg]:size-3.5"
+          className="desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] justify-start gap-1.5 px-2.5 py-1 text-left font-normal shadow-none [&_svg]:size-3.5"
           title={t("model.loadFailed")}
         >
           <TriangleAlertIcon className="text-destructive shrink-0" />
@@ -187,8 +187,8 @@ export function ModelSelect({
           variant="outline"
           size="sm"
           className={cn(
-            "text-foreground hover:text-foreground h-auto gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
-            "max-w-64 justify-start text-left",
+            "text-foreground hover:text-foreground desktop-pointer:min-h-0 h-auto min-h-10 gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
+            "max-w-[min(16rem,100%)] justify-start text-left",
             hasOverrides && "border-primary/40 bg-primary/5",
           )}
           title={t("model.settingsTitle")}

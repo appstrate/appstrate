@@ -172,7 +172,7 @@ export async function resolveAgentRunVersion(
   const row = await selectRunVersion(agent, selector, executor);
   if (!row) return { agent };
   // The version will run: its bytes go through the AFPS signature policy.
-  const content = await readVersionArchive(agent.id, row.version, { forExecution: true });
+  const content = await readVersionArchive(agent.id, row.version, { integrity: row.integrity });
   return substituteVersion(agent, { ...row, content });
 }
 

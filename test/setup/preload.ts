@@ -5,7 +5,7 @@
  *
  * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs the core Drizzle migrations — module tables live in the core schema. `module-ee` is
+ * 3. Runs the core Drizzle migrations — module tables live in the core schema. `module-billing` is
  *    the exception: it self-migrates its `ee_*` tables from `init()`, which phase 3 below runs.
  * 4. Registers the tables a module reads/writes for truncation
  *

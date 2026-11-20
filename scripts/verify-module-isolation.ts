@@ -18,7 +18,7 @@
  *   through `MODULES`, and a static import makes one mandatory and drags a
  *   differently-licensed tree into the Apache-2.0 one. The loader's computed
  *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
- *   Apache-2.0 → commercial. NOTHING outside `packages/module-ee/` or `ee/` may statically
+ *   Apache-2.0 → commercial. NOTHING outside `ee/` may statically
  *   import it — see `reviewCommercialDependencies`.
  * `apps/web` is out of scope of the core→module rule (the SPA imports a module's
  * UI on purpose). Test files are exempt module→module, and the platform→module
@@ -132,7 +132,7 @@ function stripComments(source: string): string {
       // literal — but its INTERIOR quotes are blanked, because a quote inside
       // one cannot open the specifier of an import: the whole literal is one
       // token. Without this, a source that merely QUOTES an import statement
-      // (`'import "@appstrate/module-ee";'`, which is how this gate's own test
+      // (`'import "@appstrate/module-chat";'`, which is how this gate's own test
       // feeds it synthetic input) matches as if it performed one. A real
       // specifier never contains a quote, so this only ever removes matches.
       // An unterminated literal (EOF, or a regex closed by a newline) is copied
@@ -249,11 +249,10 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
 }
 
 /**
- * The commercial tree — the repository's ONE non-Apache-2.0 directory, the same
- * prefix `verify-license-boundary.ts` checks headers against.
+ * The commercial tree: `ee/`, the repository's one non-Apache-2.0 directory, the
+ * same prefix `verify-license-headers.ts` expects the commercial header under.
  */
 const COMMERCIAL_TREES: readonly { prefix: string; spec: string }[] = [
-  { prefix: "packages/module-ee/", spec: "@appstrate/module-ee" },
   { prefix: "ee/", spec: "@appstrate/ee" },
 ];
 
@@ -268,7 +267,7 @@ function commercialTreeOf(imp: PlatformImport): { prefix: string } | undefined {
 
 /**
  * Decide which files take a STATIC dependency on the commercial tree. Pure — the
- * scan feeds it every tracked source file outside `packages/module-ee/`, the
+ * scan feeds it every tracked source file outside `ee/`, the
  * tests feed it synthetic ones.
  *
  * A direction of its own rather than a wider `platformRoots` list: the core→module rule is

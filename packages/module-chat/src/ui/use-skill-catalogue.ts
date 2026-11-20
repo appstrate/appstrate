@@ -17,13 +17,13 @@ export function useSkillCatalogue(transport: ChatTransport | undefined, wanted: 
   const scope = useConversationScope();
   const limitedSpaceId = limitedSpaceOf(scope);
   const catalogueSpaceIds = limitedSpaceId ? [limitedSpaceId] : actingSpaceIds;
-  const readable = !!transport && canIn(limitedSpaceId, "skills:read");
+  const readable = !!transport && !!catalogueSpaceIds && canIn(limitedSpaceId, "skills:read");
   return useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the acting set keys it.
     queryKey: ["packages", "skills", { consumer: "chat" }, catalogueSpaceIds],
-    queryFn: () => fetchSkills(transport!, catalogueSpaceIds),
+    queryFn: () => fetchSkills(transport!, catalogueSpaceIds!),
     enabled: wanted && readable,
     staleTime: 60_000,
   });

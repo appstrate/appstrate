@@ -53,8 +53,8 @@ import type { ToolPhase } from "./tool-result.ts";
 
 /**
  * Row of file attachments surfaced under a run card — the same unified
- * renderer the thread uses for sent attachments: an image shows a square
- * thumbnail, anything else a chip. With a host opener (web shell) it opens the
+ * renderer the thread uses for sent attachments: the attachment chip, an image's
+ * thumbnail or the file type's icon leading. With a host opener (web shell) it opens the
  * in-app preview; without one (embedded mounts) it falls back to the
  * authenticated download.
  */
@@ -102,7 +102,6 @@ export function ChatRunProgressCard({
   runId,
   initialStatus,
   agentLabel,
-  runHref,
   initialPackageId,
   spaceId,
   initialFiles,
@@ -114,7 +113,6 @@ export function ChatRunProgressCard({
   runId: string | undefined;
   initialStatus?: string;
   agentLabel?: string;
-  runHref?: string;
   initialPackageId?: string;
   /** The space the call acted in (stamped on every call that acts in a space): the run is read and opened there. */
   spaceId?: string;
@@ -227,9 +225,8 @@ export function ChatRunProgressCard({
       : denied
         ? { id: -1, text: t("run.noAccess") }
         : current;
-  const effectiveRunHref = runDenied
-    ? undefined
-    : (runHref ?? (runId ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined));
+  const effectiveRunHref =
+    runId && !runDenied ? runPageHref(linkInSpace, packageId, runId, spaceId) : undefined;
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints

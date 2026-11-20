@@ -13,10 +13,29 @@
  * back for this file and `0106` is replayed at the end.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { resolve } from "node:path";
+import { mkdtemp, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import {
+  buildBundleFromAfps,
+  canonicalBundleDigest,
+  emptyPackageCatalog,
+  generateKeyPair,
+  readBundleFromBuffer,
+  signBundle,
+  writeBundleToBuffer,
+} from "@appstrate/afps-runtime/bundle";
+import { _resetCacheForTesting } from "../../packages/env/src/index.ts";
+import { run as signBundleFile } from "../../packages/afps-runtime/src/cli/commands/sign.ts";
+import {
+  _resetTrustRootCacheForTesting,
+  verifyStoredBundleSignature,
+} from "../../apps/api/src/services/run-launcher/bundle-signature-policy.ts";
+import { downloadVersionZipForExecution } from "../../apps/api/src/services/package-storage.ts";
 import { sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
+import * as storage from "@appstrate/db/storage";
 import { deleteFile, downloadFile, uploadFile } from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
@@ -127,6 +146,62 @@ const agentManifest = {
 const zip = (files: Record<string, string>) =>
   zipArtifact(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, enc.encode(v)])), 6);
 
+async function signedArchive(
+  files: Record<string, Uint8Array>,
+  signer: ReturnType<typeof generateKeyPair>,
+) {
+  const bundle = await buildBundleFromAfps(zipArtifact(files), emptyPackageCatalog, {
+    depTypes: [],
+  });
+  const signature = signBundle(canonicalBundleDigest(bundle), signer);
+  return zipArtifact({ ...files, "signature.sig": enc.encode(JSON.stringify(signature)) });
+}
+
+async function signRequest(
+  input: string,
+  output: string,
+  keyFile: string,
+  pair: ReturnType<typeof generateKeyPair>,
+) {
+  await Bun.write(keyFile, JSON.stringify(pair));
+  expect(
+    await signBundleFile([input, "--key", keyFile, "--out", output], {
+      stdout: () => {},
+      stderr: () => {},
+    }),
+  ).toBe(0);
+}
+
+async function withTrustedPublisher(
+  pair: ReturnType<typeof generateKeyPair>,
+  run: () => Promise<void>,
+) {
+  const previousTrust = process.env.AFPS_TRUST_ROOT;
+  process.env.AFPS_TRUST_ROOT = JSON.stringify([{ keyId: pair.keyId, publicKey: pair.publicKey }]);
+  _resetCacheForTesting();
+  _resetTrustRootCacheForTesting();
+  try {
+    await run();
+  } finally {
+    if (previousTrust === undefined) delete process.env.AFPS_TRUST_ROOT;
+    else process.env.AFPS_TRUST_ROOT = previousTrust;
+    _resetCacheForTesting();
+    _resetTrustRootCacheForTesting();
+  }
+}
+
+it("refuses an unnamed database before opening the default PGlite directory", async () => {
+  const cwd = await mkdtemp(resolve(tmpdir(), "fold-no-target-"));
+  const env = { ...process.env };
+  delete env.DATABASE_URL;
+  delete env.PGLITE_DATA_DIR;
+  const script = resolve(import.meta.dir, "../migration/0054-fold-mcp-servers.ts");
+  const child = Bun.spawnSync([process.execPath, script, "--apply"], { cwd, env });
+  expect(child.exitCode).toBe(2);
+  expect(child.stdout.toString()).toContain("neither DATABASE_URL nor PGLITE_DATA_DIR is set");
+  expect(await readdir(cwd)).toEqual([]);
+});
+
 const keys: Array<[string, string]> = [];
 async function put(bucket: string, key: string, files: Record<string, string>): Promise<void> {
   keys.push([bucket, key]);
@@ -225,6 +300,235 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
     lines.length = 0;
     ctx = await createTestContext({ orgSlug: "t0054" });
     await seedAll();
+  });
+
+  it("preserves a signed beta.68 integration only with a trusted signature on the folded archive", async () => {
+    const original = new Uint8Array(
+      await Bun.file(resolve(import.meta.dir, "fixtures/0054/beta68-signed.afps")).arrayBuffer(),
+    );
+    const manifest = JSON.parse(dec.decode(unzipArtifact(original)["manifest.json"]));
+    const key = versionZipKey(INTEGRATION, "1.0.0");
+    await uploadFile(AGENT_PACKAGES_BUCKET, key, original);
+    const draftKey = packageItemKey("integrations", ctx.orgId, INTEGRATION);
+    await uploadFile(PACKAGE_ITEMS_BUCKET, draftKey, original);
+    await db.execute(
+      sql`UPDATE packages SET draft_manifest = ${JSON.stringify(manifest)}::jsonb WHERE id = ${INTEGRATION}`,
+    );
+    await db.execute(
+      sql`UPDATE package_versions SET manifest = ${JSON.stringify(manifest)}::jsonb, integrity = ${computeIntegrity(original)} WHERE package_id = ${INTEGRATION}`,
+    );
+    const signingDir = await mkdtemp(resolve(tmpdir(), "fold-signed-"));
+    const fold = (apply: boolean) =>
+      runFoldMcpServers({ apply, signingDir, out: (line) => lines.push(line) });
+    expect((await fold(false)).unfolded.join(" ")).toContain("publisher signature required");
+    expect((await fold(true)).refused).toBe(true);
+    expect(await serverCount()).toBe(3);
+    expect(new Uint8Array((await downloadFile(AGENT_PACKAGES_BUCKET, key))!)).toEqual(original);
+    const [request] = await readdir(signingDir);
+    const input = resolve(signingDir, request!);
+    const output = input.replace(/\.afps-bundle$/, ".signed.afps-bundle");
+    const signer = generateKeyPair();
+    const previousPolicy = process.env.AFPS_SIGNATURE_POLICY;
+    await withTrustedPublisher(signer, async () => {
+      const keyFile = resolve(signingDir, "publisher.json");
+      await signRequest(input, output, keyFile, generateKeyPair());
+      expect((await fold(true)).refused).toBe(true);
+      const requestBundle = readBundleFromBuffer(
+        new Uint8Array(await Bun.file(input).arrayBuffer()),
+      );
+      const requestedFiles = Object.fromEntries(
+        requestBundle.packages.get(requestBundle.root)!.files,
+      );
+      const different = await buildBundleFromAfps(
+        zipArtifact({ ...requestedFiles, "server/index.ts": enc.encode("// previous revision") }),
+        emptyPackageCatalog,
+        { depTypes: [] },
+      );
+      const differentFile = resolve(signingDir, "other-revision.afps-bundle");
+      await Bun.write(differentFile, writeBundleToBuffer(different));
+      await signRequest(differentFile, output, keyFile, signer);
+      expect((await fold(true)).unfolded.join(" ")).toContain(
+        `Bundle signature verification failed for ${INTEGRATION}`,
+      );
+      expect(new Uint8Array((await downloadFile(PACKAGE_ITEMS_BUCKET, draftKey))!)).toEqual(
+        original,
+      );
+      await signRequest(input, output, keyFile, signer);
+      expect((await fold(true)).refused).toBe(false);
+      const draft = unzipArtifact((await downloadFile(PACKAGE_ITEMS_BUCKET, draftKey))!);
+      expect(draft["server/index.ts"]).toBeDefined();
+      expect(draft["signature.sig"]).toBeUndefined();
+      process.env.AFPS_SIGNATURE_POLICY = "required";
+      _resetCacheForTesting();
+      try {
+        expect(
+          await downloadVersionZipForExecution(
+            INTEGRATION,
+            "1.0.0",
+            (await versionOf(INTEGRATION)).integrity,
+          ),
+        ).toBeTruthy();
+        expect((await fold(true)).integrationsFolded).toEqual([]);
+      } finally {
+        if (previousPolicy === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+        else process.env.AFPS_SIGNATURE_POLICY = previousPolicy;
+        _resetCacheForTesting();
+      }
+    });
+  });
+
+  it("refuses a mixed lot when a published dependency-only agent or skill archive is unavailable", async () => {
+    const skill = "@t0054/missing-skill";
+    const manifest = { ...agentManifest, name: skill, type: "skill" };
+    await seedPackage({ id: skill, orgId: ctx.orgId, type: "skill", draftManifest: manifest });
+    await seedPackageVersion({ packageId: skill, version: "1.0.0", manifest });
+    await deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey(AGENT, "1.0.0"));
+    const key = versionZipKey(INTEGRATION, "1.0.0");
+    const original = await downloadFile(AGENT_PACKAGES_BUCKET, key);
+    const dry = await run(false);
+    expect(dry.unfolded).toContain(`${skill}@1.0.0: version archive missing`);
+    expect(dry.unfolded).toContain(`${AGENT}@1.0.0: version archive missing`);
+    expect((await run(true)).refused).toBe(true);
+    expect(await serverCount()).toBe(3);
+    expect(await draftManifestOf(AGENT)).toEqual(agentManifest);
+    expect(await downloadFile(AGENT_PACKAGES_BUCKET, key)).toEqual(original);
+  });
+
+  it("never attributes a signed server's signature to an unsigned integration", async () => {
+    const version = "1.0.0";
+    const serverKey = versionZipKey(SERVER, version);
+    const signer = generateKeyPair();
+    const signed = await signedArchive(
+      {
+        "manifest.json": enc.encode(JSON.stringify(serverManifest(version))),
+        "server/index.ts": enc.encode("// signed server"),
+      },
+      signer,
+    );
+    await uploadFile(AGENT_PACKAGES_BUCKET, serverKey, signed);
+    const previousPolicy = process.env.AFPS_SIGNATURE_POLICY;
+    const key = versionZipKey(INTEGRATION, version);
+    const original = await downloadFile(AGENT_PACKAGES_BUCKET, key);
+    try {
+      process.env.AFPS_SIGNATURE_POLICY = "required";
+      _resetCacheForTesting();
+      const required = await run(true);
+      expect(required.refused).toBe(true);
+      expect(required.unfolded).toContain(
+        `${INTEGRATION}@1.0.0: publisher signature required; dry-run with --signing-dir DIR`,
+      );
+      expect(required.notes).toContain(
+        `${INTEGRATION}@1.0.0: embedded server signature covers the server only; excluded`,
+      );
+      expect(await downloadFile(AGENT_PACKAGES_BUCKET, key)).toEqual(original);
+      process.env.AFPS_SIGNATURE_POLICY = "warn";
+      _resetCacheForTesting();
+      expect((await run(true)).refused).toBe(false);
+      const files = unzipArtifact((await downloadFile(AGENT_PACKAGES_BUCKET, key))!);
+      expect(dec.decode(files["server/index.ts"])).toBe("// signed server");
+      expect(files["signature.sig"]).toBeUndefined();
+    } finally {
+      if (previousPolicy === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+      else process.env.AFPS_SIGNATURE_POLICY = previousPolicy;
+      _resetCacheForTesting();
+    }
+  });
+
+  it("strips stale signatures from imported dependency-only drafts, keeping each type's stored tree", async () => {
+    const signer = generateKeyPair();
+    const skill = "@t0054/draft-skill";
+    const skillManifest = { ...agentManifest, name: skill, type: "skill" };
+    await seedPackage({ id: skill, orgId: ctx.orgId, type: "skill", draftManifest: skillManifest });
+    const cases = [
+      { folder: "agents", manifest: agentManifest, path: "prompt.md", body: "hi" },
+      {
+        folder: "skills",
+        manifest: skillManifest,
+        path: "SKILL.md",
+        body: "---\nname: draft-skill\ndescription: Test\n---\n",
+      },
+    ] as const;
+    for (const entry of cases) {
+      const signed = await signedArchive(
+        {
+          "manifest.json": enc.encode(JSON.stringify(entry.manifest)),
+          [entry.path]: enc.encode(entry.body),
+        },
+        signer,
+      );
+      const files = unzipArtifact(signed);
+      delete files["manifest.json"]; // The import stores this field in the row.
+      const key = packageItemKey(entry.folder, ctx.orgId, entry.manifest.name);
+      keys.push([PACKAGE_ITEMS_BUCKET, key]);
+      await uploadFile(PACKAGE_ITEMS_BUCKET, key, zipArtifact(files));
+    }
+    expect((await run(true)).refused).toBe(false);
+    for (const entry of cases) {
+      const key = packageItemKey(entry.folder, ctx.orgId, entry.manifest.name);
+      const files = unzipArtifact((await downloadFile(PACKAGE_ITEMS_BUCKET, key))!);
+      expect(Object.keys(files)).toEqual([entry.path]);
+      expect(dec.decode(files[entry.path])).toBe(entry.body);
+      expect((await draftManifestOf(entry.manifest.name)).dependencies.mcp_servers).toBeUndefined();
+    }
+  });
+
+  it("recovers after the second upload fails and the database rolls back", async () => {
+    // No integration draft to upload: the first rewritten object is the signed agent version.
+    await db.execute(sql`UPDATE packages SET draft_manifest = NULL WHERE id = ${INTEGRATION}`);
+    const key = versionZipKey(AGENT, "1.0.0");
+    const signer = generateKeyPair();
+    const original = await signedArchive(
+      unzipArtifact((await downloadFile(AGENT_PACKAGES_BUCKET, key))!),
+      signer,
+    );
+    const originalSri = computeIntegrity(original);
+    await uploadFile(AGENT_PACKAGES_BUCKET, key, original);
+    await db.execute(
+      sql`UPDATE package_versions SET integrity = ${originalSri} WHERE package_id = ${AGENT}`,
+    );
+    const signingDir = await mkdtemp(resolve(tmpdir(), "fold-retry-"));
+    const fold = (apply: boolean) => runFoldMcpServers({ apply, signingDir, out: () => {} });
+    await withTrustedPublisher(signer, async () => {
+      expect((await fold(false)).unfolded).toHaveLength(1);
+      const [request] = await readdir(signingDir);
+      const input = resolve(signingDir, request!);
+      await signRequest(
+        input,
+        input.replace(/\.afps-bundle$/, ".signed.afps-bundle"),
+        resolve(signingDir, "publisher.json"),
+        signer,
+      );
+      const originalUpload = storage.uploadFile;
+      const spy = spyOn(storage, "uploadFile")
+        .mockImplementationOnce(originalUpload)
+        .mockRejectedValueOnce(new Error("second upload interrupted"));
+      try {
+        await expect(fold(true)).rejects.toThrow("second upload interrupted");
+        expect(spy).toHaveBeenCalledTimes(2);
+        expect(spy.mock.calls[0]?.slice(0, 2)).toEqual([AGENT_PACKAGES_BUCKET, key]);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await serverCount()).toBe(3);
+      expect((await versionOf(AGENT)).integrity).toBe(originalSri);
+      const partial = (await downloadFile(AGENT_PACKAGES_BUCKET, key))!;
+      expect(computeIntegrity(partial)).not.toBe(originalSri);
+      expect((await fold(false)).unfolded).toEqual([]);
+      expect((await fold(true)).refused).toBe(false);
+      expect(await downloadFile(AGENT_PACKAGES_BUCKET, key)).toEqual(partial);
+      expect(await serverCount()).toBe(0);
+      expect((await verifyStoredBundleSignature(partial, AGENT, "required")).root).toBe(
+        `${AGENT}@1.0.0`,
+      );
+      for (const id of [AGENT, INTEGRATION]) {
+        const bytes = (await downloadFile(AGENT_PACKAGES_BUCKET, versionZipKey(id, "1.0.0")))!;
+        const version = await versionOf(id);
+        expect(computeIntegrity(bytes)).toBe(version.integrity);
+        expect(JSON.parse(dec.decode(unzipArtifact(bytes)["manifest.json"]))).toEqual(
+          version.manifest,
+        );
+      }
+    });
   });
 
   it("a dry run reports and writes nothing", async () => {

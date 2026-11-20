@@ -262,8 +262,16 @@ export function UnifiedSettingsLayout() {
 export function SettingsIndexRedirect() {
   const sections = useSettingsSections();
   const { ready } = usePermissions();
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
   // Until the permissions load every entry reads as refused.
   if (!ready) return <SettingsSkeleton />;
-  return <Navigate to={firstSettingsPath(sections, settingsScopeFromPath(pathname))} replace />;
+  // The entry's state rides along: it holds the page beneath the overlay, which would otherwise be
+  // restored by a later navigation that can land after the overlay was closed.
+  return (
+    <Navigate
+      to={firstSettingsPath(sections, settingsScopeFromPath(pathname))}
+      replace
+      state={state}
+    />
+  );
 }

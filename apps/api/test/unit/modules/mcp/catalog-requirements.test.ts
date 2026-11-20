@@ -224,7 +224,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   { path: "/api/runs/{id}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
   { path: "/api/oauth/logout", why: "ends the session its own cookie names" },
   { path: "/api/uploads/_content", why: "HMAC upload sink — skips the auth pipeline outright" },
-  // Only with `@appstrate/module-ee` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
+  // Only with `@appstrate/module-billing` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
   { path: "/api/billing/webhooks", why: "Stripe receiver, verified by `stripe-signature`" },
 
   // ── Self-scoped: the caller's own rows, with no RBAC resource to name.
@@ -234,6 +234,21 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   { path: "/api/profile/password", why: "the person's own account (`isUserPrincipal`)" },
   { path: "/api/notifications", why: "filtered by the caller's actor; another's is a 404" },
   { path: "/api/notifications/*", why: "filtered by the caller's actor; another's is a 404" },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/notifications",
+    why: "filtered by the caller's actor, in each space the caller holds a role in",
+  },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/notifications/unread-count",
+    why: "filtered by the caller's actor, in each space the caller holds a role in",
+  },
+  {
+    methods: ["GET"],
+    path: "/api/orgs/{orgId}/notifications/{id}",
+    why: "filtered by the caller's actor, in each space the caller holds a role in; another's is a 404",
+  },
   { path: "/api/uploads", why: "mints an upload token into the caller's own space, nothing else" },
   { path: "/api/welcome/setup", why: "onboarding, on the person's own credential only" },
   // Exact: every other route under `/api/orgs/…` IS guarded.
@@ -257,6 +272,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ]),
   ...rowDecided("the run-read grant of each space the caller reaches, read in the handler", [
     [["GET"], "/api/orgs/{orgId}/runs"],
+    [["GET"], "/api/orgs/{orgId}/runs/{id}"],
   ]),
   ...rowDecided(
     "`schedules:read` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
@@ -270,6 +286,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     "`agents:read` or `agents:run` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
     [[["GET"], "/api/orgs/{orgId}/agents"]],
   ),
+  ...rowDecided(
+    "`persistence:read` in each space the caller reaches that reads the agent, and `persistence:delete` there for every actor's rows, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/agents/{scope}/{name}/persistence"]],
+  ),
   ...rowDecided("`<type>:read` in each space the caller reaches, read in the handler", [
     [["GET"], "/api/orgs/{orgId}/packages/skills"],
     [["GET"], "/api/orgs/{orgId}/packages/integrations"],
@@ -282,6 +302,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["GET"], "/api/realtime/runs"],
     [["GET"], "/api/realtime/runs/{id}"],
     [["GET"], "/api/realtime/agents/{packageId}/runs"],
+  ]),
+  ...rowDecided("`resolveFileAcrossSpaces`: `files:read` in the file's own space", [
+    [["GET"], "/api/files/{id}"],
+    [["GET"], "/api/files/{id}/content"],
   ]),
   ...rowDecided("`files:delete` OR the file's own creator", [
     [["DELETE"], "/api/files/{id}"],
@@ -331,7 +355,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   },
 ];
 
-/** Entries a deployment without `@appstrate/module-ee` cannot match. */
+/** Entries a deployment without `@appstrate/module-billing` cannot match. */
 const PRESENT_ONLY_WITH_EE: ReadonlySet<string> = new Set(["/api/billing/webhooks"]);
 
 function covers(
@@ -370,7 +394,7 @@ describe("every /api/ operation has a readable requirement", () => {
       (operation) =>
         operation.pathTemplate.startsWith("/api/") && !covers(NO_MOUNTED_GUARD, operation),
     );
-    expect(judged.filter((operation) => operation.method === "GET").length).toBeGreaterThan(70);
+    expect(judged.filter((operation) => operation.method === "GET").length).toBeGreaterThan(60);
     expect(judged.filter((operation) => operation.method !== "GET").length).toBeGreaterThan(80);
   });
 
@@ -424,6 +448,8 @@ describe("requirement anchors", () => {
       markNotificationReadById: req(["runs:read|runs:read-all"]),
       markAllNotificationsRead: req(["runs:read|runs:read-all"]),
       createUpload: req(["agents:run"]),
+      getFile: req(["files:read"]),
+      getFileContent: req(["files:read"]),
     };
     const ceilings = Object.fromEntries(
       Object.keys(expected).map((operationId) => [operationId, op(operationId).requirement]),

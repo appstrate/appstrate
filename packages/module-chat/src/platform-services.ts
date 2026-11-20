@@ -38,6 +38,8 @@ type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 import {
   chatActsIn,
   type ChatAttachmentRequest,
+  type ChatAttachmentContent,
+  type ChatAttachmentRead,
   type ChatUsageRecord,
   type ResolvedChatAttachment,
   type ChatModelResolution,
@@ -127,6 +129,8 @@ export interface ChatPlatformDeps {
    * quota/cap/not-found errors, which the stream route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /** Read a model attachment under the container ACL and the file grant. A miss or oversized file returns null. */
+  readChatAttachment(request: ChatAttachmentRead): Promise<ChatAttachmentContent | null>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (kept, container NULLed);
@@ -185,6 +189,7 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
       ctx.services.resolveChatModel(orgId, presetId, userId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
+    readChatAttachment: (request) => ctx.services.readChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, orgId, tx) =>
       ctx.services.cleanupSessionFiles(chatSessionId, orgId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),

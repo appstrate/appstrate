@@ -108,8 +108,10 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       expect(billingPaths).toEqual([]);
     });
 
-    it("has no Ee* component schemas", () => {
-      const schemaNames = Object.keys(spec.components.schemas).filter((n) => n.startsWith("Ee"));
+    it("has no Billing* component schemas", () => {
+      const schemaNames = Object.keys(spec.components.schemas).filter((n) =>
+        n.startsWith("Billing"),
+      );
       expect(schemaNames).toEqual([]);
     });
   });
@@ -123,7 +125,7 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       expect(cfg.features.webhooks).toBeUndefined();
     });
 
-    it("base config has no billing flag — only @appstrate/module-ee contributes it", () => {
+    it("base config has no billing flag — only @appstrate/module-billing contributes it", () => {
       const cfg = buildAppConfig();
       expect(cfg.features.billing).toBeUndefined();
     });
@@ -133,10 +135,8 @@ describe("zero-footprint invariant (no modules loaded)", () => {
    * The OTHER direction of the same invariant: what a module must NOT be
    * needed for.
    *
-   * `/api/roles` was licensed by `@appstrate/module-ee`'s `custom_roles`
-   * feature flag until custom space roles became open-source (RBAC spec §9).
-   * Every assertion below answered `403 feature_unavailable` under that gate,
-   * and this app mounts NO module at all — so green here is the whole claim
+   * `/api/roles` is behind no feature flag and no module (RBAC spec §9). This
+   * app mounts NO module at all — so green here is the whole claim
    * "a deployment running nothing but the Apache-2.0 platform can define,
    * edit, grant and preview a bundle". A licence gate put back over any of the
    * four turns this red.

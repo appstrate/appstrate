@@ -97,6 +97,8 @@ function renderCard(
     active?: boolean;
     absent?: boolean;
     connectionRequired?: boolean;
+    /** The manifest declares no auths (AFPS §7.2). */
+    noAuths?: boolean;
   } = {},
 ): string {
   const qc = new QueryClient();
@@ -105,7 +107,10 @@ function renderCard(
       params: { path: { packageId: GMAIL }, header },
     }).queryKey,
     {
-      manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+      manifest: {
+        display_name: "Gmail",
+        ...(!entry.noAuths && { auths: { oauth: { type: "oauth2" } } }),
+      },
       auths: [],
       active: entry.active ?? true,
     },
@@ -143,10 +148,13 @@ function renderCard(
         },
       ]}
       agentPackageId={AGENT}
+      empty={EMPTY}
     />,
     { queryClient: qc },
   );
 }
+
+const EMPTY = <p data-testid="no-connectable-integration" />;
 
 const label = (key: string, options?: Record<string, string>) =>
   i18n.t(`agents:detail.${key}`, options);
@@ -299,6 +307,7 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
       <AgentIntegrationsBlock
         entries={[{ id: GMAIL, version: "1.0.0", tools: undefined, scopes: undefined }]}
         agentPackageId={AGENT}
+        empty={EMPTY}
       />,
       { queryClient: qc },
     );
@@ -332,7 +341,16 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
 });
 
 describe("AgentIntegrationsBlock — an integration declaring no auths (AFPS §7.2)", () => {
-  it("offers no picker and reads ready: there is no connection to give it", () => {
+  it("has no row, and the block reads empty when it is the only one", () => {
+    const html = renderCard(unbound({ warning: null }), {
+      connectionRequired: false,
+      noAuths: true,
+    });
+    expect(html).not.toContain(`integration-row-${GMAIL}`);
+    expect(html).toContain('data-testid="no-connectable-integration"');
+  });
+
+  it("whose detail still names auths, offers no picker on the verdict and reads ready", () => {
     const html = renderCard(unbound({ warning: null }), {
       required: true,
       connectionRequired: false,
@@ -452,6 +470,7 @@ function renderAs(
         entries={[{ id: GMAIL, version: "1.0.0", tools: undefined, scopes: undefined }]}
         agentPackageId={AGENT}
         {...(opts.schedule && { scheduleOverrides: { value: {}, onChange: () => {} } })}
+        empty={EMPTY}
       />,
       { queryClient: qc },
     );

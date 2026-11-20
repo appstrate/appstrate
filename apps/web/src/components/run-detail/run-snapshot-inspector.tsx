@@ -406,7 +406,7 @@ export function RunSnapshotInspector({
         <Modal
           onClose={turnsParam.close}
           title={t("run.turnsTitle")}
-          className="max-h-[85vh] max-w-4xl overflow-y-auto"
+          className="max-h-[85dvh] max-w-4xl overflow-y-auto"
         >
           <RunTurnsDetail turns={turns} />
         </Modal>

@@ -12,7 +12,7 @@ export type EeDb = ReturnType<typeof drizzle<typeof schema>>;
 /** `onnotice`: postgres.js prints NOTICEs to stdout; `max`: a small pool beside the platform's. */
 const POOL_OPTIONS = { max: 5, onnotice: () => {} } as const;
 
-/** Arbitrary, distinct from the platform's and module-ee's: serializes concurrent boots. */
+/** Arbitrary, distinct from the platform's and module-billing's: serializes concurrent boots. */
 const MIGRATION_LOCK_KEY = 5038120741;
 
 let sqlClient: ReturnType<typeof postgres> | null = null;
@@ -25,7 +25,7 @@ export function getEeDb(): EeDb {
 
 /**
  * Apply this package's migrations to the platform database, under the journal
- * `drizzle.appstrate_ee_migrations` (the platform's and module-ee's are
+ * `drizzle.appstrate_ee_migrations` (the platform's and module-billing's are
  * untouched; the object sets are disjoint), then open the pool. A session-level
  * advisory lock on the migrating connection serializes replicas booting at
  * once. Idempotent.

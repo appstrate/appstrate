@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0010 — move the commercial module's billing tables out of the database they
+ * 0010 — move the billing module's tables out of the database they
  * had to themselves and into the platform database.
  *
  *   EE_SOURCE_DATABASE_URL=<the module's former database> DATABASE_URL=<platform> \
@@ -34,7 +34,7 @@
  * source level the copy can carry, no unknown `ee_`/`cloud_` table left behind,
  * no source-only column, no billing row already on the target — and only once
  * they all pass does `--apply` migrate the target through the module's own
- * `migrateEeDb`, copy every table in ONE target transaction, and verify source
+ * `migrateBillingDb`, copy every table in ONE target transaction, and verify source
  * count = target count per table.
  *
  * Fidelity: every value is read as `text` and re-cast to the TARGET's own type
@@ -68,7 +68,7 @@ import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const MODULE_ROOT = resolve(import.meta.dir, "../../packages/module-ee");
+const MODULE_ROOT = resolve(import.meta.dir, "../../packages/module-billing");
 const MIGRATIONS_META = resolve(MODULE_ROOT, "drizzle/migrations/meta");
 
 /** One entry of the module's journal. `when` is what its migrator stores as `created_at`. */
@@ -343,7 +343,7 @@ async function copyTable(src: SQL, tx: SQL, plan: TablePlan): Promise<number> {
 
 /**
  * Rows in the module's journal on the target. `drizzle.ee_migrations` is where
- * `migrateEeDb` writes it — deliberately a different TABLE in the same schema
+ * `migrateBillingDb` writes it — deliberately a different TABLE in the same schema
  * as the platform's own `__drizzle_migrations`.
  */
 async function appliedMigrations(db: SQL): Promise<number> {
@@ -411,17 +411,16 @@ async function sourceLevel(src: SQL): Promise<JournalEntry> {
 
 /**
  * The module's own migrator, reached by a computed specifier. It is an import,
- * not a copy: this Apache-2.0 script runs the commercial module's code, it does
- * not carry it. The specifier is computed because
+ * not a copy: this script runs the module's code, it does not carry it. The specifier is computed because
  * `scripts/verify-module-isolation.ts` forbids a platform file from naming a
  * module in a literal one — the same shape `scripts/lib/module-openapi.ts` uses.
  */
 async function applyModuleMigrations(url: string): Promise<void> {
-  // Crossing the licence boundary AT RUNTIME is the point — never copy `migrateEeDb` in-tree.
+  // Crossing the module boundary AT RUNTIME is the point — never copy `migrateBillingDb` here.
   const db = (await import(resolve(MODULE_ROOT, "src/db.ts"))) as {
-    migrateEeDb: (databaseUrl: string) => Promise<void>;
+    migrateBillingDb: (databaseUrl: string) => Promise<void>;
   };
-  await db.migrateEeDb(url);
+  await db.migrateBillingDb(url);
 }
 
 function planLines(prefix: SourcePrefix, level: JournalEntry, plans: TablePlan[]): string[] {
@@ -465,7 +464,7 @@ async function move(src: SQL, target: SQL, targetUrl: string, apply: boolean): P
       "Every migration that rewrites rows names the pre-rename `cloud_*` tables, so the target cannot",
       "apply them to the copied rows afterwards — a free-plan org would arrive carrying the terminal",
       "`subscription_status` 0003 exists to clear, and be refused every paid operation.",
-      "Apply the missing packages/module-ee/drizzle/migrations/*.sql to the SOURCE in order and record",
+      "Apply the missing packages/module-billing/drizzle/migrations/*.sql to the SOURCE in order and record",
       "each in its journal (`created_at` = the `when` in meta/_journal.json), then re-run this script.",
     ]);
   }

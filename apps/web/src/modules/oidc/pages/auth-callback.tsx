@@ -54,7 +54,7 @@ export function AuthCallbackPage() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 p-8">
         <FieldError>{error}</FieldError>
         <a href="/login" className="text-primary text-sm underline">
           Retour à la connexion
@@ -64,7 +64,7 @@ export function AuthCallbackPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="flex min-h-dvh items-center justify-center">
       <Spinner />
     </div>
   );

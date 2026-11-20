@@ -13,7 +13,8 @@
  *
  * In « Tous les espaces » a row's page (`isListRow`: a run, an agent, a schedule, a file…)
  * acts in one space, entered when the row was opened, which the switcher does not name: the
- * meta line starts with it. Out of the mode, or on a page of no space, nothing is added.
+ * meta line starts with it. Out of the mode, or on a page of no space, nothing is added. A page
+ * naming the spaces of its resource (`spaces`) opens the line with them instead, in both modes.
  */
 
 import type { ReactNode } from "react";
@@ -34,14 +35,17 @@ import { routeOf } from "@/lib/route-match";
 import { isListRow } from "@/lib/space-lists";
 import { WorkingSpaceName } from "@/components/space-name";
 
-/** The space a row's page acts in, opening the meta line in « Tous les espaces »; `separated` when meta follows. */
-function DetailBarSpace({ separated }: { separated: boolean }) {
+/**
+ * What opens the meta line: the page's own `spaces` when it names them, else the space a row's
+ * page acts in while « Tous les espaces » is on; `separated` when meta follows.
+ */
+function DetailBarSpace({ spaces, separated }: { spaces?: ReactNode; separated: boolean }) {
   const { on } = useOverviewMode();
   const { pathname } = useLocation();
-  if (!on || !isListRow(routeOf(pathname))) return null;
+  if (!spaces && (!on || !isListRow(routeOf(pathname)))) return null;
   return (
     <>
-      <WorkingSpaceName size="sm" className="shrink-0" />
+      {spaces ?? <WorkingSpaceName size="sm" className="shrink-0" />}
       {separated && <span aria-hidden>·</span>}
     </>
   );
@@ -62,6 +66,7 @@ export function DetailBar<T extends string = string>({
   title,
   badge,
   trail,
+  spaces,
   meta,
   actions,
   tabs,
@@ -74,6 +79,8 @@ export function DetailBar<T extends string = string>({
   badge?: ReactNode;
   /** The page's ancestors in the header trail, outermost first; the title closes it. */
   trail?: readonly BreadcrumbEntry[];
+  /** The spaces of the resource, opening the line under the title in both modes. */
+  spaces?: ReactNode;
   /** In the small line under the title. */
   meta?: ReactNode;
   /**
@@ -98,7 +105,7 @@ export function DetailBar<T extends string = string>({
               {badge}
             </div>
             <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5 md:mt-0.5">
-              <DetailBarSpace separated={!!meta} />
+              <DetailBarSpace spaces={spaces} separated={!!meta} />
               {meta}
             </div>
           </div>
@@ -124,10 +131,13 @@ export function DetailBarSkeleton({
   trail,
   tabCount = 4,
   meta = true,
+  spaces = false,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount?: number;
+  /** The page opens its line with its resource's spaces (`DetailBar`'s `spaces`), read with it: a block stands for them. */
+  spaces?: boolean;
   /** The page draws a line under its title (a package's id); without it the line's box stays empty. */
   meta?: boolean;
 }) {
@@ -147,7 +157,10 @@ export function DetailBarSkeleton({
             {/* The meta line's own box (`text-xs leading-5`), so it is 20px tall, not the bar's 12;
                 the space it opens with is known from the listing, so it is drawn, not waited for. */}
             <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs leading-5 md:mt-0.5">
-              <DetailBarSpace separated={meta} />
+              <DetailBarSpace
+                spaces={spaces ? <SkeletonLine className="w-24 text-xs leading-5" /> : undefined}
+                separated={meta}
+              />
               {meta && <SkeletonLine className="w-32 text-xs leading-5" />}
             </div>
           </div>

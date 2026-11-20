@@ -93,7 +93,7 @@ FROM oven/bun:1.4.2-alpine
 # only Bun's upstream OCI labels).
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
-LABEL org.opencontainers.image.licenses="Apache-2.0 AND LicenseRef-Appstrate-Commercial"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app
 
@@ -130,8 +130,8 @@ COPY --from=build --parents /app/./ee/src /app/./ee/package.json /app/./ee/drizz
 # Non-`src` package assets that must ship alongside their package source.
 # Every `packages/*/drizzle` is graph-derived like the `src` globs above, so a
 # package that starts owning migrations needs no edit here: db's are applied to
-# the platform database at boot, module-ee's to that same platform database at
-# init under its own journal (`drizzle.ee_migrations`), and
+# the platform database at boot, module-billing's to that same platform database
+# at init under its own journal (`drizzle.ee_migrations`), and
 # the `src`-only globs above would otherwise leave the image loading the module
 # and dying on `Cannot find module '../drizzle/schema.ts'`.
 # core/schema is hand-listed — it is the one non-`drizzle` asset of its kind.
@@ -165,10 +165,9 @@ COPY --from=build /app/scripts/migration ./scripts/migration
 COPY --from=build /app/scripts/verify-system-models.ts ./scripts/verify-system-models.ts
 RUN ln -s ../apps/api/node_modules scripts/node_modules
 
-# The image ships two licences: Apache-2.0 for the platform, and the commercial
-# one for packages/module-ee and ee/, which are shipped by the globs above.
+# The image ships two licences: Apache-2.0 for everything in it except ee/,
+# which is under the commercial licence in ee/LICENSE.
 COPY --from=build /app/LICENSE /app/NOTICE ./
-COPY --from=build --chown=bun:bun /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
 COPY --from=build --chown=bun:bun /app/ee/LICENSE ./ee/LICENSE
 
 # su-exec for lightweight privilege drop in entrypoint

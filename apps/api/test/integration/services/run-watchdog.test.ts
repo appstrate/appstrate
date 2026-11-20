@@ -254,7 +254,7 @@ describe("run watchdog — unified stall detection", () => {
     expect(finalizedCount).toBe(1);
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
-    // Cost MUST survive the terminal status — it's the input the ee
+    // Cost MUST survive the terminal status — it's the input the billing
     // module reads off the run row to charge the org.
     expect(row?.cost).toBeCloseTo(0.0234, 5);
   });

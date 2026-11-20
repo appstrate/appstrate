@@ -32,12 +32,12 @@
  * replaced by the value of the auth entry whose `user_config_key ?? envKey` is `K`, `sensitive`
  * if any matched entry is) and every `user_config_key` is dropped. An existing `delivery.env[V]`
  * is never overwritten (the old rule: the integration's direct `delivery.env` wins). The server's
- * files, but its `manifest.json`, join the integration's draft files / version archive and the
+ * files, except its `manifest.json` and `signature.sig`, join the integration's draft files / version archive and the
  * version's `integrity` and `artifact_size` are recomputed.
  *
  * Two kinds of output lines. UNFOLDED: a draft or version that would still read the reference
  * shape after planning (server not found, pin matching no version, server archive or draft payload
- * missing, the integration's own version archive missing, a placeholder embedded in a larger
+ * missing, any version archive that must change missing, a placeholder embedded in a larger
  * value with no matching entry, a path both hold with different bytes). NOTES: informational (a
  * whole-value placeholder with no matching entry is dropped, the old runtime delivered nothing for
  * it; an identical-bytes path collision; an already-present `delivery.env[V]`). With `--apply`, any
@@ -73,7 +73,7 @@
  * re-running repairs it. The archives are overwritten in place, so only a storage snapshot undoes
  * a committed run.
  *
- * Collisions. The server's files, but `manifest.json`, are copied next to the integration's own. A
+ * Collisions. The server's payload files are copied next to the integration's own. A
  * path both hold with the SAME bytes is a note; with DIFFERENT bytes it is UNFOLDED: remove or rename
  * the integration's own differing file (its draft files, or a new version for a published one), then
  * re-run. The script never picks a side.
@@ -90,7 +90,15 @@ import { getEnv } from "../../packages/env/src/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { compareVersionsDesc, matchVersion, resolveVersionString } from "@appstrate/core/semver";
-import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import { stripWrapperPrefix, unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import {
+  buildBundleFromAfps,
+  canonicalBundleDigest,
+  emptyPackageCatalog,
+  readBundleFromBuffer,
+  readBundleSignature,
+  writeBundleToBuffer,
+} from "@appstrate/afps-runtime/bundle";
 import { downloadFile, uploadFile } from "@appstrate/db/storage";
 import { prefixedId } from "@appstrate/db/ids";
 import type { PackageType } from "@appstrate/core/validation";
@@ -291,6 +299,10 @@ function withPayload(
   const merged: Files = { ...files };
   for (const [path, bytes] of Object.entries(payload)) {
     if (path === MANIFEST_FILE) continue;
+    if (path === "signature.sig") {
+      notes.push(`${target}: embedded server signature covers the server only; excluded`);
+      continue;
+    }
     const existing = merged[path];
     if (existing === undefined) merged[path] = bytes;
     else if (bytesEqual(existing, bytes))
@@ -300,19 +312,66 @@ function withPayload(
   return merged;
 }
 
-function archive(files: Files, manifest: Json): Uint8Array {
-  return zipArtifact(
-    sortedFiles({
-      ...files,
-      [MANIFEST_FILE]: encoder.encode(JSON.stringify(manifest, null, 2)),
-    }),
-    6,
-  );
+function archive(files: Files, manifest: Json | null): Uint8Array {
+  const entries = { ...files };
+  if (manifest === null) delete entries[MANIFEST_FILE];
+  else entries[MANIFEST_FILE] = encoder.encode(JSON.stringify(manifest, null, 2));
+  return zipArtifact(sortedFiles(entries), 6);
+}
+
+function unsignedFiles(files: Files): Files {
+  const unsigned = { ...files };
+  delete unsigned["signature.sig"];
+  return unsigned;
 }
 
 async function readZip(bucket: string, key: string): Promise<Files | null> {
   const bytes = await downloadFile(bucket, key);
-  return bytes ? unzipArtifact(new Uint8Array(bytes)) : null;
+  if (!bytes) return null;
+  const files = unzipArtifact(new Uint8Array(bytes));
+  const unwrapped = stripWrapperPrefix(files);
+  return Object.hasOwn(unwrapped, MANIFEST_FILE) ? unwrapped : files;
+}
+
+/** Only the signature is taken from the publisher's bundle. The bytes verified and stored are ours. */
+async function signedVersionArchive(
+  files: Files,
+  manifest: Json,
+  packageId: string,
+  version: string,
+  signingDir: string | undefined,
+  apply: boolean,
+): Promise<Uint8Array> {
+  if (!Object.hasOwn(files, "signature.sig") && getEnv().AFPS_SIGNATURE_POLICY !== "required") {
+    return archive(files, manifest);
+  }
+  const unsigned = unsignedFiles(files);
+  const bundle = await buildBundleFromAfps(archive(unsigned, manifest), emptyPackageCatalog, {
+    depTypes: [],
+  });
+  if (bundle.root !== `${packageId}@${version}`)
+    throw new Error("archive identity does not match stored version");
+  const digest = new Bun.CryptoHasher("sha256").update(canonicalBundleDigest(bundle)).digest("hex");
+  if (!signingDir) throw new Error("publisher signature required; dry-run with --signing-dir DIR");
+  const prefix = resolve(signingDir, digest);
+  const signedFile = Bun.file(`${prefix}.signed.afps-bundle`);
+  if (!(await signedFile.exists())) {
+    if (!apply) await Bun.write(`${prefix}.afps-bundle`, writeBundleToBuffer(bundle));
+    throw new Error(`publisher signature required for ${digest}.afps-bundle`);
+  }
+  const signed = readBundleFromBuffer(new Uint8Array(await signedFile.arrayBuffer()));
+  const signature = readBundleSignature(signed);
+  if (!signature) throw new Error("publisher bundle has no readable signature");
+  const bytes = archive(
+    { ...unsigned, "signature.sig": encoder.encode(JSON.stringify(signature)) },
+    manifest,
+  );
+  // The runtime verifier also imports the system-package registry and its database connection.
+  // Load it only after the CLI has checked that the operator explicitly named the database.
+  const { verifyStoredBundleSignature } =
+    await import("../../apps/api/src/services/run-launcher/bundle-signature-policy.ts");
+  await verifyStoredBundleSignature(bytes, packageId, "required");
+  return bytes;
 }
 
 interface ServerRow {
@@ -373,6 +432,7 @@ export interface McpServersFold {
 
 export async function runFoldMcpServers(options: {
   apply: boolean;
+  signingDir?: string;
   out: (line: string) => void;
 }): Promise<McpServersFold> {
   const { apply, out } = options;
@@ -584,7 +644,7 @@ export async function runFoldMcpServers(options: {
     const key = packageItemKey("integrations", row.org_id, row.id);
     const own = (await readZip(PACKAGE_ITEMS_BUCKET, key)) ?? {};
     const files = withPayload(own, loaded.payload, target, result.notes, result.unfolded);
-    const bytes = archive(files, folded.manifest);
+    const bytes = archive(unsignedFiles(files), folded.manifest);
     writes.push({
       kind: "draft",
       packageId: row.id,
@@ -626,13 +686,24 @@ export async function runFoldMcpServers(options: {
     const key = versionZipKey(row.package_id, row.version);
     const own = await readZip(AGENT_PACKAGES_BUCKET, key);
     if (!own) {
-      // Only a reference-shape integration blocks `--apply`; a mere dependency key is left in place.
-      if (ref !== null) unfolded(target, "version archive missing");
-      else note(target, "version archive missing — dependencies.mcp_servers left as it is");
+      unfolded(target, "version archive missing");
       continue;
     }
     const files = withPayload(own, payload, target, result.notes, result.unfolded);
-    const bytes = archive(files, manifest);
+    let bytes: Uint8Array;
+    try {
+      bytes = await signedVersionArchive(
+        files,
+        manifest,
+        row.package_id,
+        row.version,
+        options.signingDir,
+        apply,
+      );
+    } catch (error) {
+      unfolded(target, getErrorMessage(error));
+      continue;
+    }
     writes.push({
       kind: "version",
       packageId: row.package_id,
@@ -663,11 +734,17 @@ export async function runFoldMcpServers(options: {
       folds: false,
       manifest,
     };
-    if (CONFIG_BY_TYPE[row.type as PackageType].manifestIsStoredFile) {
-      // A type that stores `manifest.json` in its draft files too.
-      const key = packageItemKey("integrations", row.org_id, row.id);
-      const own = await readZip(PACKAGE_ITEMS_BUCKET, key);
-      if (own) write.upload = { bucket: PACKAGE_ITEMS_BUCKET, key, bytes: archive(own, manifest) };
+    const config = CONFIG_BY_TYPE[row.type as PackageType];
+    const key = packageItemKey(config.storageFolder, row.org_id, row.id);
+    const own = await readZip(PACKAGE_ITEMS_BUCKET, key);
+    // Imported drafts can carry the publisher's signature, including when the manifest lives
+    // only in the database. A changed draft can no longer claim that signature.
+    if (own && (config.manifestIsStoredFile || Object.hasOwn(own, "signature.sig"))) {
+      write.upload = {
+        bucket: PACKAGE_ITEMS_BUCKET,
+        key,
+        bytes: archive(unsignedFiles(own), config.manifestIsStoredFile ? manifest : null),
+      };
     }
     writes.push(write);
   }
@@ -896,14 +973,14 @@ if (import.meta.main) {
   try {
     const { values } = parseArgs({
       args: process.argv.slice(2),
-      options: { apply: { type: "boolean" } },
+      options: { apply: { type: "boolean" }, "signing-dir": { type: "string" } },
       strict: true,
     });
     const apply = values.apply === true;
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0054 — ${apply ? "APPLY" : "DRY RUN"}`);
-    const result = await runFoldMcpServers({ apply, out });
+    const result = await runFoldMcpServers({ apply, out, signingDir: values["signing-dir"] });
     code = result.refused ? 1 : 0;
   } catch (error) {
     if (error instanceof StorageUnreadable) code = 2;

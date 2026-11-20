@@ -28,7 +28,7 @@
  * broken PDF, never HTML. `image`/`pdf`/`text` are inert and need no sandbox.
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Markdown } from "./markdown";
@@ -79,19 +79,30 @@ function useRemoteText(load: (signal: { cancelled: boolean }) => Promise<string 
   return state;
 }
 
+/** The text behind a preview URL: a signed server one, or the `blob:` of a file not yet sent. */
+async function fetchPreviewText(url: string): Promise<string> {
+  const response = await fetch(url, { referrerPolicy: "no-referrer" });
+  if (!response.ok) throw new Error("preview fetch failed");
+  return await response.text();
+}
+
 function MarkdownPreview({
   id,
   context,
+  localUrl,
   unavailable,
 }: {
   id: string;
   context?: FileContext;
+  /** A file not yet sent has no content route: its own copy is read. */
+  localUrl?: string;
   unavailable: string;
 }) {
   // By value: a context rebuilt each render must not re-read the file.
   const orgId = context?.orgId;
   const spaceId = context?.spaceId;
   const load = useCallback(async () => {
+    if (localUrl) return fetchPreviewText(localUrl);
     const { data } = await client.GET("/api/files/{id}/content", {
       params: {
         path: { id },
@@ -100,7 +111,7 @@ function MarkdownPreview({
       parseAs: "text",
     });
     return data;
-  }, [id, orgId, spaceId]);
+  }, [id, orgId, spaceId, localUrl]);
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
@@ -113,11 +124,7 @@ function MarkdownPreview({
 }
 
 function TextPreview({ url, unavailable }: { url: string; unavailable: string }) {
-  const load = useCallback(async () => {
-    const response = await fetch(url, { referrerPolicy: "no-referrer" });
-    if (!response.ok) throw new Error("preview fetch failed");
-    return await response.text();
-  }, [url]);
+  const load = useCallback(() => fetchPreviewText(url), [url]);
   const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
@@ -137,11 +144,10 @@ function usePinnedPreviewUrl(fileId: string, url: string | null | undefined) {
   return next.url;
 }
 
-function UnavailablePreview({ message, action }: { message: string; action?: ReactNode }) {
+function UnavailablePreview({ message }: { message: string }) {
   return (
     <div className="text-muted-foreground flex h-full flex-col items-center justify-center p-6 text-center">
       <p>{message}</p>
-      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
@@ -150,18 +156,19 @@ export function FileViewer({
   fileId,
   file,
   context,
+  local = false,
   isLoading,
   error,
-  unavailableAction,
   className,
 }: {
   fileId: string;
   file?: ViewableFile;
+  /** The browser's own copy of a file not yet sent (`preview_url` is its `blob:`). */
+  local?: boolean;
   /** The file's organization and space when not the current ones (the reader page). */
   context?: FileContext;
   isLoading: boolean;
   error: unknown;
-  unavailableAction?: ReactNode;
   className?: string;
 }) {
   const { t } = useTranslation("files");
@@ -171,7 +178,7 @@ export function FileViewer({
     if (isLoading) return <TextSkeleton lines={6} />;
     if (error) return <ErrorState error={error} />;
     if (!file || !previewUrl) {
-      return <UnavailablePreview message={t("preview.unavailable")} action={unavailableAction} />;
+      return <UnavailablePreview message={t("preview.unavailable")} />;
     }
 
     const frameTitle = t("preview.frameTitle", { name: file.name });
@@ -182,6 +189,7 @@ export function FileViewer({
           key={fileId}
           id={fileId}
           context={context}
+          localUrl={local ? previewUrl : undefined}
           unavailable={t("preview.unavailable")}
         />
       );

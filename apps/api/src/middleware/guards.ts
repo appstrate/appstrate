@@ -2,13 +2,12 @@
 
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { getPackage } from "../services/package-catalog.ts";
+import { getPackage, getPackageForRead } from "../services/package-catalog.ts";
 import { isInlineShadowPackageId } from "../services/inline-run.ts";
 import {
   agentExecutionBlock,
   assertPackageMutationAccess,
   isInlineShadowRunReadable,
-  isPackageReadableInSpace,
 } from "../lib/package-access.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { callerPermissions } from "../lib/permissions.ts";
@@ -44,7 +43,7 @@ export function isActiveAgentGate(handler: unknown): boolean {
  * Middleware: load an agent by route param and set it on context, or 404.
  *
  * The rule is PLACEMENT — the agent is homed in this space, placed in it, or
- * shipped with the deployment ({@link isPackageReadableInSpace}) — and nothing
+ * shipped with the deployment ({@link getPackageForRead}) — and nothing
  * else. An agent placed here and switched OFF is loaded like any other: reading
  * an agent, listing its runs, choosing its model and asking what is blocking it
  * are the acts of somebody about to switch it back on, and a guard that hid the
@@ -60,19 +59,11 @@ export function isActiveAgentGate(handler: unknown): boolean {
 export function requireAgent() {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const agent = await loadPlacedAgent(packageId, c.get("orgId"), c.get("spaceId"));
+    const agent = await getPackageForRead(packageId, c.get("orgId"), c.get("spaceId"));
     if (!agent) throw agentNotFound(packageId);
     c.set("package", agent);
     return next();
   }, AGENT_LOOKUP);
-}
-
-/** The placement rule, written once: the agent of this org, readable in this
- *  space ({@link isPackageReadableInSpace}) — or `null`. */
-async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string) {
-  const agent = await getPackage(packageId, orgId);
-  if (!agent) return null;
-  return (await isPackageReadableInSpace(spaceId, packageId)) ? agent : null;
 }
 
 /** The shadow of a run the caller may read: `GET /api/runs/:id`'s rule — the
@@ -105,7 +96,7 @@ export function requireAgentOrInlineRun() {
     // there is no placed `@inline/` agent to fall back to.
     const agent = isInlineShadowPackageId(packageId)
       ? await loadReadableShadow(c, packageId)
-      : await loadPlacedAgent(packageId, orgId, spaceId);
+      : await getPackageForRead(packageId, orgId, spaceId);
     if (!agent) throw agentNotFound(packageId);
     c.set("package", agent);
     return next();
@@ -164,7 +155,7 @@ function agentNotActiveInSpace(packageId: string, spaceId: string) {
 }
 
 /** The opaque refusal: this caller may not know the agent exists here. */
-function agentNotFound(packageId: string) {
+export function agentNotFound(packageId: string) {
   return new ApiError({
     status: 404,
     code: "agent_not_found",

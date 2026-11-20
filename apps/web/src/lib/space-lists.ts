@@ -75,6 +75,14 @@ export function spacesWhere<S extends ListedSpace>(
   );
 }
 
+/**
+ * The spaces held with a role: what a list asking no role grant spans (the notification feed's
+ * org route), and so what its « Tout marquer comme lu » marks.
+ */
+export function spacesHeld<S extends ListedSpace>(spaces: readonly S[] | undefined): S[] {
+  return spacesWhere(spaces, undefined, () => true);
+}
+
 /** Whether `permission` holds in a row's space: the working space's gate, or the row's own. */
 export function grantsInRowSpace(
   rowSpaceId: string | undefined,
@@ -87,6 +95,26 @@ export function grantsInRowSpace(
   if (!rowSpaceId || rowSpaceId === workingSpaceId) return can(permission);
   const space = spaces?.find((s) => s.id === rowSpaceId);
   return !!space && isSpaceEnterable(space) && gateIn(space, orgPermissions)(permission);
+}
+
+/**
+ * Whether `permission` holds in `spaceId` among the spaces held with a role, or in any of them for
+ * a row of no one space (an org-wide row an account page lists): judged by the row, never by the
+ * working space.
+ */
+export function grantedForRow(
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+  spaceId: string | null,
+  permission: string,
+): boolean {
+  return (
+    spacesWhere(
+      spaces,
+      orgPermissions,
+      (can, space) => (!spaceId || space.id === spaceId) && can(permission),
+    ).length > 0
+  );
 }
 
 /** An action naming no space: none eligible, one taken without asking, or the reader chooses. */
@@ -127,12 +155,11 @@ const isOrgLevel = (permission: string) =>
   (CORE_RESOURCE_LEVELS as Record<string, string>)[permission.split(":")[0]!] === "org";
 
 /**
- * A route judged by one space's permissions: the workspace settings, and any route a space-level
- * (or module) permission opens. Organization and account settings, the catalogue and the `open`
- * routes belong to no space.
+ * A route judged by one space's permissions: any route a space-level (or module) permission opens.
+ * Organization and account settings, the catalogue and the `open` routes belong to no space. The
+ * settings are overlays, never the page under them, so none of them withdraws the mode.
  */
 function belongsToSpace(path: RoutePath): boolean {
-  if (isUnder(path, SETTINGS_INDEX.workspace)) return true;
   if (isUnder(path, SETTINGS_INDEX.organization) || isUnder(path, SETTINGS_INDEX.account)) {
     return false;
   }
@@ -153,8 +180,9 @@ export function holdsOverview(path: RoutePath | undefined): boolean {
 
 /**
  * A route that spans spaces opens where some space admits it, whatever the working space grants:
- * a route serving the organization (`spansSpaces`: the chat) in every mode, a list's route (its
- * rows are every space's) in « Tous les espaces » only. `undefined` for any other route, which the
+ * a route serving the organization (`spansSpaces`: the chat) in every mode, a list's route and one
+ * of its rows (each judged by its own permissions) in « Tous les espaces » only: a row may be any
+ * reached space's, and its page reopens in that space. `undefined` for any other route, which the
  * working space decides, as does every route before the space listing has answered.
  */
 export function spanningRouteVerdict(
@@ -162,9 +190,10 @@ export function spanningRouteVerdict(
   spaces: readonly ListedSpace[] | undefined,
   overview: boolean,
 ): "granted" | "denied" | undefined {
-  const list = overview ? listOf(path) : undefined;
-  const admits = list ? listAdmits(list) : spansSpaces(path) ? routeAdmits(path) : undefined;
-  if (!admits || !spaces) return undefined;
+  const spanning = spansSpaces(path) || (overview && ofList(path));
+  // An `open` route (a file) is granted by its own declaration.
+  if (!spanning || !spaces || !accessOf(path).anyOf) return undefined;
+  const admits = routeAdmits(path);
   return spacesWhere(spaces, undefined, admits).length > 0 ? "granted" : "denied";
 }
 
@@ -193,5 +222,22 @@ export function grantedInSomeActingSpace(
 ): boolean {
   return actingSpaces(spaces, orgPermissions).some((space) =>
     gateIn(space, orgPermissions)(permission),
+  );
+}
+
+/**
+ * Whether the reader may remove the pins or defaults naming `conn` (its delete answers 409 until
+ * then): judged in the row's space, any space they reach for an org-wide row, of the current
+ * organization; never for another organization's row.
+ */
+export function connectionRowConfigures(
+  conn: { org: { id: string }; space: { id: string } | null },
+  orgId: string | null | undefined,
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+): boolean {
+  return (
+    conn.org.id === orgId &&
+    grantedForRow(spaces, orgPermissions, conn.space?.id ?? null, "integrations:configure")
   );
 }

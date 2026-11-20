@@ -21,6 +21,8 @@ import type { ModelPayer } from "./model-payer.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
+  ChatAttachmentContent,
+  ChatAttachmentRead,
   ChatUsageRecord,
   ResolvedChatAttachment,
   ChatModelResolution,
@@ -43,7 +45,7 @@ import type { TerminalRunStatus } from "./run-status.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "16.0.0";
+export const CORE_VERSION = "17.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -285,7 +287,7 @@ export interface AppstrateModule {
 
   /**
    * Org-level permissions granted to a PRINCIPAL (one user in one org) rather
-   * than to a role — for a population the module maintains (the ee module's
+   * than to a role — for a population the module maintains (the billing module's
    * billing managers, RBAC spec §10; an SSO group mapping). Composes with
    * {@link permissionsContribution}, which still declares the resource and its
    * role grants; this hands extra copies of those strings to named users.
@@ -1572,6 +1574,8 @@ export interface PlatformServices {
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /** Read a model attachment under the container ACL and the file grant. A miss or oversized file returns null. */
+  readChatAttachment(request: ChatAttachmentRead): Promise<ChatAttachmentContent | null>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (`chat_session_id = NULL`)

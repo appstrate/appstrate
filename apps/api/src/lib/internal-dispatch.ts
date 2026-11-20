@@ -64,9 +64,8 @@ export function isInternalDispatch(headers: Headers): boolean {
 }
 
 /**
- * The `c.env` key of an in-process dispatch confined to one space (the space-pinned MCP endpoint).
- * Only `dispatchInProcess` passes an env holding it, so it cannot be forged; read by
- * `callerReachableSpaces` alone, it bounds everything built on the caller's reach.
+ * The `c.env` key of an in-process dispatch confined to one space. Only `dispatchInProcess` passes
+ * an env holding it, so it cannot be forged; read by `callerReachableSpaces` alone.
  */
 const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
 

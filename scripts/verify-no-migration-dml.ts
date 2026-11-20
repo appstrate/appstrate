@@ -31,12 +31,12 @@
  *     gets no such exemption. See `functionBodies`.
  *
  * Two migration trees are scanned, listed in `SCANS`: the platform's, and the
- * one `packages/module-ee/` keeps for its `ee_*` tables. Each carries its own
+ * one `packages/module-billing/` keeps for its `ee_*` tables. Each carries its own
  * grandfather list.
  *
  * Only NEW files are gated. Every migration already in a directory has run
  * on real databases and cannot be changed, so the ones that predate this rule
- * are listed in `GRANDFATHERED` / `EE_GRANDFATHERED` below — explicitly, so the
+ * are listed in `GRANDFATHERED` / `BILLING_GRANDFATHERED` below — explicitly, so the
  * exemption is reviewable rather than implicit, and checked against the directory so an
  * entry cannot go on excusing a name nothing occupies.
  */
@@ -92,14 +92,14 @@ export const GRANDFATHERED: readonly string[] = [
 ];
 
 /**
- * `packages/module-ee/` keeps a migration tree of its own for its `ee_*`
+ * `packages/module-billing/` keeps a migration tree of its own for its `ee_*`
  * tables — the only second one in the repo, and subject to the same §2 rule. Its
  * two entries predate the gate for the same reason the platform's eight do:
  * `0001_cursor_billing` re-keys usage records and backfills `cost_usd`,
  * `0003_normalize_free_subscription_status` rewrites legacy free-tier rows.
  * Both shipped and have been applied; the list is frozen the same way.
  */
-export const EE_GRANDFATHERED: readonly string[] = [
+export const BILLING_GRANDFATHERED: readonly string[] = [
   "0001_cursor_billing",
   "0003_normalize_free_subscription_status",
 ];
@@ -113,7 +113,7 @@ export interface MigrationSet {
 
 export const SCANS: readonly MigrationSet[] = [
   { dir: "packages/db/drizzle", grandfathered: GRANDFATHERED },
-  { dir: "packages/module-ee/drizzle/migrations", grandfathered: EE_GRANDFATHERED },
+  { dir: "packages/module-billing/drizzle/migrations", grandfathered: BILLING_GRANDFATHERED },
 ];
 
 /**

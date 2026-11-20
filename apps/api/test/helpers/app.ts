@@ -129,7 +129,7 @@ await initAppConfig(); // initializes app config (routes like organizations.ts c
  * Mirrors the production middleware chain from index.ts:
  * CORS → error handler → request ID → Better Auth → API key auth → org context → routes
  *
- * Skips: boot(), static files, SPA fallback, shutdown gate, ee routes.
+ * Skips: boot(), static files, SPA fallback, shutdown gate, billing routes.
  */
 export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Explicit module list → always return a fresh app (never touches the

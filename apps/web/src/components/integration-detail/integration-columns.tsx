@@ -27,6 +27,7 @@ import { CellDate, CellEmpty, CellText } from "../table-cells";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
 import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
+import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
@@ -110,6 +111,7 @@ export function useIntegrationClientColumns({
   onDelete: (row: ClientRow) => void;
 }): DataColumn<ClientRow>[] {
   const { t } = useTranslation("settings");
+  const spaceWording = useWorkingSpaceWording("settings");
 
   return [
     {
@@ -135,7 +137,9 @@ export function useIntegrationClientColumns({
       width: 168,
       cell: (row) =>
         row.usedHere ? (
-          <Badge variant="success">{t("integration.clients.usedHere")}</Badge>
+          <Badge variant="success">
+            {spaceWording("integration.clients.usedHere", "integration.clients.usedIn")}
+          </Badge>
         ) : row.orgDefault ? (
           <CellText>{t("integration.clients.orgDefault")}</CellText>
         ) : null,
@@ -155,7 +159,7 @@ export function useIntegrationClientColumns({
           actions={[
             {
               id: "use-here",
-              label: t("integration.clients.useHere"),
+              label: spaceWording("integration.clients.useHere", "integration.clients.useIn"),
               icon: CircleCheck,
               onSelect: () => onUseHere(row),
               disabled: pendingClientRef !== null,

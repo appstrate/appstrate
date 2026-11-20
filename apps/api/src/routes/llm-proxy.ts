@@ -85,6 +85,7 @@ import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
+import { issuingChatSessionId } from "../lib/actor.ts";
 
 // Protocol family → adapter; the paths come from `LLM_PROXY_ROUTES`.
 const ADAPTERS: Record<ProxiedApiShape, LlmProxyAdapter> = {
@@ -170,13 +171,10 @@ async function handleProxy(
   const userId = c.get("user").id;
   const principal = buildLlmProxyPrincipal({ apiKeyId, orgId, userId });
 
-  // Chat attribution rides the VALIDATED loopback bearer's claims, surfaced by
-  // the auth pipeline as opaque `authExtra` (never a caller-supplied header —
-  // that would let any proxy caller stamp spend onto an arbitrary session). The
-  // chat-loopback strategy is the only minter of this shape.
-  const authExtra = c.get("authExtra");
-  const chatSessionId =
-    authExtra && typeof authExtra.chatSessionId === "string" ? authExtra.chatSessionId : null;
+  // Chat attribution rides the VALIDATED loopback bearer's claims (never a
+  // caller-supplied header — that would let any proxy caller stamp spend onto
+  // an arbitrary session).
+  const chatSessionId = issuingChatSessionId(c);
 
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
