@@ -187,6 +187,59 @@ describe("MCP access grants", () => {
     });
   }
 
+  // RFC 7009 §2.2: an invalid token is answered 200, like a revoked one; only a
+  // malformed request or a failed client authentication is an error.
+  describe("client revocation answers", () => {
+    function revokeWith(body: Record<string, string>) {
+      return app.request("/api/auth/oauth2/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(body).toString(),
+      });
+    }
+
+    it("answers 200 for an unknown token, with or without a type hint", async () => {
+      const clientId = await registerClient();
+      const unknown = await revokeRefreshToken(clientId, "not-a-token-we-issued");
+      expect(unknown.status).toBe(200);
+      expect(await unknown.text()).toBe("");
+      const unhinted = await revokeWith({ token: "not-a-token-we-issued", client_id: clientId });
+      expect(unhinted.status).toBe(200);
+    });
+
+    it("answers 400 invalid_request for a request without a token", async () => {
+      const clientId = await registerClient();
+      const bodies: Record<string, string>[] = [
+        { client_id: clientId },
+        { client_id: clientId, token: "" },
+      ];
+      for (const body of bodies) {
+        const res = await revokeWith(body);
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { error?: string }).error).toBe("invalid_request");
+      }
+    });
+
+    it("answers 400 unsupported_token_type for a JWT access token (§2.2.1)", async () => {
+      const clientId = await registerClient();
+      const { token } = await connect(ctx.cookie, clientId);
+      const res = await revokeWith({ token: String(token.access_token), client_id: clientId });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error?: string }).error).toBe("unsupported_token_type");
+    });
+
+    // Never swallowed into the invalid-token 200: an unidentified client is 401,
+    // an unknown one Better Auth's 400 (RFC 6749 §5.2 allows either).
+    it("answers invalid_client for a client that is missing or unknown", async () => {
+      const missing = await revokeWith({ token: "x" });
+      expect(missing.status).toBe(401);
+      expect(((await missing.json()) as { error?: string }).error).toBe("invalid_client");
+      const unknown = await revokeWith({ token: "x", client_id: "no-such-client" });
+      expect(unknown.status).toBe(400);
+      expect(((await unknown.json()) as { error?: string }).error).toBe("invalid_client");
+    });
+  });
+
   describe("personal list", () => {
     it("lists a connected client once, with its target, origin and last use", async () => {
       // The browser session predates this second (token timestamps have
@@ -732,12 +785,13 @@ describe("MCP access grants", () => {
       );
       const tokenA = String(onA.token.refresh_token);
       const revoke = () => revokeRefreshToken(clientId, tokenA);
-      expect((await revoke()).status).toBe(200);
-      // Gone, not marked: the repeat is a plain refusal (the provider answers
-      // 400 where RFC 7009 §2.2 says 200), never a family teardown.
+      const first = await revoke();
+      expect(first.status).toBe(200);
+      // Gone, not marked: the repeat is an unknown token, answered as the
+      // success was (RFC 7009 §2.2), never a family teardown.
       const repeat = await revoke();
-      expect(repeat.status).toBe(400);
-      expect(((await repeat.json()) as { error?: string }).error).toBe("invalid_request");
+      expect(repeat.status).toBe(200);
+      expect(await repeat.text()).toBe(await first.text());
       await expectInvalidGrant(await refresh(clientId, tokenA, orgResource));
       await expectRefreshWorks(clientId, String(onB.token.refresh_token), otherResource, otherPath);
     });
@@ -753,7 +807,8 @@ describe("MCP access grants", () => {
       const tokenA = String(onA.token.refresh_token);
       const revoke = () => revokeRefreshToken(clientId, `Bearer ${tokenA}`);
       expect((await revoke()).status).toBe(200);
-      expect((await revoke()).status).toBe(400);
+      expect((await revoke()).status).toBe(200);
+      await expectInvalidGrant(await refresh(clientId, tokenA, orgResource));
       await expectRefreshWorks(clientId, String(onB.token.refresh_token), otherResource, otherPath);
     });
 

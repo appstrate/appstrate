@@ -16,12 +16,13 @@
  * It also hooks `/oauth2/token`, where an MCP grant's tokens are issued: each
  * issuance is recorded, and one whose authorization a revocation has ended
  * since is refused (`admitMcpTokenIssuance`). And `/oauth2/revoke`, where the
- * refresh token a client revoked is deleted (`deleteRevokedRefreshToken`).
+ * refresh token a client revoked is deleted and an invalid token is answered
+ * 200 (`settleRevocation`).
  */
 
 import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { stripAccessTokenAuthorizationScheme } from "better-auth/oauth2";
-import { APIError } from "better-auth/api";
+import { APIError, isAPIError } from "better-auth/api";
 import * as z from "zod";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -137,22 +138,41 @@ async function admitIssuedTokens(ctx: TokenHookCtx): Promise<void> {
 const isRevokeEndpoint = (ctx: { path?: string }) => ctx.path === "/oauth2/revoke";
 
 /**
- * Delete the refresh token a client just revoked: Better Auth only marks it, and
+ * Settle a `/oauth2/revoke` call after Better Auth answered it.
+ *
+ * On success, delete the refresh token it revoked: Better Auth only marks it, and
  * a marked token presented again reads as stolen, tearing down the (client, user)
- * family. Runs after Better Auth authenticated the client and marked the row.
- * Upstream's still: a concurrent refresh between that mark and this delete.
+ * family. Upstream's still: a concurrent refresh between that mark and this delete.
+ *
+ * On an invalid token (unknown, expired, already revoked), answer 200 as RFC 7009
+ * §2.2 requires. Better Auth means to (`error.name === "BAD_REQUEST"`), but its
+ * `APIError.name` is "APIError", so that 400 leaks. A missing token is a 400
+ * thrown before any lookup and stays one; so do 401 and `unsupported_token_type`.
  */
-async function deleteRevokedRefreshToken(ctx: TokenHookCtx): Promise<void> {
-  if ((ctx.context as { returned?: unknown }).returned instanceof Error) return;
-  const token = (ctx.body as { token?: unknown } | undefined)?.token;
-  if (typeof token !== "string" || token.length === 0) return;
-  // Stored as the digest of the token, stripped as the revoke endpoint strips it.
+async function settleRevocation(ctx: TokenHookCtx): Promise<Response | void> {
+  const raw = (ctx.body as { token?: unknown } | undefined)?.token;
+  // Stripped as the revoke endpoint strips it, so both judge the same token.
+  const token = typeof raw === "string" ? stripAccessTokenAuthorizationScheme(raw) : "";
+  if (token.length === 0) return;
+  const returned = (ctx.context as { returned?: unknown }).returned;
+  if (returned instanceof Error) {
+    if (
+      isAPIError(returned) &&
+      returned.statusCode === 400 &&
+      (returned.body as { error?: unknown } | undefined)?.error === "invalid_request"
+    ) {
+      // A `Response` is the one value whose status survives the dispatch
+      // (`toResponse` passes it through); this is the success answer's shape.
+      return new Response(null, { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return;
+  }
   try {
     await db
       .delete(oauthRefreshToken)
       .where(
         and(
-          eq(oauthRefreshToken.token, hashOAuthToken(stripAccessTokenAuthorizationScheme(token))),
+          eq(oauthRefreshToken.token, hashOAuthToken(token)),
           isNotNull(oauthRefreshToken.revoked),
         ),
       );
@@ -172,7 +192,7 @@ export function accessGrantsPlugin() {
       before: [{ matcher: isTokenEndpoint, handler: createAuthMiddleware(captureAuthorizedAt) }],
       after: [
         { matcher: isTokenEndpoint, handler: createAuthMiddleware(admitIssuedTokens) },
-        { matcher: isRevokeEndpoint, handler: createAuthMiddleware(deleteRevokedRefreshToken) },
+        { matcher: isRevokeEndpoint, handler: createAuthMiddleware(settleRevocation) },
       ],
     },
     endpoints: {

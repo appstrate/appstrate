@@ -10429,14 +10429,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Revocation succeeded. */
+            /** @description Revoked, or the token was invalid: unknown, expired or already revoked (RFC 7009 §2.2). The two answers are identical. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `invalid_request` — the token is unknown: one the client already revoked is deleted, and a rotated-out refresh token reads the same (RFC 7009 §2.2 answers 200 for an unknown token; the provider answers 400). `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). */
+            /** @description `invalid_request` — the `token` parameter is missing. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`. */
             400: {
                 headers: {
                     [name: string]: unknown;

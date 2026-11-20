@@ -627,10 +627,13 @@ export const oidcPaths = {
         },
       },
       responses: {
-        "200": { description: "Revocation succeeded." },
+        "200": {
+          description:
+            "Revoked, or the token was invalid: unknown, expired or already revoked (RFC 7009 §2.2). The two answers are identical.",
+        },
         "400": {
           description:
-            "`invalid_request` — the token is unknown: one the client already revoked is deleted, and a rotated-out refresh token reads the same (RFC 7009 §2.2 answers 200 for an unknown token; the provider answers 400). `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1).",
+            "`invalid_request` — the `token` parameter is missing. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`.",
           content: oauthError,
         },
         "401": {
