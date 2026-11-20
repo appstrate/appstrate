@@ -37,11 +37,8 @@ export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 short-lands
 /** The tools' cell: the desktop's settings and chips (`flex-1`), on a phone just the "+". */
 export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
 
-/**
- * The model picker's cell: pushed right on a desktop; on a phone it takes only what it needs, at
- * most 40 % of the line (the field keeps the rest), and its name truncates.
- */
-export const COMPOSER_SLOT_CLASS = "ml-auto min-w-0 max-md:ml-0 max-md:max-w-[40%] max-md:shrink-0";
+/** The model picker's cell: pushed right on a desktop; a phone has its model in the "+" panel and the placeholder. */
+export const COMPOSER_SLOT_CLASS = "ml-auto min-w-0 max-md:hidden";
 
 /** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
 export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";

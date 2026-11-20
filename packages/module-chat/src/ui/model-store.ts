@@ -239,3 +239,41 @@ function setGenerationSettings(value: ModelGenerationSettings): void {
   recomputeCompatible();
   for (const listener of generationListeners) listener();
 }
+
+/** The phone's model panel is opened from the composer's "+" panel, not from a button on the line. */
+let modelPanelOpen = false;
+const panelListeners = new Set<() => void>();
+
+export function subscribeModelPanel(listener: () => void): () => void {
+  panelListeners.add(listener);
+  return () => panelListeners.delete(listener);
+}
+
+export function isModelPanelOpen(): boolean {
+  return modelPanelOpen;
+}
+
+export function setModelPanelOpen(open: boolean): void {
+  if (modelPanelOpen === open) return;
+  modelPanelOpen = open;
+  for (const listener of panelListeners) listener();
+}
+
+/** The phone's "+" panel: the model panel it opens comes back to it. */
+let toolsPanelOpen = false;
+const toolsListeners = new Set<() => void>();
+
+export function subscribeToolsPanel(listener: () => void): () => void {
+  toolsListeners.add(listener);
+  return () => toolsListeners.delete(listener);
+}
+
+export function isToolsPanelOpen(): boolean {
+  return toolsPanelOpen;
+}
+
+export function setToolsPanelOpen(open: boolean): void {
+  if (toolsPanelOpen === open) return;
+  toolsPanelOpen = open;
+  for (const listener of toolsListeners) listener();
+}

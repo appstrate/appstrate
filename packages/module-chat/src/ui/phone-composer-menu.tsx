@@ -9,7 +9,7 @@
  * its attach button, its settings menu and its chips (`ComposerTools`).
  */
 
-import { useId, useState } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   BookOpenIcon,
@@ -18,6 +18,7 @@ import {
   PackageIcon,
   PaperclipIcon,
   PlusIcon,
+  SlidersHorizontalIcon,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -32,6 +33,12 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import {
+  isToolsPanelOpen,
+  setModelPanelOpen,
+  setToolsPanelOpen,
+  subscribeToolsPanel,
+} from "./model-store.ts";
 import { SheetMenu, SheetMenuRow, SheetMenuSwitchRow } from "./sheet-menu.tsx";
 import { SkillsPickerPanel } from "./skills-picker.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
@@ -128,19 +135,20 @@ export function ComposerPlusMenu({
   showPicker: boolean;
   authorsPackages: boolean;
 }) {
-  const { t, can } = useChatHost();
-  const scope = useConversationScope();
+  const { t, can, modelLabel } = useChatHost();
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
   const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
   const inlineRunModel = useInlineRunModelEnabled();
-  const [open, setOpen] = useState(false);
+  // In the store: the model panel this one opens comes back to it.
+  const open = useSyncExternalStore(subscribeToolsPanel, isToolsPanelOpen, isToolsPanelOpen);
+  const setOpen = setToolsPanelOpen;
   const [skillsOpen, setSkillsOpen] = useState(false);
   const creationId = useId();
   const inlineId = useId();
   // A setting off its default: the "+" wears a dot, and the panel shows which.
+  // The space limit is left out: it is on whenever a space is selected, so it would always show.
   const departed =
-    scope.restricted ||
     (authorsPackages && !creationMode) ||
     (offersInlineRunModel && inlineRunModel) ||
     (showPicker && selection.skillMode !== "auto");
@@ -177,6 +185,22 @@ export function ComposerPlusMenu({
           >
             <BookOpenIcon />
             {t("composer.skills")}
+          </SheetMenuRow>
+        )}
+        {modelLabel && (
+          <SheetMenuRow
+            onClick={() => {
+              close();
+              setModelPanelOpen(true);
+            }}
+          >
+            <SlidersHorizontalIcon />
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              {t("composer.model")}
+              <span className="text-muted-foreground truncate text-sm font-normal">
+                {modelLabel}
+              </span>
+            </span>
           </SheetMenuRow>
         )}
         <LimitRows onDone={close} />

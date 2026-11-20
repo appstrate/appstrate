@@ -10,8 +10,13 @@
  * pickable, the server answering its turn with the "add your key" path.
  */
 
-import { useMemo, useState } from "react";
-import { ChevronDownIcon, SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  SlidersHorizontalIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
@@ -28,9 +33,14 @@ import {
   SheetTrigger,
 } from "@appstrate/ui/components/sheet";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
+import {
+  isModelPanelOpen,
+  setModelPanelOpen,
+  setToolsPanelOpen,
+  subscribeModelPanel,
+} from "./model-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -55,9 +65,17 @@ export function ModelSelect({
   pending = false,
   failed = false,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [popoverOpen, setPopoverOpen] = useState(false);
   const isMobile = useIsMobile();
-  const [tab, setTab] = useState<"models" | "configuration">("models");
+  // A phone's panel is opened from the composer's "+" panel; a desktop's from its button.
+  const phoneOpen = useSyncExternalStore(subscribeModelPanel, isModelPanelOpen, isModelPanelOpen);
+  const open = isMobile ? phoneOpen : popoverOpen;
+  const setOpen = (next: boolean) => {
+    (isMobile ? setModelPanelOpen : setPopoverOpen)(next);
+    if (!next) setView("models");
+  };
+  // The list, or one model's settings (reached from its row's icon).
+  const [view, setView] = useState<"models" | "configuration">("models");
   const { t, can, personalModelCredentials, modelCredentials } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
   const groups = useMemo(
@@ -86,7 +104,7 @@ export function ModelSelect({
           disabled
           aria-hidden
           tabIndex={-1}
-          className="bg-muted desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] animate-pulse justify-start gap-1.5 border-transparent px-2.5 py-1 font-normal text-transparent shadow-none disabled:opacity-100 [&_svg]:size-3.5"
+          className="bg-muted desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] animate-pulse justify-start gap-1.5 border-transparent px-2.5 py-1 font-normal text-transparent shadow-none disabled:opacity-100 max-md:hidden [&_svg]:size-3.5"
         >
           <SlidersHorizontalIcon className="size-3.5 shrink-0" />
           <span className="font-medium">{t("model.select")}</span>
@@ -100,7 +118,7 @@ export function ModelSelect({
           variant="outline"
           size="sm"
           disabled
-          className="desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] justify-start gap-1.5 px-2.5 py-1 text-left font-normal shadow-none [&_svg]:size-3.5"
+          className="desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] justify-start gap-1.5 px-2.5 py-1 text-left font-normal shadow-none max-md:hidden [&_svg]:size-3.5"
           title={t("model.loadFailed")}
         >
           <TriangleAlertIcon className="text-destructive shrink-0" />
@@ -111,29 +129,66 @@ export function ModelSelect({
     return null;
   }
 
-  const panel = (
-    <Tabs
-      value={tab}
-      onValueChange={(value) => setTab(value as "models" | "configuration")}
-      className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
-    >
-      <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
-        <TabsTrigger value="models" className="h-6 px-2 text-xs">
-          {t("model.tabs.models")}
-        </TabsTrigger>
-        <TabsTrigger value="configuration" disabled={!active} className="relative h-6 px-2 text-xs">
-          {t("model.tabs.configuration")}
-          {hasOverrides && (
-            <span className="bg-primary ml-1.5 size-1.5 rounded-full" aria-hidden="true" />
+  const supportsSettings = (model: OrgModelOption) =>
+    model.generation?.temperature !== "unsupported" ||
+    model.generation?.reasoning.supported !== "unsupported";
+  const panel =
+    view === "configuration" && active ? (
+      <div className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2 max-md:max-h-[70dvh]">
+        <button
+          type="button"
+          onClick={() => setView("models")}
+          className="text-muted-foreground hover:text-foreground flex min-h-11 w-full shrink-0 items-center gap-1.5 text-left text-sm md:min-h-8"
+        >
+          <ChevronLeftIcon className="size-4 shrink-0" aria-hidden="true" />
+          <span className="truncate font-medium">{active.label ?? active.modelId}</span>
+        </button>
+        <div className="min-h-0 overflow-y-auto px-0.5 py-1">
+          {hasNoGenerationControls ? (
+            <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
+              {t("generation.noneSupported")}
+            </p>
+          ) : (
+            <ModelGenerationControls
+              value={generation}
+              capabilities={active.generation}
+              onChange={onGenerationChange}
+              // `settings:` — the shared label family lives in the
+              // settings bundle (a boot namespace, so already loaded);
+              // the host binds `t` to `chat`.
+              labels={buildGenerationLabels(
+                (key, options) => t(`settings:${key}`, options),
+                active.generation,
+              )}
+            />
           )}
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="models" className="mt-1 min-h-0 overflow-y-auto p-0">
+        </div>
+      </div>
+    ) : (
+      <div className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col overflow-y-auto p-2">
+        {/* A phone reaches this panel from the "+" panel's model row: this goes back to it. */}
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setToolsPanelOpen(true);
+            }}
+            className="text-muted-foreground hover:text-foreground flex min-h-11 w-full shrink-0 items-center gap-1.5 text-left text-sm"
+          >
+            <ChevronLeftIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className="truncate font-medium">{t("composer.tools")}</span>
+          </button>
+        )}
         <ModelPickerList
           groups={groups}
           value={selectedId}
-          onSelect={(id) => id !== null && onSelect(id)}
+          onSelect={(id) => {
+            if (id === null) return;
+            onSelect(id);
+            // A phone's pick is the end of the errand: back to the composer, which names it.
+            if (isMobile) setOpen(false);
+          }}
           selectable={isModelSelectable}
           // `settings:` — the picker's labels live in the settings bundle (a boot
           // namespace, so already loaded); the host binds `t` to `chat`.
@@ -144,65 +199,59 @@ export function ModelSelect({
               {label}
             </a>
           )}
+          // One icon per model that has settings: it picks the model and opens them.
+          rowAction={(row) => {
+            const model = models.find((m) => m.id === row.id);
+            if (!model || !isModelSelectable(row) || !supportsSettings(model)) return null;
+            return (
+              <button
+                type="button"
+                aria-label={`${t("model.tabs.configuration")}: ${model.label ?? model.modelId}`}
+                title={t("model.tabs.configuration")}
+                data-testid="model-settings"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect(model.id);
+                  setView("configuration");
+                }}
+                className="text-muted-foreground hover:text-foreground relative -my-1 -mr-1 flex size-9 shrink-0 items-center justify-center rounded-md md:size-7"
+              >
+                <SlidersHorizontalIcon className="size-4" aria-hidden="true" />
+                {hasOverrides && model.id === selectedId && (
+                  <span
+                    aria-hidden="true"
+                    className="bg-primary ring-popover absolute top-1.5 right-1.5 size-1.5 rounded-full ring-2"
+                  />
+                )}
+              </button>
+            );
+          }}
           // A phone's panel has room, and rows a thumb can hit.
           listClassName="max-h-[min(15rem,calc(100dvh-10rem))] max-md:max-h-[55dvh] max-md:[&_[cmdk-item]]:min-h-11 max-md:[&_[cmdk-item]]:items-center"
         />
-      </TabsContent>
-
-      <TabsContent value="configuration" className="mt-1 min-h-0 overflow-y-auto px-0.5 py-1">
-        {active && (
-          <>
-            <div className="text-muted-foreground mb-2 truncate text-xs">
-              {active.label ?? active.modelId}
-            </div>
-            {hasNoGenerationControls ? (
-              <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
-                {t("generation.noneSupported")}
-              </p>
-            ) : (
-              <ModelGenerationControls
-                value={generation}
-                capabilities={active.generation}
-                onChange={onGenerationChange}
-                // `settings:` — the shared label family lives in the
-                // settings bundle (a boot namespace, so already loaded);
-                // the host binds `t` to `chat`.
-                labels={buildGenerationLabels(
-                  (key, options) => t(`settings:${key}`, options),
-                  active.generation,
-                )}
-              />
-            )}
-          </>
-        )}
-      </TabsContent>
-    </Tabs>
-  );
+      </div>
+    );
+  // A phone has no button on the composer's line: its panel opens from the "+" panel's model row.
   const trigger = (
     <Button
       type="button"
       variant="outline"
       size="sm"
       className={cn(
-        "text-foreground hover:text-foreground desktop-pointer:min-h-0 h-auto min-h-10 gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
-        // On a phone the picker is the cell of the row that gives way: its name truncates, and
-        // under 400 px it is the icon alone (the name is in the field's placeholder).
-        "max-w-[min(16rem,100%)] min-w-9 justify-start text-left",
+        "text-foreground hover:text-foreground desktop-pointer:min-h-0 h-auto min-h-10 gap-1.5 px-2.5 py-1 font-normal shadow-none max-md:hidden [&_svg]:size-3.5",
+        "max-w-[min(16rem,100%)] justify-start text-left",
         hasOverrides && "border-primary/40 bg-primary/5",
       )}
       title={t("model.settingsTitle")}
-      aria-label={`${t("model.settingsTitle")}: ${active ? (active.label ?? active.modelId) : t("model.select")}`}
     >
       <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
       {active ? (
-        <span className="truncate font-medium max-[400px]:hidden">
-          {active.label ?? active.modelId}
-        </span>
+        <span className="truncate font-medium">{active.label ?? active.modelId}</span>
       ) : (
-        <span className="font-medium max-[400px]:hidden">{t("model.select")}</span>
+        <span className="font-medium">{t("model.select")}</span>
       )}
       {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
-      <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0 max-[400px]:hidden" />
+      <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
     </Button>
   );
   // A phone shows the picker as a panel from the bottom, rows a thumb can hit; a desktop keeps its popover.
