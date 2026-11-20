@@ -18,29 +18,11 @@
   }
 }
 
-/* One field stays mounted as the tools expand. In short landscape viewports Send
-   shares the editable line that Safari pans into view above its accessory bar. */
-@utility chat-composer-grid {
-  @apply grid items-center gap-x-2 gap-y-1;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  grid-template-areas: "input input input" "tools model send";
-
-  @media (width < 48rem) {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    &:has([data-composer-chip]) {
-      grid-template-areas: "input input input" "tools tools tools" ". model send";
-    }
-  }
+/* A short landscape touch screen (a phone turned sideways): the keyboard leaves a sliver, so Send
+   shares the line of the field that Safari pans into view above its accessory bar. */
+@custom-variant short-landscape {
   @media (pointer: coarse) and (orientation: landscape) and (max-height: 32rem) {
-    &,
-    &:has([data-composer-chip]) {
-      grid-template-areas: "input input send" "tools model model";
-    }
-  }
-  @media (width < 48rem) {
-    &[data-rest] {
-      grid-template-areas: "tools input send";
-    }
+    @slot;
   }
 }
 

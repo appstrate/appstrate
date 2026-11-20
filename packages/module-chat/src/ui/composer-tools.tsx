@@ -28,12 +28,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
-import {
-  limitAvailability,
-  useConversationScope,
-  useSpaceName,
-  type LimitUnavailableReason,
-} from "./conversation-scope.ts";
+import { limitAvailability, useConversationScope, useSpaceName } from "./conversation-scope.ts";
+import { LIMIT_REASON_KEY } from "./composer-reasons.ts";
+import { ComposerPlusMenu } from "./phone-composer-menu.tsx";
 import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
@@ -45,12 +42,6 @@ import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
-
-const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
-  generating: "composer.limit.generating",
-  "no-acting-space": "composer.limit.noActingSpace",
-  outside: "composer.limit.outside",
-};
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
@@ -81,10 +72,9 @@ export function ComposerTools({
   // restore (Radix reads it as a focus-outside): open it once the menu is gone.
   const openSkillsAfterClose = useRef(false);
 
-  // A phone's resting composer is one line, attach and send around the field: every tool after the
-  // attach button shows once the composer is touched (`data-rest` is the composer's).
+  // From `md` up: the attach button, the settings menu and the chips. A phone has the "+" panel.
   const cluster = (
-    <div className="flex min-w-0 items-center gap-1.5 max-md:flex-wrap max-md:group-data-[rest]/composer:[&>:not(:first-child)]:hidden">
+    <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
       <AttachButton />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -196,17 +186,35 @@ export function ComposerTools({
     </div>
   );
 
-  if (!showPicker) return cluster;
-  return (
-    <SkillsPicker
+  const phone = (
+    <ComposerPlusMenu
       transport={transport}
       selection={selection}
-      onChange={onSelectionChange}
-      open={skillsOpen}
-      onOpenChange={setSkillsOpen}
-    >
-      {cluster}
-    </SkillsPicker>
+      onSelectionChange={onSelectionChange}
+      showPicker={showPicker}
+      authorsPackages={authorsPackages}
+    />
+  );
+  if (!showPicker)
+    return (
+      <>
+        {cluster}
+        {phone}
+      </>
+    );
+  return (
+    <>
+      <SkillsPicker
+        transport={transport}
+        selection={selection}
+        onChange={onSelectionChange}
+        open={skillsOpen}
+        onOpenChange={setSkillsOpen}
+      >
+        {cluster}
+      </SkillsPicker>
+      {phone}
+    </>
   );
 }
 

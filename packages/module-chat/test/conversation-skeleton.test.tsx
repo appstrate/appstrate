@@ -40,11 +40,11 @@ describe("ConversationSkeleton", () => {
     expect(html).not.toContain("Vérifiez");
   });
 
-  it("starts the mobile composer at rest with its disclaimer visible", () => {
+  it("draws the phone composer as one line, the disclaimer under it as the desktop has it", () => {
     const html = renderToString(
       <ConversationSkeleton label="Chargement" placeholder="Écrire" disclaimer="Vérifiez" />,
     );
-    expect(html).toContain('data-rest=""');
-    expect(html).not.toMatch(/max-md:hidden[^>]*>Vérifiez/);
+    expect(html).toContain("max-md:flex-nowrap");
+    expect(html).not.toContain("data-rest");
   });
 });
