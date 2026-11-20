@@ -57,6 +57,7 @@ interface GrantRow {
   } | null;
   session_count: number;
   lastUsedAt: string | null;
+  createdAt: string;
   user?: { id: string; email: string | null };
   revocable?: boolean;
 }
@@ -165,6 +166,11 @@ describe("MCP access grants", () => {
 
   describe("personal list", () => {
     it("lists a connected client once, with its target, origin and last use", async () => {
+      // The browser session predates this second (token timestamps have
+      // one-second resolution): the grant is dated by its authorization, not
+      // by the session that granted it.
+      await Bun.sleep(1100);
+      const authorizedAfter = Math.floor(Date.now() / 1000) * 1000;
       const clientId = await registerClient();
       const { token } = await connect(ctx.cookie, clientId);
       expect((await mcpInitialize(orgPath, String(token.access_token))).status).toBe(200);
@@ -185,6 +191,7 @@ describe("MCP access grants", () => {
       });
       expect(grant.session_count).toBe(1);
       expect(grant.lastUsedAt).not.toBeNull();
+      expect(Date.parse(grant.createdAt)).toBeGreaterThanOrEqual(authorizedAfter);
     });
 
     it("groups two authorizations of one client into one grant", async () => {

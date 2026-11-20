@@ -22,7 +22,7 @@ import {
   organizations,
   spaces,
 } from "@appstrate/db/schema";
-import { and, arrayContains, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, arrayContains, eq, inArray, sql } from "drizzle-orm";
 import { parseMcpResourceUri, type McpResourceBinding } from "../../../lib/audiences.ts";
 import { logger } from "../../../lib/logger.ts";
 
@@ -191,6 +191,9 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
     return candidate;
   };
 
+  // Every refresh row of these users, rotated-out ones included: a rotation
+  // writes a new row on the same authorization, so the chain's oldest row
+  // dates the authorization.
   const tokenRows = await db
     .select({
       id: oauthRefreshToken.id,
@@ -199,24 +202,26 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
       resources: oauthRefreshToken.resources,
       authorizationCodeId: oauthRefreshToken.authorizationCodeId,
       createdAt: oauthRefreshToken.createdAt,
-      authTime: oauthRefreshToken.authTime,
+      revoked: oauthRefreshToken.revoked,
+      expiresAt: oauthRefreshToken.expiresAt,
     })
     .from(oauthRefreshToken)
     .where(
-      and(
-        "userId" in scope
-          ? eq(oauthRefreshToken.userId, scope.userId)
-          : inArray(oauthRefreshToken.userId, scope.userIds),
-        isNull(oauthRefreshToken.revoked),
-        or(isNull(oauthRefreshToken.expiresAt), gt(oauthRefreshToken.expiresAt, now)),
-      ),
+      "userId" in scope
+        ? eq(oauthRefreshToken.userId, scope.userId)
+        : inArray(oauthRefreshToken.userId, scope.userIds),
     );
+  const chainStart = new Map<string, Date>();
   for (const row of tokenRows) {
+    const chain = row.authorizationCodeId ?? row.id;
+    const at = row.createdAt ?? now;
+    if (!chainStart.has(chain) || at < chainStart.get(chain)!) chainStart.set(chain, at);
+  }
+  for (const row of tokenRows) {
+    if (row.revoked || (row.expiresAt && row.expiresAt <= now)) continue;
+    const chain = row.authorizationCodeId ?? row.id;
     for (const resource of row.resources ?? []) {
-      const startedAt = row.authTime ?? row.createdAt ?? now;
-      add(row.userId, row.clientId, resource, startedAt)?.authorizations.add(
-        row.authorizationCodeId ?? row.id,
-      );
+      add(row.userId, row.clientId, resource, chainStart.get(chain)!)?.authorizations.add(chain);
     }
   }
 
