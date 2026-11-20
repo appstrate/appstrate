@@ -3,7 +3,7 @@
 import type { components } from "../api/client";
 
 /** The org's compute month, as `GET /api/billing` projects it. */
-type BillingCompute = components["schemas"]["EeBillingCompute"];
+type BillingCompute = components["schemas"]["BillingCompute"];
 
 /**
  * Usage at which the page warns: the same 80 % the warning email fires at

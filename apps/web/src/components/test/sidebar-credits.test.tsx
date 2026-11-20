@@ -44,7 +44,7 @@ const account: components["schemas"]["BillingAccount"] = {
 
 function gauge(
   permissions: string[],
-  override: Partial<components["schemas"]["EeBillingAccount"]> = {},
+  override: Partial<components["schemas"]["BillingAccount"]> = {},
 ): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const org: components["schemas"]["Organization"] = {
