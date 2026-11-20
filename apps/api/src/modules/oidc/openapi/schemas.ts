@@ -119,7 +119,6 @@ const accessGrant: Record<string, unknown> = {
     "id",
     "kind",
     "client_name",
-    "client_icon",
     "client_origin",
     "client_registration",
     "device_name",
@@ -143,7 +142,6 @@ const accessGrant: Record<string, unknown> = {
       description:
         "The name the client declared when it registered. `null` for a CLI session (the platform's own CLI).",
     },
-    client_icon: nullableString,
     client_origin: {
       ...nullableString,
       description:

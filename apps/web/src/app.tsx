@@ -170,9 +170,9 @@ const OrgSettingsBillingPage = lazyPage(
   () => import("./pages/org-settings/billing"),
   "OrgSettingsBillingPage",
 );
-const OrgSettingsCliSessionsPage = lazyPage(
-  () => import("./pages/org-settings/cli-sessions"),
-  "OrgSettingsCliSessionsPage",
+const OrgSettingsAccessGrantsPage = lazyPage(
+  () => import("./pages/org-settings/access-grants"),
+  "OrgSettingsAccessGrantsPage",
 );
 const OrgSettingsRolesPage = lazyPage(
   () => import("./pages/org-settings/roles"),
@@ -308,7 +308,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/models": <OrgSettingsModelsPage />,
   "/org-settings/proxies": <OrgSettingsProxiesPage />,
   "/org-settings/oauth": <OrgSettingsOAuthPage />,
-  "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
+  "/org-settings/access-grants": <OrgSettingsAccessGrantsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
   // Workspace settings are scoped by `X-Space-Id`, except webhooks, which also manages the org's own (`org-webhooks:read`).
   "/workspace-settings": <Outlet />,
@@ -374,7 +374,7 @@ const SETTINGS_TABLES: Partial<
   "/org-settings/members": { toolbar: true },
   "/org-settings/spaces": {},
   "/org-settings/proxies": {},
-  "/org-settings/cli-sessions": { intro: "heading" },
+  "/org-settings/access-grants": { intro: "heading" },
   "/preferences/devices": { intro: "heading" },
   "/workspace-settings/members": { toolbar: true, intro: "hint" },
   "/workspace-settings/api-keys": { toolbar: true },

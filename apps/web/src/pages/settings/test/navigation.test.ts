@@ -65,13 +65,13 @@ describe("unified settings navigation", () => {
   it("keeps a module's screen behind its module, whatever the permission", () => {
     const withoutModules = destinations(NO_FEATURES, [
       "oauth-clients:read",
-      "cli-sessions:read",
+      "access-grants:read",
       "billing:read",
       "webhooks:read",
       "space-settings:write",
     ]);
     expect(withoutModules).not.toContain("/org-settings/oauth");
-    expect(withoutModules).not.toContain("/org-settings/cli-sessions");
+    expect(withoutModules).not.toContain("/org-settings/access-grants");
     expect(withoutModules).not.toContain("/org-settings/billing");
     expect(withoutModules).not.toContain("/workspace-settings/auth");
     expect(withoutModules).not.toContain("/workspace-settings/oauth");

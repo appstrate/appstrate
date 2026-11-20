@@ -5773,7 +5773,6 @@ export interface components {
             kind: "cli" | "mcp";
             /** @description The name the client declared when it registered. `null` for a CLI session (the platform's own CLI). */
             client_name: string | null;
-            client_icon: string | null;
             /** @description The client's verifiable origin: the host of its metadata document URL (CIMD), or of a non-loopback redirect URI. */
             client_origin: string | null;
             /**
@@ -6663,7 +6662,6 @@ export interface components {
             kind: "cli" | "mcp";
             /** @description The name the client declared when it registered. `null` for a CLI session (the platform's own CLI). */
             client_name: string | null;
-            client_icon: string | null;
             /** @description The client's verifiable origin: the host of its metadata document URL (CIMD), or of a non-loopback redirect URI. */
             client_origin: string | null;
             /**

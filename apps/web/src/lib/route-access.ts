@@ -123,10 +123,10 @@ export const ROUTE_ACCESS = {
     anyOf: ["oauth-clients:read"],
     operations: ["listOAuthClients"],
   },
-  "/org-settings/cli-sessions": {
+  "/org-settings/access-grants": {
     feature: "oidc",
-    anyOf: ["cli-sessions:read"],
-    operations: ["listOrgCliSessions"],
+    anyOf: ["access-grants:read"],
+    operations: ["listOrgAccessGrants"],
   },
   "/org-settings/billing": {
     feature: "billing",

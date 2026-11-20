@@ -152,7 +152,6 @@ export interface McpGrant {
   orgId: string;
   spaceId: string | null;
   clientName: string | null;
-  clientIcon: string | null;
   clientOrigin: string | null;
   clientRegistration: ClientRegistration;
   /** Live authorizations (refresh-token chains) the grant holds. */
@@ -279,7 +278,6 @@ async function listMcpGrants(filter: { userId: string } | { orgId: string }): Pr
     .select({
       clientId: oauthClient.clientId,
       name: oauthClient.name,
-      icon: oauthClient.icon,
       uri: oauthClient.uri,
       redirectUris: oauthClient.redirectUris,
       selfService: oauthClient.selfService,
@@ -303,7 +301,6 @@ async function listMcpGrants(filter: { userId: string } | { orgId: string }): Pr
       orgId: binding.orgId,
       spaceId: binding.spaceId ?? null,
       clientName: client?.name ?? null,
-      clientIcon: client?.icon ?? null,
       ...identity,
       sessionCount: g.authorizations.size,
       lastUsedAt: state?.lastUsedAt ?? null,

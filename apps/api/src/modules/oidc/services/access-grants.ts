@@ -41,7 +41,6 @@ export interface AccessGrantDto {
   kind: "cli" | "mcp";
   /** The client's own name. A CLI session has none: it is the platform's CLI. */
   client_name: string | null;
-  client_icon: string | null;
   /** The client's verifiable origin (host), when the platform has one. */
   client_origin: string | null;
   /** How the client is known — `null` for the platform's own CLI. */
@@ -177,7 +176,6 @@ function cliDto(s: Awaited<ReturnType<typeof listSessionsForUser>>[number]): Acc
     id: s.familyId,
     kind: "cli",
     client_name: null,
-    client_icon: null,
     client_origin: null,
     client_registration: null,
     device_name: s.deviceName,
@@ -202,7 +200,6 @@ function mcpDto(g: McpGrant, names: TargetNames): AccessGrantDto {
     id: g.id,
     kind: "mcp",
     client_name: g.clientName,
-    client_icon: g.clientIcon,
     client_origin: g.clientOrigin,
     client_registration: g.clientRegistration,
     device_name: null,
