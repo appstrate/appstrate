@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
@@ -16,6 +15,7 @@ import {
   type IntegrationDetailWire,
 } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { bindsConnection } from "./binds-connection";
 import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
@@ -113,10 +113,11 @@ export function AgentIntegrationsBlock({
     // AFPS §7.2: an integration declaring no auths binds no connection, so it has no row here.
     // On a schedule, judge the integration version it fires. The live manifest may have different auths.
     .filter(({ entry, state }) =>
-      scheduleOverrides
-        ? readiness?.integrations.find((item) => item.integration_package_id === entry.id)
-            ?.connection_required !== false
-        : !(state.detail && isUnauthenticatedIntegration(state.detail.manifest)),
+      bindsConnection(
+        state.detail,
+        scheduleOverrides &&
+          readiness?.integrations.find((item) => item.integration_package_id === entry.id),
+      ),
     );
   if (rows.length === 0) return empty;
 

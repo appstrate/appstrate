@@ -19,6 +19,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { AgentIntegrationsBlock } = await import("../package-detail/agent-integrations-block.tsx");
+const { bindsConnection } = await import("../package-detail/binds-connection.ts");
 const { pinRowActions } = await import("../package-detail/pin-row-actions.ts");
 const { PinFormFields, PinFormModal } = await import("../integration-detail/pin-editor.tsx");
 const { orgStore } = await import("../../stores/org-store.ts");
@@ -593,3 +594,19 @@ function findElement<P>(
   if (node.type === type) return node as unknown as ReactElement<P>;
   return findElement(node.props.children, type);
 }
+
+describe("bindsConnection — which integrations have a row", () => {
+  const authed = { manifest: { auths: { oauth: { type: "oauth2" } } } } as never;
+  const open = { manifest: {} } as never;
+
+  it("judges on the readiness entry when it answered", () => {
+    expect(bindsConnection(authed, { connection_required: false })).toBe(false);
+    expect(bindsConnection(open, { connection_required: true })).toBe(true);
+  });
+
+  it("falls back to the live manifest while the readiness is not available", () => {
+    expect(bindsConnection(open, undefined)).toBe(false);
+    expect(bindsConnection(authed, undefined)).toBe(true);
+    expect(bindsConnection(undefined, undefined)).toBe(true);
+  });
+});

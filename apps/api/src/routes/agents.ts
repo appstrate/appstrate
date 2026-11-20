@@ -25,7 +25,7 @@ import { updateSpacePackage, getSpacePackageSettings } from "../services/space-p
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -414,7 +414,7 @@ export function createAgentsRouter() {
       const scheduleId = c.req.query("scheduleId");
       let dependencyOverrides: Record<string, string> | null = null;
       if (scheduleId !== undefined) {
-        await requirePermission("schedules", "read")(c, async () => {});
+        assertPermission(c, "schedules", "read");
         const schedule = await loadSchedule(scheduleId, scope);
         if (!schedule || schedule.packageId !== agent.id) throw notFound("Schedule not found");
         // The schedule write authorized these stored pins. This read may reuse them but
