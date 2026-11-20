@@ -2716,6 +2716,7 @@ export function createOidcRouter() {
       if (outcome.kind === "mcp") {
         await recordAuditFromContext(c, {
           orgIdOverride: orgId,
+          spaceIdOverride: outcome.grant.spaceId ?? undefined,
           action: "oauth_grant.revoked",
           resourceType: "oauth_grant",
           resourceId: grantId,

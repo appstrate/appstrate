@@ -143,7 +143,7 @@ const accessGrant: Record<string, unknown> = {
     client_origin: {
       ...nullableString,
       description:
-        "The client's verifiable origin: the host of its metadata document URL (CIMD), or of a non-loopback redirect URI.",
+        "Where the client comes from: the host of its metadata document URL (CIMD, verified), or of a non-loopback redirect URI its dynamic registration declared (not necessarily the one an authorization used). `null` when it declared only loopback redirects.",
     },
     client_registration: {
       type: ["string", "null"],

@@ -5773,7 +5773,7 @@ export interface components {
             kind: "cli" | "mcp";
             /** @description The name the client declared when it registered. `null` for a CLI session (the platform's own CLI). */
             client_name: string | null;
-            /** @description The client's verifiable origin: the host of its metadata document URL (CIMD), or of a non-loopback redirect URI. */
+            /** @description Where the client comes from: the host of its metadata document URL (CIMD, verified), or of a non-loopback redirect URI its dynamic registration declared (not necessarily the one an authorization used). `null` when it declared only loopback redirects. */
             client_origin: string | null;
             /**
              * @description How the client is known: a fetched metadata document (CIMD), a dynamic registration (RFC 7591), or an operator. `null` for a CLI session.
@@ -6658,7 +6658,7 @@ export interface components {
             kind: "cli" | "mcp";
             /** @description The name the client declared when it registered. `null` for a CLI session (the platform's own CLI). */
             client_name: string | null;
-            /** @description The client's verifiable origin: the host of its metadata document URL (CIMD), or of a non-loopback redirect URI. */
+            /** @description Where the client comes from: the host of its metadata document URL (CIMD, verified), or of a non-loopback redirect URI its dynamic registration declared (not necessarily the one an authorization used). `null` when it declared only loopback redirects. */
             client_origin: string | null;
             /**
              * @description How the client is known: a fetched metadata document (CIMD), a dynamic registration (RFC 7591), or an operator. `null` for a CLI session.

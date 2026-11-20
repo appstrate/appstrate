@@ -42,31 +42,41 @@ export function grantLabel(
   return t("accessGrants.fallbackUnknown");
 }
 
-/** « Organisation Acme » or « Espace Ops », standing alone. */
+/**
+ * « Organisation Acme » or « Espace Ops · Acme », standing alone. A space is
+ * named with its org: space names repeat across orgs (every org has a
+ * « Default »).
+ */
 export function grantTargetLabel(target: GrantTarget, t: Translate): string {
   return target.spaceId
-    ? t("accessGrants.targetSpace", { name: target.space_name })
+    ? t("accessGrants.targetSpace", { name: target.space_name, org: target.org_name })
     : t("accessGrants.targetOrg", { name: target.org_name });
 }
 
-/** The same target inside a sentence: « l’organisation Acme », « l’espace Ops ». */
+/** The same target inside a sentence: « l’organisation Acme », « l’espace Ops d’Acme ». */
 export function grantTargetPhrase(target: GrantTarget, t: Translate): string {
   return target.spaceId
-    ? t("accessGrants.targetSpacePhrase", { name: target.space_name })
+    ? t("accessGrants.targetSpacePhrase", { name: target.space_name, org: target.org_name })
     : t("accessGrants.targetOrgPhrase", { name: target.org_name });
 }
 
 /**
- * The line under an MCP client's name: the origin the platform can vouch for
- * (its metadata document's host, or its redirect host), else what kind of
- * client it is. The name above it is the client's own claim.
+ * The line under an MCP client's name: the origin the platform can vouch for,
+ * else what kind of client it is. The name above it is the client's own claim.
+ * A metadata document's host is verified; a dynamic registration's redirect
+ * host is one it declared, which the authorization may not have used, and is
+ * shown as such.
  */
 export function grantOriginLabel(
   grant: Pick<AccessGrant, "client_origin" | "client_registration">,
   t: Translate,
 ): string {
+  if (grant.client_registration === "dynamic") {
+    return grant.client_origin
+      ? t("accessGrants.originDeclaredRedirect", { host: grant.client_origin })
+      : t("accessGrants.originLocal");
+  }
   if (grant.client_origin) return grant.client_origin;
-  if (grant.client_registration === "dynamic") return t("accessGrants.originLocal");
   return t("accessGrants.originUnknown");
 }
 

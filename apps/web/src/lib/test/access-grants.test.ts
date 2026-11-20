@@ -19,6 +19,12 @@ describe("grantOriginLabel", () => {
     ).toBe("claude.ai");
   });
 
+  it("shows a dynamic client's redirect host as declared, not verified", () => {
+    expect(
+      grantOriginLabel({ client_origin: "claude.ai", client_registration: "dynamic" }, t),
+    ).toBe('accessGrants.originDeclaredRedirect({"host":"claude.ai"})');
+  });
+
   it("calls a dynamic client with only loopback redirects a local app", () => {
     expect(grantOriginLabel({ client_origin: null, client_registration: "dynamic" }, t)).toBe(
       "accessGrants.originLocal",
@@ -62,8 +68,13 @@ describe("grantTargetLabel / grantTargetPhrase", () => {
   const org = { orgId: "o", org_name: "Acme", spaceId: null, space_name: null };
   const space = { orgId: "o", org_name: "Acme", spaceId: "spc_1", space_name: "Ops" };
 
-  it("names the org or the space the grant reaches", () => {
+  it("names the org, or the space with its org", () => {
     expect(grantTargetLabel(org, t)).toBe('accessGrants.targetOrg({"name":"Acme"})');
-    expect(grantTargetPhrase(space, t)).toBe('accessGrants.targetSpacePhrase({"name":"Ops"})');
+    expect(grantTargetLabel(space, t)).toBe(
+      'accessGrants.targetSpace({"name":"Ops","org":"Acme"})',
+    );
+    expect(grantTargetPhrase(space, t)).toBe(
+      'accessGrants.targetSpacePhrase({"name":"Ops","org":"Acme"})',
+    );
   });
 });
