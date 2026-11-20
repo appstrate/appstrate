@@ -16,7 +16,7 @@ import {
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
-import { batchLoadEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
@@ -918,15 +918,12 @@ async function enrichSchedules(
   if (schedules.length === 0) return [];
 
   const userIds = [...new Set(schedules.map((s) => s.userId).filter((id): id is string => !!id))];
-  const endUserIds = [
-    ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
-  ];
 
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
 
   const [userNameMap, endUserNameMap, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
-    batchLoadEndUserNames(endUserIds),
+    batchLoadScheduleEndUserNames(orgId, schedules),
     loadScheduleRunStats(
       schedules.map((s) => s.id),
       orgId,
@@ -951,7 +948,7 @@ async function enrichSchedules(
       actorName = userNameMap.get(schedule.userId) ?? null;
     } else if (schedule.endUserId) {
       actorType = "end_user";
-      actorName = endUserNameMap.get(schedule.endUserId) ?? null;
+      actorName = endUserNameMap.get(schedule.id) ?? null;
     }
     // A schedule that never fired has no `runs` rows, hence no group — zeroes.
     const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;

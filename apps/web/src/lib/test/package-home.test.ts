@@ -100,8 +100,8 @@ describe("previousHomeSchedules", () => {
     expect(previousHomeSchedules(rows, "spc_none", ok)).toBe(0);
   });
 
-  it("is loading while the list is read", () => {
-    expect(previousHomeSchedules(undefined, "spc_old", ok)).toBe("loading");
+  it("keeps the count unknown while the list is read", () => {
+    expect(previousHomeSchedules(undefined, "spc_old", ok)).toBe("unknown");
   });
 
   it("is unknown when not readable or on error, even with data", () => {

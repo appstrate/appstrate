@@ -68,7 +68,7 @@ import {
   integrationsNamingAny,
   selectForeignNamingScheduleIds,
 } from "./schedules-naming-connection.ts";
-import { batchLoadEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
@@ -775,10 +775,9 @@ export async function memberDepartureImpact(
     );
   const ownedIds = new Set(owned.map((row) => row.id));
   const userIds = [...new Set(rows.flatMap((row) => (row.userId ? [row.userId] : [])))];
-  const endUserIds = [...new Set(rows.flatMap((row) => (row.endUserId ? [row.endUserId] : [])))];
   const [userNames, endUserNames] = await Promise.all([
     batchLoadUserNames(userIds),
-    batchLoadEndUserNames(endUserIds),
+    batchLoadScheduleEndUserNames(orgId, rows),
   ]);
 
   return rows.map((row) => {
@@ -791,7 +790,7 @@ export async function memberDepartureImpact(
       actor: {
         ...actorRef,
         name:
-          (actorRef.type === "user" ? userNames.get(actorRef.id) : endUserNames.get(actorRef.id)) ??
+          (actorRef.type === "user" ? userNames.get(actorRef.id) : endUserNames.get(row.id)) ??
           null,
       },
       cause: causes.get(row.id)!,

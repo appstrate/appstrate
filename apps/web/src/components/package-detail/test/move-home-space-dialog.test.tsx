@@ -27,7 +27,7 @@ describe("PreviousHomeSchedules", () => {
 
   it("falls back to a sentence without a count when unknown", () => {
     const kept = render(<PreviousHomeSchedules state="unknown" keep space="Marketing" />);
-    expect(kept).toContain("Les planifications de « Marketing » resteront activées.");
+    expect(kept).toContain("Les planifications actives de « Marketing » resteront activées.");
     const released = render(
       <PreviousHomeSchedules state="unknown" keep={false} space="Marketing" />,
     );
@@ -37,11 +37,5 @@ describe("PreviousHomeSchedules", () => {
 
   it("renders nothing when not applicable", () => {
     expect(render(<PreviousHomeSchedules state={null} keep space="Marketing" />)).toBe("");
-  });
-
-  it("shows neither a count nor 'none' while loading", () => {
-    const html = render(<PreviousHomeSchedules state="loading" keep space="Marketing" />);
-    expect(html).not.toContain("Aucune");
-    expect(html).not.toContain("planification");
   });
 });

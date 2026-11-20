@@ -14,7 +14,6 @@ import { useMovePackageHome } from "../../hooks/use-packages";
 import { previousHomeSchedules, writableDestinations } from "../../lib/package-home";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
-import { SkeletonLine } from "../skeleton-line";
 import { errorMessage } from "../../lib/mutation-error";
 
 /** What the move does to the schedules of the space being left; follows the "keep" checkbox live. */
@@ -29,7 +28,6 @@ export function PreviousHomeSchedules({
 }) {
   const { t } = useTranslation("settings");
   if (state === null) return null;
-  if (state === "loading") return <SkeletonLine className="mt-2 w-2/3 text-xs tabular-nums" />;
   let text: string;
   if (state === "unknown") {
     text = keep

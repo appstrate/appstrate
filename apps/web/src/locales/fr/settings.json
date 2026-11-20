@@ -1263,7 +1263,7 @@
   "packages.moveHomeSchedulesDisabled_one": "{{count}} planification active de « {{space}} » sera désactivée.",
   "packages.moveHomeSchedulesDisabled_other": "{{count}} planifications actives de « {{space}} » seront désactivées.",
   "packages.moveHomeSchedulesNone": "Aucune planification active dans « {{space}} ».",
-  "packages.moveHomeSchedulesKeptUnknown": "Les planifications de « {{space}} » resteront activées.",
+  "packages.moveHomeSchedulesKeptUnknown": "Les planifications actives de « {{space}} » resteront activées.",
   "packages.moveHomeSchedulesDisabledUnknown": "Les planifications actives de « {{space}} » seront désactivées.",
   "packages.share": "Partager…",
   "packages.shareTitle": "Partager le package",

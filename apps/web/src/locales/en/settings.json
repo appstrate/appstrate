@@ -1262,7 +1262,7 @@
   "packages.moveHomeSchedulesDisabled_one": "{{count}} active schedule in “{{space}}” will be disabled.",
   "packages.moveHomeSchedulesDisabled_other": "{{count}} active schedules in “{{space}}” will be disabled.",
   "packages.moveHomeSchedulesNone": "No active schedule in “{{space}}”.",
-  "packages.moveHomeSchedulesKeptUnknown": "Schedules in “{{space}}” will stay enabled.",
+  "packages.moveHomeSchedulesKeptUnknown": "Active schedules in “{{space}}” will stay enabled.",
   "packages.moveHomeSchedulesDisabledUnknown": "Active schedules in “{{space}}” will be disabled.",
   "packages.share": "Share…",
   "packages.shareTitle": "Share package",

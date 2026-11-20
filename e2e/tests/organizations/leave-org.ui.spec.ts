@@ -12,8 +12,8 @@
 
 import type { APIRequestContext, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
-import { createOrg, registerUser, type AuthResult } from "../../helpers/seed.ts";
-import { createOrgOnlyClient } from "../../helpers/api-client.ts";
+import { createIntegration, createOrg, registerUser, type AuthResult } from "../../helpers/seed.ts";
+import { createApiClient, createOrgOnlyClient, type ApiClient } from "../../helpers/api-client.ts";
 import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 
 /** Invite `user` into the org as a plain member and have them accept. */
@@ -194,5 +194,94 @@ test.describe("Leaving an organization", () => {
     const leave = page.getByTestId("leave-org-button");
     await expect(leave).toBeDisabled();
     await expect(leave).toHaveAccessibleDescription(/unique membre|only member/i);
+  });
+});
+
+test("a member's shared connection can be replaced before removal", async ({
+  request,
+  authedPage: page,
+  apiClient,
+  browserCtx,
+  orgOnlyClient,
+}) => {
+  const { orgId, orgSlug, defaultSpaceId } = browserCtx.org;
+  const departing = await registerUser(request, { name: "Departing connection owner" });
+  const actor = await registerUser(request, { name: "Schedule actor" });
+  for (const member of [departing, actor])
+    await joinAsMember(request, orgOnlyClient, orgId, member);
+  const scope = `@${orgSlug}`;
+  const integration = (await createIntegration(apiClient, scope, "service")).id;
+  async function connect(client: ApiClient) {
+    const connected = await client.post(`/integrations/${integration}/auths/api/connect/fields`, {
+      credentials: { api_key: "test-credential" },
+    });
+    expect(connected.status(), await connected.text()).toBe(200);
+    const { id } = await connected.json();
+    return String(id);
+  }
+  async function sharedConnection(client: ApiClient) {
+    const id = await connect(client);
+    const shared = await client.put(`/me/connections/${id}/shares/${defaultSpaceId}`);
+    expect(shared.ok(), await shared.text()).toBe(true);
+    return id;
+  }
+  const old = await sharedConnection(
+    createApiClient(request, { cookie: departing.cookie, orgId, spaceId: defaultSpaceId }),
+  );
+  const replacement = await sharedConnection(apiClient);
+  const privateConnection = await connect(apiClient);
+  expect(privateConnection).not.toBe(replacement);
+  const agent = `${scope}/scheduled`;
+  const created = await apiClient.post("/packages/agents", {
+    manifest: {
+      schema_version: "0.2",
+      type: "agent",
+      version: "1.0.0",
+      name: agent,
+      display_name: "Scheduled",
+      description: "Schedule test",
+      dependencies: { integrations: { [integration]: "^0.1.0" } },
+      integrations_configuration: { [integration]: { tools: ["*"] } },
+    },
+    content: "Use the selected connection.",
+  });
+  expect(created.ok(), await created.text()).toBe(true);
+  const schedule = await apiClient.post(`/agents/${agent}/schedules`, {
+    name: "Team schedule",
+    cron_expression: "0 9 * * *",
+    actor: { userId: actor.userId },
+    connection_overrides: { [integration]: [old] },
+  });
+  expect(schedule.status(), await schedule.text()).toBe(201);
+  const { id } = await schedule.json();
+  await page.goto("/org-settings/members");
+  const openRemoval = async () => {
+    await page.getByRole("button", { name: /actions.*Departing connection owner/i }).click();
+    await page.getByRole("menuitem", { name: /^(Retirer|Remove)$/ }).click();
+  };
+  await openRemoval();
+  await page.getByRole("link", { name: /Choisir une connexion|Choose a connection/ }).click();
+  const original = page.getByTestId(`sched-choice-pick-option-${old}`);
+  await expect(original).toBeChecked();
+  await expect(page.getByTestId(`sched-choice-pick-option-${privateConnection}`)).toHaveCount(0);
+  await original.click();
+  await page.getByTestId(`sched-choice-pick-option-${replacement}`).click();
+  const saved = page.waitForResponse(
+    (r) => r.request().method() === "PATCH" && r.url().endsWith(`/api/schedules/${id}`),
+  );
+  await page.getByRole("button", { name: /^(Enregistrer|Save)$/ }).click();
+  expect((await saved).ok()).toBe(true);
+  await page.goto("/org-settings/members");
+  await openRemoval();
+  await expect(page.getByText(/Aucune planification|No .*schedule/i)).toBeVisible();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: /^(Retirer|Remove)$/ })
+    .click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  expect(await (await apiClient.get(`/schedules/${id}`)).json()).toMatchObject({
+    enabled: true,
+    userId: actor.userId,
+    connection_overrides: { [integration]: [replacement] },
   });
 });
