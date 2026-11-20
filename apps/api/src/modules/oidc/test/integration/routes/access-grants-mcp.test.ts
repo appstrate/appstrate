@@ -24,6 +24,7 @@ import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
   createTestContext,
+  createTestOrg,
   memberContext,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
@@ -553,6 +554,78 @@ describe("MCP access grants", () => {
       expect(res.status).toBe(404);
       expect((await myGrants(other.cookie)).filter((g) => g.kind === "mcp")).toHaveLength(1);
       await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
+    });
+  });
+  // Better Auth takes a revoked refresh token presented again for a stolen one
+  // and deletes every refresh token of the (client, user) pair, on every
+  // resource. The platform therefore deletes the tokens it ends: none of these
+  // replays may cost the client its grants elsewhere.
+  describe("ending access spares the client's other grants", () => {
+    async function expectInvalidGrant(res: Response): Promise<void> {
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error?: string }).error).toBe("invalid_grant");
+    }
+
+    it("a member removed from one org keeps the same client's grant on another", async () => {
+      const member = await memberContext(ctx, "member");
+      const { org: other } = await createTestOrg(member.user.id, { name: "Beta" });
+      await mcpModule.events!.onOrgCreate!(other.id, member.user.email);
+      const otherResource = getMcpOrgResourceUri(other.id);
+      try {
+        const clientId = await registerClient();
+        const onA = await connect(member.cookie, clientId);
+        const onB = await connect(member.cookie, clientId, otherResource);
+        // Rotate A once: Better Auth keeps the rotated-out row, marked revoked.
+        const rotated = await refresh(clientId, String(onA.token.refresh_token), orgResource);
+        expect(rotated.status).toBe(200);
+        const currentA = ((await rotated.json()) as { refresh_token: string }).refresh_token;
+
+        const removed = await app.request(`/api/orgs/${ctx.orgId}/members/${member.user.id}`, {
+          method: "DELETE",
+          headers: { Cookie: ctx.cookie },
+        });
+        expect(removed.status).toBe(204);
+
+        await expectInvalidGrant(await refresh(clientId, currentA, orgResource));
+        await expectInvalidGrant(
+          await refresh(clientId, String(onA.token.refresh_token), orgResource),
+        );
+        const onBAgain = await refresh(clientId, String(onB.token.refresh_token), otherResource);
+        expect(onBAgain.status).toBe(200);
+        const renewed = (await onBAgain.json()) as { access_token: string };
+        expect((await mcpInitialize(`/api/mcp/o/${other.id}`, renewed.access_token)).status).toBe(
+          200,
+        );
+      } finally {
+        await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
+      }
+    });
+
+    it("a password change refuses an old refresh token and keeps the grant made after it", async () => {
+      const clientId = await registerClient();
+      const before = await connect(ctx.cookie, clientId);
+      const rotated = await refresh(clientId, String(before.token.refresh_token), orgResource);
+      expect(rotated.status).toBe(200);
+      const old = ((await rotated.json()) as { refresh_token: string }).refresh_token;
+
+      const changed = await app.request("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: ctx.cookie },
+        body: JSON.stringify({
+          currentPassword: "TestPassword123!",
+          newPassword: "BrandNewPassword456!",
+        }),
+      });
+      expect(changed.status).toBe(200);
+
+      // Another device of the same client signs in again after the change.
+      const after = await connect(ctx.cookie, clientId);
+      await expectInvalidGrant(await refresh(clientId, old, orgResource));
+      await expectInvalidGrant(
+        await refresh(clientId, String(before.token.refresh_token), orgResource),
+      );
+      const fresh = await refresh(clientId, String(after.token.refresh_token), orgResource);
+      expect(fresh.status).toBe(200);
     });
   });
 });

@@ -711,8 +711,8 @@ describe("organizations service", () => {
   // ── OAuth tokens die with the membership ────────────────
   //
   // A refresh through an org-level `allowSignup` client re-provisions the
-  // membership, so the exit revokes the tokens of THIS org's own clients.
-  describe("exit revokes the org's own OAuth tokens", () => {
+  // membership, so the exit deletes the tokens of THIS org's own clients.
+  describe("exit deletes the org's own OAuth tokens", () => {
     async function seedClient(clientId: string, level: "org" | "instance", orgId?: string) {
       await db.insert(oauthClient).values({
         id: clientId,
@@ -746,16 +746,18 @@ describe("organizations service", () => {
       });
       return { refreshId, accessId };
     }
-    async function revokedState(tokens: { refreshId: string; accessId: string }) {
-      const [refresh] = await db
-        .select({ revoked: oauthRefreshToken.revoked })
+    // Ended = the row is gone: a row marked `revoked` and presented again makes
+    // Better Auth delete every refresh token of the (client, user) pair.
+    async function endedState(tokens: { refreshId: string; accessId: string }) {
+      const refresh = await db
+        .select({ id: oauthRefreshToken.id })
         .from(oauthRefreshToken)
         .where(eq(oauthRefreshToken.id, tokens.refreshId));
-      const [access] = await db
-        .select({ revoked: oauthAccessToken.revoked })
+      const access = await db
+        .select({ id: oauthAccessToken.id })
         .from(oauthAccessToken)
         .where(eq(oauthAccessToken.id, tokens.accessId));
-      return { refresh: refresh!.revoked !== null, access: access!.revoked !== null };
+      return { refresh: refresh.length === 0, access: access.length === 0 };
     }
 
     it("leaving revokes this org's client tokens and leaves the others", async () => {
@@ -775,10 +777,10 @@ describe("organizations service", () => {
 
       await leaveOrganization(org.id, member.id);
 
-      expect(await revokedState(thisOrg)).toEqual({ refresh: true, access: true });
-      expect(await revokedState(otherOrg)).toEqual({ refresh: false, access: false });
-      expect(await revokedState(instance)).toEqual({ refresh: false, access: false });
-      expect(await revokedState(stayer)).toEqual({ refresh: false, access: false });
+      expect(await endedState(thisOrg)).toEqual({ refresh: true, access: true });
+      expect(await endedState(otherOrg)).toEqual({ refresh: false, access: false });
+      expect(await endedState(instance)).toEqual({ refresh: false, access: false });
+      expect(await endedState(stayer)).toEqual({ refresh: false, access: false });
     });
 
     it("revokes instance-client tokens bound to this org's MCP resource, only those", async () => {
@@ -791,12 +793,22 @@ describe("organizations service", () => {
       const bound = await seedTokens("cli_mcp", member.id, [getMcpOrgResourceUri(org.id)]);
       const otherBound = await seedTokens("cli_mcp", member.id, [getMcpOrgResourceUri(other.id)]);
       const unbound = await seedTokens("cli_mcp", member.id);
+      const both = await seedTokens("cli_mcp", member.id, [
+        getMcpOrgResourceUri(org.id),
+        getMcpOrgResourceUri(other.id),
+      ]);
 
       await removeMember(org.id, member.id, { userId, firstPartySession: true });
 
-      expect(await revokedState(bound)).toEqual({ refresh: true, access: true });
-      expect(await revokedState(otherBound)).toEqual({ refresh: false, access: false });
-      expect(await revokedState(unbound)).toEqual({ refresh: false, access: false });
+      expect(await endedState(bound)).toEqual({ refresh: true, access: true });
+      expect(await endedState(otherBound)).toEqual({ refresh: false, access: false });
+      expect(await endedState(unbound)).toEqual({ refresh: false, access: false });
+      // One authorization covering both orgs keeps the other org's endpoint.
+      const [kept] = await db
+        .select({ resources: oauthRefreshToken.resources })
+        .from(oauthRefreshToken)
+        .where(eq(oauthRefreshToken.id, both.refreshId));
+      expect(kept?.resources).toEqual([getMcpOrgResourceUri(other.id)]);
     });
 
     it("revokes tokens bound to a space of this org's MCP endpoint, not another org's", async () => {
@@ -817,8 +829,8 @@ describe("organizations service", () => {
 
       await removeMember(org.id, member.id, { userId, firstPartySession: true });
 
-      expect(await revokedState(bound)).toEqual({ refresh: true, access: true });
-      expect(await revokedState(otherBound)).toEqual({ refresh: false, access: false });
+      expect(await endedState(bound)).toEqual({ refresh: true, access: true });
+      expect(await endedState(otherBound)).toEqual({ refresh: false, access: false });
     });
   });
 

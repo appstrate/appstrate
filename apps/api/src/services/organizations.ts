@@ -20,25 +20,10 @@ import {
   uploads,
   apiKeys,
   oauthClient,
-  oauthAccessToken,
-  oauthRefreshToken,
   modelProviderCredentials,
   modelProviderPairings,
-  spaces,
 } from "@appstrate/db/schema";
-import {
-  and,
-  arrayOverlaps,
-  eq,
-  ne,
-  inArray,
-  isNull,
-  notInArray,
-  or,
-  count,
-  sql,
-  asc,
-} from "drizzle-orm";
+import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import {
   isUuid,
@@ -64,7 +49,7 @@ import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
-import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../lib/audiences.ts";
+import { deleteOAuthTokens, endMcpGrantsInOrg } from "./oauth-token-revocation.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface OrgResult {
@@ -528,45 +513,19 @@ async function removeMemberInTx(
     .returning({ id: apiKeys.id });
 
   // Tokens that grant only this org: its own clients' (a refresh through an
-  // `allowSignup` one re-provisions the member) and those bound to one of its
-  // MCP resources (the org's or a space's). Only opaque tokens are rows; a JWT
-  // lives until its TTL, stopped by the per-request membership check.
+  // `allowSignup` one re-provisions the member), deleted outright, and its MCP
+  // endpoints' (the org's or a space's), withdrawn from tokens that may also
+  // cover another org's. Deleted, never marked revoked: see
+  // `oauth-token-revocation.ts`. A JWT lives until its TTL, stopped by the
+  // per-request membership check and the grant's watermark.
   const orgClientIds = tx
     .select({ clientId: oauthClient.clientId })
     .from(oauthClient)
     .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
-  const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
-  const mcpResources = [
-    getMcpOrgResourceUri(orgId),
-    ...orgSpaces.map((s) => getMcpSpaceResourceUri(orgId, s.id)),
-  ];
-  const revokedAt = new Date();
-  await tx
-    .update(oauthRefreshToken)
-    .set({ revoked: revokedAt })
-    .where(
-      and(
-        eq(oauthRefreshToken.userId, userId),
-        isNull(oauthRefreshToken.revoked),
-        or(
-          inArray(oauthRefreshToken.clientId, orgClientIds),
-          arrayOverlaps(oauthRefreshToken.resources, mcpResources),
-        ),
-      ),
-    );
-  await tx
-    .update(oauthAccessToken)
-    .set({ revoked: revokedAt })
-    .where(
-      and(
-        eq(oauthAccessToken.userId, userId),
-        isNull(oauthAccessToken.revoked),
-        or(
-          inArray(oauthAccessToken.clientId, orgClientIds),
-          arrayOverlaps(oauthAccessToken.resources, mcpResources),
-        ),
-      ),
-    );
+  await deleteOAuthTokens(tx, (table) =>
+    and(eq(table.userId, userId), inArray(table.clientId, orgClientIds)),
+  );
+  await endMcpGrantsInOrg(tx, orgId, userId);
 
   // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);

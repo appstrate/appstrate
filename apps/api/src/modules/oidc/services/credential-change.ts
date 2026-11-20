@@ -6,21 +6,16 @@
  * provider spares `offline_access` refresh tokens, and CLI families and
  * approved device codes are bound to no session.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { deviceCode, oauthAccessToken, oauthRefreshToken } from "@appstrate/db/schema";
+import { deviceCode } from "@appstrate/db/schema";
+import { deleteOAuthTokens } from "../../../services/oauth-token-revocation.ts";
 import { revokeAllFamiliesForUser } from "./cli-tokens.ts";
 
 export async function revokeOidcAccessAfterCredentialChange(userId: string): Promise<void> {
   await db.delete(deviceCode).where(eq(deviceCode.userId, userId));
-  const revokedAt = new Date();
-  await db
-    .update(oauthRefreshToken)
-    .set({ revoked: revokedAt })
-    .where(and(eq(oauthRefreshToken.userId, userId), isNull(oauthRefreshToken.revoked)));
-  await db
-    .update(oauthAccessToken)
-    .set({ revoked: revokedAt })
-    .where(and(eq(oauthAccessToken.userId, userId), isNull(oauthAccessToken.revoked)));
+  // Deleted, not marked revoked: a marked token presented again after the user
+  // reconnects would make Better Auth wipe the new grant (`oauth-token-revocation.ts`).
+  await deleteOAuthTokens(db, (table) => eq(table.userId, userId));
   await revokeAllFamiliesForUser(userId, "password_changed");
 }
