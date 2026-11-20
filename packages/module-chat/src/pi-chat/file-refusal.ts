@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Whether a model refused a file, decided by a replay rather than by the provider's wording.
- *
- * A provider request carrying a file that fails as an invalid request, or with no recognised
- * cause, is replayed in the same step with those file parts replaced by a text pointer: the PDFs
- * alone first when images rode too, then both if that replay is refused the same way (same
- * category), so at most two replays, whatever the failure's real cause. Only a replay that
- * succeeds names the cause; a kind it withheld stays withheld for the rest of the turn, even
- * after a failure that was only flaky. When every replay is refused the same way, the turn
- * reports the first error; when one fails otherwise, its own error. Nothing outlives the turn.
+ * Whether a model refused a file, decided by a replay, not by the provider's wording. The rule
+ * and its replay order: `docs/architecture/FILES.md`.
  */
 
 import {
@@ -19,18 +12,9 @@ import {
   type Message,
 } from "@appstrate/runner-pi";
 import { describeModelFailure, type ModelErrorCategory } from "@appstrate/core/model-error";
+import { wireParts, type WireParts } from "../file-input.ts";
 
 type FileKind = "image" | "pdf";
-
-/** The part types pi-ai and `native-pdf.ts` write for an image or a PDF, across the chat's APIs. */
-const PART_KINDS = new Map<unknown, FileKind>([
-  ["image", "image"],
-  ["input_image", "image"],
-  ["image_url", "image"],
-  ["document", "pdf"],
-  ["input_file", "pdf"],
-  ["file", "pdf"],
-]);
 
 /** Names the kind, so the model does not doubt the files of the other kind it did receive. */
 const WITHHELD: Record<FileKind, string> = {
@@ -38,61 +22,59 @@ const WITHHELD: Record<FileKind, string> = {
   pdf: "[PDF withheld: this model rejected it; any other file was delivered]",
 };
 
-const partKind = (value: object) => PART_KINDS.get((value as { type?: unknown }).type);
+function partKind(value: object, parts: WireParts): FileKind | undefined {
+  const { type } = value as { type?: unknown };
+  if (type === parts.image) return "image";
+  return parts.pdf !== undefined && type === parts.pdf ? "pdf" : undefined;
+}
 
 /** Walks messages, their content and tool outputs only: a tool call's arguments are the model's. */
-function collectKinds(value: unknown, kinds: Set<FileKind>): void {
-  if (Array.isArray(value)) return value.forEach((item) => collectKinds(item, kinds));
+function collectKinds(value: unknown, parts: WireParts, kinds: Set<FileKind>): void {
+  if (Array.isArray(value)) return value.forEach((item) => collectKinds(item, parts, kinds));
   if (!value || typeof value !== "object") return;
-  const kind = partKind(value);
+  const kind = partKind(value, parts);
   if (kind) return void kinds.add(kind);
   const { content, output } = value as Record<string, unknown>;
-  collectKinds(content, kinds);
-  collectKinds(output, kinds);
+  collectKinds(content, parts, kinds);
+  collectKinds(output, parts, kinds);
 }
 
 /** The file kinds a provider payload's conversation (not its tool schemas) carries. */
-function fileKindsIn(payload: unknown): Set<FileKind> {
+function fileKindsIn(payload: unknown, parts: WireParts): Set<FileKind> {
   const kinds = new Set<FileKind>();
   if (payload && typeof payload === "object") {
     const { messages, input } = payload as Record<string, unknown>;
-    collectKinds(messages, kinds);
-    collectKinds(input, kinds);
+    collectKinds(messages, parts, kinds);
+    collectKinds(input, parts, kinds);
   }
   return kinds;
 }
 
-function withhold(value: unknown, kinds: ReadonlySet<FileKind>, textType: string): unknown {
-  if (Array.isArray(value)) return value.map((item) => withhold(item, kinds, textType));
+function withhold(value: unknown, kinds: ReadonlySet<FileKind>, parts: WireParts): unknown {
+  if (Array.isArray(value)) return value.map((item) => withhold(item, kinds, parts));
   if (!value || typeof value !== "object") return value;
-  const kind = partKind(value);
+  const kind = partKind(value, parts);
   if (kind) {
     if (!kinds.has(kind)) return value;
     const { cache_control } = value as { cache_control?: unknown };
-    return { type: textType, text: WITHHELD[kind], ...(cache_control ? { cache_control } : {}) };
+    return { type: parts.text, text: WITHHELD[kind], ...(cache_control ? { cache_control } : {}) };
   }
   const item = value as Record<string, unknown>;
   return {
     ...item,
-    ...("content" in item ? { content: withhold(item.content, kinds, textType) } : {}),
-    ...("output" in item ? { output: withhold(item.output, kinds, textType) } : {}),
+    ...("content" in item ? { content: withhold(item.content, kinds, parts) } : {}),
+    ...("output" in item ? { output: withhold(item.output, kinds, parts) } : {}),
   };
 }
 
 /** The payload with every file part of these kinds replaced by a text pointer. */
-function withholdFiles(
-  payload: unknown,
-  kinds: ReadonlySet<FileKind>,
-  api: string | null | undefined,
-): unknown {
+function withholdFiles(payload: unknown, kinds: ReadonlySet<FileKind>, parts: WireParts): unknown {
   if (!payload || typeof payload !== "object") return payload;
-  const textType =
-    api === "openai-responses" || api === "openai-codex-responses" ? "input_text" : "text";
   const { messages, input } = payload as Record<string, unknown>;
   return {
     ...payload,
-    ...(messages === undefined ? {} : { messages: withhold(messages, kinds, textType) }),
-    ...(input === undefined ? {} : { input: withhold(input, kinds, textType) }),
+    ...(messages === undefined ? {} : { messages: withhold(messages, kinds, parts) }),
+    ...(input === undefined ? {} : { input: withhold(input, kinds, parts) }),
   };
 }
 
@@ -150,6 +132,8 @@ export function createFileRefusal(
   api: string | null | undefined,
   onReplay: () => void,
 ): FileRefusal {
+  // An API without known part types carries no file the refusal can see: it never replays.
+  const parts = wireParts(api);
   const withheld = new Set<FileKind>();
   const refused = new Set<FileKind>();
   let sent: FileKind[] = [];
@@ -162,8 +146,9 @@ export function createFileRefusal(
     originalError: () => original,
     extension(pi) {
       pi.on("before_provider_request", ({ payload }) => {
-        const sending = withheld.size ? withholdFiles(payload, withheld, api) : payload;
-        sent = [...fileKindsIn(sending)];
+        if (!parts) return;
+        const sending = withheld.size ? withholdFiles(payload, withheld, parts) : payload;
+        sent = [...fileKindsIn(sending, parts)];
         return withheld.size ? sending : undefined;
       });
       // Errors are judged where Pi settles a run, after its own retries.

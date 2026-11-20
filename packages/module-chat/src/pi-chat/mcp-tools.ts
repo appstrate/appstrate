@@ -224,7 +224,7 @@ async function relayedToolResult(
       ? block
       : {
           type: "text" as const,
-          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, supplied for this turn]`,
+          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, read for this turn]`,
         },
   );
   return { ...projected, content, persistedContent };
@@ -318,7 +318,7 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
-  fileDelivery?: FileDelivery;
+  fileDelivery: FileDelivery;
   pdfInput?: TurnPdfInput;
 };
 
@@ -616,7 +616,7 @@ function makeForwardExtension(
         }
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
-            await relayedToolResult(result, scope, opts.fileDelivery?.image === true),
+            await relayedToolResult(result, scope, opts.fileDelivery.image),
             turnBudget,
           );
         }
@@ -817,7 +817,7 @@ async function liveResources(
       );
       if ("reference" in pdf) content.push({ type: "text", text: pdf.reference });
       else note = pdf.note;
-    } else if (isRasterImageMime(mimeType) && opts.fileDelivery?.image) {
+    } else if (isRasterImageMime(mimeType) && opts.fileDelivery.image) {
       content.push({ type: "image", mimeType, data: blob });
     } else {
       note = "This file format cannot be read by the current model.";

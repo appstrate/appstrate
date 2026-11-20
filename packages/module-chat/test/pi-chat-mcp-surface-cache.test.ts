@@ -620,7 +620,7 @@ describe("inline images from remote integration tools", () => {
           errorText: expect.stringContaining("Preview failed"),
         }),
       );
-      expect(JSON.stringify(chunks)).toContain("supplied for this turn");
+      expect(JSON.stringify(chunks)).toContain("read for this turn]");
       for (const secret of [data, hiddenData, "private caption"]) {
         expect(JSON.stringify(chunks)).not.toContain(secret);
       }
@@ -664,7 +664,7 @@ describe("inline images from remote integration tools", () => {
 
 describe("temporary connector files", () => {
   it("hands the PDF to the current tool call, streams a receipt, and ignores relayed resource blocks", async () => {
-    const pdf = createTurnPdfInput({ api: "openai-responses" }, { pdf: true });
+    const pdf = createTurnPdfInput({ api: "openai-responses" });
     const added: string[] = [];
     const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, false, {
       ...pdf,

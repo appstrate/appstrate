@@ -14,6 +14,10 @@ const text = { type: "text", text: "hi" };
 const image = { type: "image", source: { type: "base64", data: "AAAA" } };
 const pdf = { type: "document", source: { type: "base64", data: "BBBB" } };
 const withImage = { messages: [{ role: "user", content: [text, image] }] };
+const responsesImage = { input: [{ role: "user", content: [{ type: "input_image" }] }] };
+const completionsImage = {
+  messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "x" } }] }],
+};
 const withBoth = {
   messages: [
     { role: "user", content: [text, image] },
@@ -79,7 +83,7 @@ describe("which failures are replayed", () => {
       "Invalid file data: 'file_data'. Expected a base64-encoded data URL with a MIME type.",
       "Codex error: invalid_request_error",
     ]) {
-      expect(harness("openai-codex-responses").fail(withImage, error)).toBe(true);
+      expect(harness("openai-codex-responses").fail(responsesImage, error)).toBe(true);
     }
   });
 
@@ -95,10 +99,8 @@ describe("which failures are replayed", () => {
         "anthropic-messages",
         { messages: [{ role: "user", content: [{ type: "tool_result", content: [image] }] }] },
       ],
-      [
-        "openai-completions",
-        { messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "x" } }] }] },
-      ],
+      ["openai-completions", completionsImage],
+      ["mistral-conversations", completionsImage],
       [
         "openai-completions",
         { messages: [{ role: "user", content: [{ type: "file", file: { file_data: "x" } }] }] },
@@ -107,9 +109,17 @@ describe("which failures are replayed", () => {
         "openai-responses",
         { input: [{ type: "function_call_output", output: [{ type: "input_file" }] }] },
       ],
-      ["openai-responses", { input: [{ role: "user", content: [{ type: "input_image" }] }] }],
+      ["openai-responses", responsesImage],
     ];
     for (const [api, payload] of cases) expect(harness(api).fail(payload, "400 bad")).toBe(true);
+  });
+
+  it("reads only the API's own part types, and nothing on an API it has none for", () => {
+    expect(harness("anthropic-messages").fail(completionsImage, "400 bad")).toBe(false);
+    expect(harness("mistral-conversations").fail(withBoth, "400 bad")).toBe(false);
+    const { send, fail } = harness("google-generative-ai");
+    expect(fail(withImage, "400 bad")).toBe(false);
+    expect(send(withImage)).toBe(withImage);
   });
 
   it("never reads a file in tool schemas or in a tool call's arguments", () => {
@@ -143,7 +153,7 @@ describe("which failures are replayed", () => {
 
   it("does not replay Cerebras's bodyless overflow, as Pi reads it", () => {
     for (const error of ["400 status code (no body)", "413 status code (no body)"]) {
-      expect(harness("openai-completions").fail(withImage, error, "cerebras")).toBe(false);
+      expect(harness("openai-completions").fail(completionsImage, error, "cerebras")).toBe(false);
     }
   });
 
@@ -228,8 +238,8 @@ describe("the replay", () => {
 
   it("keeps the first error when a statusless failure is refused statusless again", () => {
     const { refusal, send, end, settle, fail } = harness("openai-codex-responses");
-    fail(withImage, "Codex error: invalid_request_error");
-    send(withImage);
+    fail(responsesImage, "Codex error: invalid_request_error");
+    send(responsesImage);
     end("error", "Codex error: invalid_request_error");
     expect(settle()).toBeUndefined();
     expect(refusal.originalError()).toBe("Codex error: invalid_request_error");

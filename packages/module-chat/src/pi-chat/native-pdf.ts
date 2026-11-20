@@ -3,13 +3,15 @@
 import { sanitizeFilename } from "@appstrate/core/naming";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { ExtensionFactory } from "@appstrate/runner-pi";
-import { hasPdfWireFormat, type FileDelivery, type PdfWireApi } from "../file-input.ts";
+import { fileDelivery, WIRE_PARTS, type PdfWireApi } from "../file-input.ts";
 import { logger } from "../logger.ts";
 
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
-const REFERENCE = /\[pdf:[0-9a-f-]{36}\]/g;
+const REFERENCE_PREFIX = "[pdf:";
+const REFERENCE = new RegExp(`\\${REFERENCE_PREFIX}[0-9a-f-]{36}\\]`, "g");
 
-const INLINE_RUN_HINT = "Use an inline run to inspect the file.";
+/** What the model is told to do with a file it is not sent. */
+export const INLINE_RUN_HINT = "Use an inline run to inspect the file.";
 /** Why a turn sends no PDF: one sentence per cause, shared by every PDF it withholds. */
 const PDF_NOT_SENT = {
   format: `This model's chat adapter has no PDF input format. ${INLINE_RUN_HINT}`,
@@ -52,13 +54,15 @@ type Message = Record<string, unknown>;
 type Strip = (
   blocks: Block[],
   source: string | undefined,
-  textType: string,
 ) => { blocks: Block[]; files: StoredFile[] } | undefined;
+
+/** The API's part types (`WIRE_PARTS`): what an encoder reads text as and writes a PDF as. */
+type Parts = (typeof WIRE_PARTS)[PdfWireApi];
 
 interface PdfEncoder {
   /** The tool call id as the API writes it on the wire. */
   source(toolCallId: string): string;
-  encode(payload: Message, strip: Strip, compat: unknown): Message | undefined;
+  encode(payload: Message, strip: Strip, parts: Parts, compat: unknown): Message | undefined;
 }
 
 const toBlocks = (content: unknown, textType: string): Block[] | undefined =>
@@ -88,17 +92,17 @@ const TOOL_OUTPUT_TYPES = new Set<unknown>(["function_call_output", "custom_tool
 const RESPONSES: PdfEncoder = {
   // Pi pairs Responses calls as "call_id|item_id"; only call_id goes on the wire.
   source: (id) => id.split("|", 1)[0]!,
-  encode(payload, strip) {
+  encode(payload, strip, parts) {
     if (!Array.isArray(payload.input)) return;
     const input = (payload.input as Message[]).map((item) => {
       const user = item?.role === "user";
       if (!user && !TOOL_OUTPUT_TYPES.has(item?.type)) return item;
       const key = user ? "content" : "output";
-      const blocks = toBlocks(item[key], "input_text");
-      const taken = blocks && strip(blocks, user ? undefined : String(item.call_id), "input_text");
+      const blocks = toBlocks(item[key], parts.text);
+      const taken = blocks && strip(blocks, user ? undefined : String(item.call_id));
       if (!taken) return item;
       const files = taken.files.map((file) => ({
-        type: "input_file",
+        type: parts.pdf,
         filename: file.name,
         file_data: dataUrl(file),
       }));
@@ -108,29 +112,30 @@ const RESPONSES: PdfEncoder = {
   },
 };
 
-const anthropicDocument = (file: StoredFile) => ({
-  type: "document",
+const anthropicDocument = (parts: Parts) => (file: StoredFile) => ({
+  type: parts.pdf,
   source: { type: "base64", media_type: "application/pdf", data: file.data },
 });
 
 const ANTHROPIC: PdfEncoder = {
   // pi-ai normalizes only another model's tool call ids; this turn's reach the wire unchanged.
   source: (id) => id,
-  encode(payload, strip) {
+  encode(payload, strip, parts) {
     if (!Array.isArray(payload.messages)) return;
+    const document = anthropicDocument(parts);
     const messages = (payload.messages as Message[]).map((message) => {
-      const blocks = message?.role === "user" && toBlocks(message.content, "text");
+      const blocks = message?.role === "user" && toBlocks(message.content, parts.text);
       if (!blocks) return message;
       // pi-ai merges a step's tool results into one user message of tool_result blocks.
       const withResults = blocks.map((block) => {
-        const inner = block?.type === "tool_result" && toBlocks(block.content, "text");
-        const taken = inner && strip(inner, String(block.tool_use_id), "text");
+        const inner = block?.type === "tool_result" && toBlocks(block.content, parts.text);
+        const taken = inner && strip(inner, String(block.tool_use_id));
         if (!taken) return block;
-        const content = [...taken.blocks, ...taken.files.map(anthropicDocument)];
+        const content = [...taken.blocks, ...taken.files.map(document)];
         return { ...block, content: content.length ? content : "" };
       });
-      const taken = strip(withResults, undefined, "text");
-      const next = taken ? [...taken.blocks, ...taken.files.map(anthropicDocument)] : withResults;
+      const taken = strip(withResults, undefined);
+      const next = taken ? [...taken.blocks, ...taken.files.map(document)] : withResults;
       if (next.length === blocks.length && next.every((block, i) => block === blocks[i])) {
         return message;
       }
@@ -140,11 +145,10 @@ const ANTHROPIC: PdfEncoder = {
   },
 };
 
-const completionsFile = (file: StoredFile) => ({
-  type: "file",
+const completionsFile = (parts: Parts) => (file: StoredFile) => ({
+  type: parts.pdf,
   file: { filename: file.name, file_data: dataUrl(file) },
 });
-const isText = (block: Block) => block?.type === "text";
 /** The caption of pi-ai's user message for tool images, which a tool's PDFs join. */
 const TOOL_IMAGES_CAPTION = "Attached image(s) from tool result:";
 
@@ -157,8 +161,10 @@ const requiresAssistantAfterToolResult = (compat: unknown) =>
 const COMPLETIONS: PdfEncoder = {
   // pi-ai normalizes only another model's tool call ids; this turn's reach the wire unchanged.
   source: (id) => id,
-  encode(payload, strip, compat) {
+  encode(payload, strip, parts, compat) {
     if (!Array.isArray(payload.messages)) return;
+    const file = completionsFile(parts);
+    const isText = (block: Block) => block?.type === parts.text;
     const input = [...(payload.messages as Message[])];
     const bridged = requiresAssistantAfterToolResult(compat);
     const messages: Message[] = [];
@@ -166,22 +172,22 @@ const COMPLETIONS: PdfEncoder = {
     for (let i = 0; i < input.length; i++) {
       const message = input[i]!;
       const tool = message?.role === "tool";
-      const blocks = (tool || message?.role === "user") && toBlocks(message.content, "text");
+      const blocks = (tool || message?.role === "user") && toBlocks(message.content, parts.text);
       const source = tool ? String(message.tool_call_id) : undefined;
-      const taken = blocks && strip(blocks, source, "text");
+      const taken = blocks && strip(blocks, source);
       if (!blocks || !taken) messages.push(message);
       else if (!tool) {
-        const content = [...taken.blocks, ...taken.files.map(completionsFile)];
+        const content = [...taken.blocks, ...taken.files.map(file)];
         messages.push({ ...message, content: keepCacheMark(blocks, content, isText) });
       } else {
-        files.push(...taken.files.map(completionsFile));
+        files.push(...taken.files.map(file));
         const text =
           taken.blocks.map((block) => block.text).join("\n") ||
           (taken.files.length ? "(see attached PDF)" : "(no tool output)");
         const mark = cacheMark(blocks);
         messages.push({
           ...message,
-          content: mark ? [{ type: "text", text, cache_control: mark }] : text,
+          content: mark ? [{ type: parts.text, text, cache_control: mark }] : text,
         });
       }
       if (!tool || !files.length || input[i + 1]?.role === "tool") continue;
@@ -198,7 +204,7 @@ const COMPLETIONS: PdfEncoder = {
       } else {
         // pi-ai marks the last message: a marked tool message hands its mark to the new last one.
         const last = messages.at(-1)!;
-        const lastBlocks = toBlocks(last.content, "text")!;
+        const lastBlocks = toBlocks(last.content, parts.text)!;
         const mark = cacheMark(lastBlocks);
         if (mark) {
           const text = lastBlocks.map((block) => block.text).join("\n");
@@ -207,7 +213,7 @@ const COMPLETIONS: PdfEncoder = {
         if (bridged) {
           messages.push({ role: "assistant", content: "I have processed the tool results." });
         }
-        const caption = { type: "text", text: "Attached PDF(s) from tool result:" };
+        const caption = { type: parts.text, text: "Attached PDF(s) from tool result:" };
         messages.push({
           role: "user",
           content: [mark ? { ...caption, cache_control: mark } : caption, ...files],
@@ -231,24 +237,31 @@ const ENCODERS = {
  * messages and attach them at serialization, to the same user or tool result
  * that supplied them. A new turn starts with an empty set.
  */
-export function createTurnPdfInput(
-  model: { api?: string | null; compat?: unknown },
-  delivery: Pick<FileDelivery, "pdf">,
-): TurnPdfInput {
-  // `delivery` decides whether a PDF goes; the API only picks its wire format.
-  const format = model.api && hasPdfWireFormat(model.api) ? ENCODERS[model.api] : undefined;
-  const encoder: PdfEncoder | undefined = delivery.pdf ? format : undefined;
-  const unsupported = encoder ? undefined : format ? PDF_NOT_SENT.textOnly : PDF_NOT_SENT.format;
+export function createTurnPdfInput(model: {
+  api: string;
+  input?: readonly string[] | null;
+  compat?: unknown;
+}): TurnPdfInput {
+  const delivery = fileDelivery(model);
+  // `pdf` holds only for an API with a PDF wire format.
+  const api = delivery.pdf ? (model.api as PdfWireApi) : undefined;
+  const encoder: PdfEncoder | undefined = api && ENCODERS[api];
+  const parts = api && WIRE_PARTS[api];
+  const unsupported = api
+    ? undefined
+    : delivery.image
+      ? PDF_NOT_SENT.format
+      : PDF_NOT_SENT.textOnly;
   const files: StoredFile[] = [];
   let remainingBytes = RESOURCE_BLOB_MAX_BYTES;
   let warned = false;
 
-  const strip: Strip = (blocks, source, textType) => {
+  const strip: Strip = (blocks, source) => {
     const owned = new Set<StoredFile>();
     let changed = false;
     const kept = blocks.flatMap((block) => {
-      if (block?.type !== textType || typeof block.text !== "string") return [block];
-      if (!block.text.includes("[pdf:")) return [block];
+      if (block?.type !== parts?.text || typeof block.text !== "string") return [block];
+      if (!block.text.includes(REFERENCE_PREFIX)) return [block];
       changed = true;
       let text: string = block.text;
       for (const file of files) {
@@ -278,19 +291,19 @@ export function createTurnPdfInput(
       if (duplicate) return duplicate.receipt;
       if (size > remainingBytes) {
         return {
-          note: "PDF omitted: the turn's inline file size limit was reached. Use an inline run to inspect it.",
+          note: `PDF omitted: the turn's inline file size limit was reached. ${INLINE_RUN_HINT}`,
         };
       }
       remainingBytes -= size;
-      const receipt = { reference: `[pdf:${crypto.randomUUID()}]` };
+      const receipt = { reference: `${REFERENCE_PREFIX}${crypto.randomUUID()}]` };
       files.push({ source, receipt, name: filename, data });
       return receipt;
     },
     extension(pi) {
       pi.on("before_provider_request", ({ payload }) => {
-        if (!encoder || !files.length || !payload || typeof payload !== "object") return;
+        if (!encoder || !parts || !files.length || !payload || typeof payload !== "object") return;
         try {
-          return encoder.encode(payload as Message, strip, model.compat);
+          return encoder.encode(payload as Message, strip, parts, model.compat);
         } catch (error) {
           // Pi would send the payload unchanged on a throw: never a reference as text.
           if (!warned) {

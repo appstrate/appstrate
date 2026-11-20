@@ -245,7 +245,7 @@ export function runPiChat(input: PiChatInput): Response {
     // Every call records the space it was dispatched in, for the cards that show it later.
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
-  // Replays a request refused with a file once without it; the failed attempt is then forgotten.
+  // Replays a request refused with a file without it, up to twice; the failed attempt is forgotten.
   const fileRefusal = createFileRefusal(model.api, () => mapper.clearFailure());
 
   const stream = createUIMessageStream({
@@ -353,7 +353,7 @@ export function runPiChat(input: PiChatInput): Response {
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
         const delivery = fileDelivery(model);
-        const pdfInput = createTurnPdfInput(model, delivery);
+        const pdfInput = createTurnPdfInput(model);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({

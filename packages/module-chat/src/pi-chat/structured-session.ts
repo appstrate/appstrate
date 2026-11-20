@@ -33,8 +33,6 @@ export interface PiHistoryModel {
 /** Estimate the tokens one Pi message occupies — Pi's own exported heuristic. */
 type EstimateTokens = (message: Message) => number;
 
-const NO_FILE_DELIVERY: FileDelivery = { image: false, pdf: false };
-
 export interface BuildStructuredPiTurnOptions {
   estimateTokens: EstimateTokens;
   /**
@@ -51,8 +49,8 @@ export interface BuildStructuredPiTurnOptions {
    */
   images?: AttachmentImages;
   pdfReceipts?: ReadonlyMap<string, string>;
-  /** What this turn sends the model, for the wording of the pointer lines. Omitted = no file. */
-  fileDelivery?: FileDelivery;
+  /** What this turn sends the model, for the wording of the pointer lines. */
+  fileDelivery: FileDelivery;
 }
 
 interface StructuredPiTurn {
@@ -309,13 +307,7 @@ function assistantMessages(
 export function buildStructuredPiTurn(
   input: UIMessage[],
   model: PiHistoryModel,
-  {
-    estimateTokens,
-    baseTokens,
-    images,
-    fileDelivery = NO_FILE_DELIVERY,
-    pdfReceipts,
-  }: BuildStructuredPiTurnOptions,
+  { estimateTokens, baseTokens, images, fileDelivery, pdfReceipts }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
   const sentImages: AttachmentImages = images ?? new Map();
   const messages = messagesWithAttachmentsAsText(input, {

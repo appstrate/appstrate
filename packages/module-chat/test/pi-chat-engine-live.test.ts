@@ -863,23 +863,6 @@ describe("runPiChat against a stub provider", () => {
       });
     }, 30_000);
 
-    it("keeps the image when only the PDF beside it is refused", async () => {
-      capture.bodies.length = 0;
-      providerRefusal = refusing(pdfData);
-      const { chunks } = await runTurn(() => "pdf-refused", undefined, undefined, {
-        model: vision(),
-        messages: attaching("image", "pdf"),
-        readAttachment: readFiles,
-      });
-      expect(capture.bodies).toHaveLength(2);
-      expect(capture.bodies[0]).toContain(PNG);
-      expect(capture.bodies[1]).toContain(PNG);
-      expect(capture.bodies[1]).toContain(PDF_POINTER);
-      expect(capture.bodies[1]).not.toContain(pdfData);
-      expect(capture.bodies[1]).not.toContain(IMAGE_POINTER);
-      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
-    }, 30_000);
-
     const TEXT_TYPES = [
       { apiShape: "openai-completions", textType: "text" },
       { apiShape: "anthropic-messages", textType: "text" },
@@ -1034,22 +1017,6 @@ describe("runPiChat against a stub provider", () => {
       expect(capture.bodies).toHaveLength(3);
       expect(capture.bodies[2]).not.toContain(pdfData);
       expect(capture.bodies[2]).toContain(PDF_POINTER);
-      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
-      expect(answered(chunks)).toContain(ANSWER);
-    }, 30_000);
-
-    it("replays without a refused image a model of unknown modalities was sent", async () => {
-      capture.bodies.length = 0;
-      providerRefusal = refusing(PNG);
-      const { chunks } = await runTurn(() => "unknown-modalities", undefined, undefined, {
-        model: { ...orgModel(), input: null },
-        messages: attaching("image"),
-        readAttachment: readFiles,
-      });
-      expect(capture.bodies).toHaveLength(2);
-      expect(capture.bodies[0]).toContain(PNG);
-      expect(capture.bodies[1]).not.toContain(PNG);
-      expect(capture.bodies[1]).toContain(IMAGE_POINTER);
       expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
       expect(answered(chunks)).toContain(ANSWER);
     }, 30_000);

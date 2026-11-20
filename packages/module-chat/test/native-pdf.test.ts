@@ -25,7 +25,7 @@ function serialize(turn: TurnPdfInput, key: string, items: unknown[]) {
 const transform = (turn: TurnPdfInput, input: unknown[]) => serialize(turn, "input", input);
 
 interface TestModel {
-  api: string | null;
+  api: string;
   input: string[] | null;
   compat?: unknown;
 }
@@ -33,7 +33,7 @@ interface TestModel {
 /** The turn the engine builds for a model. */
 const turnFor = (model: TestModel) => {
   const delivery = fileDelivery(model);
-  const turn = createTurnPdfInput(model, delivery);
+  const turn = createTurnPdfInput(model);
   expect(turn.unsupported === undefined).toBe(delivery.pdf);
   return turn;
 };
@@ -146,14 +146,6 @@ it("reports a PDF the turn does not deliver, with its cause, without exposing it
     expect(note).not.toContain(pdf.data);
     const input = [{ role: "user", content: note }];
     expect(transform(turn, input)).toEqual(input);
-  }
-});
-
-it("treats a PDF the rule lets through on an API without an encoder as unsupported", () => {
-  for (const api of [null, "mistral-conversations"]) {
-    const turn = createTurnPdfInput({ api }, { pdf: true });
-    expect(turn.unsupported).toContain("has no PDF input format");
-    expect(noteOf(turn.add(pdf))).toContain("has no PDF input format");
   }
 });
 

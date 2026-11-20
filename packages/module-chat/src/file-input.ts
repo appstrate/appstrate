@@ -6,20 +6,41 @@
  * impossible; otherwise send, and the provider decides. A field that is not known never blocks.
  */
 
+/** What a model of unknown modalities (an alias, a custom model) is sent: images included. */
+export const UNKNOWN_INPUT_MODALITIES = ["text", "image"] as const;
+
+export interface WireParts {
+  text: string;
+  image: string;
+  /** Absent: the chat has no PDF wire format for this API. */
+  pdf?: string;
+}
+
 /**
- * API shapes the chat has a PDF wire format for, each encoded in `pi-chat/native-pdf.ts`.
- * Mistral's conversations API takes documents only by hosted URL, so it has none.
+ * The content part types each API's payload carries: pi-ai's converters write the text and the
+ * images, `pi-chat/native-pdf.ts` the PDFs. Mistral's conversations API takes documents only by
+ * hosted URL, so it has no PDF. An API missing here is sent no PDF, and none of its parts is
+ * recognised as a file.
  */
-const PDF_WIRE_APIS = [
-  "openai-responses",
-  "openai-codex-responses",
-  "anthropic-messages",
-  "openai-completions",
-] as const;
-export type PdfWireApi = (typeof PDF_WIRE_APIS)[number];
+export const WIRE_PARTS = {
+  "openai-responses": { text: "input_text", image: "input_image", pdf: "input_file" },
+  "openai-codex-responses": { text: "input_text", image: "input_image", pdf: "input_file" },
+  "anthropic-messages": { text: "text", image: "image", pdf: "document" },
+  "openai-completions": { text: "text", image: "image_url", pdf: "file" },
+  "mistral-conversations": { text: "text", image: "image_url" },
+} as const satisfies Record<string, WireParts>;
+
+type WireApi = keyof typeof WIRE_PARTS;
+export type PdfWireApi = {
+  [K in WireApi]: (typeof WIRE_PARTS)[K] extends { pdf: string } ? K : never;
+}[WireApi];
+
+export function wireParts(api: string | null | undefined): WireParts | undefined {
+  return api && Object.hasOwn(WIRE_PARTS, api) ? WIRE_PARTS[api as WireApi] : undefined;
+}
 
 export function hasPdfWireFormat(api: string): api is PdfWireApi {
-  return (PDF_WIRE_APIS as readonly string[]).includes(api);
+  return wireParts(api)?.pdf !== undefined;
 }
 
 /** What one turn sends the model, computed once per turn. */
@@ -34,7 +55,7 @@ export function fileDelivery(model: {
   /** `null`/`undefined`: the modalities are not known (an alias, a custom model). */
   input?: readonly string[] | null;
 }): FileDelivery {
-  const image = model.input?.includes("image") ?? true;
+  const image = (model.input ?? UNKNOWN_INPUT_MODALITIES).includes("image");
   // Providers read a PDF's pages as images, so a model declared text-only reads no PDF either.
   return { image, pdf: image && (model.api ? hasPdfWireFormat(model.api) : true) };
 }

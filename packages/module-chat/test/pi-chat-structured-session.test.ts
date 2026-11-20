@@ -11,7 +11,11 @@ import {
 } from "../src/pi-chat/structured-session.ts";
 
 const { estimateTokens } = await loadPiCodingAgentSdk();
-const OPTIONS: BuildStructuredPiTurnOptions = { estimateTokens, baseTokens: 0 };
+const OPTIONS: BuildStructuredPiTurnOptions = {
+  estimateTokens,
+  baseTokens: 0,
+  fileDelivery: { image: false, pdf: false },
+};
 
 const MODEL: PiHistoryModel = {
   api: "openai-completions" as Api,

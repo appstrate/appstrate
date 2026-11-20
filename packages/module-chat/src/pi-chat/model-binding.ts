@@ -26,6 +26,7 @@ import {
 import type { ModelInputModality } from "@appstrate/core/module";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
+import { UNKNOWN_INPUT_MODALITIES } from "../file-input.ts";
 
 /**
  * Unknown modalities are not a refusal (`fileDelivery`): Pi drops every image of a text-only
@@ -34,7 +35,7 @@ import type { OrgModel } from "../llm.ts";
 function chatInputModalities(
   input: readonly ModelInputModality[] | null | undefined,
 ): readonly ModelInputModality[] {
-  return input ?? ["text", "image"];
+  return input ?? UNKNOWN_INPUT_MODALITIES;
 }
 
 interface PiChatModelBindingBase {

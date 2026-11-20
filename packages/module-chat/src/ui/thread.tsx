@@ -308,9 +308,9 @@ function ComposerAttachmentChip() {
   );
   const notice =
     file && isImageMime(file.type) && !sendsImages
-      ? t("composer.imageNotSeen")
+      ? t("composer.imageNotSent")
       : file?.type === "application/pdf" && !sendsPdf
-        ? t("composer.pdfNotRead")
+        ? t("composer.pdfNotSent")
         : undefined;
   const preview =
     openFile && file && localPreviewKind(file.type)

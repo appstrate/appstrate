@@ -94,7 +94,7 @@ test("sends image pixels and the PDF to the configured provider and reloads the 
         { name: "draft.png", mimeType: "image/png", buffer: png },
         { name: "draft.pdf", mimeType: "application/pdf", buffer: pdf },
       ]);
-      await expect(page.getByText("Ce modèle ne peut pas voir l’image.")).toBeVisible();
+      await expect(page.getByText("Image non envoyée à ce modèle.")).toBeVisible();
       await expect(page.getByText("PDF non envoyé à ce modèle.")).toBeVisible();
     },
   );
