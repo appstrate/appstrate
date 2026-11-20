@@ -28,7 +28,12 @@ import {
   memberContext,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../../test/helpers/seed.ts";
+import {
+  seedApiKey,
+  seedInvitation,
+  seedSpace,
+  seedSpaceMember,
+} from "../../../../../../test/helpers/seed.ts";
 import { deleteSpace, ensurePersonalSpaceFor } from "../../../../../services/spaces.ts";
 import { MCP_ACCEPT } from "../../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../../test/helpers/platform-app.ts";
@@ -561,60 +566,182 @@ describe("MCP access grants", () => {
   // resource. The platform therefore deletes the tokens it ends: none of these
   // replays may cost the client its grants elsewhere.
   describe("ending access spares the client's other grants", () => {
+    /** Other orgs' MCP resources a test registered, removed after it. */
+    let otherResources: string[] = [];
+    afterEach(async () => {
+      for (const resource of otherResources) {
+        await db.delete(oauthResource).where(like(oauthResource.identifier, `${resource}%`));
+      }
+      otherResources = [];
+    });
+
     async function expectInvalidGrant(res: Response): Promise<void> {
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error?: string }).error).toBe("invalid_grant");
     }
 
-    it("a member removed from one org keeps the same client's grant on another", async () => {
-      const member = await memberContext(ctx, "member");
-      const { org: other } = await createTestOrg(member.user.id, { name: "Beta" });
-      await mcpModule.events!.onOrgCreate!(other.id, member.user.email);
+    async function expectRefreshWorks(
+      clientId: string,
+      refreshToken: string,
+      resource: string,
+      mcpPath: string,
+    ): Promise<void> {
+      const res = await refresh(clientId, refreshToken, resource);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { access_token: string };
+      expect((await mcpInitialize(mcpPath, body.access_token)).status).toBe(200);
+    }
+
+    /** One client authorized by `cookie`'s user on this org and on a second one, B. */
+    async function twoOrgGrants(cookie: string, userEmail: string, userId: string) {
+      const { org: other } = await createTestOrg(userId, { name: "Beta" });
+      await mcpModule.events!.onOrgCreate!(other.id, userEmail);
       const otherResource = getMcpOrgResourceUri(other.id);
-      try {
-        const clientId = await registerClient();
-        const onA = await connect(member.cookie, clientId);
-        const onB = await connect(member.cookie, clientId, otherResource);
-        // Rotate A once: Better Auth keeps the rotated-out row, marked revoked.
-        const rotated = await refresh(clientId, String(onA.token.refresh_token), orgResource);
-        expect(rotated.status).toBe(200);
-        const currentA = ((await rotated.json()) as { refresh_token: string }).refresh_token;
+      otherResources.push(otherResource);
+      const otherPath = `/api/mcp/o/${other.id}`;
+      const clientId = await registerClient();
+      const onA = await connect(cookie, clientId);
+      const onB = await connect(cookie, clientId, otherResource);
+      return { other, otherResource, otherPath, clientId, onA, onB };
+    }
 
-        const removed = await app.request(`/api/orgs/${ctx.orgId}/members/${member.user.id}`, {
-          method: "DELETE",
-          headers: { Cookie: ctx.cookie },
+    /**
+     * A member of this org (A), holding a space of it, and of B, with one
+     * client authorized on A, on the space and on B, and A's chain rotated
+     * once (Better Auth keeps the rotated-out row, marked revoked).
+     */
+    async function memberWithGrantsOnTwoOrgs() {
+      const member = await memberContext(ctx, "member");
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Ops", visibility: "closed" });
+      await seedSpaceMember({ spaceId: space.id, userId: member.user.id, presetRole: "admin" });
+      const spaceResource = getMcpSpaceResourceUri(ctx.orgId, space.id);
+      const spacePath = `${orgPath}/s/${space.id}`;
+      const grants = await twoOrgGrants(member.cookie, member.user.email, member.user.id);
+      const onSpace = await connect(member.cookie, grants.clientId, spaceResource);
+      expect((await mcpInitialize(spacePath, String(onSpace.token.access_token))).status).toBe(200);
+      const rotated = await refresh(
+        grants.clientId,
+        String(grants.onA.token.refresh_token),
+        orgResource,
+      );
+      expect(rotated.status).toBe(200);
+      const currentA = ((await rotated.json()) as { refresh_token: string }).refresh_token;
+      return { member, spaceResource, spacePath, onSpace, currentA, ...grants };
+    }
+
+    type ExitedMember = Awaited<ReturnType<typeof memberWithGrantsOnTwoOrgs>>;
+
+    /** Nothing of A works any more, its space included, and B still does. */
+    async function expectOnlyBSurvives(m: ExitedMember): Promise<void> {
+      await expectInvalidGrant(await refresh(m.clientId, m.currentA, orgResource));
+      await expectInvalidGrant(
+        await refresh(m.clientId, String(m.onA.token.refresh_token), orgResource),
+      );
+      await expectInvalidGrant(
+        await refresh(m.clientId, String(m.onSpace.token.refresh_token), m.spaceResource),
+      );
+      expect((await mcpInitialize(orgPath, String(m.onA.token.access_token))).status).toBe(401);
+      expect((await mcpInitialize(m.spacePath, String(m.onSpace.token.access_token))).status).toBe(
+        401,
+      );
+      await expectRefreshWorks(
+        m.clientId,
+        String(m.onB.token.refresh_token),
+        m.otherResource,
+        m.otherPath,
+      );
+    }
+
+    function removeMember(userId: string) {
+      return app.request(`/api/orgs/${ctx.orgId}/members/${userId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+    }
+
+    it("a member removed from one org keeps the same client's grant on another", async () => {
+      const m = await memberWithGrantsOnTwoOrgs();
+      expect((await removeMember(m.member.user.id)).status).toBe(204);
+      await expectOnlyBSurvives(m);
+    });
+
+    it("a member leaving one org keeps the same client's grant on another", async () => {
+      const m = await memberWithGrantsOnTwoOrgs();
+      const left = await app.request(`/api/orgs/${ctx.orgId}/leave`, {
+        method: "POST",
+        headers: { Cookie: m.member.cookie },
+      });
+      expect(left.status).toBe(204);
+      await expectOnlyBSurvives(m);
+    });
+
+    it("a member re-invited after removal gets none of the old tokens back", async () => {
+      const m = await memberWithGrantsOnTwoOrgs();
+      expect((await removeMember(m.member.user.id)).status).toBe(204);
+      const invitation = await seedInvitation({
+        orgId: ctx.orgId,
+        email: m.member.user.email,
+        invitedBy: ctx.user.id,
+      });
+      const accepted = await app.request(`/invite/${invitation.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: m.member.cookie },
+      });
+      expect(accepted.status).toBe(200);
+
+      // Membership is back: the old tokens stay refused by themselves.
+      await expectInvalidGrant(await refresh(m.clientId, m.currentA, orgResource));
+      await expectInvalidGrant(
+        await refresh(m.clientId, String(m.onA.token.refresh_token), orgResource),
+      );
+      expect((await mcpInitialize(orgPath, String(m.onA.token.access_token))).status).toBe(401);
+
+      // A JWT's `iat` has one-second resolution: start past the exit's second.
+      await Bun.sleep(1000 - (Date.now() % 1000) + 10);
+      const again = await connect(m.member.cookie, m.clientId);
+      expect(again.consentShown).toBe(true);
+      expect((await mcpInitialize(orgPath, String(again.token.access_token))).status).toBe(200);
+      await expectRefreshWorks(
+        m.clientId,
+        String(m.onB.token.refresh_token),
+        m.otherResource,
+        m.otherPath,
+      );
+    });
+
+    // RFC 7009 revocation by the client itself: Better Auth marks the row
+    // revoked, and the same token presented again would tear down the family.
+    it("a refresh token the client revoked, presented again, costs it no other grant", async () => {
+      const { otherResource, otherPath, clientId, onA, onB } = await twoOrgGrants(
+        ctx.cookie,
+        ctx.user.email,
+        ctx.user.id,
+      );
+      const tokenA = String(onA.token.refresh_token);
+      const revoke = () =>
+        app.request("/api/auth/oauth2/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            token: tokenA,
+            token_type_hint: "refresh_token",
+            client_id: clientId,
+          }).toString(),
         });
-        expect(removed.status).toBe(204);
-
-        await expectInvalidGrant(await refresh(clientId, currentA, orgResource));
-        await expectInvalidGrant(
-          await refresh(clientId, String(onA.token.refresh_token), orgResource),
-        );
-        const onBAgain = await refresh(clientId, String(onB.token.refresh_token), otherResource);
-        expect(onBAgain.status).toBe(200);
-        const renewed = (await onBAgain.json()) as { access_token: string };
-        expect((await mcpInitialize(`/api/mcp/o/${other.id}`, renewed.access_token)).status).toBe(
-          200,
-        );
-      } finally {
-        await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
-      }
+      expect((await revoke()).status).toBe(200);
+      // Gone, not marked: the repeat is a plain refusal (the provider answers
+      // 400 where RFC 7009 §2.2 says 200), never a family teardown.
+      const repeat = await revoke();
+      expect(repeat.status).toBe(400);
+      expect(((await repeat.json()) as { error?: string }).error).toBe("invalid_request");
+      await expectInvalidGrant(await refresh(clientId, tokenA, orgResource));
+      await expectRefreshWorks(clientId, String(onB.token.refresh_token), otherResource, otherPath);
     });
 
     // MCP clients present one refresh token twice (anthropics/claude-ai-mcp#1194).
     // Within `refreshTokenReuseInterval`, the second presentation is a replay of
     // the first rotation's response, never a theft: no grant elsewhere is lost.
     describe("a refresh token presented twice within the reuse window", () => {
-      async function twoOrgGrants(cookie: string, userEmail: string, userId: string) {
-        const { org: other } = await createTestOrg(userId, { name: "Beta" });
-        await mcpModule.events!.onOrgCreate!(other.id, userEmail);
-        const otherResource = getMcpOrgResourceUri(other.id);
-        const clientId = await registerClient();
-        const onA = await connect(cookie, clientId);
-        const onB = await connect(cookie, clientId, otherResource);
-        return { other, otherResource, clientId, onA, onB };
-      }
-
       async function refreshRowCount(clientId: string): Promise<number> {
         const rows = await db
           .select({ id: oauthRefreshToken.id })
@@ -623,54 +750,61 @@ describe("MCP access grants", () => {
         return rows.length;
       }
 
-      async function expectRefreshWorks(
-        clientId: string,
-        refreshToken: string,
-        resource: string,
-        mcpPath: string,
-      ): Promise<void> {
-        const res = await refresh(clientId, refreshToken, resource);
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { access_token: string };
-        expect((await mcpInitialize(mcpPath, body.access_token)).status).toBe(200);
-      }
-
       it("answers the second with the first's tokens and keeps the client's other grants", async () => {
         const { other, otherResource, clientId, onA, onB } = await twoOrgGrants(
           ctx.cookie,
           ctx.user.email,
           ctx.user.id,
         );
-        try {
-          const original = String(onA.token.refresh_token);
-          const first = await refresh(clientId, original, orgResource);
-          expect(first.status).toBe(200);
-          const firstBody = (await first.json()) as { access_token: string; refresh_token: string };
-          const rowsAfterRotation = await refreshRowCount(clientId);
+        const original = String(onA.token.refresh_token);
+        const first = await refresh(clientId, original, orgResource);
+        expect(first.status).toBe(200);
+        const firstBody = (await first.json()) as { access_token: string; refresh_token: string };
+        const rowsAfterRotation = await refreshRowCount(clientId);
 
-          const second = await refresh(clientId, original, orgResource);
-          expect(second.status).toBe(200);
-          const secondBody = (await second.json()) as {
-            access_token: string;
-            refresh_token: string;
-          };
-          // A replay of the stored response: nothing new is minted or stored.
-          expect(secondBody.access_token).toBe(firstBody.access_token);
-          expect(secondBody.refresh_token).toBe(firstBody.refresh_token);
-          expect(await refreshRowCount(clientId)).toBe(rowsAfterRotation);
-          expect((await mcpInitialize(orgPath, secondBody.access_token)).status).toBe(200);
+        const second = await refresh(clientId, original, orgResource);
+        expect(second.status).toBe(200);
+        const secondBody = (await second.json()) as {
+          access_token: string;
+          refresh_token: string;
+        };
+        // A replay of the stored response: nothing new is minted or stored.
+        expect(secondBody.access_token).toBe(firstBody.access_token);
+        expect(secondBody.refresh_token).toBe(firstBody.refresh_token);
+        expect(await refreshRowCount(clientId)).toBe(rowsAfterRotation);
+        expect((await mcpInitialize(orgPath, secondBody.access_token)).status).toBe(200);
 
-          // The chain goes on from the rotated token, and B never noticed.
-          await expectRefreshWorks(clientId, secondBody.refresh_token, orgResource, orgPath);
-          await expectRefreshWorks(
-            clientId,
-            String(onB.token.refresh_token),
-            otherResource,
-            `/api/mcp/o/${other.id}`,
-          );
-        } finally {
-          await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
-        }
+        // The chain goes on from the rotated token, and B never noticed.
+        await expectRefreshWorks(clientId, secondBody.refresh_token, orgResource, orgPath);
+        await expectRefreshWorks(
+          clientId,
+          String(onB.token.refresh_token),
+          otherResource,
+          `/api/mcp/o/${other.id}`,
+        );
+      });
+
+      it("survives two refreshes of one token fired together, and keeps the client's other grants", async () => {
+        const { otherResource, otherPath, clientId, onA, onB } = await twoOrgGrants(
+          ctx.cookie,
+          ctx.user.email,
+          ctx.user.id,
+        );
+        const original = String(onA.token.refresh_token);
+        const both = await Promise.all([
+          refresh(clientId, original, orgResource),
+          refresh(clientId, original, orgResource),
+        ]);
+        const statuses = both.map((res) => res.status);
+        // Which one wins is the provider's: neither may fail, nor end the family.
+        expect(statuses).toContain(200);
+        for (const status of statuses) expect(status).toBeLessThan(500);
+        await expectRefreshWorks(
+          clientId,
+          String(onB.token.refresh_token),
+          otherResource,
+          otherPath,
+        );
       });
 
       it("refuses a second presentation asking for other scopes, and keeps every grant", async () => {
@@ -679,36 +813,32 @@ describe("MCP access grants", () => {
           ctx.user.email,
           ctx.user.id,
         );
-        try {
-          const original = String(onA.token.refresh_token);
-          const first = await refresh(clientId, original, orgResource);
-          expect(first.status).toBe(200);
-          const current = ((await first.json()) as { refresh_token: string }).refresh_token;
+        const original = String(onA.token.refresh_token);
+        const first = await refresh(clientId, original, orgResource);
+        expect(first.status).toBe(200);
+        const current = ((await first.json()) as { refresh_token: string }).refresh_token;
 
-          // Not the request the stored response answered: a plain refusal.
-          const narrower = await app.request("/api/auth/oauth2/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              grant_type: "refresh_token",
-              refresh_token: original,
-              client_id: clientId,
-              resource: orgResource,
-              scope: "openid mcp:read",
-            }).toString(),
-          });
-          await expectInvalidGrant(narrower);
+        // Not the request the stored response answered: a plain refusal.
+        const narrower = await app.request("/api/auth/oauth2/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: original,
+            client_id: clientId,
+            resource: orgResource,
+            scope: "openid mcp:read",
+          }).toString(),
+        });
+        await expectInvalidGrant(narrower);
 
-          await expectRefreshWorks(clientId, current, orgResource, orgPath);
-          await expectRefreshWorks(
-            clientId,
-            String(onB.token.refresh_token),
-            otherResource,
-            `/api/mcp/o/${other.id}`,
-          );
-        } finally {
-          await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
-        }
+        await expectRefreshWorks(clientId, current, orgResource, orgPath);
+        await expectRefreshWorks(
+          clientId,
+          String(onB.token.refresh_token),
+          otherResource,
+          `/api/mcp/o/${other.id}`,
+        );
       });
 
       it("refuses it once the grant was revoked, and keeps the client's other grants", async () => {
@@ -717,40 +847,36 @@ describe("MCP access grants", () => {
           ctx.user.email,
           ctx.user.id,
         );
-        try {
-          const original = String(onA.token.refresh_token);
-          const first = await refresh(clientId, original, orgResource);
-          expect(first.status).toBe(200);
-          const rotatedAccess = ((await first.json()) as { access_token: string }).access_token;
-          const grantA = (await myGrants(ctx.cookie)).find(
-            (g) => g.kind === "mcp" && g.target?.orgId === ctx.orgId,
-          );
-          expect((await revokeMine(ctx.cookie, grantA!.id)).status).toBe(200);
+        const original = String(onA.token.refresh_token);
+        const first = await refresh(clientId, original, orgResource);
+        expect(first.status).toBe(200);
+        const rotatedAccess = ((await first.json()) as { access_token: string }).access_token;
+        const grantA = (await myGrants(ctx.cookie)).find(
+          (g) => g.kind === "mcp" && g.target?.orgId === ctx.orgId,
+        );
+        expect((await revokeMine(ctx.cookie, grantA!.id)).status).toBe(200);
 
-          // The rotated-out row is gone with the grant: no stored response to replay.
-          const replay = await refresh(clientId, original, orgResource);
-          expect(replay.status).toBe(400);
-          const body = (await replay.json()) as Record<string, unknown>;
-          expect(body.error).toBe("invalid_grant");
-          expect(body).not.toHaveProperty("access_token");
-          // What the first rotation minted is refused too.
-          expect((await mcpInitialize(orgPath, rotatedAccess)).status).toBe(401);
-          // Nothing of A came back.
-          const remaining = await db
-            .select({ resources: oauthRefreshToken.resources })
-            .from(oauthRefreshToken)
-            .where(eq(oauthRefreshToken.clientId, clientId));
-          expect(remaining.flatMap((r) => r.resources ?? [])).not.toContain(orgResource);
+        // The rotated-out row is gone with the grant: no stored response to replay.
+        const replay = await refresh(clientId, original, orgResource);
+        expect(replay.status).toBe(400);
+        const body = (await replay.json()) as Record<string, unknown>;
+        expect(body.error).toBe("invalid_grant");
+        expect(body).not.toHaveProperty("access_token");
+        // What the first rotation minted is refused too.
+        expect((await mcpInitialize(orgPath, rotatedAccess)).status).toBe(401);
+        // Nothing of A came back.
+        const remaining = await db
+          .select({ resources: oauthRefreshToken.resources })
+          .from(oauthRefreshToken)
+          .where(eq(oauthRefreshToken.clientId, clientId));
+        expect(remaining.flatMap((r) => r.resources ?? [])).not.toContain(orgResource);
 
-          await expectRefreshWorks(
-            clientId,
-            String(onB.token.refresh_token),
-            otherResource,
-            `/api/mcp/o/${other.id}`,
-          );
-        } finally {
-          await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
-        }
+        await expectRefreshWorks(
+          clientId,
+          String(onB.token.refresh_token),
+          otherResource,
+          `/api/mcp/o/${other.id}`,
+        );
       });
 
       it("refuses it on the revoked endpoint of an authorization covering two", async () => {
@@ -786,9 +912,10 @@ describe("MCP access grants", () => {
       });
     });
 
-    it("a password change refuses an old refresh token and keeps the grant made after it", async () => {
+    it("a password change refuses the old tokens and keeps the grant made after it", async () => {
       const clientId = await registerClient();
       const before = await connect(ctx.cookie, clientId);
+      expect((await mcpInitialize(orgPath, String(before.token.access_token))).status).toBe(200);
       const rotated = await refresh(clientId, String(before.token.refresh_token), orgResource);
       expect(rotated.status).toBe(200);
       const old = ((await rotated.json()) as { refresh_token: string }).refresh_token;
@@ -803,8 +930,14 @@ describe("MCP access grants", () => {
       });
       expect(changed.status).toBe(200);
 
-      // Another device of the same client signs in again after the change.
+      // The access token issued before the change is refused from its next request.
+      expect((await mcpInitialize(orgPath, String(before.token.access_token))).status).toBe(401);
+
+      // Another device of the same client signs in again after the change
+      // (past the change's second: a JWT's `iat` has one-second resolution).
+      await Bun.sleep(1000 - (Date.now() % 1000) + 10);
       const after = await connect(ctx.cookie, clientId);
+      expect((await mcpInitialize(orgPath, String(after.token.access_token))).status).toBe(200);
       await expectInvalidGrant(await refresh(clientId, old, orgResource));
       await expectInvalidGrant(
         await refresh(clientId, String(before.token.refresh_token), orgResource),

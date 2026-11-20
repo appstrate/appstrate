@@ -2243,6 +2243,7 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "POST /api/auth/oauth2/token": "application/json",
   "GET /api/auth/oauth2/userinfo": "application/json",
   "POST /api/auth/oauth2/introspect": "application/json",
+  "POST /api/auth/oauth2/revoke": "application/json",
   "POST /api/auth/device/code": "application/json",
   "POST /api/auth/cli/token": "application/json",
   "POST /api/auth/cli/revoke": "application/json",

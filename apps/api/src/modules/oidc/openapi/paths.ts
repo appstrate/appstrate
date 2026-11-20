@@ -627,7 +627,12 @@ export const oidcPaths = {
         },
       },
       responses: {
-        "200": { description: "Revocation succeeded (even on unknown token, per RFC 7009)." },
+        "200": { description: "Revocation succeeded." },
+        "400": {
+          description:
+            "The token is unknown or already revoked (`invalid_request`). RFC 7009 §2.2 answers 200 there; the provider answers 400.",
+          content: oauthError,
+        },
       },
     },
   },

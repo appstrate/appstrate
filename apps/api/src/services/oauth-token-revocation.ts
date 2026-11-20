@@ -89,6 +89,18 @@ async function raiseWatermarks(tx: Tx, grants: McpGrantKey[]): Promise<void> {
 }
 
 /**
+ * Refuse every MCP access token `userId` holds, from its next request: raise
+ * the watermark of each of the user's grants, leaving tokens, consents and the
+ * grants themselves to the caller. Tokens issued after it are accepted.
+ */
+export async function raiseMcpWatermarksOfUser(executor: DbOrTx, userId: string): Promise<void> {
+  await executor
+    .update(oauthGrantState)
+    .set({ tokensValidAfter: new Date() })
+    .where(eq(oauthGrantState.userId, userId));
+}
+
+/**
  * End MCP grants: withdraw each one's resource from its tokens and from the
  * user's consent to the client (reconnecting shows the consent screen again),
  * and raise its watermark so an access token already issued is refused on its

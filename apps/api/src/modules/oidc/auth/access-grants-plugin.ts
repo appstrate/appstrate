@@ -15,12 +15,16 @@
  *
  * It also hooks `/oauth2/token`, where an MCP grant's tokens are issued: each
  * issuance is recorded, and one whose authorization a revocation has ended
- * since is refused (`admitMcpTokenIssuance`).
+ * since is refused (`admitMcpTokenIssuance`). And `/oauth2/revoke`, where the
+ * refresh token a client revoked is deleted (`deleteRevokedRefreshToken`).
  */
 
 import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { APIError } from "better-auth/api";
 import * as z from "zod";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { oauthRefreshToken } from "@appstrate/db/schema";
 import { listResponse } from "@appstrate/core/list-query";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
 import { logger } from "../../../lib/logger.ts";
@@ -33,6 +37,7 @@ import {
 import {
   admitMcpTokenIssuance,
   authorizationCodeIssuedAt,
+  hashOAuthToken,
   type McpGrant,
 } from "../services/mcp-grants.ts";
 import { verifyEndUserAccessToken } from "../services/enduser-token.ts";
@@ -128,12 +133,39 @@ async function admitIssuedTokens(ctx: TokenHookCtx): Promise<void> {
   }
 }
 
+const isRevokeEndpoint = (ctx: { path?: string }) => ctx.path === "/oauth2/revoke";
+
+/**
+ * Delete the refresh token a client just revoked. Better Auth only marks it
+ * `revoked`, and a marked token presented again (a retried revoke, a refresh
+ * in flight) is read as stolen: every refresh token of the (client, user) pair
+ * is deleted, on every endpoint and org. Deleted, a repeat is a plain
+ * not-found. Runs only after Better Auth authenticated the client and revoked
+ * the row (a row it did not mark, another client's, is left alone); two
+ * revokes racing inside Better Auth's own mark remain upstream's.
+ */
+async function deleteRevokedRefreshToken(ctx: TokenHookCtx): Promise<void> {
+  if ((ctx.context as { returned?: unknown }).returned instanceof Error) return;
+  const token = (ctx.body as { token?: unknown } | undefined)?.token;
+  if (typeof token !== "string" || token.length === 0) return;
+  // No refresh-token prefix or encryption is configured (`auth/plugins.ts`):
+  // the stored value is the digest of the presented token.
+  await db
+    .delete(oauthRefreshToken)
+    .where(
+      and(eq(oauthRefreshToken.token, hashOAuthToken(token)), isNotNull(oauthRefreshToken.revoked)),
+    );
+}
+
 export function accessGrantsPlugin() {
   return {
     id: "appstrate-access-grants",
     hooks: {
       before: [{ matcher: isTokenEndpoint, handler: createAuthMiddleware(captureAuthorizedAt) }],
-      after: [{ matcher: isTokenEndpoint, handler: createAuthMiddleware(admitIssuedTokens) }],
+      after: [
+        { matcher: isTokenEndpoint, handler: createAuthMiddleware(admitIssuedTokens) },
+        { matcher: isRevokeEndpoint, handler: createAuthMiddleware(deleteRevokedRefreshToken) },
+      ],
     },
     endpoints: {
       listAccessGrants: createAuthEndpoint(
