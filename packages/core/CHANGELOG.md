@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Later turns on the branch start from it instead of summarizing the whole history again.
   Optional and additive: a turn that summarized nothing carries none.
 
+### Changed
+
+- **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
+  (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room
+  for a reply plus the summary trigger, not the model's max output. A 1M window with a 384k
+  `maxTokens` now summarizes at 936k instead of 616k; reserves already below 64k are unchanged.
+
 ## [17.0.0] — 2026-11-19
 
 ### Added

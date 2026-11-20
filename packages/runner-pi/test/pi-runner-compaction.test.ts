@@ -26,6 +26,12 @@ describe("derivePiCompactionSettings — reserveTokens", () => {
     expect(result.compaction.reserveTokens).toBe(64_000);
   });
 
+  it("caps the reserve at 64k on a large window (1M / 384k max output)", () => {
+    const result = derivePiCompactionSettings({ contextWindow: 1_000_000, maxTokens: 384_000 }, {});
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.reserveTokens).toBe(64_000);
+  });
+
   it("derives max(16384, 20% × window) when model.maxTokens is null", () => {
     // Now routed through the shared `deriveResponseReserveTokens`, which
     // matches the sidecar's spill guard: 200k × 0.2 = 40 000.

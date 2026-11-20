@@ -201,12 +201,11 @@ interface TokenBudgetOptions {
    */
   contextWindowTokens?: number;
   /**
-   * Reserve (tokens) the upstream model keeps for its response. Only
-   * meaningful in combination with {@link contextWindowTokens}.
-   * Defaults to `max(16384, floor(contextWindowTokens × 0.2))` — the
-   * same heuristic the runner uses for Pi SDK compaction sizing, kept
-   * in sync deliberately so a missing `maxTokens` cascades to the same
-   * conservative fallback in both places.
+   * Room (tokens) kept for the model's reply. Only meaningful in
+   * combination with {@link contextWindowTokens}. Normalized by
+   * `deriveResponseReserveTokens` (capped at an absolute 64k); a missing
+   * value defaults to `max(16384, floor(contextWindowTokens × 0.2))`, the
+   * same rule the runner uses for Pi SDK compaction sizing.
    */
   reserveTokens?: number;
   /**

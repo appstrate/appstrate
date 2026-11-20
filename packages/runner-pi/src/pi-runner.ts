@@ -322,7 +322,7 @@ type ContextModel = { contextWindow?: number | null; maxTokens?: number | null }
  *
  * | Knob               | Mapping                                | Why                                                                                                                                                                              |
  * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
- * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Honours `max_tokens` so the first call post-compaction does not underflow into the upstream 400 ("prompt is too long") — critical for Claude Sonnet thinking mode (`maxTokens: 64000`). An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
+ * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Room kept for a reply and the summary trigger (`contextWindow - reserve`): honours a usable `max_tokens` up to an absolute 64k ceiling (pi-ai clamps the `max_tokens` it sends, so this is not an upstream-400 guard); 1M window / 384k max output → 64k. An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * `enabled: false` turns compaction off entirely — useful when stacking
@@ -359,7 +359,7 @@ export function derivePiCompactionSettings(
     return { compaction: { enabled: false }, contextWindow };
   }
   // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
-  // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
+  // `maxTokens` up to RESERVE_CEILING_TOKENS, but treats an impossible `maxTokens >= contextWindow`
   // (corrupt catalog/override data) as unset and derives a sane reserve —
   // otherwise the compaction threshold `contextWindow - reserveTokens`
   // collapses to ≤0 and the agent compacts on every turn.
