@@ -20,6 +20,7 @@ import { Progress } from "@appstrate/ui/components/progress";
 import { useChatHost } from "./runtime-context.ts";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
 import { thresholdShare, type ContextLevel } from "./turn-context.ts";
+import { modelFit } from "./model-fit.ts";
 import { useConversationContext } from "./use-conversation-context.ts";
 
 const LEVEL_TEXT: Record<ContextLevel, string> = {
@@ -76,9 +77,13 @@ export function ContextGauge({ className }: { className?: string }) {
     used: formatTokenFigure(context.tokens, readAgainstSelected, lang),
     max: formatTokenFigure(context.window, context.windowAssumed, lang),
   });
-  const sentence = t(LEVEL_SENTENCE[context.level], {
-    threshold: formatCompactTokens(context.compactAt, lang),
-  });
+  // Past a declared window, no summary saves the turn: say so, as the model picker does.
+  const sentence =
+    modelFit(context.tokens, context) === "window"
+      ? t("model.fit.window")
+      : t(LEVEL_SENTENCE[context.level], {
+          threshold: formatCompactTokens(context.compactAt, lang),
+        });
   const showShare = context.level !== "ok";
 
   return (
