@@ -318,7 +318,8 @@ describe("the activation remedy, through every door", () => {
         headers,
         body: JSON.stringify({ packageId: INTEGRATION }),
       });
-      expect([403, 404]).toContain(res.status);
+      // Neither reaches the home for placement: the package is not found, never a 403.
+      expect(res.status).toBe(404);
     }
     expect(await rowIn(vitrine, INTEGRATION)).toBeNull();
   });

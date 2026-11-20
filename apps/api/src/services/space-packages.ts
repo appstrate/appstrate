@@ -495,7 +495,7 @@ function packageListingOrder() {
 
 /**
  * List every package of one `type` any of `spaceIds` runs
- * ({@link activePackagesFilter}): what can be launched from there, one row per
+ * ({@link activePackagesFilter}): what is switched on there (launchable once its required integrations are active too), one row per
  * package carrying the spaces it is active in ({@link activeSpaceIds}) — ONE
  * statement whatever the number of spaces. Placed-but-off packages belong to
  * the library (`services/package-library.ts`). The projection omits

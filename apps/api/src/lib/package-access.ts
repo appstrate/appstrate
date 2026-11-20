@@ -288,23 +288,26 @@ export async function assertCatalogPackageAccess(
   packageId: string,
   source?: ForeignOrgStanding,
 ) {
-  const sourceOrgId = source?.orgId ?? c.get("orgId");
-  const [pkg, accessible, placedIn] = await Promise.all([
-    loadPackageRow(packageId, sourceOrgId),
-    packageAccessSpaces(c, source),
-    loadPlacementSpaces(packageId, sourceOrgId),
-  ]);
-  assertPackageIsReachable(packageId, pkg, placedIn, accessible);
-  return pkg;
+  return assertPackageReachable(c, packageId, packageAccessSpaces, source);
 }
 
 /** {@link assertCatalogPackageAccess} over {@link placementAccessSpaces}: the activation door, which may place. */
 export async function assertPlaceablePackageAccess(c: Context<AppEnv>, packageId: string) {
-  const orgId = c.get("orgId");
+  return assertPackageReachable(c, packageId, placementAccessSpaces);
+}
+
+/** The one reachability read; the callers differ only in the spaces the credential reaches. */
+async function assertPackageReachable(
+  c: Context<AppEnv>,
+  packageId: string,
+  reach: (c: Context<AppEnv>, source?: ForeignOrgStanding) => Promise<PackageAccessSpace[]>,
+  source?: ForeignOrgStanding,
+) {
+  const sourceOrgId = source?.orgId ?? c.get("orgId");
   const [pkg, accessible, placedIn] = await Promise.all([
-    loadPackageRow(packageId, orgId),
-    placementAccessSpaces(c),
-    loadPlacementSpaces(packageId, orgId),
+    loadPackageRow(packageId, sourceOrgId),
+    reach(c, source),
+    loadPlacementSpaces(packageId, sourceOrgId),
   ]);
   assertPackageIsReachable(packageId, pkg, placedIn, accessible);
   return pkg;

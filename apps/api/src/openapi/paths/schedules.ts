@@ -3,7 +3,7 @@
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
-import { connectionConflictContent } from "../responses.ts";
+import { agentNotActiveContent, connectionConflictContent } from "../responses.ts";
 import { ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 /**
@@ -288,9 +288,10 @@ export const schedulesPaths = {
         // decision, so this door also carries the activation refusal — LISTING
         // an agent's schedules does not.
         "404": {
-          $ref: "#/components/responses/NoPublishedVersion",
           description:
             "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`; its `active_in_spaces` names where it is active).",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: agentNotActiveContent,
         },
         "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },

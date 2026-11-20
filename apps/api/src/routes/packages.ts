@@ -2159,8 +2159,9 @@ export function createPackagesRouter() {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
       throw internalError();
     }
-    // `warnings` only where the row is ON: a placement left off switches nothing on.
-    const warnings = view.enabled ? await activationWarnings(spaceId, packageId) : [];
+    // `warnings` only where this caller may activate AND the row is ON: a stored ON state
+    // set by the recipient must not leak their personal space's integration state (§3.6).
+    const warnings = enabled && view.enabled ? await activationWarnings(spaceId, packageId) : [];
     return c.json({ object: "package_share", ...view, warnings }, 201);
   });
 

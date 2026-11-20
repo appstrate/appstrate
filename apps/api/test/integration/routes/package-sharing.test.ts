@@ -1821,6 +1821,32 @@ describe("a share landing ON names the agent's integrations left off there", () 
     expect(body.enabled).toBe(false);
     expect(body.warnings).toEqual([]);
   });
+
+  it("carries `[]` and no personal space id when the recipient switched the row on and the sharer re-posts", async () => {
+    // The row's stored ON state is the recipient's doing: the sharer must not
+    // learn what is inactive in a personal space they cannot reach (§3.6).
+    const sharer = await sharerWith("builder");
+    expect((await shareWithUser(sharer.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+    expect(await activeIn(recipient.personalSpaceId, AGENT)).toBe(true);
+
+    const res = await shareWithUser(sharer.headers(homeId), AGENT, recipient.userId);
+    const text = await res.text();
+    expect(res.status, text).toBe(201);
+    expect((JSON.parse(text) as Body).warnings).toEqual([]);
+    expect(text).not.toContain(recipient.personalSpaceId);
+  });
+
+  it("carries `[]` for a space row already ON when the caller holds no activation grant there", async () => {
+    const sharer = await sharerWith("operator");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect((await takeUpOffer(owner(teamId), AGENT, teamId)).status).toBe(201);
+    expect(await activeIn(teamId, AGENT)).toBe(true);
+
+    const res = await shareWithSpace(sharer.headers(homeId), AGENT, teamId);
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(((await res.json()) as Body).warnings).toEqual([]);
+  });
 });
 
 describe("the placement is judged against the LOCKED home", () => {
