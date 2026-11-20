@@ -1314,6 +1314,7 @@
   "spaces.personal.orphanedName": "Espace personnel d'un ancien membre",
   "spaces.personal.badge": "Personnel",
   "spaces.personal.settingsLocked": "Un espace personnel est toujours privé et n'a que vous pour membre : seul son nom est modifiable.",
+  "spaces.personal.credentialProxyAlwaysOpen": "Toujours activé dans un espace personnel : vous en êtes le seul membre, et seules les connexions que vous y mettez sont atteintes.",
   "spaces.personal.orphanedSince": "Orphelin depuis le {{date}}",
   "spaces.personal.convert": "Convertir en espace d'équipe",
   "spaces.personal.convertConfirm": "Convertir cet espace personnel en espace d'équipe ? Son ancien propriétaire a quitté l'organisation et n'y regagne rien : l'espace restera privé et son contenu deviendra lisible et modifiable par les propriétaires et administrateurs de l'organisation.",

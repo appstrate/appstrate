@@ -1313,6 +1313,7 @@
   "spaces.personal.orphanedName": "Former member's personal space",
   "spaces.personal.badge": "Personal",
   "spaces.personal.settingsLocked": "A personal space is always private and has you as its only member: only its name can be changed.",
+  "spaces.personal.credentialProxyAlwaysOpen": "Always on in a personal space: you are its only member, and only the connections you put in it are reached.",
   "spaces.personal.orphanedSince": "Orphaned since {{date}}",
   "spaces.personal.convert": "Convert to a team space",
   "spaces.personal.convertConfirm": "Convert this personal space into a team space? Its former owner has left the organization and gains nothing: the space stays private, and its contents become readable and writable by the organization's owners and administrators.",
