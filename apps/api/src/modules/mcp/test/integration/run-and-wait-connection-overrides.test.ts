@@ -32,7 +32,11 @@ import { eq } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
-import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  orgOnlyHeaders,
+  type TestContext,
+} from "../../../../../test/helpers/auth.ts";
 import {
   createFakeOrchestrator,
   inlineAgentManifest,
@@ -51,9 +55,14 @@ import {
   type JsonRpcEnvelope,
   mcpAuthHeaders,
 } from "../../../../../test/helpers/mcp.ts";
-import { seedPackage, seedPublishedVersion } from "../../../../../test/helpers/seed.ts";
+import {
+  seedPackage,
+  seedPublishedVersion,
+  seedSpace,
+  seedSpacePackage,
+} from "../../../../../test/helpers/seed.ts";
 import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
-import { activatePackage } from "../../../../services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../../services/space-packages.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
@@ -171,6 +180,35 @@ describe("mcp run_and_wait — connection_overrides", () => {
     }
 
     // Nothing was launched — the readiness gate ran before run creation.
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
+
+  it("relays an integration_not_active refusal with its remedy and the spaces where it is active", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    const ready = await seedSpace({ orgId: ctx.orgId, name: "Ready" });
+    await seedSpacePackage(ready.id, INTEGRATION);
+
+    const launch = async (h: Record<string, string>, args: Record<string, unknown> = {}) => {
+      const result = await callTool(h, "run_and_wait", {
+        kind: "inline",
+        manifest: inlineAgentManifest([INTEGRATION], { required: [INTEGRATION] }),
+        prompt: "do the thing",
+        ...args,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.data.status).toBe(409);
+      return result.data.body as ProblemDetails & { active_in_spaces?: unknown };
+    };
+
+    // Org-wide: an inline run has no placement, the integration alone decides.
+    const orgWide = await launch(orgOnlyHeaders(ctx), { space_id: ctx.defaultSpaceId });
+    const err = orgWide.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err!.code).toBe("integration_not_active");
+    expect(err!.message).toContain(`POST /api/spaces/${ctx.defaultSpaceId}/packages`);
+    expect(orgWide.active_in_spaces).toEqual([{ id: ready.id, name: "Ready" }]);
+    // Pinned to the space: this connection reaches no other one.
+    expect((await launch(headers)).active_in_spaces).toEqual([]);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
 

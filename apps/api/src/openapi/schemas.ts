@@ -539,6 +539,39 @@ export const schemas = {
             description:
               "On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`.",
           },
+          active_in_spaces: {
+            $ref: "#/components/schemas/ActiveInSpaces",
+            description:
+              "On an agent-run or inline-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration refused `integration_not_active` are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
+          },
+        },
+      },
+    ],
+  },
+  ActiveInSpaces: {
+    type: "array",
+    description:
+      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds `agents:run` and the packages in question are placed and active, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+    items: {
+      type: "object",
+      required: ["id", "name"],
+      properties: {
+        id: { type: "string", description: "Space id (`spc_…`)." },
+        name: { type: "string" },
+      },
+    },
+  },
+  AgentNotActiveInSpaceProblem: {
+    description:
+      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or launch it in one of `active_in_spaces`.",
+    allOf: [
+      { $ref: "#/components/schemas/ProblemDetail" },
+      {
+        type: "object",
+        required: ["active_in_spaces"],
+        properties: {
+          code: { type: "string", enum: ["agent_not_active_in_space"] },
+          active_in_spaces: { $ref: "#/components/schemas/ActiveInSpaces" },
         },
       },
     ],
@@ -568,6 +601,37 @@ export const schemas = {
         items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
       },
     },
+  },
+  // `allOf`-merged into the success bodies of the two doors that switch a package on in a space.
+  ActivationWarnings: {
+    type: "object",
+    required: ["warnings"],
+    properties: {
+      warnings: {
+        type: "array",
+        description:
+          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, and for a placement left OFF. Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+        items: { $ref: "#/components/schemas/ActivationWarning" },
+      },
+    },
+  },
+  ActivationWarning: {
+    description:
+      "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+    allOf: [
+      { $ref: "#/components/schemas/ResolutionFieldError" },
+      {
+        type: "object",
+        required: ["required"],
+        properties: {
+          code: { type: "string", enum: ["integration_not_active"] },
+          required: {
+            type: "boolean",
+            description: "Whether the agent declares the integration `required`.",
+          },
+        },
+      },
+    ],
   },
   // The `structuredContent` of the MCP `run_and_wait` tool, and its declared `outputSchema`.
   RunAndWaitResult: {

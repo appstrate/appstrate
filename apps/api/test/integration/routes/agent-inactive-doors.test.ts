@@ -33,7 +33,12 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSpacePackage, seedUnreachableSpace } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedSpace,
+  seedSpacePackage,
+  seedUnreachableSpace,
+} from "../../helpers/seed.ts";
 import { isActiveAgentGate, isAgentLookup } from "../../../src/middleware/guards.ts";
 
 const app = getTestApp();
@@ -178,9 +183,21 @@ describe("a placed-but-switched-off agent", () => {
 
   it("names the space and the door that fixes it", async () => {
     const res = await executionDoors(OFF).run();
-    const body = (await res.json()) as { detail?: string };
+    const body = (await res.json()) as { detail?: string; active_in_spaces?: unknown };
     expect(body.detail).toContain(ctx.defaultSpaceId);
     expect(body.detail).toContain(`POST /api/spaces/${ctx.defaultSpaceId}/packages`);
+    expect(body.active_in_spaces).toEqual([]);
+  });
+
+  it("lists the caller's other spaces where the agent is active, and no space it cannot read", async () => {
+    const on = await seedSpace({ orgId: ctx.orgId, name: "On" });
+    const off = await seedSpace({ orgId: ctx.orgId, name: "Off" });
+    await seedSpacePackage(on.id, OFF);
+    await seedSpacePackage(off.id, OFF, { enabled: false });
+    await seedSpacePackage(await seedUnreachableSpace(ctx.orgId), OFF);
+
+    const body = (await (await executionDoors(OFF).run()).json()) as { active_in_spaces?: unknown };
+    expect(body.active_in_spaces).toEqual([{ id: on.id, name: "On" }]);
   });
 
   it("answers every READ and every CONFIGURE as if the switch did not exist", async () => {

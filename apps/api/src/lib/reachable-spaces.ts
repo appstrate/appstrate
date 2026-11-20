@@ -7,7 +7,7 @@ import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
 import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
 import { forbidden, notFound, type ApiError } from "./errors.ts";
-import { dispatchSpacePin } from "./internal-dispatch.ts";
+import { dispatchEndpointPin, dispatchSpacePin } from "./internal-dispatch.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -63,6 +63,18 @@ export function callerReachableSpaces(
  */
 export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
   return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));
+}
+
+/**
+ * The spaces this caller may launch in from where it stands: the credential's own reach (a key
+ * pinned to a space reaches it alone, a credential bound to a set reaches all of it) and the
+ * endpoint's pin, its dispatches' included, but not a per-call dispatch pin, which confines the
+ * call it carries, not its caller. Read by a launch refusal naming where the launch could run
+ * instead (`lib/launch-spaces.ts`).
+ */
+export function launchableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
+  const pin = c.get("endpointSpaceId") ?? dispatchEndpointPin(c);
+  return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), pin);
 }
 
 /** The space the endpoint or the dispatch confines this request to. */

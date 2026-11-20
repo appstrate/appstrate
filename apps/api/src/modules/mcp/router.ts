@@ -317,7 +317,7 @@ const pinnedSpaceContext =
 
 const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
 - Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask. Only \`search\` may omit it: it then searches every space you reach, and each item's \`granted_in\` names the spaces where you reach it: act on it with one of them, where your role there still decides.
-- Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
+- Your role differs per space, so an operation allowed in one may be refused in another. A permission refusal (\`403\`, \`not_granted\`) is final for that task: ${NO_FALLBACK_HINT} A configuration refusal (\`agent_not_active_in_space\`, \`integration_not_active\`, a connection missing or needing reconnection) is repairable: offer its remedy here (connect; or activate with \`activatePackage\` when your role allows), or a space of its \`active_in_spaces\`; act in another space only once the user agrees, never silently. Activating (or sharing) an agent is not refused for its dependencies: the response's \`warnings[]\` names each declared integration not active in that space, and a \`required: true\` one will refuse its launch there — offer to activate it, with the user's agreement.
 - Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
 function forwardAuthHeaders(src: Headers): Headers {
@@ -599,7 +599,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
-      : (request) => dispatchInProcess(request, scope.spaceId);
+      : (request) => dispatchInProcess(request, scope.spaceId, orgSpaces === undefined);
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.

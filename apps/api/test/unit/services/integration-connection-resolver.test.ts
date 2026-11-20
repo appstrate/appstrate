@@ -3275,7 +3275,10 @@ describe("resolveConnections — an imposed set and its additions (floor ∪ sel
 });
 
 describe("resolveConnections — integration switched off in the space", () => {
-  const inactive = { inactiveIntegrationIds: new Set([INTEG]) };
+  const SPACE = "spc_here";
+  const inactive = { inactive: { spaceId: SPACE, integrationIds: new Set([INTEG]) } };
+  // The state and its remedy, the activation door of this space.
+  const notActive = `Integration '${INTEG}' is not active in this space — activate it with POST /api/spaces/${SPACE}/packages {"packageId":"${INTEG}"}`;
 
   it("non-required: bound to none, warned `integration_not_active`, whatever would bind", () => {
     const c = conn({});
@@ -3293,7 +3296,7 @@ describe("resolveConnections — integration switched off in the space", () => {
         {
           integrationId: INTEG,
           code: "integration_not_active",
-          message: `Integration '${INTEG}' is not active in this space; the run proceeds without it.`,
+          message: `${notActive}; the run proceeds without it.`,
         },
       ]);
     }
@@ -3312,7 +3315,7 @@ describe("resolveConnections — integration switched off in the space", () => {
       {
         integrationId: INTEG,
         code: "integration_not_active",
-        message: `Integration '${INTEG}' is not active in this space.`,
+        message: `${notActive}.`,
       },
     ]);
     const wire = translateResolutionError(result.errors[0]!);
@@ -3320,7 +3323,7 @@ describe("resolveConnections — integration switched off in the space", () => {
       field: `integrations.${INTEG}`,
       code: "integration_not_active",
       title: "Integration Not Active",
-      message: `Integration '${INTEG}' is not active in this space.`,
+      message: `${notActive}.`,
     });
     expect(connectOfferTarget(wire)).toBeNull();
   });
@@ -3371,7 +3374,7 @@ describe("resolveConnections — a warning carries the code its state raises on 
       requirement: req(oauth2Manifest()),
       input: () => ({
         accessibleConnections: [conn({})],
-        inactiveIntegrationIds: new Set([INTEG]),
+        inactive: { spaceId: "spc_here", integrationIds: new Set([INTEG]) },
       }),
     },
   ];

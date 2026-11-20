@@ -69,9 +69,21 @@ export function isInternalDispatch(headers: Headers): boolean {
  */
 const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
 
-/** The `app.fetch` env of a dispatch confined to `spaceId`. */
-export function dispatchSpacePinEnv(spaceId: string): Record<symbol, string> {
-  return { [DISPATCH_SPACE_PIN]: spaceId };
+/** Set beside it when the pin is the endpoint's (`/api/mcp/o/:org/s/:space`), not per call. */
+const DISPATCH_ENDPOINT_PIN = Symbol("appstrate.dispatchEndpointPin");
+
+/** The `app.fetch` env of a dispatch confined to `spaceId`; `endpoint`: by its endpoint's pin. */
+export function dispatchSpacePinEnv(spaceId: string, endpoint = false): Record<symbol, string> {
+  return endpoint
+    ? { [DISPATCH_SPACE_PIN]: spaceId, [DISPATCH_ENDPOINT_PIN]: spaceId }
+    : { [DISPATCH_SPACE_PIN]: spaceId };
+}
+
+/** The space this dispatch's endpoint is pinned to, if it is one. */
+export function dispatchEndpointPin(c: Context): string | undefined {
+  const env = c.env as Record<symbol, unknown> | undefined;
+  const pin = env?.[DISPATCH_ENDPOINT_PIN];
+  return typeof pin === "string" ? pin : undefined;
 }
 
 /** The space this request is a dispatch confined to, if it is one. */

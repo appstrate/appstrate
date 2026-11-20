@@ -87,6 +87,15 @@ describe("mcp org-wide connection", () => {
     });
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
+    // Only a permission refusal is final; a configuration one is repaired or, agreed, moved.
+    expect(instructions).toContain("A permission refusal (`403`, `not_granted`) is final");
+    expect(instructions).toMatch(
+      /A configuration refusal \(`agent_not_active_in_space`, `integration_not_active`/,
+    );
+    expect(instructions).toContain(
+      "`active_in_spaces`; act in another space only once the user agrees",
+    );
+    expect(instructions).toContain("a `required: true` one will refuse its launch there");
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
     expect(instructions).toContain(`createAgent [${gestion.id}]`);
     // The spaces are listed by the `space_id` schema, not repeated here.

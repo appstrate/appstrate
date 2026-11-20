@@ -160,8 +160,8 @@ interface ResolveConnectionsInput {
   actorEndUserId?: string | null;
   /** Also resolve INERT integrations (never spawned): the agent-page picker still manages them. */
   includeInert?: boolean;
-  /** Declared integrations switched off in the space: never walked through the cascade. */
-  inactiveIntegrationIds?: ReadonlySet<string>;
+  /** Declared integrations switched off in `spaceId`: never walked through the cascade. */
+  inactive?: { spaceId: string; integrationIds: ReadonlySet<string> };
   /** The fallback binds nothing: the actor's own serving connections are a choice, one included. */
   noFallback?: boolean;
 }
@@ -207,12 +207,12 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       continue;
     }
     if (isInert(req) && !input.includeInert) continue;
-    if (input.inactiveIntegrationIds?.has(req.integrationId)) {
+    if (input.inactive?.integrationIds.has(req.integrationId)) {
       record(
         req.integrationId,
         gapOf(req, {
           code: "integration_not_active",
-          message: `Integration '${req.integrationId}' is not active in this space`,
+          message: integrationNotActiveMessage(req.integrationId, input.inactive.spaceId),
         }),
       );
       continue;
@@ -680,6 +680,17 @@ const LAYER_PHRASE: Record<ExplicitSource, string> = {
   org_default: "an org default",
 };
 
+/**
+ * `integration_not_active`, with its remedy: the activation door, which asks its own permission.
+ * One wording for the gate, readiness and the activation `warnings[]`; each adds its consequence.
+ */
+export function integrationNotActiveMessage(integrationId: string, spaceId: string): string {
+  return (
+    `Integration '${integrationId}' is not active in this space — activate it with ` +
+    `POST /api/spaces/${spaceId}/packages {"packageId":"${integrationId}"}`
+  );
+}
+
 /** A degraded state's twin code: a `required` integration in it is refused, any other is not. */
 type GapCode = Exclude<ConnectionResolutionWarningCode, "integration_unbound">;
 
@@ -1031,7 +1042,10 @@ export async function resolveConnectionsForRun(
     actorEndUserId,
     includeInert: input.includeInert ?? false,
     noFallback: input.noFallback,
-    inactiveIntegrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
+    inactive: {
+      spaceId: input.scope.spaceId,
+      integrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
+    },
   });
 }
 

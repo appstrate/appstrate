@@ -13,6 +13,7 @@ import { canReadRuns } from "@appstrate/core/permissions";
 import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
+import { launchSpacesLookup, type LaunchSpace } from "../lib/launch-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -137,20 +138,27 @@ export function requireActiveAgent() {
     // caller has just lost sight of this agent, and the named one would report
     // a state they are no longer entitled to observe.
     if (block === "not_placed") throw agentNotFound(agent.id);
-    if (block === "not_active") throw agentNotActiveInSpace(agent.id, spaceId);
+    if (block === "not_active") {
+      throw agentNotActiveInSpace(agent.id, spaceId, await launchSpacesLookup(c)([agent.id]));
+    }
     return next();
   }, ACTIVE_AGENT_GATE);
 }
 
-/** The refusal of an agent the caller CAN see and CANNOT run here. */
-function agentNotActiveInSpace(packageId: string, spaceId: string) {
+/**
+ * The refusal of an agent the caller CAN see and CANNOT run here: a configuration to repair, by
+ * activating it here or, with the user's agreement, launching in one of `activeInSpaces`.
+ */
+function agentNotActiveInSpace(packageId: string, spaceId: string, activeInSpaces: LaunchSpace[]) {
   return new ApiError({
     status: 404,
     code: "agent_not_active_in_space",
     title: "Agent Not Active",
     detail:
       `Agent '${packageId}' is placed in space '${spaceId}' but not active there. ` +
-      `Activate it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
+      `Activate it with POST /api/spaces/${spaceId}/packages {"packageId":"${packageId}"}, ` +
+      `or launch it in one of active_in_spaces.`,
+    extensions: { active_in_spaces: activeInSpaces },
   });
 }
 

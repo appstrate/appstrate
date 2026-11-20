@@ -99,10 +99,15 @@ function getRegistered(use: string): { app: Hono<AppEnv>; operations: PlatformOp
  * Re-enter the fully-wired platform app in-process (no socket hop). `app.fetch`
  * returns `Response | Promise<Response>`; the async wrapper normalizes it to the
  * `Promise<Response>` callers (the `inProcess` service, the MCP router) expect.
- * `spacePin` confines the call to one space (`dispatchSpacePin`).
+ * `spacePin` confines the call to one space (`dispatchSpacePin`); `endpointPinned` says the pin
+ * is the endpoint's, not the call's (`dispatchEndpointPin`).
  */
-export function dispatchInProcess(request: Request, spacePin?: string): Promise<Response> {
-  const env = spacePin === undefined ? undefined : dispatchSpacePinEnv(spacePin);
+export function dispatchInProcess(
+  request: Request,
+  spacePin?: string,
+  endpointPinned = false,
+): Promise<Response> {
+  const env = spacePin === undefined ? undefined : dispatchSpacePinEnv(spacePin, endpointPinned);
   return Promise.resolve(getRegistered("in-process dispatch").app.fetch(request, env));
 }
 

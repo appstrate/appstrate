@@ -474,7 +474,7 @@ describe("POST /api/runs/inline/validate", () => {
           field: `integrations.${INTEGRATION}`,
           code: "integration_not_active",
           title: "Integration Not Active",
-          message: `Integration '${INTEGRATION}' is not active in this space; the run proceeds without it.`,
+          message: `Integration '${INTEGRATION}' is not active in this space — activate it with POST /api/spaces/${ctx.defaultSpaceId}/packages {"packageId":"${INTEGRATION}"}; the run proceeds without it.`,
         },
       ]);
 
