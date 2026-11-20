@@ -27,9 +27,11 @@ import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import {
   MAX_LISTED_SCOPES,
   readIntegrationTools,
+  type CallableListing,
   type CallableTool,
   type ListingRefusal,
 } from "./integration-tool-catalog.ts";
@@ -42,6 +44,9 @@ export interface IntegrationToolContext extends DispatchContext {
   /** The caller is also offered `run_and_wait`, so the descriptions may name it. */
   runs: boolean;
 }
+
+/** Spaces whose listings are read at once. */
+const SPACES_AT_ONCE = 4;
 
 /** Issues one argument refusal names. */
 const MAX_REPORTED_ISSUES = 10;
@@ -128,12 +133,16 @@ function listedConnection<C extends { scopes_granted: string[] }>(connection: C)
     : connection;
 }
 
+/** A tool listed in one or more spaces of an org-wide call (`granted_in`); pinned, in the one. */
+type SpaceTool = CallableTool & { granted_in?: string[] };
+
 /** A tool as a search lists it, its connections among the section's `connections`. */
-function listedTool(tool: CallableTool): Record<string, unknown> {
+function listedTool(tool: SpaceTool): Record<string, unknown> {
   return {
     id: tool.name,
     integration_package_id: tool.integration_package_id,
     description: tool.description,
+    ...(tool.granted_in ? { granted_in: tool.granted_in } : {}),
     ...(tool.kind === "remote" && tool.catalog_unreadable ? { catalog_unreadable: true } : {}),
     connection_ids: tool.connection_ids,
     ...(tool.kind === "remote" && tool.missing_scopes
@@ -143,7 +152,7 @@ function listedTool(tool: CallableTool): Record<string, unknown> {
 }
 
 /** A tool as `describe` details it: how to call it and read its result, and its schemas. */
-function describedTool(tool: CallableTool): Record<string, unknown> {
+function describedTool(tool: SpaceTool): Record<string, unknown> {
   return {
     kind: "integration_tool",
     ...listedTool(tool),
@@ -182,20 +191,95 @@ interface IntegrationToolSearch {
 }
 
 /**
+ * The listings of `reads`, one per space of an org-wide call (`spaceId` set) or the one of a
+ * pinned connection, as one: a tool listed in several spaces once, under `granted_in`, with the
+ * union of its connection ids; each connection once; a `not_ready` or `unlisted` entry naming the
+ * space it comes from. A space whose listing was refused is left out; all refused answers the
+ * first.
+ */
+async function readAcrossSpaces(
+  reads: readonly { spaceId: string | undefined; ctx: IntegrationToolContext }[],
+  query: { integration?: string; cachedOnly: boolean },
+  signal: AbortSignal | undefined,
+): Promise<
+  | {
+      tools: SpaceTool[];
+      connections: CallableListing["connections"];
+      not_ready: (CallableListing["not_ready"][number] & { space_id?: string })[];
+      unlisted: (CallableListing["unlisted"][number] & { space_id?: string })[];
+      truncated_catalogs: CallableListing["truncated_catalogs"];
+      uncached: string[];
+    }
+  | { refused: ListingRefusal }
+> {
+  const listings = await mapWithConcurrency(reads, SPACES_AT_ONCE, async ({ spaceId, ctx }) => ({
+    spaceId,
+    read: await readIntegrationTools(
+      ctx,
+      {
+        ...(query.integration ? { integration: query.integration } : {}),
+        ...(query.cachedOnly ? { cachedOnly: true } : {}),
+      },
+      signal,
+    ),
+  }));
+  const tools = new Map<string, SpaceTool>();
+  const connections = new Map<string, CallableListing["connections"][number]>();
+  const truncated = new Map<string, CallableListing["truncated_catalogs"][number]>();
+  const uncached = new Set<string>();
+  const notReady: (CallableListing["not_ready"][number] & { space_id?: string })[] = [];
+  const unlisted: (CallableListing["unlisted"][number] & { space_id?: string })[] = [];
+  let refused: ListingRefusal | undefined;
+  let answered = 0;
+  for (const { spaceId, read } of listings) {
+    if ("refused" in read) {
+      refused ??= read.refused;
+      continue;
+    }
+    answered += 1;
+    const from = spaceId ? { space_id: spaceId } : {};
+    for (const tool of read.tools) {
+      const key = `${tool.integration_package_id}\0${tool.name}`;
+      const found = tools.get(key);
+      if (!found) {
+        tools.set(key, { ...tool, ...(spaceId ? { granted_in: [spaceId] } : {}) });
+        continue;
+      }
+      found.connection_ids = [...new Set([...found.connection_ids, ...tool.connection_ids])];
+      if (found.kind === "remote" && tool.kind === "remote" && tool.missing_scopes) {
+        found.missing_scopes = { ...found.missing_scopes, ...tool.missing_scopes };
+      }
+      if (spaceId) found.granted_in!.push(spaceId);
+    }
+    for (const connection of read.connections)
+      connections.set(connection.connection_id, connection);
+    for (const entry of read.truncated_catalogs) truncated.set(entry.integration_package_id, entry);
+    for (const name of read.uncached) uncached.add(name);
+    for (const entry of read.not_ready) notReady.push({ ...entry, ...from });
+    for (const entry of read.unlisted) unlisted.push({ ...entry, ...from });
+  }
+  if (answered === 0 && refused) return { refused };
+  return {
+    tools: [...tools.values()],
+    connections: [...connections.values()],
+    not_ready: notReady,
+    unlisted,
+    truncated_catalogs: [...truncated.values()],
+    uncached: [...uncached],
+  };
+}
+
+/**
  * The integration tools a search lists, ranked by `tokens`, the remote catalogs read from the
- * cache alone when `cachedOnly`.
+ * cache alone when `cachedOnly`; one read per entry of `reads`, concurrently.
  */
 export async function searchIntegrationTools(
-  ctx: IntegrationToolContext,
+  reads: readonly { spaceId: string | undefined; ctx: IntegrationToolContext }[],
   query: { tokens: readonly string[]; integration?: string; limit: number; cachedOnly: boolean },
   signal: AbortSignal | undefined,
 ): Promise<IntegrationToolSearch | { refused: ListingRefusal }> {
   const { tokens, integration, limit, cachedOnly } = query;
-  const read = await readIntegrationTools(
-    ctx,
-    { ...(integration ? { integration } : {}), ...(cachedOnly ? { cachedOnly } : {}) },
-    signal,
-  );
+  const read = await readAcrossSpaces(reads, { integration, cachedOnly }, signal);
   if ("refused" in read) return { refused: read.refused };
 
   const about = (id: string, text = "") =>
@@ -204,7 +288,7 @@ export async function searchIntegrationTools(
     about(entry.integration_package_id, entry.display_name),
   );
   const unlistedShown = read.unlisted.filter((entry) => about(entry.integration_package_id));
-  const fields = (tool: CallableTool) => ({
+  const fields = (tool: SpaceTool) => ({
     name: tool.name,
     text: `${tool.integration_package_id} ${tool.description}`,
   });

@@ -42,7 +42,12 @@ import {
   memberHolding,
   type TestContext,
 } from "../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
+import {
+  seedApiKey,
+  seedSpace,
+  seedSpaceMember,
+  seedSpacePackage,
+} from "../../../../../test/helpers/seed.ts";
 import { seedShares } from "../../../../../test/helpers/connection-shares.ts";
 import {
   seedProxyConnection,
@@ -576,6 +581,61 @@ describe("mcp integration tools", () => {
       const defaulted = await callTool(caller, "search", { space_id: other.id });
       expect(defaulted.isError).toBe(false);
       expect(defaulted.data.integration_tools).toBeUndefined();
+    });
+
+    describe("searching across spaces", () => {
+      let other: { id: string };
+      let caller: Caller;
+
+      beforeEach(async () => {
+        // An org-scoped connection serves every space the integration is active in.
+        await connect(owner, "mine");
+        await db
+          .update(integrationConnections)
+          .set({ spaceId: null })
+          .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+        other = await seedSpace({ orgId: owner.orgId, name: "Atelier" });
+        await seedSpacePackage(other.id, INTEGRATION_ID);
+        caller = {
+          path: `/api/mcp/o/${owner.orgId}`,
+          headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+        };
+      });
+
+      const items = (data: Record<string, unknown>) =>
+        (data.integration_tools as { items: Array<{ id: string; granted_in: string[] }> }).items;
+
+      it("lists a tool usable in two spaces once, naming both", async () => {
+        const all = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect(all.isError).toBe(false);
+        expect(items(all.data).map((item) => item.id)).toEqual([TOOL]);
+        expect(items(all.data)[0]!.granted_in.sort()).toEqual(
+          [owner.defaultSpaceId, other.id].sort(),
+        );
+        const connections = (all.data.integration_tools as { connections: unknown[] }).connections;
+        expect(connections).toHaveLength(1);
+
+        const one = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
+          space_id: other.id,
+        });
+        expect(items(one.data)[0]!.granted_in).toEqual([other.id]);
+      });
+
+      it("leaves a space that closes the proxy out of a default search, and refuses the kind named once every space closes it", async () => {
+        await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, other.id));
+        const defaulted = await callTool(caller, "search", {});
+        expect(items(defaulted.data)[0]!.granted_in).toEqual([owner.defaultSpaceId]);
+
+        await db
+          .update(spaces)
+          .set({ credentialProxyOpen: false })
+          .where(eq(spaces.id, owner.defaultSpaceId));
+        const closed = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect(closed.isError).toBe(true);
+        // No space allows the kind, so it is no longer declared at all.
+        expect(closed.data).toMatchObject({ code: "invalid_argument", arguments: ["kinds"] });
+      });
     });
 
     for (const open of [true, false]) {

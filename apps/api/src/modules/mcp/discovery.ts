@@ -166,20 +166,26 @@ export interface SkillHit {
   package_id: string;
   name: string;
   description: string;
+  /** The space of its URI: where it is read. */
+  granted_in: [string];
 }
 
-/** The published skills of `spaceId`, as `skills/list` lists them. */
-export async function listSkills(reader: McpSkillReader, spaceId: string): Promise<SkillHit[]> {
+/** The published skills of `spaceIds`, as `skills/list` lists them. */
+export async function listSkills(
+  reader: McpSkillReader,
+  spaceIds: readonly string[],
+): Promise<SkillHit[]> {
   const entries = await reader.list();
   return entries.flatMap((entry): SkillHit[] => {
     const address = parseSkillUri(entry.uri);
-    if (!address || address.spaceId !== spaceId) return [];
+    if (!address || !spaceIds.includes(address.spaceId)) return [];
     return [
       {
         id: entry.uri,
         package_id: address.packageId,
         name: entry.frontmatter.name,
         description: entry.frontmatter.description,
+        granted_in: [address.spaceId],
       },
     ];
   });

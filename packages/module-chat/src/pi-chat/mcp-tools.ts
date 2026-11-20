@@ -507,6 +507,22 @@ async function enterNamedSpace(
   return undefined;
 }
 
+/**
+ * Whether a call reads every space of the turn: it omits a `space_id` its tool declares and does
+ * not require, so the platform covers each space reached.
+ */
+function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
+  const schema = (inputSchema ?? {}) as {
+    properties?: Record<string, unknown>;
+    required?: unknown;
+  };
+  return (
+    args.space_id === undefined &&
+    schema.properties?.space_id !== undefined &&
+    !(Array.isArray(schema.required) && schema.required.includes("space_id"))
+  );
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -539,6 +555,9 @@ function makeForwardExtension(
               turnBudget,
             );
           }
+        } else if (readsEveryTurnSpace(tool.inputSchema, args)) {
+          // Recorded as a named space is: the conversation's visibility depends on it.
+          await Promise.all(organization.spaces.map((space) => organization.touch(space.id)));
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(

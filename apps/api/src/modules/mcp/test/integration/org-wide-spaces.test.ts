@@ -261,7 +261,7 @@ describe("mcp org-wide connection", () => {
     ).denied.find((op) => op.id === "createAgent");
     expect(row?.granted_in).toEqual([gestion.id]);
 
-    // Granted in every reachable space: no `granted_in` at all, as in the index.
+    // Granted in every reachable space: all of them in `granted_in`.
     const everywhere = payload(
       await call("search", {
         query: "listAgents",
@@ -274,7 +274,34 @@ describe("mcp org-wide connection", () => {
       everywhere.data.operations as { items: Array<{ id: string; granted_in?: string[] }> }
     ).items.find((op) => op.id === "listAgents");
     expect(listed).toBeDefined();
-    expect(listed!.granted_in).toBeUndefined();
+    expect(listed!.granted_in?.sort()).toEqual([defaultSpaceId, gestion.id, lecture.id].sort());
+  });
+
+  it("lets search omit space_id: an operation granted in one space is listed, naming it", async () => {
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+    const schema = (
+      envelope.result?.tools as Array<{
+        name: string;
+        inputSchema: { properties: Record<string, unknown>; required?: string[] };
+      }>
+    ).find((t) => t.name === "search")!.inputSchema;
+    expect(schema.properties.space_id).toBeDefined();
+    expect(schema.required ?? []).not.toContain("space_id");
+
+    const across = payload(await call("search", { query: "createAgent", kinds: ["operation"] }));
+    const operations = across.data.operations as {
+      items: Array<{ id: string; granted_in: string[] }>;
+      denied: Array<{ id: string }>;
+    };
+    expect(operations.items.find((op) => op.id === "createAgent")?.granted_in).toEqual([
+      gestion.id,
+    ]);
+    expect(operations.denied.map((op) => op.id)).not.toContain("createAgent");
   });
 
   it("re-checks kind:inline as its own act: an operator runs agents, not inline runs", async () => {

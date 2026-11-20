@@ -138,14 +138,18 @@ import {
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { describeSpace } from "@appstrate/core/mcp-spaces";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  spaceIdsWhere,
   spaceArgumentRefusal,
   spaceRef,
   NO_FALLBACK_HINT,
   type McpSpace,
   type OrgWideSpaces,
+  type OrgWideToolSpaces,
 } from "./spaces.ts";
 import { connectionIdSetJsonSchema } from "../../openapi/paths/integrations.ts";
 
@@ -238,7 +242,7 @@ export interface McpToolContext {
    */
   observe?: McpObserver;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
-  orgSpaces?: OrgWideSpaces;
+  orgSpaces?: OrgWideToolSpaces;
   /** The skills the connection reaches, through the Skills extension's reader (`./skills.ts`). */
   skills: McpSkillReader;
 }
@@ -541,6 +545,10 @@ function buildSearchTool(
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
       "role may not invoke are listed apart under `denied`, with the permissions they need in " +
       "YOUR space: report that to the user instead of trying them." +
+      (ctx.orgSpaces
+        ? " Without `space_id`, every space you reach is searched; an item's `granted_in` names " +
+          "the spaces where it is usable."
+        : "") +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
     annotations: discoveryAnnotations("Search", kinds),
     inputSchema: {
@@ -588,20 +596,27 @@ function buildSearchTool(
     const tokens = searchTokens(args.query);
     const tag = asString(args.tag)?.toLowerCase();
     const integration = asString(args.integration);
+    // Org-wide: the space named, else every space reached; pinned: the one the endpoint is in.
+    const spaces: SearchedSpaces = ctx.orgSpaces
+      ? args.space_id === undefined
+        ? ctx.orgSpaces.reachable
+        : [ctx.orgSpaces.current]
+      : undefined;
 
     const outcomes = await Promise.all(
       requested.kinds.map((kind): Promise<KindOutcome> => {
         switch (kind) {
           case "operation":
-            return Promise.resolve(searchOperations(ctx, tokens, tag, limit));
+            return Promise.resolve(searchOperations(ctx, spaces, tokens, tag, limit));
           case "agent":
-            return searchAgentKind(ctx, surface, tokens, limit, requested.explicit);
+            return searchAgentKind(ctx, surface, spaces, tokens, limit, requested.explicit);
           case "skill":
-            return searchSkillKind(ctx, tokens, limit);
+            return searchSkillKind(ctx, spaces, tokens, limit);
           case "integration_tool":
             return searchIntegrationKind(
               ctx,
               integrations,
+              spaces,
               {
                 tokens,
                 limit,
@@ -643,8 +658,26 @@ function buildSearchTool(
   return { descriptor, handler };
 }
 
+/** What a search reads: the spaces of an org-wide call (one when it named `space_id`), `undefined` when pinned. */
+type SearchedSpaces = readonly McpSpace[] | undefined;
+
+/** At most this many spaces are read at once. */
+const SEARCH_CONCURRENCY = 4;
+
+/** A dispatch context reading in `space`, or in the one space a pinned connection enters. */
+function readingIn(ctx: McpToolContext, space: McpSpace | undefined): DispatchContext {
+  return space && ctx.orgSpaces
+    ? {
+        origin: ctx.origin,
+        authHeaders: ctx.authHeaders,
+        dispatch: ctx.orgSpaces.dispatchIn(space.id),
+      }
+    : ctx;
+}
+
 function searchOperations(
   ctx: McpToolContext,
+  spaces: SearchedSpaces,
   tokens: readonly string[],
   tag: string | undefined,
   limit: number,
@@ -661,12 +694,20 @@ function searchOperations(
     tokens,
     fields,
   );
+  const grantedIn = (op: CatalogOperation) => (space: McpSpace) =>
+    operationGranted(op, space.permissions, ctx.ceiling);
+  // Where an item is usable: every space that grants it, not only the ones searched.
+  const usableIn = (op: CatalogOperation) =>
+    ctx.orgSpaces ? { granted_in: spaceIdsWhere(ctx.orgSpaces.reachable, grantedIn(op)) } : {};
 
   // A denied match is answered, not hidden — its id and requirement only.
   const granted: typeof scored = [];
   const denied: CatalogOperation[] = [];
   for (const ranked of scored) {
-    if (operationGranted(ranked.item, ctx.permissions, ctx.ceiling)) granted.push(ranked);
+    const listed = spaces
+      ? spaces.some(grantedIn(ranked.item))
+      : operationGranted(ranked.item, ctx.permissions, ctx.ceiling);
+    if (listed) granted.push(ranked);
     else denied.push(ranked.item);
   }
   const shown = granted.slice(0, limit).map(({ item }) => item);
@@ -681,52 +722,107 @@ function searchOperations(
         path: op.pathTemplate,
         summary: op.summary,
         tags: op.tags,
-        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
+        ...usableIn(op),
       })),
       denied_total: denied.length,
       denied: denied.slice(0, limit).map((op) => ({
         id: op.operationId,
         required_permissions: op.requirement.requirements,
         ...deniedCeiling(op, ctx),
-        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
+        ...usableIn(op),
       })),
     },
     ...(tokens.length > 0 && top
       ? {
           top: {
             score: top.score,
-            describe: async () => describePayload(top.item, componentSchemas, ctx),
+            describe: async () => {
+              // In the first space that grants it.
+              const at = spaces?.find(grantedIn(top.item));
+              return describePayload(
+                top.item,
+                componentSchemas,
+                at && ctx.orgSpaces
+                  ? {
+                      ...ctx,
+                      permissions: at.permissions,
+                      orgSpaces: { ...ctx.orgSpaces, current: at },
+                    }
+                  : ctx,
+              );
+            },
           },
         }
       : {}),
   };
 }
 
+/** An agent listed in one or more spaces. */
+interface SpaceAgent {
+  hit: AgentHit;
+  spaceIds: string[];
+}
+
 async function searchAgentKind(
   ctx: McpToolContext,
   surface: McpSurface,
+  spaces: SearchedSpaces,
   tokens: readonly string[],
   limit: number,
   named: boolean,
 ): Promise<KindOutcome> {
-  const listed = await listAgents(ctx);
-  if ("refused" in listed) {
-    return named ? { result: jsonResult({ ...listed.refused }, true) } : null;
+  const reads = await mapWithConcurrency(
+    spaces ?? [undefined],
+    SEARCH_CONCURRENCY,
+    async (space) => ({
+      space,
+      listed: await listAgents(readingIn(ctx, space)),
+    }),
+  );
+  // A space whose route refuses is left out; all refusing answers the first.
+  const merged = new Map<string, SpaceAgent>();
+  let refused: Extract<(typeof reads)[number]["listed"], { refused: unknown }> | undefined;
+  let answered = 0;
+  for (const { space, listed } of reads) {
+    if ("refused" in listed) {
+      refused ??= listed;
+      continue;
+    }
+    answered += 1;
+    for (const hit of listed.agents) {
+      const found = merged.get(hit.id) ?? { hit, spaceIds: [] };
+      if (space) found.spaceIds.push(space.id);
+      merged.set(hit.id, found);
+    }
   }
-  const fields = (agent: AgentHit) => ({
-    name: agent.id,
-    text: `${agent.title} ${agent.description}`,
+  if (answered === 0 && refused) {
+    return named ? { result: jsonResult({ ...refused.refused }, true) } : null;
+  }
+  const fields = ({ hit }: SpaceAgent) => ({
+    name: hit.id,
+    text: `${hit.title} ${hit.description}`,
   });
-  const matches = rankByKeywords(listed.agents, tokens, fields);
+  const matches = rankByKeywords([...merged.values()], tokens, fields);
   const top = matches[0];
   return {
     kind: "agent",
-    section: { total: matches.length, items: matches.slice(0, limit).map(({ item }) => item) },
+    section: {
+      total: matches.length,
+      items: matches
+        .slice(0, limit)
+        .map(({ item }) => ({ ...item.hit, ...(spaces ? { granted_in: item.spaceIds } : {}) })),
+    },
     ...(tokens.length > 0 && top
       ? {
           top: {
             score: top.score,
-            describe: () => describeAgentPayload(ctx, surface, top.item.id),
+            describe: () =>
+              describeAgentPayload(
+                ctx,
+                surface,
+                top.item.hit.id,
+                spaces?.find((space) => space.id === top.item.spaceIds[0]),
+              ),
           },
         }
       : {}),
@@ -735,10 +831,14 @@ async function searchAgentKind(
 
 async function searchSkillKind(
   ctx: McpToolContext,
+  spaces: SearchedSpaces,
   tokens: readonly string[],
   limit: number,
 ): Promise<KindSection> {
-  const skills = await listSkills(ctx.skills, ctx.scope.spaceId);
+  const skills = await listSkills(
+    ctx.skills,
+    spaces?.map((space) => space.id) ?? [ctx.scope.spaceId],
+  );
   const fields = (skill: SkillHit) => ({
     name: skill.name,
     text: `${skill.package_id} ${skill.description}`,
@@ -747,12 +847,17 @@ async function searchSkillKind(
   const top = matches[0];
   return {
     kind: "skill",
-    section: { total: matches.length, items: matches.slice(0, limit).map(({ item }) => item) },
+    section: {
+      total: matches.length,
+      items: matches
+        .slice(0, limit)
+        .map(({ item: { granted_in, ...hit } }) => (spaces ? { ...hit, granted_in } : hit)),
+    },
     ...(tokens.length > 0 && top
       ? {
           top: {
             score: top.score,
-            describe: () => describeSkillPayload(ctx, top.item.id),
+            describe: () => describeSkillPayload(ctx, top.item.id, top.item.granted_in[0]!),
           },
         }
       : {}),
@@ -771,11 +876,12 @@ function integrationKindRefusal(ctx: McpToolContext): Refusal | undefined {
 /**
  * The integration tools section: remote catalogs read from their servers only when the call
  * named the kind or an integration, from the cache otherwise. A search that did not name the
- * kind leaves it out where it may not read it.
+ * kind leaves it out where it may not read it, and across spaces reads the ones that allow it.
  */
 async function searchIntegrationKind(
   ctx: McpToolContext,
   integrations: IntegrationToolContext,
+  spaces: SearchedSpaces,
   query: {
     tokens: readonly string[];
     limit: number;
@@ -786,10 +892,16 @@ async function searchIntegrationKind(
   signal: AbortSignal | undefined,
 ): Promise<KindOutcome> {
   const { named } = query;
-  const refusal = integrationKindRefusal(ctx);
-  if (refusal) return named ? { result: refusalResult(refusal) } : null;
+  const allowed = spaces?.filter((space) => space.surface.proxies);
+  if (allowed?.length === 0) {
+    const refusal = integrationKindRefusal(ctx);
+    return named && refusal ? { result: refusalResult(refusal) } : null;
+  }
   const found = await searchIntegrationTools(
-    integrations,
+    (allowed ?? [undefined]).map((space) => ({
+      spaceId: space?.id,
+      ctx: { ...integrations, dispatch: readingIn(ctx, space).dispatch },
+    })),
     {
       tokens: query.tokens,
       limit: query.limit,
@@ -811,16 +923,20 @@ async function searchIntegrationKind(
   };
 }
 
-/** An agent's `describe` payload, its route's refusal relayed as `invoke_operation` relays one. */
+/**
+ * An agent's `describe` payload, its route's refusal relayed as `invoke_operation` relays one,
+ * read in `space` (the pinned connection's own when none).
+ */
 async function describeAgentPayload(
   ctx: McpToolContext,
   surface: McpSurface,
   id: string,
+  space?: McpSpace,
 ): Promise<Record<string, unknown>> {
   const described = await describeAgent(
-    ctx,
+    readingIn(ctx, space),
     id,
-    surface.runs ? { spaceId: ctx.orgSpaces?.current.id } : null,
+    (space ? space.surface.runs : surface.runs) ? { spaceId: space?.id } : null,
   );
   if ("agent" in described) return { kind: "agent", ...described.agent };
   if ("refused" in described) return { kind: "agent", id, refused: described.refused };
@@ -830,8 +946,9 @@ async function describeAgentPayload(
 async function describeSkillPayload(
   ctx: McpToolContext,
   uri: string,
+  spaceId: string,
 ): Promise<Record<string, unknown>> {
-  const described = await describeSkill(ctx.skills, uri, ctx.scope.spaceId);
+  const described = await describeSkill(ctx.skills, uri, spaceId);
   return "skill" in described
     ? { kind: "skill", ...described.skill }
     : { kind: "skill", id: uri, refusal: described.refusal };
@@ -935,13 +1052,13 @@ function buildDescribeTool(
         return jsonResult(describePayload(op, componentSchemas, ctx));
       }
       case "agent": {
-        const payload = await describeAgentPayload(ctx, surface, id!);
+        const payload = await describeAgentPayload(ctx, surface, id!, ctx.orgSpaces?.current);
         observe();
         if (payload.refusal) return refusalResult(payload.refusal as Refusal);
         return jsonResult(payload, payload.refused !== undefined);
       }
       case "skill": {
-        const payload = await describeSkillPayload(ctx, id!);
+        const payload = await describeSkillPayload(ctx, id!, ctx.scope.spaceId);
         observe();
         if (payload.refusal) return refusalResult(payload.refusal as Refusal);
         return jsonResult(payload);
@@ -2387,10 +2504,11 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
 /**
  * What each tool needs in the space an org-wide call names: `false` no space
  * (no `space_id`), `null` the route guard alone, else the surface act
- * re-checked there. Exhaustive, so a new tool must decide.
+ * re-checked there, `"optional"` the route guard alone and `space_id` may be omitted (the tool
+ * then covers every space reached). Exhaustive, so a new tool must decide.
  */
-const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
-  search: null,
+const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false | "optional"> = {
+  search: "optional",
   describe: null,
   invoke_operation: "invokes",
   run_and_wait: "runs",
@@ -2404,15 +2522,19 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
 };
 
 /** `space_id`, listing the spaces itself: clients truncate server instructions. */
-function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
+function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<string, unknown> {
+  const reached = spaces.reachable.map(describeSpace).join("; ");
   return {
     type: "string",
     enum: spaces.reachable.map((s) => s.id),
-    description:
-      `The space this call acts in, by id: ${spaces.reachable.map(describeSpace).join("; ")}. ` +
-      "Take it from the user's request, or, when it names none, from the space your context " +
-      "designates for such a request; with neither, when several could serve, ask the user which " +
-      "one instead of choosing. The server picks no default space.",
+    description: optional
+      ? `The one space to search, by id: ${reached}. Omitted, every space you reach is searched ` +
+        "and each item names the spaces where it is usable (`granted_in`); acting on it takes the " +
+        "`space_id` of one of them."
+      : `The space this call acts in, by id: ${reached}. ` +
+        "Take it from the user's request, or, when it names none, from the space your context " +
+        "designates for such a request; with neither, when several could serve, ask the user which " +
+        "one instead of choosing. The server picks no default space.",
   };
 }
 
@@ -2453,8 +2575,10 @@ function withSpaceArgument(
   tool: AppstrateToolDefinition,
   spaces: OrgWideSpaces,
 ): AppstrateToolDefinition {
-  const act = SPACE_ACTS[tool.descriptor.name as McpToolName];
-  if (act === false) return tool;
+  const declared = SPACE_ACTS[tool.descriptor.name as McpToolName];
+  if (declared === false) return tool;
+  const optional = declared === "optional";
+  const act = optional ? null : declared;
   const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
     need === null || space.surface[need];
   const granted = grantedSpaces(spaces, holds(act));
@@ -2467,15 +2591,18 @@ function withSpaceArgument(
       : tool.descriptor.description,
     inputSchema: {
       ...schema,
-      properties: { ...schema.properties, space_id: spaceIdProperty(spaces) },
-      required: [...(schema.required ?? []), "space_id"],
+      properties: { ...schema.properties, space_id: spaceIdProperty(spaces, optional) },
+      ...(optional ? {} : { required: [...(schema.required ?? []), "space_id"] }),
     },
   };
   return {
     descriptor,
     handler: async (args, extra) => {
+      // The tool reads `space_id` itself: absent, it covers every space reached.
+      if (optional && args.space_id === undefined) return tool.handler(args, extra);
       const refusal = spaceArgumentRefusal(spaces, args.space_id);
       if (refusal) return refusalResult(refusal);
+      if (optional) return tool.handler(args, extra);
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const unmet = spaceActRefusal(

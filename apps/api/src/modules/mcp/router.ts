@@ -114,6 +114,7 @@ import {
   listReachableSpaces,
   pinnedSpaceIds,
   requestedSpaceId,
+  spaceDispatcher,
   NO_FALLBACK_HINT,
   type McpSpace,
   type OrgWideSpaces,
@@ -315,7 +316,7 @@ const pinnedSpaceContext =
   "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
 
 const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
-- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask.
+- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask. Only \`search\` may omit it: it then searches every space you reach, and each item's \`granted_in\` names the spaces where it is usable (the \`space_id\` to act with).
 - Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
 - Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
@@ -697,7 +698,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       actor,
       scope,
       fileAccess: () => requestFileAccess(c),
-      orgSpaces,
+      orgSpaces: orgSpaces && {
+        ...orgSpaces,
+        dispatchIn: spaceDispatcher(orgSpaces, dispatchInProcess, !spansSpaces),
+      },
       // `search`, `describe` and `read` reach skills through the Skills extension's own reader.
       skills: {
         list: () => skills.list("published"),

@@ -20,6 +20,7 @@ import {
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import { MAX_LISTED_SCOPES } from "../../../../src/modules/mcp/integration-tool-catalog.ts";
+import { searchIntegrationTools } from "../../../../src/modules/mcp/integration-tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
 import {
@@ -1204,6 +1205,42 @@ describe("typed tools of a remote MCP integration", () => {
     const { section, best } = await searchKind(made, { integration: REMOTE, query: "search" });
     expect(section.total).toBe(1);
     expect(best).toBeUndefined();
+  });
+
+  it("merges a tool listed in two spaces: both spaces, each connection's missing scopes", async () => {
+    const other = "9b1c2d3e-0000-4000-8000-000000000002";
+    const read = (connectionId: string) => ({
+      spaceId: connectionId === CONNECTION_ID ? "spc_1" : "spc_2",
+      ctx: {
+        origin: "https://test.local",
+        authHeaders: new Headers(),
+        dispatch: (async () =>
+          listingOf([
+            remoteTool({
+              connections: [connection({ connection_id: connectionId })],
+              missing_scopes: { [connectionId]: [`scope:${connectionId.slice(-1)}`] },
+            }),
+          ])()) as Dispatch,
+        observe: () => {},
+        runs: false,
+      },
+    });
+    const found = await searchIntegrationTools(
+      [read(CONNECTION_ID), read(other)],
+      { tokens: [], limit: 10, cachedOnly: true },
+      undefined,
+    );
+    if ("refused" in found) throw new Error("refused");
+    const items = found.section.items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      granted_in: ["spc_1", "spc_2"],
+      connection_ids: [CONNECTION_ID, other],
+      missing_scopes: {
+        [CONNECTION_ID]: [`scope:${CONNECTION_ID.slice(-1)}`],
+        [other]: ["scope:2"],
+      },
+    });
   });
 
   it("marks a tool whose server could not be listed", async () => {

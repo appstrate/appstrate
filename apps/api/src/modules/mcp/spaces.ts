@@ -11,7 +11,7 @@ import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { enterableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
-import type { McpSurface } from "./tools.ts";
+import type { Dispatch, McpSurface } from "./tools.ts";
 import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
 
@@ -30,6 +30,33 @@ export interface McpSpace {
 export interface OrgWideSpaces {
   reachable: readonly McpSpace[];
   current: McpSpace;
+}
+
+/** What a tool reads of an org-wide connection: its spaces, and a dispatch into any of them. */
+export interface OrgWideToolSpaces extends OrgWideSpaces {
+  /** A dispatch run in one reachable space, with the caller's permissions there; throws for any other. */
+  dispatchIn: (spaceId: string) => Dispatch;
+}
+
+/**
+ * {@link OrgWideToolSpaces.dispatchIn} over `send`. A credential bound to a set of spaces
+ * (`bound`) is confined to one space per dispatch (`dispatchInProcess`'s pin); any other
+ * credential enters the space by its `x-space-id`.
+ */
+export function spaceDispatcher(
+  spaces: OrgWideSpaces,
+  send: (request: Request, spacePin?: string) => Promise<Response>,
+  bound: boolean,
+): (spaceId: string) => Dispatch {
+  return (spaceId) => {
+    if (!spaces.reachable.some((space) => space.id === spaceId)) {
+      throw new Error(`Space ${spaceId} is not one this connection reaches.`);
+    }
+    return (request) => {
+      request.headers.set("x-space-id", spaceId);
+      return send(request, bound ? spaceId : undefined);
+    };
+  };
 }
 
 /** The credential's space and the URL's (`/api/mcp/o/:org/s/:space`), when set. */
@@ -91,6 +118,14 @@ export function grantedSpaces(
   if (!spaces) return undefined;
   const matching = spaces.reachable.filter(granted);
   return matching.length === spaces.reachable.length ? undefined : matching;
+}
+
+/** The ids of the spaces where `granted` holds: an item's `granted_in`, present whatever the count. */
+export function spaceIdsWhere(
+  spaces: readonly McpSpace[],
+  granted: (space: McpSpace) => boolean,
+): string[] {
+  return spaces.filter(granted).map((space) => space.id);
 }
 
 /** `granted_in` by space ID. */
