@@ -170,7 +170,7 @@ const ACCESS_TOKEN_LIFETIME_MS = 10 * 60 * 1000;
 const GRANT_ID_PREFIX = "mcg_";
 
 /** The grant's public id. Not a secret: it only names a grant its reader can already see. */
-export function mcpGrantId(userId: string, clientId: string, resource: string): string {
+function mcpGrantId(userId: string, clientId: string, resource: string): string {
   const digest = new Bun.CryptoHasher("sha256")
     .update(`${userId}\u0000${clientId}\u0000${resource}`)
     .digest("hex");
