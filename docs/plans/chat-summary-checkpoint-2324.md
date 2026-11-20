@@ -158,7 +158,7 @@ Ajout d'export dans `@appstrate/core` : entrée au CHANGELOG sous `[Unreleased]`
   `tokens > compactAt`. Après un résumé, `tokens` est l'usage réel de l'appel qui a suivi : la
   jauge redescend seule.
 - Le popover peut indiquer que l'historique antérieur est résumé (présence de `summary`).
-  Vocabulaire : « résumé », en attendant le point « Vocabulaire » de l'issue.
+  Vocabulaire : « résumé », côté chat comme côté runs.
 
 ### Commentaires à réécrire
 
@@ -188,7 +188,7 @@ Cette propriété sur deux tours réels est vérifiée par l'E2E navigateur, pas
 unitaire : les tests unitaires fixent chaque maillon (capture, projection, reconstruction,
 garde d'horodatage de Pi) séparément.
 
-## Lot 2 : usage compté par appel (fait)
+## Lot 2 : usage compté par appel
 
 - `ui-stream-mapper.ts` : l'usage de `compaction_end.result.usage` (non interrompu) s'ajoute au
   cumul du tour (`addRequestUsage`) ; `lastSettledUsage` n'y est pas touché (un résumé n'est pas
@@ -213,12 +213,17 @@ garde d'horodatage de Pi) séparément.
   pratique. Un signal là-bas partirait à chaque appel (relecture du détail en plein tour) et
   ferait émettre un canal du module de chat par le cœur de l'API.
 
-## Lot 3 : réserve de réponse (décidé)
+## Lot 3 : réserve de réponse
 
 Plafond absolu de 64k (`RESERVE_CEILING_TOKENS`) sur la réserve. pi-ai borne le `max_tokens`
 envoyé à `fenêtre − entrée estimée − marge`, avec un plancher d'environ 32k, sur toutes les formes
-d'API : la réserve ne protège plus d'un refus 400 du fournisseur. La sortie de l'appel de résumé
+d'API : la réserve n'a pas à couvrir la sortie maximale du modèle. La sortie de l'appel de résumé
 n'est pas dimensionnée par la réserve.
+
+Limite connue : quand la marge de 15 % de pi-ai ne laisse plus 32 768 tokens de sortie, pi-ai
+garde une marge de 4 096 et borne la réponse à 32 768. Sur une fenêtre au-delà d'environ 272k,
+c'est le cas près du seuil ; la reprise sur dépassement de Pi (résumé puis nouvel essai) est le
+filet. 64k reste dans l'ordre de Claude Code (~33k) et d'OpenCode (`min(sortie, 32k)`).
 
 ## Ordre et découpage
 
@@ -233,7 +238,26 @@ partent dans la même version, sans déploiement progressif.
 La compaction côté fournisseur (Anthropic `compact_20260112`, Responses API), spécifique à
 chaque API.
 
-Les points « Affichage » et « À envisager » de #2324 sont traités dans cette branche : jauge et
-popover (historique résumé indiqué, plus de niveau « plein » après un résumé), adéquation du
-modèle à la conversation (`model-fit.ts`), lecture de la fenêtre (`packages/ui` `context-window.ts`)
-et libellés.
+Les points « Affichage » et « À envisager » de #2324 sont traités dans cette branche (voir
+« Affichage » ci-dessous).
+
+## Affichage
+
+- Jauge et sélecteur suivent une seule règle (`model-fit.ts`) : seuil franchi si
+  `tokens > compactAt`, fenêtre dépassée si `tokens > fenêtre` et la fenêtre est déclarée. Une
+  mesure relue contre un autre modèle que celui qui l'a prise s'affiche avec « ≈ ».
+- La mesure de la conversation est lue une fois (`ConversationContextProvider`) et ne change qu'à
+  la fin d'un tour, pas à chaque fragment streamé.
+- Pourcentage du seuil non borné au-delà (150 %), arrondi par défaut en dessous ; anneau et barre
+  restent bornés.
+- Avertissement du brouillon : texte (caractères / 4) et pièces jointes, estimation présentée
+  comme telle, région `role="status"` toujours montée. Plafonds partagés avec le moteur
+  (`attachment-limits.ts`).
+- Fenêtre supposée (`windowAssumed` côté chat, `contextWindowAssumed` côté runs) : une seule règle,
+  `resolvePiContextWindow` (`runner-pi/pi-model.ts`), marquée « ≈ » et expliquée (jauge du chat,
+  panneau Infos, jauge du run en popover).
+- Nombres localisés : `formatCompactTokens(tokens, lang)` et `formatTokenFigure(tokens,
+approximate, lang)` (`packages/ui/src/context-window.ts`), un formateur `Intl` par langue.
+- Note par modèle dans le sélecteur (`ModelPickerList.renderNote`) : seuil franchi, ou fenêtre
+  déjà dépassée (le modèle ne pourra sans doute pas prendre la conversation, même résumée : Pi
+  envoie tout l'historique à résumer en un seul appel).

@@ -37,12 +37,22 @@ const live = { ...dead, id: "live", label: "GPT", needs_reconnection: false };
 const groups = groupModelsForPicker([unpaid, dead, live], { canConnect: true });
 const labels = buildModelPickerLabels((key) => key);
 
-/** Each item's label → whether cmdk marks it disabled (SSR renders no `data-value`). */
-function disabledByLabel(html: string): Record<string, boolean> {
+/** Each item's label → its markup (SSR renders no `data-value`). */
+function itemsByLabel(html: string): Record<string, string> {
   const items = html.split(/(?=<div[^>]*cmdk-item="")/).slice(1);
   return Object.fromEntries(
     items.map((item) => [
       /<span class="truncate[^"]*">([^<]+)<\/span>/.exec(item)?.[1] ?? "",
+      item,
+    ]),
+  );
+}
+
+/** Each item's label → whether cmdk marks it disabled. */
+function disabledByLabel(html: string): Record<string, boolean> {
+  return Object.fromEntries(
+    Object.entries(itemsByLabel(html)).map(([label, item]) => [
+      label,
       /^<div[^>]*data-disabled="true"/.test(item),
     ]),
   );
@@ -81,6 +91,7 @@ describe("composer model list", () => {
       />,
     );
     expect(html.match(/<i>outgrown<\/i>/g)).toHaveLength(1);
-    expect(html).toMatch(/GPT<\/span><\/div><i>outgrown<\/i>/);
+    const gpt = itemsByLabel(html).GPT;
+    expect(gpt).toContain("<i>outgrown</i>");
   });
 });

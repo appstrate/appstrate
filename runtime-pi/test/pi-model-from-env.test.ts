@@ -3,11 +3,17 @@
 import { describe, expect, it } from "bun:test";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../env.ts";
 
 const DIALECT = { name: "DeepSeek V4.1 Flash", compat: { thinkingFormat: "deepseek" } };
 
-function containerModel(opts: { aliased: boolean; dialect: typeof DIALECT | null }) {
+function containerModel(opts: {
+  aliased: boolean;
+  dialect: typeof DIALECT | null;
+  contextWindow?: number | null;
+}) {
   const env = buildRuntimePiEnv({
     model: {
       api: "openai-completions",
@@ -16,7 +22,7 @@ function containerModel(opts: { aliased: boolean; dialect: typeof DIALECT | null
       piProvider: "opencode-go",
       dialect: opts.dialect,
       input: ["text"],
-      contextWindow: 128_000,
+      contextWindow: opts.contextWindow === undefined ? 128_000 : opts.contextWindow,
       maxTokens: 8_192,
       reasoning: true,
       aliased: opts.aliased,
@@ -34,7 +40,8 @@ function containerModel(opts: { aliased: boolean; dialect: typeof DIALECT | null
       secret: "abcdefghijklmnopqrstuvwxyz0123456789",
     },
   });
-  return { env, model: buildPiModelFromEnv(parseRuntimeEnv(env)) };
+  const parsed = parseRuntimeEnv(env);
+  return { env, parsed, model: buildPiModelFromEnv(parsed) };
 }
 
 describe("buildPiModelFromEnv — the platform's dialect", () => {
@@ -84,5 +91,35 @@ describe("buildPiModelFromEnv — the platform's dialect", () => {
     ]) {
       expect(() => parseRuntimeEnv({ ...env, MODEL_DIALECT: broken })).toThrow(/MODEL_DIALECT/);
     }
+  });
+});
+
+// The entrypoint flags the runner `contextWindowAssumed` from
+// `resolvePiContextWindow(env.modelContextWindow).assumed`.
+describe("the container's context window", () => {
+  it("runs on the declared window, not assumed", () => {
+    const { env, parsed, model } = containerModel({
+      aliased: false,
+      dialect: DIALECT,
+      contextWindow: 500_000,
+    });
+    expect(env.MODEL_CONTEXT_WINDOW).toBe("500000");
+    expect(model.contextWindow).toBe(500_000);
+    expect(resolvePiContextWindow(parsed.modelContextWindow)).toEqual({ contextWindow: 500_000 });
+  });
+
+  it("runs on the default window, assumed, when the platform declares none", () => {
+    const { env, parsed, model } = containerModel({
+      aliased: false,
+      dialect: DIALECT,
+      contextWindow: null,
+    });
+    expect(env).not.toHaveProperty("MODEL_CONTEXT_WINDOW");
+    expect(parsed.modelContextWindow).toBeUndefined();
+    expect(model.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(resolvePiContextWindow(parsed.modelContextWindow)).toEqual({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      assumed: true,
+    });
   });
 });

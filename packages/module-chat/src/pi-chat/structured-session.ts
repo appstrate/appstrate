@@ -22,7 +22,7 @@ import {
   turnMetadataFromMessage,
   type AppstrateTurnSummary,
 } from "@appstrate/core/chat-turn-metadata";
-import type { Api, Message } from "@appstrate/runner-pi";
+import type { Api, Message, PiCodingAgentSdk } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
 import type { AttachmentImages, PiImageContent } from "./attachment-inputs.ts";
@@ -58,8 +58,8 @@ export interface BuildStructuredPiTurnOptions {
   pdfReceipts?: ReadonlyMap<string, string>;
   /** Whether the model accepts image input, for the wording of the pointer lines. */
   modelSeesImages?: boolean;
-  /** The branch's summary, already validated ({@link resolveSummaryCheckpoint}); none = the whole history. */
-  checkpoint?: SummaryCheckpoint | null;
+  /** The branch's summary, validated ({@link resolveSummaryCheckpoint}) and sized; none = the whole history. */
+  checkpoint?: ReplayCheckpoint;
 }
 
 /** The branch message a projected Pi message comes from, and its rank in that message's projection. */
@@ -72,6 +72,21 @@ export interface MessageOrigin {
 export interface SummaryCheckpoint {
   summary: AppstrateTurnSummary;
   anchorIndex: number;
+}
+
+/** A checkpoint with the tokens its summary occupies as Pi sends it ({@link piSummaryTokens}). */
+export interface ReplayCheckpoint extends SummaryCheckpoint {
+  summaryTokens: number;
+}
+
+/** Tokens of a summary as Pi sends it: the user message its `convertToLlm` wraps the summary in. */
+export function piSummaryTokens(
+  pi: Pick<PiCodingAgentSdk, "convertToLlm" | "estimateTokens">,
+  summary: string,
+): number {
+  return pi
+    .convertToLlm([{ role: "compactionSummary", summary, tokensBefore: 0, timestamp: 0 }])
+    .reduce((sum, message) => sum + pi.estimateTokens(message), 0);
 }
 
 interface StructuredPiTurn {
@@ -326,30 +341,44 @@ const turnSummarySchema = z.object({
   tokensBefore: z.number().nonnegative(),
 });
 
-/** How many Pi messages one branch message projects to: the range its `offset` ranks in. */
-function projectedLength(message: UIMessage, model: PiHistoryModel): number {
-  if (message.role === "assistant")
-    return assistantMessages(message, model, () => 0).messages.length;
-  if (message.role !== "user") return 0;
+/**
+ * The Pi messages one branch message projects to, the range a `keptFrom.offset` ranks in. The model
+ * only stamps the assistants' `api`/`provider`; it is the projection's own argument.
+ */
+function projectAnchor(message: UIMessage, model: PiHistoryModel): Message[] {
+  if (message.role === "assistant") return assistantMessages(message, model, () => 0).messages;
+  if (message.role !== "user") return [];
   const [converted] = messagesWithAttachmentsAsText([message]);
-  return converted && userMessage(converted, () => 0) ? 1 : 0;
+  const user = converted && userMessage(converted, () => 0);
+  return user ? [user] : [];
 }
 
 /** The checkpoint a branch message's summary gives, or why it gives none. */
 function checkpointAt(
   branch: readonly UIMessage[],
   carrier: number,
+  summary: unknown,
   model: PiHistoryModel,
 ): { reason: string } | SummaryCheckpoint {
-  const parsed = turnSummarySchema.safeParse(turnMetadataFromMessage(branch[carrier])?.summary);
+  const parsed = turnSummarySchema.safeParse(summary);
   if (!parsed.success) return { reason: "malformed summary metadata" };
   const { messageId, offset } = parsed.data.keptFrom;
   const anchorIndex = branch.findLastIndex(
     (message, index) => index <= carrier && message.id === messageId,
   );
-  if (anchorIndex < 0) return { reason: "its kept history is not on the branch" };
-  if (offset > 0 && offset >= projectedLength(branch[anchorIndex]!, model)) {
+  if (anchorIndex < 0) {
+    return branch.some((message, index) => index > carrier && message.id === messageId)
+      ? { reason: "its kept history starts after the turn that made it" }
+      : { reason: "its kept history is not on the branch" };
+  }
+  const projected = projectAnchor(branch[anchorIndex]!, model);
+  if (offset > 0 && offset >= projected.length) {
     return { reason: "its anchor offset is past the message's projection" };
+  }
+  // Pi never starts kept history on a tool result (`isCutPointMessage`, compaction.js): replayed
+  // first, it would answer a call the request no longer carries.
+  if (projected[offset]?.role === "toolResult") {
+    return { reason: "its anchor offset lands on a tool result" };
   }
   return { summary: parsed.data, anchorIndex };
 }
@@ -362,14 +391,15 @@ function checkpointAt(
 export function resolveSummaryCheckpoint(
   branch: readonly UIMessage[],
   model: PiHistoryModel,
-): SummaryCheckpoint | null {
+): SummaryCheckpoint | undefined {
   for (let carrier = branch.length - 1; carrier >= 0; carrier -= 1) {
-    if (turnMetadataFromMessage(branch[carrier])?.summary === undefined) continue;
-    const found = checkpointAt(branch, carrier, model);
+    const summary = turnMetadataFromMessage(branch[carrier])?.summary;
+    if (summary === undefined) continue;
+    const found = checkpointAt(branch, carrier, summary, model);
     if ("summary" in found) return found;
     logger.warn(`chat summary ignored: ${found.reason}`, { carrierId: branch[carrier]!.id });
   }
-  return null;
+  return undefined;
 }
 
 /**
@@ -397,7 +427,7 @@ export function buildStructuredPiTurn(
     images,
     modelSeesImages = false,
     pdfReceipts,
-    checkpoint = null,
+    checkpoint,
   }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
   const sentImages: AttachmentImages = images ?? new Map();
@@ -445,14 +475,7 @@ export function buildStructuredPiTurn(
   // arbitrarily long thread look empty to that check, so each assistant
   // carries the running estimate of everything up to it. The real usage of
   // this turn's own responses overwrites it as soon as it arrives.
-  let contextTokens = baseTokens;
-  if (checkpoint) {
-    contextTokens += estimateTokens({
-      role: "user",
-      content: [{ type: "text", text: checkpoint.summary.text }],
-      timestamp: 0,
-    });
-  }
+  let contextTokens = baseTokens + (checkpoint?.summaryTokens ?? 0);
   for (const message of history) {
     contextTokens += estimateTokens(message);
     if (message.role === "assistant") message.usage = historyUsage(contextTokens);

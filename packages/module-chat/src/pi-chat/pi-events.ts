@@ -35,6 +35,25 @@ export interface PiUsage {
   };
 }
 
+/** Mirror of Pi's `CompactionResult`: the summary it appended, and what it cost. */
+export interface PiCompactionResult {
+  summary: string;
+  /** Session entry id of the first message kept beside the summary. */
+  firstKeptEntryId: string;
+  tokensBefore: number;
+  /** Pi's estimate of the session after the summary, system prompt included. */
+  estimatedTokensAfter?: number;
+  /** The summary call's own usage: a billed call that emits no `message_end`. */
+  usage?: PiUsage;
+}
+
+/** Pi's `compaction_end`; `result` is absent when the summary failed. */
+export interface PiCompactionEndEvent {
+  type: "compaction_end";
+  result: PiCompactionResult | undefined;
+  aborted: boolean;
+}
+
 /** UI-message-stream finish reasons this engine emits. */
 export type PiFinishReason = "stop" | "length" | "tool-calls" | "error" | "other";
 
@@ -45,11 +64,7 @@ export type AgentSessionEvent =
   | { type: "message_end"; message: unknown }
   | { type: "turn_end"; message: unknown; toolResults: unknown[] }
   | { type: "agent_end"; messages: unknown[] }
-  | {
-      type: "compaction_end";
-      result: unknown;
-      aborted: boolean;
-    }
+  | PiCompactionEndEvent
   | {
       type: "tool_execution_end";
       toolCallId: string;

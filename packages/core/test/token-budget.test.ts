@@ -4,7 +4,6 @@ import { describe, it, expect } from "bun:test";
 import {
   deriveResponseReserveTokens,
   isUsableMaxOutputTokens,
-  RESERVE_CEILING_TOKENS,
   RESERVE_FLOOR_TOKENS,
 } from "@appstrate/core/token-budget";
 
@@ -69,11 +68,27 @@ describe("deriveResponseReserveTokens", () => {
   });
 
   it("caps the reserve at the absolute ceiling", () => {
-    expect(RESERVE_CEILING_TOKENS).toBe(64_000);
     // DeepSeek V4.1 Flash: 1M window, 384k max output → threshold 936k.
     expect(deriveResponseReserveTokens(1_000_000, 384_000)).toBe(64_000);
     expect(deriveResponseReserveTokens(1_000_000, null)).toBe(64_000);
     expect(deriveResponseReserveTokens(200_000, 128_000)).toBe(64_000);
+  });
+
+  it("crosses from the 80 % cap to the 64k ceiling at an 80k window", () => {
+    // 0.8 × 80k == 64k: both caps meet.
+    expect(deriveResponseReserveTokens(80_000, 70_000)).toBe(64_000);
+    expect(deriveResponseReserveTokens(79_000, 70_000)).toBe(63_200);
+    // 20 % of the window reaches the ceiling at 320k, and stays below it at 300k.
+    expect(deriveResponseReserveTokens(320_000, null)).toBe(64_000);
+    expect(deriveResponseReserveTokens(300_000, null)).toBe(60_000);
+    expect(deriveResponseReserveTokens(1_000_000, null)).toBe(64_000);
+  });
+
+  it("keeps the reserve below the window down to a 2-token window, and at 1 for a 1-token one", () => {
+    expect(deriveResponseReserveTokens(2, null)).toBe(1);
+    expect(deriveResponseReserveTokens(2, 1)).toBe(1);
+    // No positive integer lies below 1: the documented `contextWindow >= 2` precondition.
+    expect(deriveResponseReserveTokens(1, null)).toBe(1);
   });
 
   it("leaves reserves below the ceiling unchanged", () => {

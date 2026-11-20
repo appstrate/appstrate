@@ -8,7 +8,7 @@ import { useSessionDetail } from "@appstrate/module-chat/unread";
 import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { cn } from "@appstrate/ui/cn";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { formatCompactTokens, formatContextWindow } from "@appstrate/ui/context-window";
+import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -348,7 +348,7 @@ function ConversationDetailsSkeleton() {
  * The models that closed the conversation's turns and the context it carries, from the turns' own
  * metadata, beside the tokens every metered call consumed, from the server's ledger sum.
  */
-function ConversationUsage({
+export function ConversationUsage({
   session,
 }: {
   session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
@@ -376,13 +376,20 @@ function ConversationUsage({
                 <span className="whitespace-nowrap tabular-nums">
                   {t("contextUsage.counts", {
                     used: formatCompactTokens(context.tokens, i18n.language),
-                    max: formatContextWindow(
+                    max: formatTokenFigure(
                       context.window,
                       context.windowAssumed === true,
                       i18n.language,
                     ),
                   })}
                 </span>
+                {context.windowAssumed === true ? (
+                  <span className="text-muted-foreground block text-xs">
+                    {t("contextUsage.windowAssumed", {
+                      window: formatCompactTokens(context.window, i18n.language),
+                    })}
+                  </span>
+                ) : null}
               </Fact>
             ) : null}
             {models.length > 0 ? (

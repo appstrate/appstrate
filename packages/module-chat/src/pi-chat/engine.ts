@@ -63,6 +63,7 @@ import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./att
 import { createTurnPdfInput } from "./native-pdf.ts";
 import {
   buildStructuredPiTurn,
+  piSummaryTokens,
   reconstructPiSession,
   resolveSummaryCheckpoint,
 } from "./structured-session.ts";
@@ -496,7 +497,11 @@ export function runPiChat(input: PiChatInput): Response {
           provider: sessionModel.provider,
           model: sessionModel.id,
         };
-        const checkpoint = resolveSummaryCheckpoint(input.messages, historyModel);
+        const found = resolveSummaryCheckpoint(input.messages, historyModel);
+        const checkpoint = found && {
+          ...found,
+          summaryTokens: piSummaryTokens(sdk, found.summary.text),
+        };
         const images =
           modelSeesImages && read
             ? await untilAborted(
@@ -510,9 +515,11 @@ export function runPiChat(input: PiChatInput): Response {
         const pdfReceipts = await untilAborted(
           readPromptPdfs(input.messages.at(-1), pdfInput, read, signal),
         );
-        const textTokens = (text: string) =>
-          estimateTokens({ role: "user", content: [{ type: "text", text }], timestamp: 0 });
-        const baseTokens = textTokens(system);
+        const baseTokens = estimateTokens({
+          role: "user",
+          content: [{ type: "text", text: system }],
+          timestamp: 0,
+        });
         const projectedTurn = buildStructuredPiTurn(input.messages, historyModel, {
           estimateTokens,
           images,
@@ -544,7 +551,7 @@ export function runPiChat(input: PiChatInput): Response {
                   !origins.has(entry.id)
                     ? sum + estimateTokens(entry.message)
                     : sum,
-                baseTokens + textTokens(summary),
+                baseTokens + piSummaryTokens(sdk, summary),
               ),
         };
         timings.projectionMs = Date.now() - projectionStartedAt;

@@ -15,7 +15,11 @@ import {
   type AppstrateTurnContext,
   type AppstrateTurnSummary,
 } from "@appstrate/core/chat-turn-metadata";
-import { contextReading, latestConversationContext } from "../src/ui/turn-context.ts";
+import {
+  contextReading,
+  latestConversationContext,
+  thresholdShare,
+} from "../src/ui/turn-context.ts";
 
 function assistant(id: string, context?: unknown, summary?: AppstrateTurnSummary): UIMessage {
   return {
@@ -92,5 +96,19 @@ describe("contextReading", () => {
     expect(latestConversationContext([assistant("a1", measure(600_001), summary)])?.level).toBe(
       "full",
     );
+  });
+});
+
+describe("thresholdShare", () => {
+  const share = (tokens: number) => thresholdShare({ tokens, compactAt: 100_000 });
+
+  it("floors under the threshold, so just short of it never reads 100 %", () => {
+    expect(share(99_600)).toBe(0.99);
+    expect(share(100_000)).toBe(1);
+  });
+
+  it("is unclamped past the threshold, unlike the fill", () => {
+    expect(share(150_000)).toBe(1.5);
+    expect(contextReading({ tokens: 150_000, window: 200_000, compactAt: 100_000 }).ratio).toBe(1);
   });
 });

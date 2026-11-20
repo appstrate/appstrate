@@ -12,6 +12,7 @@ import {
   piModelDialect,
   piReasoningLevels,
   piTokenCostUsd,
+  resolvePiContextWindow,
   usableRecordMaxTokens,
   usageCostUsd,
   type PiTokenCounts,
@@ -170,6 +171,31 @@ describe("buildPiModel", () => {
       contextWindow: 32_000,
     });
     expect(model).toMatchObject({ contextWindow: 32_000, maxTokens: DEFAULT_MAX_TOKENS });
+  });
+});
+
+describe("resolvePiContextWindow", () => {
+  it("keeps a declared window and assumes the default for an undeclared one", () => {
+    expect(resolvePiContextWindow(500_000)).toEqual({ contextWindow: 500_000 });
+    for (const declared of [null, undefined]) {
+      expect(resolvePiContextWindow(declared)).toEqual({
+        contextWindow: DEFAULT_CONTEXT_WINDOW,
+        assumed: true,
+      });
+    }
+  });
+
+  it("is the window buildPiModel builds with", () => {
+    for (const contextWindow of [500_000, null]) {
+      const model = buildPiModel({
+        id: "gw-model",
+        dialect: null,
+        apiShape: "openai-completions",
+        baseUrl: "https://gateway.example",
+        contextWindow,
+      });
+      expect(model.contextWindow).toBe(resolvePiContextWindow(contextWindow).contextWindow);
+    }
   });
 });
 

@@ -23,7 +23,7 @@ import {
   type ExtensionFactory,
   type Model,
 } from "@appstrate/runner-pi";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
 
 interface PiChatModelBindingBase {
@@ -122,7 +122,9 @@ export function createPiProxyModelBinding(args: {
   return {
     authMode: "proxy",
     model,
-    ...(args.model.contextWindow == null ? { windowAssumed: true as const } : {}),
+    ...(resolvePiContextWindow(args.model.contextWindow).assumed
+      ? { windowAssumed: true as const }
+      : {}),
     provider: model.provider,
     runtimeApiKey: "proxy",
     authExtension: createPiProxyAuthExtension(args.mintBearer),
@@ -149,7 +151,9 @@ export function createPiOAuthModelBinding(
   return {
     authMode: "oauth2",
     model: piModel,
-    ...(model.contextWindow == null ? { windowAssumed: true as const } : {}),
+    ...(resolvePiContextWindow(model.contextWindow).assumed
+      ? { windowAssumed: true as const }
+      : {}),
     provider: piModel.provider,
     runtimeApiKey: model.accessToken,
     metering: { kind: "inline", cost: model.cost },

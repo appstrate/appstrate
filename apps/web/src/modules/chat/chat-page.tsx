@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   ChatConversationSettingsButton,
   ChatPage,
@@ -31,7 +32,6 @@ import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
-import { useTranslation } from "react-i18next";
 import { formatBytes } from "../../lib/format-bytes";
 import { useViewAs } from "../../stores/view-as-store";
 import { useUploadInSpace } from "../../hooks/use-upload";

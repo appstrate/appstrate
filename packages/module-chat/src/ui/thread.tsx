@@ -67,7 +67,7 @@ import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { ContextGauge } from "./context-gauge.tsx";
 import { draftCrossesThreshold, estimateDraftTokens } from "./model-fit.ts";
-import { useConversationContext } from "./use-conversation-context.ts";
+import { ConversationContextProvider, useConversationContext } from "./use-conversation-context.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
@@ -125,78 +125,80 @@ export function Thread({
   // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
   // (a disabled dropzone would cancel the drop silently).
   return (
-    <ComposerPrimitive.AttachmentDropzone
-      disabled={!canWrite}
-      data-testid="chat-dropzone"
-      className="group/drop relative h-full min-h-0"
-    >
-      <ThreadPrimitive.Root
-        // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
-        // this shell are grey with white cards on top (the composer, the tool
-        // cards). `background` is shadcn's component surface, which would make
-        // the chat the one flat white screen in the product.
-        className="bg-canvas flex h-full flex-col"
-        style={{ ["--thread-max-width" as string]: "42rem" }}
+    <ConversationContextProvider>
+      <ComposerPrimitive.AttachmentDropzone
+        disabled={!canWrite}
+        data-testid="chat-dropzone"
+        className="group/drop relative h-full min-h-0"
       >
-        {/* Register the rich tool cards (these render nothing themselves). */}
-        <InvokeOperationToolUI />
-        <RunAndWaitToolUI />
-        <SearchToolUI />
-        <DescribeToolUI />
-        <ImportPackageFileToolUI />
+        <ThreadPrimitive.Root
+          // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+          // this shell are grey with white cards on top (the composer, the tool
+          // cards). `background` is shadcn's component surface, which would make
+          // the chat the one flat white screen in the product.
+          className="bg-canvas flex h-full flex-col"
+          style={{ ["--thread-max-width" as string]: "42rem" }}
+        >
+          {/* Register the rich tool cards (these render nothing themselves). */}
+          <InvokeOperationToolUI />
+          <RunAndWaitToolUI />
+          <SearchToolUI />
+          <DescribeToolUI />
+          <ImportPackageFileToolUI />
 
-        {/* Empty: composer centered mid-screen for a strong first impression.
+          {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
-        <AuiIf condition={(s) => s.thread.isEmpty}>
-          <ThreadWelcome
-            composerTools={composerTools}
-            composerSlot={composerSlot}
-            initialComposerDraft={initialComposerDraft}
-            draftSeededRef={draftSeededRef}
-            queue={messageQueue}
-          />
-        </AuiIf>
+          <AuiIf condition={(s) => s.thread.isEmpty}>
+            <ThreadWelcome
+              composerTools={composerTools}
+              composerSlot={composerSlot}
+              initialComposerDraft={initialComposerDraft}
+              draftSeededRef={draftSeededRef}
+              queue={messageQueue}
+            />
+          </AuiIf>
 
-        <AuiIf condition={(s) => !s.thread.isEmpty}>
-          {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+          <AuiIf condition={(s) => !s.thread.isEmpty}>
+            {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
             and amplifies any residual layout shift. `relative` makes the
             viewport the containing block of its absolutely positioned
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-          <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
-            <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+            <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
+              <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
-            <div className="min-h-6 flex-grow" />
+              <div className="min-h-6 flex-grow" />
 
-            <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
-              <ScrollToBottom />
-              <Composer
-                tools={composerTools}
-                slot={composerSlot}
-                initialDraft={initialComposerDraft}
-                draftSeededRef={draftSeededRef}
-                queue={messageQueue}
-              />
-              <Disclaimer />
-            </ThreadPrimitive.ViewportFooter>
-          </ThreadPrimitive.Viewport>
-        </AuiIf>
-      </ThreadPrimitive.Root>
-      {/* The app's dropzone in its drag-over state (the form file field, the
+              <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
+                <ScrollToBottom />
+                <Composer
+                  tools={composerTools}
+                  slot={composerSlot}
+                  initialDraft={initialComposerDraft}
+                  draftSeededRef={draftSeededRef}
+                  queue={messageQueue}
+                />
+                <Disclaimer />
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </AuiIf>
+        </ThreadPrimitive.Root>
+        {/* The app's dropzone in its drag-over state (the form file field, the
           import dialog): dashed border, primary tint. Over the thread it needs
           a veil so the transcript does not show through. */}
-      <div
-        aria-hidden="true"
-        className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
-      >
-        <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
-          <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+        <div
+          aria-hidden="true"
+          className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
+        >
+          <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
+            <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
+            <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+          </div>
         </div>
-      </div>
-    </ComposerPrimitive.AttachmentDropzone>
+      </ComposerPrimitive.AttachmentDropzone>
+    </ConversationContextProvider>
   );
 }
 
@@ -443,12 +445,14 @@ function ComposerAttachmentError() {
 }
 
 /**
- * Warns when the draft's files would take the conversation past the summarizing threshold: an
- * estimate that errs low (`estimateDraftTokens`), against the last measure. Nothing before one.
+ * Warns when the draft (its text and files) would take the conversation past the summarizing
+ * threshold, by an approximation (`estimateDraftTokens`) against the last measure. Nothing before
+ * one. The live region stays mounted: one inserted already filled is often not announced.
  */
 function DraftContextNotice() {
   const { t } = useChatHost();
   const reading = useConversationContext();
+  const textLength = useAuiState((s) => s.composer.text.length);
   const attachments = useAuiState((s) => s.composer.attachments);
   const readsImages = React.useSyncExternalStore(
     subscribeModel,
@@ -463,21 +467,27 @@ function DraftContextNotice() {
   const draftTokens = React.useMemo(
     () =>
       estimateDraftTokens(
-        attachments.map((a) => ({
-          name: a.name,
-          mime: a.file?.type || a.contentType || "",
-          size: a.file?.size ?? 0,
-        })),
+        {
+          textLength,
+          files: attachments.map((a) => ({
+            name: a.name,
+            mime: a.file?.type || a.contentType || "",
+            size: a.file?.size ?? 0,
+          })),
+        },
         { readsImages, readsPdf },
       ),
-    [attachments, readsImages, readsPdf],
+    [textLength, attachments, readsImages, readsPdf],
   );
-  if (!reading || !attachments.length || !draftCrossesThreshold(reading.context, draftTokens))
-    return null;
+  const crosses = reading !== null && draftCrossesThreshold(reading.context, draftTokens);
   return (
-    <Alert role="status" variant="warning" size="sm">
-      <AlertDescription>{t("composer.draftPastThreshold")}</AlertDescription>
-    </Alert>
+    <div role="status" className="empty:hidden">
+      {crosses ? (
+        <Alert role={undefined} variant="warning" size="sm">
+          <AlertDescription>{t("composer.draftPastThreshold")}</AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
   );
 }
 

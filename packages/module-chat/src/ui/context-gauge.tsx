@@ -11,7 +11,7 @@ import * as React from "react";
 import { cn } from "@appstrate/ui/cn";
 import {
   formatCompactTokens,
-  formatContextWindow,
+  formatTokenFigure,
   formatWindowPercent,
 } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
@@ -19,7 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/component
 import { Progress } from "@appstrate/ui/components/progress";
 import { useChatHost } from "./runtime-context.ts";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
-import type { ContextLevel } from "./turn-context.ts";
+import { thresholdShare, type ContextLevel } from "./turn-context.ts";
 import { useConversationContext } from "./use-conversation-context.ts";
 
 const LEVEL_TEXT: Record<ContextLevel, string> = {
@@ -38,8 +38,9 @@ const LEVEL_SENTENCE: Record<ContextLevel, string> = {
   full: "contextUsage.compactNext",
 };
 
-// With the share beside the ring the button widens: `w-auto` follows `size-*` in the stylesheet.
-const SHARE_CLASS = "w-auto min-w-10 gap-1 px-2 desktop-pointer:w-auto desktop-pointer:min-w-8";
+// With the share beside the ring the button widens: a height and a minimum width, no `size-*`.
+const SHARE_CLASS =
+  "h-10 min-w-10 shrink-0 gap-1 rounded-lg px-2 desktop-pointer:h-8 desktop-pointer:min-w-8";
 
 const RING_RADIUS = 6;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -70,9 +71,10 @@ export function ContextGauge({ className }: { className?: string }) {
   if (!reading) return null;
   const { context, measuredWith, readAgainstSelected } = reading;
 
+  // Read against another model, the measure is the measuring model's tokenizer: approximate.
   const counts = t("contextUsage.counts", {
-    used: formatCompactTokens(context.tokens, lang),
-    max: formatContextWindow(context.window, context.windowAssumed === true, lang),
+    used: formatTokenFigure(context.tokens, readAgainstSelected, lang),
+    max: formatTokenFigure(context.window, context.windowAssumed, lang),
   });
   const sentence = t(LEVEL_SENTENCE[context.level], {
     threshold: formatCompactTokens(context.compactAt, lang),
@@ -84,11 +86,10 @@ export function ContextGauge({ className }: { className?: string }) {
       <PopoverTrigger asChild>
         <Button
           type="button"
-          size="icon"
+          size={showShare ? "sm" : "icon"}
           variant="ghost"
           className={cn(
-            COMPOSER_BUTTON_CLASS,
-            showShare && SHARE_CLASS,
+            showShare ? SHARE_CLASS : COMPOSER_BUTTON_CLASS,
             LEVEL_TEXT[context.level],
             className,
           )}
@@ -98,7 +99,7 @@ export function ContextGauge({ className }: { className?: string }) {
           {/* aria-hidden: the label already says the level. */}
           {showShare ? (
             <span aria-hidden="true" className="text-xs tabular-nums">
-              {formatWindowPercent(context.ratio, lang)}
+              {formatWindowPercent(thresholdShare(context), lang)}
             </span>
           ) : null}
         </Button>
@@ -120,21 +121,21 @@ export function ContextGauge({ className }: { className?: string }) {
           indicatorClassName={LEVEL_FILL[context.level]}
         />
         <p className="whitespace-nowrap tabular-nums">{counts}</p>
-        <p className="text-muted-foreground tabular-nums">
-          {t("contextUsage.shareOfThreshold", {
-            share: formatWindowPercent(context.ratio, lang),
-            threshold: formatCompactTokens(context.compactAt, lang),
-          })}
-        </p>
         <p className="text-muted-foreground">{sentence}</p>
         {context.summarized ? (
           <p className="text-muted-foreground">{t("contextUsage.summarized")}</p>
         ) : null}
         {context.windowAssumed ? (
           <p className="text-muted-foreground">
-            {t("contextUsage.windowAssumed", {
-              window: formatCompactTokens(context.window, lang),
-            })}
+            {/* Read against the measuring model, "this model" would be the selected one: name it. */}
+            {measuredWith && !readAgainstSelected
+              ? t("contextUsage.windowAssumedOf", {
+                  model: measuredWith,
+                  window: formatCompactTokens(context.window, lang),
+                })
+              : t("contextUsage.windowAssumed", {
+                  window: formatCompactTokens(context.window, lang),
+                })}
           </p>
         ) : null}
         {measuredWith ? (

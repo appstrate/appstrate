@@ -31,6 +31,8 @@ import { addRequestUsage } from "@appstrate/runner-pi/pi-model";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
+  PiCompactionEndEvent,
+  PiCompactionResult,
   PiUsage,
   PiFinishReason,
 } from "./pi-events.ts";
@@ -87,20 +89,10 @@ interface PiChatResultMeta {
 }
 
 /** What Pi's `compaction_end` result says about the summary it appended. */
-export interface PiCompaction {
-  summary: string;
-  /** Session entry id of the first message kept beside the summary. */
-  firstKeptEntryId: string;
-  tokensBefore: number;
-}
-
-function compactionOf(result: unknown): PiCompaction | undefined {
-  if (!result || typeof result !== "object") return undefined;
-  const { summary, firstKeptEntryId, tokensBefore } = result as Record<string, unknown>;
-  if (typeof summary !== "string" || typeof firstKeptEntryId !== "string") return undefined;
-  if (typeof tokensBefore !== "number") return undefined;
-  return { summary, firstKeptEntryId, tokensBefore };
-}
+export type PiCompaction = Pick<
+  PiCompactionResult,
+  "summary" | "firstKeptEntryId" | "tokensBefore"
+>;
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
   switch (stop) {
@@ -202,7 +194,6 @@ export class PiChatUiStreamMapper {
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
-      aborted?: boolean;
     };
     switch (e.type) {
       case "message_start":
@@ -251,15 +242,17 @@ export class PiChatUiStreamMapper {
         this.captureFailure(lastAssistantMessage(e.messages ?? []));
         return [];
       case "compaction_end": {
+        // The catch-all member defeats narrowing; the view is pinned to Pi's (`pi-events.ts`).
+        const { result, aborted } = event as PiCompactionEndEvent;
+        if (aborted || !result) return [];
         // A later summary in the same turn starts from the earlier one, so it replaces it.
-        const compaction = e.aborted ? undefined : compactionOf(e.result);
-        if (compaction) {
-          this.compaction = compaction;
-          const after = (e.result as { estimatedTokensAfter?: unknown }).estimatedTokensAfter;
-          this.contextAfterCompaction = typeof after === "number" && after > 0 ? after : undefined;
-        }
+        const { summary, firstKeptEntryId, tokensBefore, estimatedTokensAfter, usage } = result;
+        this.compaction = { summary, firstKeptEntryId, tokensBefore };
+        this.contextAfterCompaction =
+          estimatedTokensAfter !== undefined && estimatedTokensAfter > 0
+            ? estimatedTokensAfter
+            : undefined;
         // The summary is a billed call that emits no `message_end`; it is not a context measure.
-        const usage = e.aborted ? undefined : (e.result as { usage?: PiUsage } | undefined)?.usage;
         if (usage) this.accUsage = addRequestUsage(this.accUsage, usage, this.cost);
         return [];
       }

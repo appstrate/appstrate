@@ -422,6 +422,15 @@ describe("buildTurnRows — per-turn projection", () => {
     expect(rows[1]!).not.toHaveProperty("contextWindowAssumed");
   });
 
+  it("drops `contextWindowAssumed: false`, and an assumption without a valid window", () => {
+    const rows = buildTurnRows([
+      turnLog({ event: "turn", index: 1, contextWindow: 128_000, contextWindowAssumed: false }),
+      turnLog({ event: "turn", index: 2, contextWindowAssumed: true }),
+      turnLog({ event: "turn", index: 3, contextWindow: "128k", contextWindowAssumed: true }),
+    ]);
+    for (const row of rows) expect(row).not.toHaveProperty("contextWindowAssumed");
+  });
+
   it("drops a malformed window instead of coercing it", () => {
     const rows = buildTurnRows([
       turnLog({ event: "turn", index: 1, inputTokens: 10, contextWindow: "200k" }),

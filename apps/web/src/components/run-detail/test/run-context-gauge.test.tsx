@@ -34,6 +34,8 @@ const TURNS = [turn(0, 40_000, 200_000), turn(1, 187_000, 200_000), turn(2, 128_
 
 const nbsp = "\u00a0";
 const text = (html: string) => html.replace(/<[^>]*>/g, "");
+// The window renders as "128 k" (nbsp) in the hint; only the part before it is stable here.
+const assumedHint = agentsFr["run.contextGaugeWindowAssumed"].split("{{window}}")[0]!.trim();
 const valueText = (html: string) => /aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "";
 
 describe("ContextGaugeReadout", () => {
@@ -49,8 +51,10 @@ describe("ContextGaugeReadout", () => {
   it("shows the peak once the run settled, and says so", () => {
     const html = render(<ContextGaugeReadout turns={TURNS} status="success" />);
     expect(text(html)).toBe(`187${nbsp}k / 200${nbsp}k`);
-    expect(valueText(html)).toContain("pic atteint");
-    expect(html).toContain('tabindex="0"');
+    expect(valueText(html)).toContain(
+      agentsFr["run.contextGaugePeakValueText"].split("{{window}}")[1]!.trim(),
+    );
+    expect(html).toContain('aria-haspopup="dialog"');
     expect(text(render(<ContextGaugePeakHint />))).toBe(agentsFr["run.contextGaugePeakHint"]);
   });
 
@@ -60,8 +64,19 @@ describe("ContextGaugeReadout", () => {
     expect(text(html)).toBe(
       `64${nbsp}k / ≈${nbsp}128${nbsp}k · ${formatWindowPercent(0.5, i18n.language)}`,
     );
-    expect(valueText(html)).toContain("Fenêtre supposée");
-    expect(html).toContain('tabindex="0"');
+    expect(valueText(html)).toContain(assumedHint);
+    expect(html).toContain('aria-haspopup="dialog"');
+  });
+
+  it("marks an assumed window on a settled run too: popover trigger and value text", () => {
+    const assumed = [{ ...turn(0, 64_000, 128_000), contextWindowAssumed: true as const }];
+    const html = render(<ContextGaugeReadout turns={assumed} status="success" />);
+    expect(text(html)).toBe(`64${nbsp}k / ≈${nbsp}128${nbsp}k`);
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(valueText(html)).toContain(assumedHint);
+    expect(valueText(html)).toContain(
+      agentsFr["run.contextGaugePeakValueText"].split("{{window}}")[1]!.trim(),
+    );
   });
 
   it("clamps the bar's value past a stale window, keeping the raw count in the text", () => {

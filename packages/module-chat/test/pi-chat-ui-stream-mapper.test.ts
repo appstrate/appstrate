@@ -566,7 +566,7 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
   });
   const compaction = (summary: string): AgentSessionEvent => ({
     type: "compaction_end",
-    result: { summary, firstKeptEntryId: `kept_${summary}`, tokensBefore: 9_000, usage: {} },
+    result: { summary, firstKeptEntryId: `kept_${summary}`, tokensBefore: 9_000 },
     aborted: false,
   });
 

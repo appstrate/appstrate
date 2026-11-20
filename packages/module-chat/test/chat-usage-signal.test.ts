@@ -64,10 +64,26 @@ describe("recordTurnUsage", () => {
     const notified: unknown[][] = [];
     const { write, settle } = deferredWrite();
     recordTurnUsage(RECORD, write, (...args) => notified.push(args));
+    await flush();
     settle().reject(new Error("ledger down"));
     await flush();
     expect(notified).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("never throws, and logs, when the write throws synchronously", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const notified: unknown[][] = [];
+    const write = (): Promise<void> => {
+      throw new Error("ledger unreachable");
+    };
+    expect(() => recordTurnUsage(RECORD, write, (...args) => notified.push(args))).not.toThrow();
+    await flush();
+    expect(notified).toEqual([]);
+    expect(warn).toHaveBeenCalledWith("chat usage metering failed", {
+      err: "Error: ledger unreachable",
+    });
     warn.mockRestore();
   });
 });

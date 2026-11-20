@@ -11,6 +11,8 @@
 
 import { describe, it, expect } from "bun:test";
 import type { UIMessage } from "ai";
+import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
+import type { ReadAttachment } from "../src/pi-chat/attachment-inputs.ts";
 import { createPiOAuthModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
@@ -101,6 +103,13 @@ const storedTokens = (meta: Record<string, unknown> | undefined) =>
 
 /** The `finish` chunk's turn metadata, read off the SSE body. */
 async function closingTurn(res: Response): Promise<Record<string, unknown> | undefined> {
+  return (await closingMetadata(res))?.appstrate?.turn;
+}
+
+/** The `finish` chunk's whole message metadata, as the client persists it on the message. */
+async function closingMetadata(
+  res: Response,
+): Promise<{ appstrate?: { turn?: Record<string, unknown> } } | undefined> {
   const body = await res.text();
   for (const line of body.split("\n")) {
     if (!line.startsWith("data: ")) continue;
@@ -110,7 +119,7 @@ async function closingTurn(res: Response): Promise<Record<string, unknown> | und
       type?: string;
       messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
     };
-    if (chunk.type === "finish") return chunk.messageMetadata?.appstrate?.turn;
+    if (chunk.type === "finish") return chunk.messageMetadata;
   }
   return undefined;
 }
@@ -120,11 +129,23 @@ const HISTORY = [
   { id: "a0", role: "assistant", parts: [{ type: "text", text: "première réponse" }] },
 ] as UIMessage[];
 
+type SessionManagerOf = Awaited<ReturnType<typeof loadPiCodingAgentSdk>>["SessionManager"];
+
+interface TurnOptions {
+  /** The prompt; default: "bonjour" as `u1`. */
+  prompt?: UIMessage;
+  /** The model accepts images, read through `readAttachment`. */
+  readAttachment?: ReadAttachment;
+  /** Receives the reconstructed session handed to Pi. */
+  onSession?: (sessionManager: ReturnType<SessionManagerOf["inMemory"]>) => void;
+}
+
 function turn(
   usages: Usage[],
   contextWindow: number | null,
   replay: Replay = {},
   history: UIMessage[] = [],
+  { prompt, readAttachment, onSession }: TurnOptions = {},
 ) {
   const binding = createPiOAuthModelBinding(
     {
@@ -133,7 +154,7 @@ function turn(
       baseUrl: "https://api.anthropic.com",
       accessToken: "oauth-secret-in-memory",
       credentialId: "cred-test",
-      input: ["text"],
+      input: readAttachment ? ["text", "image"] : ["text"],
       contextWindow,
       maxTokens: 16_384,
       reasoning: false,
@@ -151,7 +172,7 @@ function turn(
     chatSessionId: null,
     messages: [
       ...history,
-      { id: "u1", role: "user", parts: [{ type: "text", text: "bonjour" }] },
+      prompt ?? { id: "u1", role: "user", parts: [{ type: "text", text: "bonjour" }] },
     ] as UIMessage[],
     system: "You are a helpful assistant.",
     generation: {},
@@ -159,13 +180,17 @@ function turn(
     abortSignal: new AbortController().signal,
     onError: (error) => String(error),
     recordUsage: () => {},
-    createSession: async (options) => ({
-      session: replaySession(
-        usages,
-        options!.sessionManager as unknown as { getBranch(): Array<{ id: string }> },
-        replay,
-      ),
-    }),
+    ...(readAttachment ? { readAttachment } : {}),
+    createSession: async (options) => {
+      onSession?.(options!.sessionManager as ReturnType<SessionManagerOf["inMemory"]>);
+      return {
+        session: replaySession(
+          usages,
+          options!.sessionManager as unknown as { getBranch(): Array<{ id: string }> },
+          replay,
+        ),
+      };
+    },
   });
 }
 
@@ -244,5 +269,76 @@ describe("chat turn context", () => {
     // No call measured anything: the context is the estimate of what the next turn resends.
     expect(meta).toMatchObject({ finishReason: "error", summary: { text: "Résumé du fil" } });
     expect(storedTokens(meta)).toBeGreaterThan(0);
+  }, 20_000);
+
+  it("replays a turn's summary on the next turn, from where it kept history", async () => {
+    const { getLatestCompactionEntry } = await loadPiCodingAgentSdk();
+    const image = (id: string, text: string, url: string) =>
+      ({
+        id,
+        role: "user",
+        parts: [
+          { type: "text", text },
+          { type: "file", mediaType: "image/png", url },
+        ],
+      }) as UIMessage;
+    const history = [image("u0", "question résumée", "file://u0.png"), HISTORY[1]!];
+    // Turn N: Pi summarizes past its threshold, keeping from `a0`.
+    const full = [{ input: 190_000, output: 500, cacheRead: 0, cacheWrite: 0 }];
+    const keep = (session: { getBranch(): Array<{ id: string }> }) => session.getBranch()[1]!.id;
+    const metadata = await closingMetadata(
+      turn(full, 200_000, { compacts: "after", keep }, history),
+    );
+    expect(metadata?.appstrate?.turn?.summary).toMatchObject({
+      keptFrom: { messageId: "a0", offset: 0 },
+    });
+
+    // Turn N+1: the branch carries turn N's reply with its metadata.
+    const read: string[] = [];
+    let sessionManager: Parameters<NonNullable<TurnOptions["onSession"]>>[0] | undefined;
+    await closingTurn(
+      turn(
+        [{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }],
+        200_000,
+        {},
+        [
+          ...history,
+          image("u1", "bonjour", "file://u1.png"),
+          {
+            id: "a1",
+            role: "assistant",
+            parts: [{ type: "text", text: "réponse résumée" }],
+            metadata,
+          } as UIMessage,
+        ],
+        {
+          prompt: { id: "u2", role: "user", parts: [{ type: "text", text: "suite" }] } as UIMessage,
+          readAttachment: async (uri) => {
+            read.push(uri);
+            return null;
+          },
+          onSession: (manager) => (sessionManager = manager),
+        },
+      ),
+    );
+    const branch = sessionManager!.getBranch();
+    expect(branch.map((entry) => entry.type)).toEqual([
+      "message",
+      "compaction",
+      "message",
+      "message",
+    ]);
+    const messages = sessionManager!.buildSessionContext().messages;
+    expect(messages[0]).toMatchObject({ role: "compactionSummary", summary: "Résumé du fil" });
+    expect(messages.slice(1).map((message) => message.role)).toEqual([
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("question résumée");
+    // Pi's next summary starts from the latest one on the branch (`prepareCompaction`).
+    expect(getLatestCompactionEntry(branch)?.summary).toBe("Résumé du fil");
+    // Attachments before the kept history are never read.
+    expect(read).toEqual(["file://u1.png"]);
   }, 20_000);
 });

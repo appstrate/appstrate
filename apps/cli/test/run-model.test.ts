@@ -69,6 +69,16 @@ describe("resolveModel — defaults + flags", () => {
     expect(model.provider).toBe("mistral");
   });
 
+  it("runs on the default limits, the window flagged assumed: env mode declares none", () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-dev";
+    const resolved = resolveModel({});
+    expect(resolved.model).toMatchObject({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
+    expect(resolved.contextWindowAssumed).toBe(true);
+  });
+
   it("flag beats env var", () => {
     process.env.APPSTRATE_MODEL_API = "anthropic-messages";
     process.env.ANTHROPIC_API_KEY = "sk-ant";
@@ -378,14 +388,15 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         orgId: "org_1",
         presetsLoader: async () => [makePreset({ ...preset, ...limits })],
       });
-    expect((await resolve({})).model).toMatchObject({
+    const undeclared = await resolve({});
+    expect(undeclared.model).toMatchObject({
       contextWindow: DEFAULT_CONTEXT_WINDOW,
       maxTokens: DEFAULT_MAX_TOKENS,
     });
-    expect((await resolve({ contextWindow: 500_000, maxTokens: 16_000 })).model).toMatchObject({
-      contextWindow: 500_000,
-      maxTokens: 16_000,
-    });
+    expect(undeclared.contextWindowAssumed).toBe(true);
+    const declared = await resolve({ contextWindow: 500_000, maxTokens: 16_000 });
+    expect(declared.model).toMatchObject({ contextWindow: 500_000, maxTokens: 16_000 });
+    expect(declared).not.toHaveProperty("contextWindowAssumed");
   });
 
   // `undefined`: the field is required, `null` being how "no record" is said.

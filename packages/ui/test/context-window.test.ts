@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   formatCompactTokens,
-  formatContextWindow,
+  formatTokenFigure,
   formatWindowPercent,
   fractionOfWindow,
 } from "../src/context-window.ts";
@@ -67,11 +67,12 @@ describe("formatWindowPercent", () => {
   });
 });
 
-describe("formatContextWindow", () => {
+describe("formatTokenFigure", () => {
   it("marks an assumed window and leaves a declared one as is", () => {
-    expect(formatContextWindow(128_000, false, "en")).toBe("128K");
-    expect(formatContextWindow(128_000, true, "en")).toBe("≈\u00a0128K");
-    expect(formatContextWindow(128_000, true, "fr")).toBe(
+    expect(formatTokenFigure(128_000, false, "en")).toBe("128K");
+    expect(formatTokenFigure(128_000, undefined, "en")).toBe("128K");
+    expect(formatTokenFigure(128_000, true, "en")).toBe("≈\u00a0128K");
+    expect(formatTokenFigure(128_000, true, "fr")).toBe(
       `≈\u00a0${formatCompactTokens(128_000, "fr")}`,
     );
   });

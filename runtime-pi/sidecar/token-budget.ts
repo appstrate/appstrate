@@ -203,9 +203,9 @@ interface TokenBudgetOptions {
   /**
    * Room (tokens) kept for the model's reply. Only meaningful in
    * combination with {@link contextWindowTokens}. Normalized by
-   * `deriveResponseReserveTokens` (capped at an absolute 64k); a missing
-   * value defaults to `max(16384, floor(contextWindowTokens × 0.2))`, the
-   * same rule the runner uses for Pi SDK compaction sizing.
+   * `deriveResponseReserveTokens`, the rule the runner sizes Pi SDK
+   * compaction with: capped at 64k and at 80 % of the window; a missing
+   * value derives from the window (`max(16384, 20 %)`, under the same caps).
    */
   reserveTokens?: number;
   /**
@@ -282,7 +282,8 @@ export class TokenBudget {
           `TokenBudget: contextWindowTokens must be a positive integer when set, got ${ctx}`,
         );
       }
-      // `deriveResponseReserveTokens` guarantees `reserve < ctx`: it treats
+      // `deriveResponseReserveTokens` guarantees `reserve < ctx` for any
+      // `ctx >= 2` (a 1-token window has no positive reserve below it): it treats
       // an impossible `maxTokens >= ctx` (corrupt catalog/override data) as
       // unusable and falls back to a derived default rather than throwing —
       // a bad datum must degrade gracefully, never crash the sidecar at boot.

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { sanitizeFilename } from "@appstrate/core/naming";
-import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { Api, ExtensionFactory } from "@appstrate/runner-pi";
+import { TURN_PDF_MAX_BYTES } from "../attachment-limits.ts";
 import { readsPdfNatively } from "../pdf-input.ts";
 
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
@@ -45,7 +45,7 @@ export function createTurnPdfInput(model: { api: Api; input: readonly string[] }
     name: string;
     data: string;
   }[] = [];
-  let remainingBytes = RESOURCE_BLOB_MAX_BYTES;
+  let remainingBytes = TURN_PDF_MAX_BYTES;
 
   return {
     supported,

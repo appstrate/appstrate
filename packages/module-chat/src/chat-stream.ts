@@ -273,21 +273,25 @@ export async function persistClaimedUserMessage(
 
 /**
  * Write a turn's usage row without holding the stream, then signal its conversation: the row
- * lands after the turn's own persistence signal, and the detail reads the ledger.
+ * lands after the turn's own persistence signal, and the detail reads the ledger. Never throws:
+ * the engine calls it from its `finally`, ahead of the MCP close, so a write that throws
+ * synchronously is logged like a rejected one.
  */
 export function recordTurnUsage(
   record: ChatUsageRecord,
   write: (record: ChatUsageRecord) => Promise<void>,
   notify: typeof notifySessionUpdate = notifySessionUpdate,
 ): void {
-  void write(record).then(
-    () => {
-      if (record.chatSessionId) notify(record.chatSessionId, record.orgId, record.userId);
-    },
-    (err: unknown) => {
-      logger.warn("chat usage metering failed", { err: String(err) });
-    },
-  );
+  void Promise.resolve()
+    .then(() => write(record))
+    .then(
+      () => {
+        if (record.chatSessionId) notify(record.chatSessionId, record.orgId, record.userId);
+      },
+      (err: unknown) => {
+        logger.warn("chat usage metering failed", { err: String(err) });
+      },
+    );
 }
 
 export async function handleChatStream(

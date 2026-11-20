@@ -223,6 +223,19 @@ function thinkingLevelMapOf(spec: PiModelSpec): Model<Api>["thinkingLevelMap"] {
   return spec.apiShape === ALIAS_CLIENT_API_SHAPE ? undefined : UNRECORDED_THINKING_LEVEL_MAP;
 }
 
+/**
+ * The window a model runs on. A launcher that declares none gets
+ * `DEFAULT_CONTEXT_WINDOW`, flagged `assumed` so turns can say the window is a guess.
+ */
+export function resolvePiContextWindow(declared: number | null | undefined): {
+  contextWindow: number;
+  assumed?: true;
+} {
+  return declared == null
+    ? { contextWindow: DEFAULT_CONTEXT_WINDOW, assumed: true }
+    : { contextWindow: declared };
+}
+
 export function buildPiModel(spec: PiModelSpec): Model<Api> {
   const dialect = spec.dialect;
   const thinkingLevelMap = thinkingLevelMapOf(spec);
@@ -237,7 +250,7 @@ export function buildPiModel(spec: PiModelSpec): Model<Api> {
     input: spec.input ? [...spec.input] : ["text"],
     cost: { ...ZERO_MODEL_COST, ...spec.cost },
     compat: { ...dialect?.compat, ...PLATFORM_MODEL_COMPAT },
-    contextWindow: spec.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    contextWindow: resolvePiContextWindow(spec.contextWindow).contextWindow,
     maxTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS,
     ...(spec.headers ? { headers: spec.headers } : {}),
   } as Model<Api>;

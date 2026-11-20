@@ -150,12 +150,12 @@ export function turnContextOf(
   const settled = measured.lastSettledUsage;
   const { compaction } = measured;
   const keptFrom = compaction && anchors?.origins.get(compaction.firstKeptEntryId);
-  const afterSummary =
-    measured.contextAfterCompaction === undefined || !compaction || !anchors
-      ? undefined
-      : keptFrom
-        ? measured.contextAfterCompaction
-        : anchors.estimateRestart(compaction.summary);
+  let afterSummary: number | undefined;
+  if (measured.contextAfterCompaction !== undefined && compaction && anchors) {
+    // Pi's own estimate, system prompt included, when it kept history the next turn resends as is.
+    if (keptFrom) afterSummary = measured.contextAfterCompaction;
+    else afterSummary = anchors.estimateRestart(compaction.summary);
+  }
   const tokens = !measure ? 0 : (afterSummary ?? (settled ? measure.contextTokens(settled) : 0));
   return {
     ...(measure && tokens > 0

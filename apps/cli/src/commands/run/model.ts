@@ -24,7 +24,8 @@
 import type { Api, Model } from "../../lib/pi-sdk.ts";
 import { deriveProviderFromApi, llmProxyBaseUrl, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import type { ModelInputModality } from "@appstrate/core/module";
 import { isPiModelDialect } from "@appstrate/core/sidecar-types";
 import {
@@ -45,7 +46,7 @@ interface ModelFlags {
 interface ResolvedModel {
   model: Model<Api>;
   apiKey: string;
-  /** The preset declares no window: `model` runs on `DEFAULT_CONTEXT_WINDOW`. */
+  /** No window was declared (always so in env mode): `model` runs on `DEFAULT_CONTEXT_WINDOW`. */
   contextWindowAssumed?: true;
 }
 
@@ -142,11 +143,13 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     // One spelling of those zeros; `ZERO_MODEL_COST` carries both reasons the
     // record exists, and the `compat` exemption above does NOT extend to it.
     cost: { ...ZERO_MODEL_COST },
-    contextWindow: 200_000,
-    maxTokens: 8192,
+    // Env mode has no source for the model's limits: the runner's defaults, the window flagged
+    // as assumed.
+    contextWindow: DEFAULT_CONTEXT_WINDOW,
+    maxTokens: DEFAULT_MAX_TOKENS,
   };
 
-  return { model, apiKey };
+  return { model, apiKey, contextWindowAssumed: true };
 }
 
 /**
@@ -224,7 +227,9 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   return {
     model,
     apiKey,
-    ...(preset.contextWindow == null ? { contextWindowAssumed: true as const } : {}),
+    ...(resolvePiContextWindow(preset.contextWindow).assumed
+      ? { contextWindowAssumed: true as const }
+      : {}),
   };
 }
 

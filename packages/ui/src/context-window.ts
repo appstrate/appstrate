@@ -22,19 +22,40 @@ export function fractionOfWindow(tokens: number, window: number): number {
  */
 export function formatCompactTokens(tokens: number, lang: string): string {
   if (!Number.isFinite(tokens) || tokens < 0) return "0";
-  return new Intl.NumberFormat(lang, { notation: "compact" }).format(tokens);
+  return formatter(COMPACT, lang, { notation: "compact" }).format(tokens);
 }
 
-/** A window as {@link formatCompactTokens} does, marked `≈` when it is a fallback, not a declared size. */
-export function formatContextWindow(window: number, assumed: boolean, lang: string): string {
-  const figure = formatCompactTokens(window, lang);
-  return assumed ? `≈\u00a0${figure}` : figure;
+/**
+ * A count as {@link formatCompactTokens} does, marked `≈` when it is approximate: a fallback
+ * window, not a declared one, or a measure read against another model than the one that took it.
+ */
+export function formatTokenFigure(
+  tokens: number,
+  approximate: boolean | undefined,
+  lang: string,
+): string {
+  const figure = formatCompactTokens(tokens, lang);
+  return approximate ? `≈\u00a0${figure}` : figure;
 }
 
 /** A 0..1 share as a localized percentage (`Intl`: French puts a narrow no-break space before the sign). */
 export function formatWindowPercent(fraction: number, lang: string): string {
-  return new Intl.NumberFormat(lang, {
-    style: "percent",
-    maximumFractionDigits: 0,
-  }).format(fraction);
+  return formatter(PERCENT, lang, { style: "percent", maximumFractionDigits: 0 }).format(fraction);
+}
+
+/** One formatter per language and style: gauges format on every render. */
+const COMPACT = new Map<string, Intl.NumberFormat>();
+const PERCENT = new Map<string, Intl.NumberFormat>();
+
+function formatter(
+  cache: Map<string, Intl.NumberFormat>,
+  lang: string,
+  options: Intl.NumberFormatOptions,
+): Intl.NumberFormat {
+  let format = cache.get(lang);
+  if (!format) {
+    format = new Intl.NumberFormat(lang, options);
+    cache.set(lang, format);
+  }
+  return format;
 }

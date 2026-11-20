@@ -299,7 +299,7 @@ export interface PiRunnerOptions {
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
   modelCompaction?: boolean;
   /** {@link model}'s window is `DEFAULT_CONTEXT_WINDOW`, the launcher declared none: turns say so. */
-  contextWindowAssumed?: boolean;
+  contextWindowAssumed?: true;
   /** Per-tool-result byte cap on the event sink. Default `DEFAULT_TOOL_RESULT_BYTE_LIMIT`. */
   toolResultByteLimit?: number;
 }
@@ -1718,8 +1718,8 @@ export function installSessionBridge(
           runId,
           message:
             before !== undefined && after !== undefined
-              ? `Context compacted — ${before} → ${after} tokens`
-              : "Context compacted",
+              ? `Context summarized — ${before} → ${after} tokens`
+              : "Context summarized",
           data: {
             event: COMPACTION_EVENT,
             ...(e.reason !== undefined ? { reason: e.reason } : {}),
