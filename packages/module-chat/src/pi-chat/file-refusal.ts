@@ -3,16 +3,21 @@
 /**
  * Whether a model refused a file, decided by a replay rather than by the provider's wording.
  *
- * A provider request carrying a file that fails as an invalid request (not for its length) is
- * replayed in the same step with those file parts replaced by a text pointer: the PDFs alone
- * first when images rode too, then both if that replay is refused the same way. Only a replay
- * that succeeds names the cause; a kind it withheld stays withheld for the rest of the turn.
- * When every replay is refused the same way, the turn reports the first error; when one fails
- * otherwise, its own error. Nothing outlives the turn.
+ * A provider request carrying a file that fails as an invalid request, or with no recognised
+ * cause, is replayed in the same step with those file parts replaced by a text pointer: the PDFs
+ * alone first when images rode too, then both if that replay is refused the same way (same
+ * category). Only a replay that succeeds names the cause; a kind it withheld stays withheld for
+ * the rest of the turn. When every replay is refused the same way, the turn reports the first
+ * error; when one fails otherwise, its own error. Nothing outlives the turn.
  */
 
-import { getOverflowPatterns, type ExtensionFactory } from "@appstrate/runner-pi";
-import { classifyClientTurnError } from "../turn-error.ts";
+import {
+  isContextOverflow,
+  isRetryableAssistantError,
+  type ExtensionFactory,
+  type Message,
+} from "@appstrate/runner-pi";
+import { describeModelFailure, type ModelErrorCategory } from "@appstrate/core/model-error";
 
 type FileKind = "image" | "pdf";
 
@@ -90,18 +95,25 @@ function withholdFiles(
   };
 }
 
-const OVERFLOW_PATTERNS = getOverflowPatterns();
+type AssistantMessage = Extract<Message, { role: "assistant" }>;
+
+/** A request timeout and a conflict are 4xx a retry can clear: not a verdict on the file. */
+const TRANSIENT_REQUEST_STATUSES = new Set([408, 409]);
 
 /**
- * What a refused file fails as: an invalid request (any 4xx but auth, quota and throttling) that
- * pi-ai's overflow patterns do not read as too long — the llm-proxy's 413 body limit among them.
+ * The category a failed call is a refusal candidate under, or undefined when it is not one.
+ * An invalid request, or a failure with no recognised cause: Codex reports a refused file with
+ * no status. Never auth, quota, throttling, a 5xx, Pi's own transient or overflow verdicts — the
+ * llm-proxy's 413 body limit among them.
  */
-function mayBeFileRefusal(errorText: string): boolean {
-  const text = errorText.trim();
-  return (
-    classifyClientTurnError(text).category === "invalid_request" &&
-    !OVERFLOW_PATTERNS.some((pattern) => pattern.test(text))
-  );
+function refusalCategory(message: AssistantMessage): ModelErrorCategory | undefined {
+  const text = (message.errorMessage ?? "").trim();
+  const { category, status } = describeModelFailure(text);
+  if (category !== "invalid_request" && category !== "unknown") return undefined;
+  if (status !== undefined && TRANSIENT_REQUEST_STATUSES.has(status)) return undefined;
+  // A known 4xx is authoritative over its prose; Pi's transient patterns judge the rest.
+  if (category === "unknown" && isRetryableAssistantError(message)) return undefined;
+  return isContextOverflow(message) ? undefined : category;
 }
 
 interface FileRefusal {
@@ -113,6 +125,12 @@ interface FileRefusal {
   originalError(): string | undefined;
 }
 
+interface Suspect {
+  kinds: FileKind[];
+  error: string;
+  category: ModelErrorCategory;
+}
+
 interface Replay {
   /** Every kind withheld so far by this replay chain. */
   kinds: FileKind[];
@@ -120,14 +138,10 @@ interface Replay {
   remaining: FileKind[];
   /** The failed request's error, before any replay. */
   error: string;
-  /** The latest replay's own error, retries included. */
-  lastError?: string;
-}
-
-interface AssistantView {
-  role?: unknown;
-  stopReason?: unknown;
-  errorMessage?: unknown;
+  /** The failed request's refusal category: a replay failing under it is refused the same way. */
+  category: ModelErrorCategory;
+  /** The latest replay's own failure, retries included. */
+  last?: AssistantMessage;
 }
 
 /** `onReplay` runs when a replay is requested: the failed attempt is no longer the turn's error. */
@@ -138,7 +152,7 @@ export function createFileRefusal(
   const withheld = new Set<FileKind>();
   const refused = new Set<FileKind>();
   let sent: FileKind[] = [];
-  let suspect: { kinds: FileKind[]; error: string } | undefined;
+  let suspect: Suspect | undefined;
   let replay: Replay | undefined;
   let original: string | undefined;
 
@@ -153,18 +167,18 @@ export function createFileRefusal(
       });
       // Errors are judged where Pi settles a run, after its own retries.
       pi.on("turn_end", ({ message }) => {
-        const m = message as AssistantView;
-        if (m.role !== "assistant") return;
-        const error = typeof m.errorMessage === "string" ? m.errorMessage : "";
+        if (message.role !== "assistant") return;
+        const m = message as AssistantMessage;
         if (m.stopReason === "aborted") {
           suspect = replay = undefined;
         } else if (m.stopReason !== "error") {
           for (const kind of replay?.kinds ?? []) refused.add(kind);
           suspect = replay = original = undefined;
         } else if (replay) {
-          replay.lastError = error;
+          replay.last = m;
         } else {
-          suspect = sent.length && mayBeFileRefusal(error) ? { kinds: sent, error } : undefined;
+          const category = sent.length ? refusalCategory(m) : undefined;
+          suspect = category ? { kinds: sent, error: m.errorMessage ?? "", category } : undefined;
         }
       });
       pi.on("agent_before_settle", ({ outcome, context }) => {
@@ -175,7 +189,8 @@ export function createFileRefusal(
         )?.sourceEntry;
         if (failed?.type !== "message" || failed.message.role !== "assistant") return;
         if (failed.message.stopReason !== "error") return;
-        const refusedAgain = replay !== undefined && mayBeFileRefusal(replay.lastError ?? "");
+        const refusedAgain =
+          replay?.last !== undefined && refusalCategory(replay.last) === replay.category;
         if (replay && !(refusedAgain && replay.remaining.length)) {
           original = refusedAgain ? replay.error : undefined;
           replay = undefined;
@@ -191,6 +206,7 @@ export function createFileRefusal(
             kinds,
             remaining: suspect!.kinds.filter((kind) => !kinds.includes(kind)),
             error: suspect!.error,
+            category: suspect!.category,
           };
           suspect = undefined;
         }

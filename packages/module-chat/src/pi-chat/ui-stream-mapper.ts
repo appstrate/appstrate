@@ -358,10 +358,10 @@ export class PiChatUiStreamMapper {
     //    actually went wrong and must keep reaching the user.
     //
     // Nothing genuine is silenced on the `error`-chunk path in `engine.ts`
-    // (`meta.errorText ?? (finishReason === "error" ? … )`): the two fields move
-    // together here — the same `message_end` that clears the text also moves
-    // `finishReason` off "error", so a turn still reporting "error" always has
-    // its text (or falls back to "unknown model error").
+    // (`finishReason === "error" ? (fileRefusal.originalError() ?? meta.errorText
+    // ?? "unknown model error") : meta.errorText`): the same `message_end` that
+    // clears the text also moves `finishReason` off "error", and `clearFailure()`
+    // retires both at once before a file-refusal replay.
     if (m.stopReason !== "error" && m.stopReason !== "aborted") this.lastError = undefined;
     this.captureFailure(message);
   }

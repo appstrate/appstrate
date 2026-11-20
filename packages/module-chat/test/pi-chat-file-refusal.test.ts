@@ -34,8 +34,10 @@ function harness(api = "anthropic-messages") {
   /** The payload as it reaches the wire. */
   const send = (payload: unknown) =>
     handlers.get("before_provider_request")!({ payload }) ?? payload;
-  const end = (stopReason: string, errorMessage?: string) =>
-    handlers.get("turn_end")!({ message: { role: "assistant", stopReason, errorMessage } });
+  const end = (stopReason: string, errorMessage?: string, provider = "anthropic") =>
+    handlers.get("turn_end")!({
+      message: { role: "assistant", stopReason, errorMessage, provider },
+    });
   const settle = (outcome = "error") =>
     handlers.get("agent_before_settle")!({
       outcome,
@@ -53,9 +55,9 @@ function harness(api = "anthropic-messages") {
       },
     });
   /** One failed request with `payload`, settled: whether a replay was asked for. */
-  const fail = (payload: unknown, error: string) => {
+  const fail = (payload: unknown, error: string, provider?: string) => {
     send(payload);
-    end("error", error);
+    end("error", error, provider);
     return settle() !== undefined;
   };
   return { refusal, send, end, settle, fail, replays: () => replays };
@@ -70,6 +72,15 @@ describe("which failures are replayed", () => {
   it("replays an invalid request that carried a file, a non-file 4xx included", () => {
     expect(harness().fail(withImage, "400 Invalid image data")).toBe(true);
     expect(harness().fail(withImage, "400 Unsupported parameter: 'temperature'")).toBe(true);
+  });
+
+  it("replays a failure with no status, the way Codex reports a refused file", () => {
+    for (const error of [
+      "Invalid file data: 'file_data'. Expected a base64-encoded data URL with a MIME type.",
+      "Codex error: invalid_request_error",
+    ]) {
+      expect(harness("openai-codex-responses").fail(withImage, error)).toBe(true);
+    }
   });
 
   it("does not replay a failure that carried no file", () => {
@@ -120,8 +131,19 @@ describe("which failures are replayed", () => {
       "401 invalid x-api-key",
       "429 Too many requests",
       "503 Service unavailable",
+      "408 Request Timeout",
+      "409 Conflict",
+      "fetch failed",
+      "Connection error.",
+      "Codex response failed: stream disconnected before completion",
     ]) {
       expect(harness().fail(withImage, error)).toBe(false);
+    }
+  });
+
+  it("does not replay Cerebras's bodyless overflow, as Pi reads it", () => {
+    for (const error of ["400 status code (no body)", "413 status code (no body)"]) {
+      expect(harness("openai-completions").fail(withImage, error, "cerebras")).toBe(false);
     }
   });
 
@@ -202,6 +224,24 @@ describe("the replay", () => {
     expect(settle()).toBeUndefined();
     expect(refusal.refusedKinds()).toEqual([]);
     expect(refusal.originalError()).toBe("400 Unsupported parameter: 'temperature'");
+  });
+
+  it("keeps the first error when a statusless failure is refused statusless again", () => {
+    const { refusal, send, end, settle, fail } = harness("openai-codex-responses");
+    fail(withImage, "Codex error: invalid_request_error");
+    send(withImage);
+    end("error", "Codex error: invalid_request_error");
+    expect(settle()).toBeUndefined();
+    expect(refusal.originalError()).toBe("Codex error: invalid_request_error");
+  });
+
+  it("reports the replay's own error when it fails in another category", () => {
+    const { refusal, send, end, settle, fail } = harness();
+    fail(withImage, "400 Could not process image");
+    send(withImage);
+    end("error", "Codex error: invalid_request_error");
+    expect(settle()).toBeUndefined();
+    expect(refusal.originalError()).toBeUndefined();
   });
 
   it("forgets the chain when a stop lands during the replay", () => {

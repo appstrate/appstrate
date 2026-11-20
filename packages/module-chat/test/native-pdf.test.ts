@@ -33,7 +33,7 @@ interface TestModel {
 const turnFor = (model: TestModel) => {
   const delivery = fileDelivery(model);
   const turn = createTurnPdfInput(model, delivery);
-  expect(turn.supported).toBe(delivery.pdf);
+  expect(turn.unsupported === undefined).toBe(delivery.pdf);
   return turn;
 };
 
@@ -119,18 +119,19 @@ it("caps cumulative file bytes before sending, including across function calls",
   expect(turnFor(VISION).add({ ...full, data: full.data + "AAAA" }).note).toContain("size limit");
 });
 
-it("reports a PDF the turn does not deliver without exposing it as text", () => {
-  const cases = [
-    { api: "mistral-conversations", input: ["text", "image"] },
+it("reports a PDF the turn does not deliver, with its cause, without exposing it as text", () => {
+  const cases: [TestModel, string][] = [
+    [{ api: "mistral-conversations", input: ["text", "image"] }, "has no PDF input format"],
     // Providers read a PDF's pages as images: a text-only model reads none.
-    { api: "openai-responses", input: ["text"] },
+    [{ api: "openai-responses", input: ["text"] }, "declared without image input"],
   ];
-  for (const model of cases) {
+  for (const [model, cause] of cases) {
     const turn = turnFor(model);
-    expect(turn.supported).toBe(false);
+    expect(turn.unsupported).toContain(cause);
     const receipt = turn.add(pdf);
     expect(receipt.reference).toBeUndefined();
-    expect(receipt.note).toContain("does not accept PDF");
+    expect(receipt.note).toBe(turn.unsupported!);
+    expect(receipt.note).toEndWith("Use an inline run to inspect the file.");
     expect(receipt.note).not.toContain(pdf.data);
     const input = [{ role: "user", content: receipt.note }];
     expect(transform(turn, input)).toEqual(input);
@@ -140,7 +141,7 @@ it("reports a PDF the turn does not deliver without exposing it as text", () => 
 it("treats a PDF the rule lets through on an API without an encoder as unsupported", () => {
   for (const api of [null, "mistral-conversations"]) {
     const turn = createTurnPdfInput({ api }, { pdf: true });
-    expect(turn.supported).toBe(false);
+    expect(turn.unsupported).toContain("has no PDF input format");
     expect(turn.add(pdf).reference).toBeUndefined();
   }
 });
@@ -186,7 +187,7 @@ describe("anthropic-messages", () => {
     ]);
   });
 
-  it("puts a tool's PDF in its own tool_result, never in an error result or another call's", () => {
+  it("puts a tool's PDF in its own tool_result, an error result's after the results", () => {
     const turn = turnFor(ANTHROPIC);
     const mine = turn.add(pdf, "toolu_a");
     const failed = turn.add({ ...pdf, data: btoa("%PDF-1.7 failed") }, "toolu_e");
@@ -214,12 +215,17 @@ describe("anthropic-messages", () => {
           result("toolu_a", [text(mine.note), document]),
           result("toolu_e", [text("failed")], { is_error: true }),
           result("toolu_b", [text("B")]),
-          result("toolu_c", "untouched", { cache_control: CACHE }),
+          result("toolu_c", "untouched"),
+          text("PDFs from the error result of tool call toolu_e:"),
+          {
+            ...document,
+            source: { ...document.source, data: btoa("%PDF-1.7 failed") },
+            cache_control: CACHE,
+          },
         ],
       },
     ]);
     expect(JSON.stringify(wire)).not.toContain("[pdf:");
-    expect(JSON.stringify(wire)).not.toContain(btoa("%PDF-1.7 failed"));
   });
 
   it("leaves a request that references no PDF untouched", () => {

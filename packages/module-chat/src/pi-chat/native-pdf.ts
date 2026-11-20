@@ -8,8 +8,12 @@ import { hasPdfWireFormat, type FileDelivery, type PdfWireApi } from "../file-in
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
 const REFERENCE = /\[pdf:[0-9a-f-]{36}\]/g;
 
-export const PDF_INPUT_UNSUPPORTED =
-  "This model's chat adapter does not accept PDF input. Use an inline run to inspect the file.";
+const INLINE_RUN_HINT = "Use an inline run to inspect the file.";
+/** Why a turn sends no PDF: one sentence per cause, shared by every PDF it withholds. */
+const PDF_NOT_SENT = {
+  format: `This model's chat adapter has no PDF input format. ${INLINE_RUN_HINT}`,
+  textOnly: `This model is declared without image input, so it reads no PDF. ${INLINE_RUN_HINT}`,
+};
 
 interface PdfFile {
   name: string;
@@ -23,7 +27,8 @@ interface PdfReceipt {
 }
 
 export interface TurnPdfInput {
-  supported: boolean;
+  /** Why this turn sends no PDF, told to the model for each one; undefined when it sends them. */
+  unsupported?: string;
   /** Without a tool call id, the PDF belongs to the current user message. */
   add(file: PdfFile, toolCallId?: string): PdfReceipt;
   extension: ExtensionFactory;
@@ -115,19 +120,26 @@ const ANTHROPIC: PdfEncoder = {
       const blocks = message?.role === "user" && toBlocks(message.content, "text");
       if (!blocks) return message;
       // pi-ai merges a step's tool results into one user message of tool_result blocks.
+      const errorFiles: Block[] = [];
       const withResults = blocks.map((block) => {
         const inner = block?.type === "tool_result" && toBlocks(block.content, "text");
         const taken = inner && strip(inner, String(block.tool_use_id), "text");
         if (!taken) return block;
-        // Anthropic accepts only text in an error result: its PDF is not sent.
-        const content = [
-          ...taken.blocks,
-          ...(block.is_error ? [] : taken.files.map(anthropicDocument)),
-        ];
+        const documents = taken.files.map(anthropicDocument);
+        // Anthropic accepts only text in an error result: like pi-ai's error images, its PDFs
+        // follow the step's tool results in the same message.
+        if (block.is_error && documents.length) {
+          errorFiles.push(
+            { type: "text", text: `PDFs from the error result of tool call ${block.tool_use_id}:` },
+            ...documents,
+          );
+        }
+        const content = block.is_error ? taken.blocks : [...taken.blocks, ...documents];
         return { ...block, content: content.length ? content : "" };
       });
-      const taken = strip(withResults, undefined, "text");
-      const next = taken ? [...taken.blocks, ...taken.files.map(anthropicDocument)] : withResults;
+      const results = [...withResults, ...errorFiles];
+      const taken = strip(results, undefined, "text");
+      const next = taken ? [...taken.blocks, ...taken.files.map(anthropicDocument)] : results;
       if (next.length === blocks.length && next.every((block, i) => block === blocks[i])) {
         return message;
       }
@@ -233,8 +245,9 @@ export function createTurnPdfInput(
   delivery: Pick<FileDelivery, "pdf">,
 ): TurnPdfInput {
   // `delivery` decides whether a PDF goes; the API only picks its wire format.
-  const encoder: PdfEncoder | undefined =
-    delivery.pdf && model.api && hasPdfWireFormat(model.api) ? ENCODERS[model.api] : undefined;
+  const format = model.api && hasPdfWireFormat(model.api) ? ENCODERS[model.api] : undefined;
+  const encoder: PdfEncoder | undefined = delivery.pdf ? format : undefined;
+  const unsupported = encoder ? undefined : format ? PDF_NOT_SENT.textOnly : PDF_NOT_SENT.format;
   const files: StoredFile[] = [];
   let remainingBytes = RESOURCE_BLOB_MAX_BYTES;
 
@@ -260,9 +273,9 @@ export function createTurnPdfInput(
   };
 
   return {
-    supported: encoder !== undefined,
+    ...(unsupported ? { unsupported } : {}),
     add({ name, data }, toolCallId) {
-      if (!encoder) return { note: PDF_INPUT_UNSUPPORTED };
+      if (!encoder) return { note: unsupported! };
       const size = Buffer.byteLength(data, "base64");
       if (!size) return { note: "No PDF content was available." };
       const filename = sanitizeFilename(name);
