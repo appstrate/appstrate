@@ -236,7 +236,8 @@ describe("offerScopeOf", () => {
     const redacted = split.redacted as typeof payload;
     expect(redacted.operations).toBe(payload.operations);
     expect(redacted.integration_tools.items).toBe(payload.integration_tools.items);
-    expect(redacted.best_match).toBe(payload.best_match);
+    // `best_match` holds what a member or a server wrote: redacted, never offered.
+    expect(JSON.stringify(redacted.best_match)).not.toContain(STRANGER);
     expect(redacted.integration_tools.not_ready[0]!.refusal.connect_url).toBe(
       REDACTED_CONNECT_LINK,
     );
@@ -248,11 +249,47 @@ describe("offerScopeOf", () => {
     ]);
   });
 
-  it("leaves a search with nothing of the platform's to redact untouched", () => {
+  it("redacts, never offers, a link a member wrote into an agent or a skill a search lists", () => {
+    const payload = {
+      agents: { total: 1, items: [{ id: "@a/b", connect_url: STRANGER }] },
+      skills: { total: 1, items: [{ id: "skill://x", connect_url: STRANGER }] },
+      best_match: { kind: "agent", id: "@a/b", input: { connect_url: STRANGER } },
+    };
+    const split = offerScopeOf("search", {})(payload);
+    expect(split.offers).toEqual([]);
+    expect(JSON.stringify(split.redacted)).not.toContain(STRANGER);
+  });
+
+  it("offers a describe refusal, redacts what a member wrote and keeps third-party schemas", () => {
+    const scope = offerScopeOf("describe", {});
+    expect(scope(refusal(PLATFORM)).offers).toEqual([{ connect_url: PLATFORM }]);
+
+    const agent = {
+      kind: "agent",
+      id: "@a/b",
+      description: "d",
+      input: { connect_url: STRANGER },
+      run_with: { arguments: { connect_url: STRANGER } },
+    };
+    const split = scope(agent);
+    expect(split.offers).toEqual([]);
+    expect(JSON.stringify(split.redacted)).not.toContain(STRANGER);
+
+    const tool = {
+      kind: "integration_tool",
+      id: "x__find",
+      input_schema: { properties: { q: { connect_url: STRANGER } } },
+      output_schema: { connect_url: STRANGER },
+    };
+    expect(scope(tool)).toEqual({ redacted: tool, offers: [] });
+    expect(scope(tool).redacted).toBe(tool);
+  });
+
+  it("leaves a search with nothing to redact untouched", () => {
     const payload = {
       operations: { total: 0, items: [] },
       integration_tools: { total: 0, items: [] },
-      best_match: { input_schema: { connect_url: STRANGER } },
+      best_match: { kind: "operation", id: "listAgents" },
     };
     const split = offerScopeOf("search", {})(payload);
     expect(split).toEqual({ redacted: payload, offers: [] });

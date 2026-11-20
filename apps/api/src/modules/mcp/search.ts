@@ -58,14 +58,14 @@ export function compareKeywordScores(
 }
 
 /**
- * `items` matching `tokens` (all of them when there are none), best first by
+ * `items` matching `tokens` (all of them when there are none) with their scores, best first by
  * {@link compareKeywordScores}, ties kept in the order given.
  */
 export function rankByKeywords<T>(
   items: readonly T[],
   tokens: readonly string[],
   fields: (item: T) => { name: string; text: string },
-): T[] {
+): { item: T; score: KeywordScore }[] {
   return items
     .map((item, order) => {
       const { name, text } = fields(item);
@@ -73,5 +73,5 @@ export function rankByKeywords<T>(
     })
     .filter(({ score }) => tokens.length === 0 || score.inName + score.inText > 0)
     .sort((a, b) => compareKeywordScores(a.score, b.score, tokens) || a.order - b.order)
-    .map(({ item }) => item);
+    .map(({ item, score }) => ({ item, score }));
 }

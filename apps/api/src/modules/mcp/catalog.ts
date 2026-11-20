@@ -77,7 +77,7 @@ function extractHeaderParams(node: OperationNode): string[] {
 /** The credential proxy's route: kept out of the catalog, dispatched to by `call_integration_tool` alone. */
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
-/** The integration tool routes: kept out of the catalog, dispatched to by the two integration tools alone. */
+/** The integration tool routes: kept out of the catalog, dispatched to by `call_integration_tool` and the `integration_tool` kind of `search` and `describe` alone. */
 export const INTEGRATION_TOOLS_PATH = "/api/credential-proxy/tools";
 export const REMOTE_TOOLS_CALL_PATH = "/api/credential-proxy/tools/call";
 
@@ -97,7 +97,8 @@ const RUN_TOOLS_MCP_PATHS: ReadonlySet<string> = new Set(["/internal/mcp", "/api
  * routes (the endpoint serves skills through the Skills extension, not as
  * operations), the spec document and its viewer, which `describe`
  * already serves piecewise, and the credential proxy and its tool routes, which
- * the two integration tools alone reach (`integration-tools.ts`).
+ * `call_integration_tool` and the `integration_tool` kind of `search` and `describe`
+ * alone reach (`integration-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (

@@ -200,6 +200,7 @@ async function mcp(
 interface ListedTool {
   name: string;
   description: string;
+  annotations?: Record<string, unknown>;
   inputSchema: {
     required?: string[];
     properties?: Record<string, { items?: { enum?: string[] } }>;
@@ -499,6 +500,82 @@ describe("mcp integration tools", () => {
       expect(error).toContain(`'Coffre' (${closed.id}) closes the credential proxy outside a run`);
       expect(error).not.toContain("role");
       expect(upstreamCalls).toHaveLength(0);
+    });
+
+    it("annotates search and describe as reaching third-party servers when they declare the kind", async () => {
+      const annotations = async (caller: Caller) => {
+        const tools = await listTools(caller);
+        return ["search", "describe"].map(
+          (name) => tools.find((tool) => tool.name === name)!.annotations,
+        );
+      };
+      for (const hints of await annotations(await instanceCaller(owner))) {
+        expect(hints).toMatchObject({
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        });
+      }
+      const runner = await instanceCaller(await memberContext(owner, "member", "runner"));
+      for (const hints of await annotations(runner)) {
+        expect(hints).toMatchObject({ readOnlyHint: true, openWorldHint: false });
+      }
+    });
+
+    it("refuses the integration tool kind in a space that closes the proxy, and leaves it out of a default search", async () => {
+      const closed = await seedSpace({ orgId: owner.orgId, name: "Coffre" });
+      await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, closed.id));
+      const caller: Caller = {
+        path: `/api/mcp/o/${owner.orgId}`,
+        headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+      };
+
+      for (const [name, args] of [
+        ["search", { kinds: ["integration_tool"] }],
+        ["describe", { kind: "integration_tool", id: TOOL }],
+      ] as const) {
+        const refused = await callTool(caller, name, { space_id: closed.id, ...args });
+        expect(refused.isError, name).toBe(true);
+        expect(refused.data, name).toMatchObject({
+          code: "credential_proxy_closed",
+          space: { id: closed.id, name: "Coffre" },
+          granted_in: [owner.defaultSpaceId],
+        });
+      }
+
+      const defaulted = await callTool(caller, "search", { space_id: closed.id });
+      expect(defaulted.isError).toBe(false);
+      expect(defaulted.data.integration_tools).toBeUndefined();
+      expect(defaulted.data.operations).toBeDefined();
+      expect(upstreamCalls).toHaveLength(0);
+    });
+
+    it("refuses the integration tool kind with not_granted where the role lacks the proxy permission", async () => {
+      const operator = await memberContext(owner, "member", "operator");
+      const other = await seedSpace({ orgId: owner.orgId, name: "Autre" });
+      await seedSpaceMember({ spaceId: other.id, userId: operator.user.id, presetRole: "runner" });
+      const caller: Caller = {
+        path: `/api/mcp/o/${owner.orgId}`,
+        headers: { Authorization: `Bearer ${await mintInstanceToken(operator)}` },
+      };
+
+      for (const [name, args] of [
+        ["search", { kinds: ["integration_tool"] }],
+        ["describe", { kind: "integration_tool", id: TOOL }],
+      ] as const) {
+        const refused = await callTool(caller, name, { space_id: other.id, ...args });
+        expect(refused.isError, name).toBe(true);
+        expect(refused.data, name).toMatchObject({
+          code: "not_granted",
+          space: { id: other.id, name: "Autre" },
+          granted_in: [owner.defaultSpaceId],
+        });
+      }
+
+      const defaulted = await callTool(caller, "search", { space_id: other.id });
+      expect(defaulted.isError).toBe(false);
+      expect(defaulted.data.integration_tools).toBeUndefined();
     });
 
     for (const open of [true, false]) {

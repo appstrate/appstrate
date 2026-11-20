@@ -14,8 +14,8 @@
 import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { parseSkillUri, type SkillEntry } from "@appstrate/core/skill-uri";
+import type { DispatchContext } from "./api-call-batch.ts";
 import { asRecord, dispatchHeaders, type Refusal } from "./tool-results.ts";
-import type { Dispatch } from "./tools.ts";
 
 /** The kinds of things `search` finds and `describe` details. */
 export const DISCOVERY_KINDS = ["operation", "integration_tool", "agent", "skill"] as const;
@@ -45,14 +45,8 @@ export interface McpSkillReader {
   read: (uri: string) => Promise<ReadResourceResult>;
 }
 
-interface DispatchContext {
-  origin: string;
-  authHeaders: Headers;
-  dispatch: Dispatch;
-}
-
 /** A route's refusal, as `invoke_operation` relays one: its status and problem body. */
-export interface RouteRefusal {
+interface RouteRefusal {
   status: number;
   body: unknown;
 }
@@ -64,20 +58,25 @@ export interface AgentHit {
   published: boolean;
 }
 
-async function get(ctx: DispatchContext, path: string): Promise<Response> {
+/** A GET dispatched in-process, in `spaceId` when given and in the space the caller's headers enter otherwise. */
+export function dispatchGet(
+  ctx: DispatchContext,
+  path: string,
+  spaceId?: string,
+): Promise<Response> {
+  const headers = dispatchHeaders(ctx.authHeaders);
+  if (spaceId) headers.set("x-space-id", spaceId);
   return ctx.dispatch(
-    new Request(new URL(path, ctx.origin).toString(), {
-      method: "GET",
-      headers: dispatchHeaders(ctx.authHeaders),
-    }),
+    new Request(new URL(path, ctx.origin).toString(), { method: "GET", headers }),
   );
 }
 
-/** The agents index of the space the call entered (`GET /api/agents`). */
+/** The agents index of a space (`GET /api/agents`), the one reader of its rows. */
 export async function listAgents(
   ctx: DispatchContext,
+  spaceId?: string,
 ): Promise<{ agents: AgentHit[] } | { refused: RouteRefusal }> {
-  const response = await get(ctx, "/api/agents");
+  const response = await dispatchGet(ctx, "/api/agents", spaceId);
   const body = asRecord(await response.json().catch(() => undefined));
   if (!response.ok || !Array.isArray(body?.data)) {
     return { refused: { status: response.status, body: body ?? null } };
@@ -115,7 +114,7 @@ const AGENT_LAUNCH_FIELDS = [
 
 /**
  * An agent's launch contract, from its detail at the definition a launch by this caller runs
- * (`GET /api/packages/agents/{scope}/{name}`, `version` omitted): its input schema, stored
+ * (`GET /api/packages/agents/{scope}/{name}?version=latest`, what a launch with `version` omitted runs): its input schema, stored
  * values and locked fields, its output, and the integrations it declares.
  */
 export async function describeAgent(
@@ -137,7 +136,10 @@ export async function describeAgent(
       },
     };
   }
-  const response = await get(ctx, `/api/packages/agents/${encodePackageIdPath(id)}`);
+  const response = await dispatchGet(
+    ctx,
+    `/api/packages/agents/${encodePackageIdPath(id)}?version=latest`,
+  );
   const body = asRecord(await response.json().catch(() => undefined));
   if (!response.ok || !body) {
     return { refused: { status: response.status, body: body ?? null } };
@@ -148,12 +150,11 @@ export async function describeAgent(
   }
   if (launch)
     agent.run_with = {
-      tool: "run_and_wait",
+      tool: KIND_USE.agent.tool,
       arguments: {
         kind: "agent",
         scope: `@${scoped.scope}`,
         name: scoped.name,
-        input: {},
         ...(launch.spaceId ? { space_id: launch.spaceId } : {}),
       },
     };
@@ -184,11 +185,32 @@ export async function listSkills(reader: McpSkillReader, spaceId: string): Promi
   });
 }
 
+/**
+ * The refusal of a skill URI in another space than the one the call entered (`spaceId`), or
+ * `undefined`: a call reads only the space it names, which is the one the chat records.
+ */
+export function skillSpaceRefusal(
+  uri: string,
+  spaceId: string,
+  argument: string,
+): Refusal | undefined {
+  const address = parseSkillUri(uri);
+  if (!address || address.spaceId === spaceId) return undefined;
+  return {
+    code: "space_mismatch",
+    error: `This call acts in space ${spaceId}; ${uri} is in another space. Send a call for that space as its own request.`,
+    arguments: [argument],
+  };
+}
+
 /** A skill's entry: its frontmatter and the `skill://` URI of each of its files. */
 export async function describeSkill(
   reader: McpSkillReader,
   uri: string,
+  spaceId: string,
 ): Promise<{ skill: Record<string, unknown> } | { refusal: Refusal }> {
+  const mismatch = skillSpaceRefusal(uri, spaceId, "id");
+  if (mismatch) return { refusal: mismatch };
   const address = parseSkillUri(uri);
   const entry = address ? await reader.entry(uri) : null;
   if (!address || !entry) {
@@ -206,7 +228,7 @@ export async function describeSkill(
       package_id: address.packageId,
       frontmatter: entry.frontmatter,
       resources: entry.resources,
-      read_with: { tool: "read", arguments: { uri: entry.uri } },
+      read_with: { tool: KIND_USE.skill.tool, arguments: { uri: entry.uri } },
     },
   };
 }

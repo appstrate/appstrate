@@ -417,6 +417,10 @@ describe("mcp tool round-trip", () => {
     expect((invoke.annotations as Record<string, unknown>).destructiveHint).toBe(true);
     const search = tools.find((t) => t.name === "search")!;
     expect((search.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
+    // Without the integration tool kind neither tool reaches a third-party server.
+    const describeTool = tools.find((t) => t.name === "describe")!;
+    expect((describeTool.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
+    expect((describeTool.annotations as Record<string, unknown>).openWorldHint).toBe(false);
   });
 
   it("narrows the advertised surface to the caller's space role", async () => {

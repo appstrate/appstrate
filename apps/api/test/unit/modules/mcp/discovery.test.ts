@@ -76,7 +76,7 @@ function makeTools(permissions: string[], agentsStatus = 200) {
     scope: { orgId: "org_1", spaceId: SPACE },
     skills: {
       list: async () => [TONE, ELSEWHERE],
-      entry: async (uri) => (uri === TONE.uri ? TONE : null),
+      entry: async (uri) => [TONE, ELSEWHERE].find((entry) => entry.uri === uri) ?? null,
       read: async () => {
         throw new Error("not read here");
       },
@@ -157,7 +157,7 @@ describe("search over agents and skills", () => {
       version: "1.2.0",
       run_with: {
         tool: "run_and_wait",
-        arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter", input: {} },
+        arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter" },
       },
     });
     const skill = await call("search", { query: "tone" });
@@ -171,9 +171,24 @@ describe("search over agents and skills", () => {
   });
 
   it("relays the agents route's refusal in its section", async () => {
-    const { call } = makeTools(READER, 403);
-    const result = await call("search", { kinds: ["agent"] });
-    expect(result.agents).toEqual({ refused: { status: 403, body: { code: "forbidden" } } });
+    const { byName, call } = makeTools(READER, 403);
+    const named = await byName.get("search")!.handler({ kinds: ["agent"] }, noExtra);
+    expect(named.isError).toBe(true);
+    expect(parseResult(named)).toEqual({ status: 403, body: { code: "forbidden" } });
+    // A search that did not name the kind leaves it out, and answers the rest.
+    const defaulted = await call("search", {});
+    expect(Object.keys(defaulted).sort()).toEqual(["operations", "skills"]);
+  });
+
+  it("narrows an omitted kinds to the kind of the filter passed, and refuses a filter its kinds exclude", async () => {
+    const { call, requests } = makeTools(READER);
+    const tagged = await call("search", { tag: "agents" });
+    expect(Object.keys(tagged)).toEqual(["operations"]);
+    expect(requests).toEqual([]);
+    expect(await call("search", { kinds: ["agent"], tag: "agents" })).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["tag"],
+    });
   });
 
   it("names an acting tool only to a caller it is declared to", async () => {
@@ -208,7 +223,12 @@ describe("describe of an agent or a skill", () => {
   it("returns an agent's launch contract, without its editor state", async () => {
     const { call, requests } = makeTools(READER);
     const agent = await call("describe", { kind: "agent", id: "@acme/invoice-sorter" });
-    expect(requests).toEqual(["/api/packages/agents/@acme/invoice-sorter"]);
+    // The definition a launch with `version` omitted runs.
+    expect(requests).toEqual(["/api/packages/agents/@acme/invoice-sorter?version=latest"]);
+    expect(agent.run_with).toEqual({
+      tool: "run_and_wait",
+      arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter" },
+    });
     expect(agent).toMatchObject({
       kind: "agent",
       id: "@acme/invoice-sorter",
@@ -241,9 +261,21 @@ describe("describe of an agent or a skill", () => {
       resources: TONE.resources,
       read_with: { tool: "read", arguments: { uri: TONE.uri } },
     });
+    expect(
+      await call("describe", { kind: "skill", id: "skill://spc_1/acme/gone/gone/SKILL.md" }),
+    ).toMatchObject({ code: "not_found", arguments: ["id"] });
+  });
+
+  it("reads a skill only in the space the call entered", async () => {
+    const { call } = makeTools(READER);
+    // The reader answers for the other space too: the refusal is the call's own.
     expect(await call("describe", { kind: "skill", id: ELSEWHERE.uri })).toMatchObject({
-      code: "not_found",
+      code: "space_mismatch",
       arguments: ["id"],
+    });
+    expect(await call("read", { uri: ELSEWHERE.uri })).toMatchObject({
+      code: "space_mismatch",
+      arguments: ["uri"],
     });
   });
 

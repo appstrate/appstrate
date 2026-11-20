@@ -150,8 +150,8 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   )}
 
 Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
-    "search for the right operation with `search`, read its schema with `describe`, then invoke it with `invoke_operation`",
-    "search for the right operation with `search` and read its schema with `describe`: you can look things up, you cannot act — answer the user from what you read, and never claim to have carried an operation out",
+    'search for the right operation with `search` (pass `kinds: ["operation"]`), read its schema with `describe`, then invoke it with `invoke_operation`',
+    'search for the right operation with `search` (pass `kinds: ["operation"]`) and read its schema with `describe`: you can look things up, you cannot act — answer the user from what you read, and never claim to have carried an operation out',
   )}.${runs(` When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics.`)} Never invent an operationId or argument shape.
 
 Choosing what to do:

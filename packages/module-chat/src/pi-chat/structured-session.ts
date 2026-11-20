@@ -232,9 +232,7 @@ function assistantMessages(
         // The browser submits its branch, which can still contain a file read before an upgrade.
         const { uri } = args;
         result =
-          (toolName === "read" || toolName === "read_resource") &&
-          typeof uri === "string" &&
-          uri.startsWith(FILE_URI_PREFIX)
+          typeof uri === "string" && uri.startsWith(FILE_URI_PREFIX)
             ? `[File content omitted on replay: ${uri}]`
             : part.output;
         isError = false;

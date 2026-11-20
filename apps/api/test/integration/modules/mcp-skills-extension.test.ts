@@ -222,7 +222,7 @@ describe("the read tool on skill://", () => {
     (JSON.parse(result.content[0]!.text!) as { code: string }).code;
 
   it("returns the resource resources/read serves, for a client without the Skills extension", async () => {
-    const tool = await read(ownerHeaders(), { uri: teamUri(), space_id: owner.defaultSpaceId });
+    const tool = await read(ownerHeaders(), { uri: teamUri(), space_id: teamB.id });
     const served = await call(ownerHeaders(), "resources/read", { uri: teamUri() });
     expect(tool.isError).toBe(false);
     expect(tool.content).toEqual([
@@ -230,9 +230,16 @@ describe("the read tool on skill://", () => {
     ]);
   });
 
+  it("refuses a skill of another space than the one the call enters", async () => {
+    const pinned = inSpace(ownerHeaders(), owner.defaultSpaceId);
+    expect(refusalCode(await read(pinned, { uri: teamUri() }))).toBe("space_mismatch");
+    const named = await read(ownerHeaders(), { uri: teamUri(), space_id: owner.defaultSpaceId });
+    expect(named.isError).toBe(true);
+    expect(refusalCode(named)).toBe("space_mismatch");
+  });
+
   it("refuses as not_found what resources/read cannot serve", async () => {
     const pinned = inSpace(ownerHeaders(), owner.defaultSpaceId);
-    expect(refusalCode(await read(pinned, { uri: teamUri() }))).toBe("not_found");
     const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
     const unreadable = await read(headers, { uri: toneUri(), space_id: owner.defaultSpaceId });
     expect(unreadable.isError).toBe(true);

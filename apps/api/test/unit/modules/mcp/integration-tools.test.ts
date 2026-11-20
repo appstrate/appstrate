@@ -387,17 +387,46 @@ describe("search — integration_tool kind", () => {
     ]);
   });
 
-  it("relays the listing route's refusal as the section's `refused: { status, body }`", async () => {
+  it("relays the listing route's refusal as an error result when the call names the kind, and leaves the kind out otherwise", async () => {
     for (const code of ["forbidden", "credential_proxy_closed"]) {
-      const { result, payload } = await search(
-        {},
-        { listing: () => problem(403, code, "Refused") },
-      );
-      expect(result.isError).toBe(false);
-      const refused = payload.refused as { status: number; body: { code: string } };
+      const made = makeTools(CALL_OWN, undefined, true, {
+        listing: () => problem(403, code, "Refused"),
+      });
+      const named = await made.byName
+        .get("search")!
+        .handler({ kinds: ["integration_tool"] }, noExtra);
+      expect(named.isError).toBe(true);
+      const refused = parseResult(named) as { status: number; body: { code: string } };
       expect(refused.status).toBe(403);
       expect(refused.body.code).toBe(code);
+      expect(made.events).toContainEqual(
+        expect.objectContaining({
+          tool: "search",
+          method: "GET",
+          path: "/api/credential-proxy/tools",
+          status: 403,
+        }),
+      );
+
+      const defaulted = await made.byName.get("search")!.handler({}, noExtra);
+      expect(defaulted.isError).toBe(false);
+      expect(parseResult(defaulted).integration_tools).toBeUndefined();
     }
+  });
+
+  it("narrows an omitted `kinds` to integration tools under `integration`, and refuses it beside other kinds only", async () => {
+    const made = makeTools(CALL_OWN);
+    const alone = parseResult(
+      await made.byName.get("search")!.handler({ integration: INTEGRATION }, noExtra),
+    );
+    expect(Object.keys(alone)).toEqual(["integration_tools"]);
+    const refused = await made.byName
+      .get("search")!
+      .handler({ kinds: ["operation"], integration: INTEGRATION }, noExtra);
+    expect(parseResult(refused)).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["integration"],
+    });
   });
 
   /** A `not_ready` entry of the listing. */
@@ -1164,6 +1193,17 @@ describe("typed tools of a remote MCP integration", () => {
     expect(best!.input_schema).toEqual(inputSchema);
     expect(best!.usage).toContain("the server's own tool result");
     expect(made.calls).toHaveLength(0);
+  });
+
+  it("never makes a tool known by name alone the best match", async () => {
+    const made = makeTools(CALL_OWN, undefined, true, {
+      listing: listingOf([
+        remoteTool({ catalog_unreadable: true, input_schema: { type: "object" } }),
+      ]),
+    });
+    const { section, best } = await searchKind(made, { integration: REMOTE, query: "search" });
+    expect(section.total).toBe(1);
+    expect(best).toBeUndefined();
   });
 
   it("marks a tool whose server could not be listed", async () => {

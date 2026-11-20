@@ -73,6 +73,17 @@ const reachOf = (
   }),
 ];
 
+/** The kinds `search` declares in a handshake's tool list. */
+function searchKinds(tools: string): string[] {
+  const search = (JSON.parse(tools) as [string, string, unknown][]).find(
+    ([name]) => name === "search",
+  );
+  const parameters = search?.[2] as {
+    properties?: { kinds?: { items?: { enum?: string[] } } };
+  };
+  return parameters?.properties?.kinds?.items?.enum ?? [];
+}
+
 /** One chat turn's handshake against the real server, uncached: key + what it learned. */
 async function handshake(caller: Caller, permissions: readonly string[]) {
   const url = platformMcpUrl(ORIGIN, caller.ctx.orgId);
@@ -237,6 +248,8 @@ describe("platform MCP surface key purity", () => {
     const [opened, shut] = await Promise.all([handshake(open, grant), handshake(closed, grant)]);
     expect(opened.tools).toContain("call_integration_tool");
     expect(shut.tools).not.toContain("call_integration_tool");
+    expect(searchKinds(opened.tools)).toContain("integration_tool");
+    expect(searchKinds(shut.tools)).not.toContain("integration_tool");
     expect(shut.key).not.toBe(opened.key);
   });
 });

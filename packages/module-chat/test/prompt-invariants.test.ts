@@ -608,15 +608,15 @@ describe("the persona of a turn that can look but not act", () => {
   });
 
   it("still teaches discovery and direct file reading", () => {
-    expect(DISCOVERY).toContain("search");
-    expect(DISCOVERY).toContain("describe");
+    expect(DISCOVERY).toContain("`search`");
+    expect(DISCOVERY).toContain("`describe`");
     expect(DISCOVERY).toContain("you can look things up, you cannot act");
     expect(DISCOVERY).toContain("call `read` first");
     expect(DISCOVERY).toContain("Never invent an operationId or argument shape");
     // Control: the discovery tools are named to the full persona too, so their
     // presence here is not an artifact of a branch only this turn renders.
-    expect(FULL).toContain("search");
-    expect(FULL).toContain("describe");
+    expect(FULL).toContain("`search`");
+    expect(FULL).toContain("`describe`");
   });
 
   it("still carries the permission list, without promising an attempt", () => {

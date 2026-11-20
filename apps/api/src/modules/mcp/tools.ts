@@ -108,14 +108,15 @@ import {
 import {
   buildIntegrationTools,
   describeIntegrationTool,
-  integrationToolsDescription,
+  INTEGRATION_KIND_ANNOTATIONS,
+  INTEGRATION_TOOLS_DESCRIPTION,
+  listingRefused,
   searchIntegrationTools,
   type IntegrationToolContext,
 } from "./integration-tools.ts";
 import {
   compareKeywordScores,
   DEFAULT_SEARCH_LIMIT,
-  keywordScore,
   MAX_SEARCH_LIMIT,
   rankByKeywords,
   searchLimit,
@@ -129,6 +130,7 @@ import {
   describeSkill,
   listAgents,
   listSkills,
+  skillSpaceRefusal,
   type AgentHit,
   type DiscoveryKind,
   type McpSkillReader,
@@ -423,12 +425,21 @@ interface KindSection {
   top?: { score: KeywordScore; describe: () => Promise<Record<string, unknown>> };
 }
 
+/**
+ * What searching one kind gives: its section; the refusal that answers the whole call, when the
+ * call named the kind; `null` when a search that did not name it leaves it out.
+ */
+type KindOutcome = KindSection | { result: CallToolResult } | null;
+
 const KIND_SECTION: Record<DiscoveryKind, string> = {
   operation: "operations",
   integration_tool: "integration_tools",
   agent: "agents",
   skill: "skills",
 };
+
+/** The kind each filter of `search` belongs to. */
+const FILTER_KIND = { tag: "operation", integration: "integration_tool" } as const;
 
 function kindsArgument(kinds: readonly DiscoveryKind[]): Record<string, unknown> {
   return {
@@ -437,16 +448,32 @@ function kindsArgument(kinds: readonly DiscoveryKind[]): Record<string, unknown>
     uniqueItems: true,
     description:
       `What to search: ${kinds.map((k) => `\`${k}\``).join(", ")}. Omitted, every kind is ` +
-      "searched.",
+      "searched, or only the kinds whose filter (`tag`, `integration`) is passed.",
   };
 }
 
-/** The `kinds` a call named, or every declared one; a refusal names an undeclared one. */
+/**
+ * The kinds a call searches. Omitted `kinds` is every declared kind, or the kinds of the filters
+ * passed; named kinds are checked against the declared ones and against the filters, which a kind
+ * not searched cannot honour.
+ */
 function requestedKinds(
-  raw: unknown,
+  args: Record<string, unknown>,
   declared: readonly DiscoveryKind[],
 ): { kinds: DiscoveryKind[]; explicit: boolean } | Refusal {
-  if (raw === undefined) return { kinds: [...declared], explicit: false };
+  const raw = args.kinds;
+  const filters = (Object.keys(FILTER_KIND) as (keyof typeof FILTER_KIND)[]).filter(
+    (filter) => args[filter] !== undefined,
+  );
+  if (raw === undefined) {
+    return {
+      kinds:
+        filters.length === 0
+          ? [...declared]
+          : declared.filter((kind) => filters.some((filter) => FILTER_KIND[filter] === kind)),
+      explicit: false,
+    };
+  }
   const valid = Array.isArray(raw) && raw.length > 0 && raw.every((k) => typeof k === "string");
   const unknown = valid
     ? (raw as string[]).filter((k) => !declared.includes(k as DiscoveryKind))
@@ -461,7 +488,16 @@ function requestedKinds(
       accepted: [...declared],
     };
   }
-  return { kinds: declared.filter((k) => (raw as string[]).includes(k)), explicit: true };
+  const kinds = declared.filter((k) => (raw as string[]).includes(k));
+  const stray = filters.find((filter) => !kinds.includes(FILTER_KIND[filter]));
+  if (stray) {
+    return {
+      code: "invalid_argument",
+      error: `\`${stray}\` filters ${FILTER_KIND[stray]} items, and kinds does not include ${FILTER_KIND[stray]}.`,
+      arguments: [stray],
+    };
+  }
+  return { kinds, explicit: true };
 }
 
 /** `<section> → <tool>` for each kind whose acting tool `surface` declares. */
@@ -473,6 +509,13 @@ function kindUses(kinds: readonly DiscoveryKind[], surface: McpSurface): string 
     })
     .map((kind) => `${KIND_SECTION[kind]} → ${KIND_USE[kind].tool}`)
     .join(", ");
+}
+
+/** Read-only, unless the kind of integration tools is declared: reading its catalog reaches third-party servers. */
+function discoveryAnnotations(title: string, kinds: readonly DiscoveryKind[]): Tool["annotations"] {
+  return kinds.includes("integration_tool")
+    ? { title, ...INTEGRATION_KIND_ANNOTATIONS }
+    : { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false };
 }
 
 function buildSearchTool(
@@ -492,18 +535,14 @@ function buildSearchTool(
       (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
       "With keywords, `best_match` is the top hit across the kinds, described" +
       (invokes
-        ? " — when it matches your intent, act on it directly, no describe call needed. "
+        ? " — an operation or an integration tool that matches your intent can be acted on " +
+          "directly, no describe call needed; an agent is run only when the user asked for it. "
         : ", so a clear single hit needs no follow-up describe call. ") +
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
       "role may not invoke are listed apart under `denied`, with the permissions they need in " +
       "YOUR space: report that to the user instead of trying them." +
-      (kinds.includes("integration_tool") ? integrationToolsDescription(surface.runs) : ""),
-    annotations: {
-      title: "Search",
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+      (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
+    annotations: discoveryAnnotations("Search", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -543,32 +582,41 @@ function buildSearchTool(
     extra: AppstrateRequestExtra,
   ): Promise<CallToolResult> => {
     const start = performance.now();
-    const requested = requestedKinds(args.kinds, kinds);
+    const requested = requestedKinds(args, kinds);
     if ("code" in requested) return refusalResult(requested);
     const limit = searchLimit(args.limit);
     const tokens = searchTokens(args.query);
     const tag = asString(args.tag)?.toLowerCase();
     const integration = asString(args.integration);
 
-    const sections = await Promise.all(
-      requested.kinds.map((kind): Promise<KindSection> => {
+    const outcomes = await Promise.all(
+      requested.kinds.map((kind): Promise<KindOutcome> => {
         switch (kind) {
           case "operation":
             return Promise.resolve(searchOperations(ctx, tokens, tag, limit));
           case "agent":
-            return searchAgentKind(ctx, surface, tokens, limit);
+            return searchAgentKind(ctx, surface, tokens, limit, requested.explicit);
           case "skill":
             return searchSkillKind(ctx, tokens, limit);
           case "integration_tool":
             return searchIntegrationKind(
               ctx,
               integrations,
-              { tokens, limit, integration, explicit: requested.explicit },
+              {
+                tokens,
+                limit,
+                integration,
+                named: requested.explicit || integration !== undefined,
+                start,
+              },
               extra.signal,
             );
         }
       }),
     );
+    const refused = outcomes.find((outcome) => outcome !== null && "result" in outcome);
+    if (refused && "result" in refused) return refused.result;
+    const sections = outcomes.filter((outcome): outcome is KindSection => outcome !== null);
 
     let best: KindSection["top"];
     for (const { top } of sections) {
@@ -587,11 +635,7 @@ function buildSearchTool(
     });
 
     return jsonResult({
-      ...Object.fromEntries(
-        sections.flatMap(({ kind, section }) =>
-          section === OMITTED ? [] : [[KIND_SECTION[kind], section]],
-        ),
-      ),
+      ...Object.fromEntries(sections.map(({ kind, section }) => [KIND_SECTION[kind], section])),
       ...(best ? { best_match: await best.describe() } : {}),
     });
   };
@@ -619,13 +663,14 @@ function searchOperations(
   );
 
   // A denied match is answered, not hidden — its id and requirement only.
-  const granted: CatalogOperation[] = [];
+  const granted: typeof scored = [];
   const denied: CatalogOperation[] = [];
-  for (const op of scored) {
-    (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
+  for (const ranked of scored) {
+    if (operationGranted(ranked.item, ctx.permissions, ctx.ceiling)) granted.push(ranked);
+    else denied.push(ranked.item);
   }
-  const shown = granted.slice(0, limit);
-  const top = shown[0];
+  const shown = granted.slice(0, limit).map(({ item }) => item);
+  const top = granted[0];
   return {
     kind: "operation",
     section: {
@@ -649,8 +694,8 @@ function searchOperations(
     ...(tokens.length > 0 && top
       ? {
           top: {
-            score: keywordScore(fields(top).name, fields(top).text, tokens),
-            describe: async () => describePayload(top, componentSchemas, ctx),
+            score: top.score,
+            describe: async () => describePayload(top.item, componentSchemas, ctx),
           },
         }
       : {}),
@@ -662,9 +707,12 @@ async function searchAgentKind(
   surface: McpSurface,
   tokens: readonly string[],
   limit: number,
-): Promise<KindSection> {
+  named: boolean,
+): Promise<KindOutcome> {
   const listed = await listAgents(ctx);
-  if ("refused" in listed) return { kind: "agent", section: { refused: listed.refused } };
+  if ("refused" in listed) {
+    return named ? { result: jsonResult({ ...listed.refused }, true) } : null;
+  }
   const fields = (agent: AgentHit) => ({
     name: agent.id,
     text: `${agent.title} ${agent.description}`,
@@ -673,12 +721,12 @@ async function searchAgentKind(
   const top = matches[0];
   return {
     kind: "agent",
-    section: { total: matches.length, items: matches.slice(0, limit) },
+    section: { total: matches.length, items: matches.slice(0, limit).map(({ item }) => item) },
     ...(tokens.length > 0 && top
       ? {
           top: {
-            score: keywordScore(fields(top).name, fields(top).text, tokens),
-            describe: () => describeAgentPayload(ctx, surface, top.id),
+            score: top.score,
+            describe: () => describeAgentPayload(ctx, surface, top.item.id),
           },
         }
       : {}),
@@ -699,68 +747,47 @@ async function searchSkillKind(
   const top = matches[0];
   return {
     kind: "skill",
-    section: { total: matches.length, items: matches.slice(0, limit) },
+    section: { total: matches.length, items: matches.slice(0, limit).map(({ item }) => item) },
     ...(tokens.length > 0 && top
       ? {
           top: {
-            score: keywordScore(fields(top).name, fields(top).text, tokens),
-            describe: () => describeSkillPayload(ctx, top.id),
+            score: top.score,
+            describe: () => describeSkillPayload(ctx, top.item.id),
           },
         }
       : {}),
   };
 }
 
-/** A section a search leaves out: a kind it searched by default and may not search here. */
-const OMITTED: Record<string, unknown> = {};
-
 /**
  * Why integration tools may not be searched or described in the space an org-wide call names: the
- * space's closed credential proxy, or the caller's role there; `null` when they may. A pinned
+ * space's closed credential proxy, or the caller's role there; `undefined` when they may. A pinned
  * connection declares the kind only where they may.
  */
-function integrationKindRefusal(ctx: McpToolContext): Refusal | null {
-  const spaces = ctx.orgSpaces;
-  if (!spaces) return null;
-  const { current } = spaces;
-  const proxies = (space: McpSpace) => space.surface.proxies;
-  // In the proxy route's order: its permission first, then the space's barrier.
-  if (current.surface.proxiesClosed) {
-    return {
-      code: "credential_proxy_closed",
-      error: credentialProxyClosedDetail(current),
-      space: spaceRef(current),
-      ...grantedIn(spaces, proxies),
-      hint: NO_FALLBACK_HINT,
-    };
-  }
-  if (!current.surface.proxies) {
-    return {
-      code: "not_granted",
-      error: `Your role in ${describeSpace(current)} does not allow integration tools.`,
-      space: spaceRef(current),
-      ...grantedIn(spaces, proxies),
-      hint: NO_FALLBACK_HINT,
-    };
-  }
-  return null;
+function integrationKindRefusal(ctx: McpToolContext): Refusal | undefined {
+  return ctx.orgSpaces ? spaceActRefusal(ctx.orgSpaces, "proxies", "integration tools") : undefined;
 }
 
 /**
  * The integration tools section: remote catalogs read from their servers only when the call
- * named the kind or an integration, from the cache otherwise.
+ * named the kind or an integration, from the cache otherwise. A search that did not name the
+ * kind leaves it out where it may not read it.
  */
 async function searchIntegrationKind(
   ctx: McpToolContext,
   integrations: IntegrationToolContext,
-  query: { tokens: readonly string[]; limit: number; integration?: string; explicit: boolean },
+  query: {
+    tokens: readonly string[];
+    limit: number;
+    integration?: string;
+    named: boolean;
+    start: number;
+  },
   signal: AbortSignal | undefined,
-): Promise<KindSection> {
-  const named = query.explicit || query.integration !== undefined;
+): Promise<KindOutcome> {
+  const { named } = query;
   const refusal = integrationKindRefusal(ctx);
-  if (refusal) {
-    return { kind: "integration_tool", section: named ? { refusal } : OMITTED };
-  }
+  if (refusal) return named ? { result: refusalResult(refusal) } : null;
   const found = await searchIntegrationTools(
     integrations,
     {
@@ -771,18 +798,16 @@ async function searchIntegrationKind(
     },
     signal,
   );
+  if ("refused" in found) {
+    return named
+      ? { result: listingRefused(integrations, "search", query.start, found.refused) }
+      : null;
+  }
   const { top } = found;
   return {
     kind: "integration_tool",
     section: found.section,
-    ...(top
-      ? {
-          top: {
-            score: keywordScore(top.name, top.text, query.tokens),
-            describe: async () => top.described,
-          },
-        }
-      : {}),
+    ...(top ? { top: { score: top.score, describe: async () => top.described } } : {}),
   };
 }
 
@@ -806,7 +831,7 @@ async function describeSkillPayload(
   ctx: McpToolContext,
   uri: string,
 ): Promise<Record<string, unknown>> {
-  const described = await describeSkill(ctx.skills, uri);
+  const described = await describeSkill(ctx.skills, uri, ctx.scope.spaceId);
   return "skill" in described
     ? { kind: "skill", ...described.skill }
     : { kind: "skill", id: uri, refusal: described.refusal };
@@ -846,12 +871,7 @@ function buildDescribeTool(
           "with call_integration_tool, how to read its result and what its connections' fields " +
           "mean. Its remote catalog is read from its server when not cached."
         : ""),
-    annotations: {
-      title: "Describe",
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+    annotations: discoveryAnnotations("Describe", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -865,8 +885,8 @@ function buildDescribeTool(
           type: "string",
           description:
             "The item's `id`, as search returned it (or already known: an operationId, an agent's " +
-            "`@scope/name`, a skill's `skill://` URI, an integration tool's name). Not needed when " +
-            "search's best_match already described it.",
+            "`@scope/name`, a skill's `skill://` URI, an integration tool's name). No describe call is needed when " +
+            "search's best_match already described the item.",
         },
       },
       required: ["kind", "id"],
@@ -1955,8 +1975,8 @@ function buildReadTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Read a resource by its URI: an `appfile://` file (from list_files, a run's output or an " +
       "attachment) through the file's own ACL, or a skill file by its `skill://` URI (from " +
       "search or describe of a skill), the same bytes `resources/read` " +
-      "serves. A skill's `SKILL.md` is at its `uri`; replace `SKILL.md` with a path its " +
-      "`resources` list to read another of its files. Small text and binary files are returned " +
+      "serves. A skill's `SKILL.md` is at its `uri`; each of its other files is a " +
+      "`resources[].uri` of its entry (describe, or `skills/get`). Small text and binary files are returned " +
       "as embedded MCP resources; an oversized or non-downloadable file returns " +
       "capability-aware metadata.",
     annotations: {
@@ -2010,6 +2030,8 @@ function buildReadTool(ctx: McpToolContext): AppstrateToolDefinition {
  * `invalid_argument`.
  */
 async function readSkillResource(ctx: McpToolContext, uri: string): Promise<ReadResourceResult> {
+  const mismatch = skillSpaceRefusal(uri, ctx.scope.spaceId, "uri");
+  if (mismatch) throw new ToolRefusal(mismatch);
   try {
     return await ctx.skills.read(uri);
   } catch (err) {
@@ -2251,8 +2273,8 @@ export interface McpSurface {
   /** `search`'s and `describe`'s integration tools, and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
   /**
-   * Those two tools are withheld by the space's setting alone (`credential_proxy_open`), not by
-   * the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
+   * The integration tools are withheld by the space's setting alone (`credential_proxy_open`),
+   * not by the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
    */
   proxiesClosed: boolean;
 }
@@ -2394,6 +2416,38 @@ function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
   };
 }
 
+/**
+ * The refusal of an act the space an org-wide call entered does not grant the caller, or
+ * `undefined`: in the proxy route's order, its permission first (`not_granted`), then the space's
+ * barrier (`credential_proxy_closed`), met only by a caller the permission admits. `what` names
+ * the act in the refusal.
+ */
+function spaceActRefusal(
+  spaces: OrgWideSpaces,
+  need: keyof McpSurface | null,
+  what: string,
+): Refusal | undefined {
+  const holds = (space: McpSpace) => need === null || space.surface[need];
+  const { current } = spaces;
+  if (need === "proxies" && current.surface.proxiesClosed) {
+    return {
+      code: "credential_proxy_closed",
+      error: credentialProxyClosedDetail(current),
+      space: spaceRef(current),
+      ...grantedIn(spaces, holds),
+      hint: NO_FALLBACK_HINT,
+    };
+  }
+  if (holds(current)) return undefined;
+  return {
+    code: "not_granted",
+    error: `Your role in ${describeSpace(current)} does not allow ${what}.`,
+    space: spaceRef(current),
+    ...grantedIn(spaces, holds),
+    hint: NO_FALLBACK_HINT,
+  };
+}
+
 /** Declare `space_id` on a space-acting tool and check it before the handler runs. */
 function withSpaceArgument(
   tool: AppstrateToolDefinition,
@@ -2424,28 +2478,12 @@ function withSpaceArgument(
       if (refusal) return refusalResult(refusal);
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
-      const { current } = spaces;
-      // In the proxy route's order: its permission first (`not_granted` below), then the space's
-      // barrier, met only by a caller the permission admits. The credential kind never reaches
-      // here: the proxy refuses it for every space of the request, so neither tool is declared.
-      if (need === "proxies" && current.surface.proxiesClosed) {
-        return refusalResult({
-          code: "credential_proxy_closed",
-          error: credentialProxyClosedDetail(current),
-          space: spaceRef(current),
-          ...grantedIn(spaces, holds(need)),
-          hint: NO_FALLBACK_HINT,
-        });
-      }
-      if (!holds(need)(current)) {
-        return refusalResult({
-          code: "not_granted",
-          error: `Your role in ${describeSpace(current)} does not allow ${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}.`,
-          space: spaceRef(current),
-          ...grantedIn(spaces, holds(need)),
-          hint: NO_FALLBACK_HINT,
-        });
-      }
+      const unmet = spaceActRefusal(
+        spaces,
+        need,
+        `${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}`,
+      );
+      if (unmet) return refusalResult(unmet);
       // Consumed: `run_and_wait` validates its own arguments.
       const { space_id: _entered, ...rest } = args;
       return tool.handler(rest, extra);

@@ -692,7 +692,7 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it.each(["read", "read_resource"])(
+  it.each(["read", "read_resource", "any_tool_name"])(
     "keeps an old tab's %s result out of the next model request after the grant is revoked",
     async (toolName) => {
       const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
