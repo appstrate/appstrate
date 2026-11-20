@@ -76,6 +76,16 @@ export function useRemoveMember() {
   });
 }
 
+/** What removing a member would stop in team spaces; read fresh, as the admin may reassign elsewhere and come back. */
+export function useMemberDepartureImpact(orgId: string | undefined, userId: string | null) {
+  return $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/members/{userId}/departure-impact",
+    { params: { path: { orgId: orgId ?? "", userId: userId ?? "" } } },
+    { enabled: !!orgId && !!userId, staleTime: 0, select: (envelope) => envelope.data },
+  );
+}
+
 export function useChangeMemberRole() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {

@@ -16,7 +16,7 @@ import {
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
-import { batchLoadUserNames } from "../lib/user-helpers.ts";
+import { batchLoadEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
@@ -924,17 +924,9 @@ async function enrichSchedules(
 
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
 
-  const [userNameMap, endUserRows, runStats, packageRows] = await Promise.all([
+  const [userNameMap, endUserNameMap, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
-    endUserIds.length > 0
-      ? db
-          .select({
-            id: endUsers.id,
-            name: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-          })
-          .from(endUsers)
-          .where(inArray(endUsers.id, endUserIds))
-      : Promise.resolve([] as { id: string; name: string | null }[]),
+    batchLoadEndUserNames(endUserIds),
     loadScheduleRunStats(
       schedules.map((s) => s.id),
       orgId,
@@ -949,7 +941,6 @@ async function enrichSchedules(
       .from(packages)
       .where(and(inArray(packages.id, packageIds), orgOrSystemFilter(orgId))),
   ]);
-  const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
   const agentNameMap = new Map(packageRows.map((r) => [r.id, getPackageDisplayName(r)]));
 
   return schedules.map((schedule) => {

@@ -18,6 +18,7 @@ import {
   getOrgMembers,
   getOrgMemberWithProfile,
   leaveOrganization,
+  memberDepartureImpact,
   removeMember,
   updateMemberRole,
   isSlugAvailable,
@@ -527,6 +528,22 @@ router.patch(
       expiresAt: updated.expiresAt?.toISOString(),
       createdAt: updated.createdAt?.toISOString(),
     });
+  },
+);
+
+// GET /api/orgs/:orgId/members/:userId/departure-impact — what the removal would stop
+// Same guard and same per-target rule as the DELETE below: a preview of an act the
+// caller may not perform is refused the same way.
+router.get(
+  "/:orgId/members/:userId/departure-impact",
+  requirePermission("members", "remove"),
+  async (c) => {
+    const items = await memberDepartureImpact(
+      c.req.param("orgId")!,
+      c.req.param("userId")!,
+      memberActor(c),
+    );
+    return c.json(listResponse(items));
   },
 );
 

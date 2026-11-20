@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
@@ -43,6 +43,7 @@ import {
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   leaveOrganization,
+  memberDepartureImpact,
   provisionMember,
   removeMember,
   updateMemberRole,
@@ -525,6 +526,76 @@ describe("unsharing on access loss", () => {
       await updateMemberRole(ctx.orgId, admin, "member", asOwner());
 
       expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
+
+    describe("departure impact", () => {
+      /** The team-space schedules disabled now, as `{ id, cause }` sorted by id. */
+      async function disabledInTeamSpaces() {
+        const rows = await db
+          .select({ id: schedules.id, cause: schedules.disabledReason })
+          .from(schedules)
+          .innerJoin(spaces, eq(spaces.id, schedules.spaceId))
+          .where(and(eq(schedules.enabled, false), isNull(spaces.ownerUserId)));
+        return rows.sort((a, b) => a.id.localeCompare(b.id));
+      }
+
+      it("lists exactly what the removal then disables in team spaces, and writes nothing", async () => {
+        const member = await addMember();
+        const colleague = await addMember();
+        const connM = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+        const connO = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: ctx.user.id });
+        const s1 = await scheduleOf(member, connM);
+        const s2 = await scheduleOf(member, connO);
+        const s3 = await scheduleOf(colleague, connM);
+        const s4 = await scheduleOf(member, connM, await personalSpaceOf(member));
+        const s5 = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: colleague,
+          enabled: false,
+          connectionOverrides: { [INTEGRATION]: [connM] },
+        });
+        const s6 = await scheduleOf(ctx.user.id, connO);
+        const before = await db.select().from(schedules);
+
+        const impact = await memberDepartureImpact(ctx.orgId, member, asOwner());
+
+        expect(await db.select().from(schedules)).toEqual(before);
+        const byId = new Map(impact.map((item) => [item.id, item]));
+        expect([...byId.keys()].sort()).toEqual([s1.id, s2.id, s3.id].sort());
+        expect(byId.get(s1.id)).toMatchObject({
+          cause: "actor_left_org",
+          lost_integrations: [INTEGRATION],
+          actor: { type: "user", id: member },
+          space: { id: ctx.defaultSpaceId },
+          packageId: AGENT,
+        });
+        expect(byId.get(s2.id)).toMatchObject({ cause: "actor_left_org", lost_integrations: [] });
+        expect(byId.get(s3.id)).toMatchObject({
+          cause: "connection_unshared",
+          lost_integrations: [INTEGRATION],
+          actor: { type: "user", id: colleague },
+        });
+        for (const excluded of [s4, s5, s6]) expect(byId.has(excluded.id)).toBe(false);
+
+        const disabledBefore = await disabledInTeamSpaces();
+        await removeMember(ctx.orgId, member, asOwner());
+        const newlyDisabled = (await disabledInTeamSpaces()).filter(
+          (row) => !disabledBefore.some((prior) => prior.id === row.id),
+        );
+
+        expect(newlyDisabled).toEqual(
+          impact
+            .map((item) => ({ id: item.id, cause: item.cause }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        );
+        expect(await rowOf(s4.id)).toMatchObject({
+          enabled: false,
+          disabledReason: "actor_left_org",
+        });
+        expect(await rowOf(s6.id)).toEqual(s6);
+      });
     });
   });
 

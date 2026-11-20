@@ -1501,5 +1501,12 @@
   "accessGrants.confirmRevokeCli": "« {{name}} » ne pourra plus accéder à votre compte. L'utilisateur devra se reconnecter via `appstrate login`.",
   "accessGrants.deviceColumn": "Appareil",
   "orgAccessGrants.cliEmptyHint": "Les utilisateurs n'ont actuellement aucune session CLI ou GitHub Action ouverte sur leur compte.",
-  "orgAccessGrants.confirmRevokeCli": "L'appareil « {{device}} » utilisé par {{user}} sera déconnecté. L’utilisateur devra exécuter `appstrate login` pour se reconnecter."
+  "orgAccessGrants.confirmRevokeCli": "L'appareil « {{device}} » utilisé par {{user}} sera déconnecté. L’utilisateur devra exécuter `appstrate login` pour se reconnecter.",
+  "orgSettings.departure.title": "Ce qui s'arrêtera dans les espaces d'équipe",
+  "orgSettings.departure.none": "Aucune planification d'un espace d'équipe ne s'arrêtera.",
+  "orgSettings.departure.causeActorLeft": "Planification de ce membre",
+  "orgSettings.departure.causeConnectionUnshared": "Utilise une connexion partagée par ce membre",
+  "orgSettings.departure.replacementRequired": "Connexion de remplacement requise : {{integrations}}",
+  "orgSettings.departure.reassign": "Réassigner",
+  "orgSettings.departure.chooseConnection": "Choisir une connexion"
 }

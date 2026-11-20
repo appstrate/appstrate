@@ -1284,6 +1284,80 @@ describe("Organizations API", () => {
     });
   });
 
+  describe("GET /api/orgs/:orgId/members/:userId/departure-impact", () => {
+    const preview = (cookie: string, orgId: string, userId: string) =>
+      app.request(`/api/orgs/${orgId}/members/${userId}/departure-impact`, {
+        headers: { Cookie: cookie },
+      });
+
+    it("lists the member's team-space schedules for an owner, writing nothing", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-owner-org" });
+      const member = await createTestUser({ name: "Leaving Member" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/impact-agent` });
+      const schedule = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        name: "Nightly",
+        enabled: true,
+      });
+
+      const res = await preview(ctx.cookie, ctx.orgId, member.id);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        object: "list",
+        hasMore: false,
+        data: [
+          {
+            id: schedule.id,
+            name: "Nightly",
+            space: { id: ctx.defaultSpaceId, name: "Default" },
+            packageId: pkg.id,
+            actor: { type: "user", id: member.id, name: "Leaving Member" },
+            cause: "actor_left_org",
+            lost_integrations: [],
+          },
+        ],
+      });
+      const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(row!.enabled).toBe(true);
+    });
+
+    it("refuses a plain member", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-member-org" });
+      const actor = await createTestUser();
+      const target = await createTestUser();
+      await addOrgMember(ctx.orgId, actor.id, "member");
+      await addOrgMember(ctx.orgId, target.id, "member");
+
+      const res = await preview(actor.cookie, ctx.orgId, target.id);
+
+      expect(res.status).toBe(403);
+    });
+
+    it("refuses an admin previewing an owner, as the removal would", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-admin-org" });
+      const admin = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+
+      const res = await preview(admin.cookie, ctx.orgId, ctx.user.id);
+
+      expect(res.status).toBe(403);
+    });
+
+    it("answers 404 for a user who is not a member", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-unknown-org" });
+      const stranger = await createTestUser();
+
+      const res = await preview(ctx.cookie, ctx.orgId, stranger.id);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
   // Several owners, one invariant: an org always keeps at least one. Only an
   // owner touches an owner; an admin's reach is unchanged.
   describe("owner management", () => {

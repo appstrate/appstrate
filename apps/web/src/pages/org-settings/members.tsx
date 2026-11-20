@@ -3,7 +3,13 @@
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import type { components } from "../../api/client";
-import { useChangeMemberRole, useOrg, useOrgDetail, useRemoveMember } from "../../hooks/use-org";
+import {
+  useChangeMemberRole,
+  useMemberDepartureImpact,
+  useOrg,
+  useOrgDetail,
+  useRemoveMember,
+} from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useUrlModalTarget } from "../../hooks/use-url-modal";
@@ -20,6 +26,7 @@ import type { MenuAction } from "../../lib/menu-action";
 import { InvitationsTable } from "../../components/invitations-table";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";
+import { MemberDepartureImpact } from "./member-departure-impact";
 import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
 import { hasFullOrgAccess } from "../../lib/org-role";
@@ -53,6 +60,7 @@ export function OrgSettingsMembersPage() {
   } | null>(null);
 
   const { data: orgData, isLoading, error } = useOrgDetail();
+  const departureImpact = useMemberDepartureImpact(orgId, confirmState?.id ?? null);
 
   const allMembers = orgData?.members ?? [];
   const list = useListParams(NO_FILTERS);
@@ -274,7 +282,9 @@ export function OrgSettingsMembersPage() {
             );
           }
         }}
-      />
+      >
+        <MemberDepartureImpact impact={departureImpact} />
+      </ConfirmModal>
     </>
   );
 }

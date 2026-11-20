@@ -1501,5 +1501,12 @@
   "accessGrants.confirmRevokeCli": "“{{name}}” will lose access to your account. The user will need to sign in again with `appstrate login`.",
   "accessGrants.deviceColumn": "Device",
   "orgAccessGrants.cliEmptyHint": "Users currently have no open CLI or GitHub Action sessions on their accounts.",
-  "orgAccessGrants.confirmRevokeCli": "“{{device}}” used by {{user}} will be signed out. The user will need to run `appstrate login` to reconnect."
+  "orgAccessGrants.confirmRevokeCli": "“{{device}}” used by {{user}} will be signed out. The user will need to run `appstrate login` to reconnect.",
+  "orgSettings.departure.title": "What will stop in team spaces",
+  "orgSettings.departure.none": "No team-space schedule will stop.",
+  "orgSettings.departure.causeActorLeft": "This member's schedule",
+  "orgSettings.departure.causeConnectionUnshared": "Uses a connection shared by this member",
+  "orgSettings.departure.replacementRequired": "Replacement connection required: {{integrations}}",
+  "orgSettings.departure.reassign": "Reassign",
+  "orgSettings.departure.chooseConnection": "Choose a connection"
 }
