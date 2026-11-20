@@ -24,7 +24,7 @@ import {
   getMcpSpaceResourceUri,
   parseMcpResourceUri,
 } from "../lib/audiences.ts";
-import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import { inTransaction, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 
 type TokenTable = typeof oauthRefreshToken | typeof oauthAccessToken;
 type ResourceBoundTable = TokenTable | typeof oauthConsent;
@@ -94,10 +94,23 @@ async function raiseWatermarks(tx: Tx, grants: McpGrantKey[]): Promise<void> {
  * grants themselves to the caller. Tokens issued after it are accepted.
  */
 export async function raiseMcpWatermarksOfUser(executor: DbOrTx, userId: string): Promise<void> {
-  await executor
-    .update(oauthGrantState)
-    .set({ tokensValidAfter: new Date() })
-    .where(eq(oauthGrantState.userId, userId));
+  await inTransaction(executor, async (tx) => {
+    // Rows locked in (client, resource) byte order, the order `endMcpGrants` takes
+    // them in (`COLLATE "C"` matches its code-unit sort): two writers on one user's grants cannot deadlock.
+    await tx
+      .select({ id: oauthGrantState.userId })
+      .from(oauthGrantState)
+      .where(eq(oauthGrantState.userId, userId))
+      .orderBy(
+        sql`${oauthGrantState.clientId} COLLATE "C"`,
+        sql`${oauthGrantState.resource} COLLATE "C"`,
+      )
+      .for("update");
+    await tx
+      .update(oauthGrantState)
+      .set({ tokensValidAfter: new Date() })
+      .where(eq(oauthGrantState.userId, userId));
+  });
 }
 
 /**
@@ -111,7 +124,12 @@ export async function raiseMcpWatermarksOfUser(executor: DbOrTx, userId: string)
  * before the watermark, and `admitMcpTokenIssuance` (OIDC module) refuses its
  * response.
  */
-export async function endMcpGrants(tx: Tx, grants: McpGrantKey[]): Promise<void> {
+export async function endMcpGrants(tx: Tx, unordered: McpGrantKey[]): Promise<void> {
+  // Fixed (client, resource) order: the lock order `raiseMcpWatermarksOfUser` uses too.
+  const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const grants = [...unordered].sort(
+    (a, b) => byCodeUnit(a.clientId, b.clientId) || byCodeUnit(a.resource, b.resource),
+  );
   await raiseWatermarks(tx, grants);
   for (const { userId, clientId, resource } of grants) {
     for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {

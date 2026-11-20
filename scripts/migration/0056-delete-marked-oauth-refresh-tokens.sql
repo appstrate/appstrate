@@ -9,7 +9,8 @@
 -- rotated_at IS NULL`. Better Auth's own rotation sets `rotated_at` together with `revoked` (the
 -- `rotationUpdate` object of `@better-auth/oauth-provider`), so a marked row without `rotated_at`
 -- was ended by an administrative path: the platform's member exit and password change before this
--- release, script 0019, or Better Auth's `/oauth2/revoke`.
+-- release, script 0019, Better Auth's `/oauth2/revoke`, or Better Auth's sign-out of a session's
+-- non-`offline_access` refresh tokens (`applyBackchannelLogoutPlan`).
 --
 -- WHY. Better Auth reads a marked refresh token presented again outside the reuse window as stolen
 -- and deletes every refresh token of the (client, user) pair, on every resource and org. The

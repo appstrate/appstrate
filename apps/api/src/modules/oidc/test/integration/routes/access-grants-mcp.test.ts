@@ -738,6 +738,30 @@ describe("MCP access grants", () => {
       await expectRefreshWorks(clientId, String(onB.token.refresh_token), otherResource, otherPath);
     });
 
+    // Better Auth strips an authorization scheme from the token it revokes; the
+    // deletion applies the same normalisation.
+    it("a refresh token revoked as `Bearer <token>` is deleted too", async () => {
+      const { otherResource, otherPath, clientId, onA, onB } = await twoOrgGrants(
+        ctx.cookie,
+        ctx.user.email,
+        ctx.user.id,
+      );
+      const tokenA = String(onA.token.refresh_token);
+      const revoke = () =>
+        app.request("/api/auth/oauth2/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            token: `Bearer ${tokenA}`,
+            token_type_hint: "refresh_token",
+            client_id: clientId,
+          }).toString(),
+        });
+      expect((await revoke()).status).toBe(200);
+      expect((await revoke()).status).toBe(400);
+      await expectRefreshWorks(clientId, String(onB.token.refresh_token), otherResource, otherPath);
+    });
+
     // MCP clients present one refresh token twice (anthropics/claude-ai-mcp#1194).
     // Within `refreshTokenReuseInterval`, the second presentation is a replay of
     // the first rotation's response, never a theft: no grant elsewhere is lost.

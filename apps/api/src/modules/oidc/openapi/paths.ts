@@ -1271,7 +1271,7 @@ export const oidcPaths = {
       operationId: "revokeMyAccessGrant",
       summary: "End one of the caller's access grants",
       description:
-        "End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are revoked, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.",
+        "End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are deleted, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.",
       security: [{ cookieAuth: [] }],
       requestBody: {
         required: true,

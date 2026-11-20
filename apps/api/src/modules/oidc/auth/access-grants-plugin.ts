@@ -20,6 +20,7 @@
  */
 
 import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { stripAccessTokenAuthorizationScheme } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
 import * as z from "zod";
 import { and, eq, isNotNull } from "drizzle-orm";
@@ -149,12 +150,24 @@ async function deleteRevokedRefreshToken(ctx: TokenHookCtx): Promise<void> {
   const token = (ctx.body as { token?: unknown } | undefined)?.token;
   if (typeof token !== "string" || token.length === 0) return;
   // No refresh-token prefix or encryption is configured (`auth/plugins.ts`):
-  // the stored value is the digest of the presented token.
-  await db
-    .delete(oauthRefreshToken)
-    .where(
-      and(eq(oauthRefreshToken.token, hashOAuthToken(token)), isNotNull(oauthRefreshToken.revoked)),
-    );
+  // the stored value is the digest of the presented token, after the same
+  // scheme stripping the revoke endpoint applies.
+  try {
+    await db
+      .delete(oauthRefreshToken)
+      .where(
+        and(
+          eq(oauthRefreshToken.token, hashOAuthToken(stripAccessTokenAuthorizationScheme(token))),
+          isNotNull(oauthRefreshToken.revoked),
+        ),
+      );
+  } catch (err) {
+    // The revoke itself succeeded: a failed cleanup must not turn it into a 500.
+    logger.error("deleting a revoked refresh token failed", {
+      module: "oidc",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export function accessGrantsPlugin() {
