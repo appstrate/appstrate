@@ -394,6 +394,13 @@ export const agentsPaths = {
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
+          name: "scheduleId",
+          in: "query",
+          schema: { type: "string" },
+          description:
+            "Apply the stored dependency version overrides of this agent's schedule in the current space. Requires schedules:read. The version parameter selects the agent definition and connection visibility remains the caller's.",
+        },
+        {
           name: "version",
           in: "query",
           required: false,

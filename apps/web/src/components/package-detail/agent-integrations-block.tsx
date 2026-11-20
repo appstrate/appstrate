@@ -7,6 +7,7 @@ import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
 import {
+  useAgentConnectionReadiness,
   useIntegrationDetails,
   useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
@@ -49,6 +50,7 @@ interface ScheduleOverrides {
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;
+  scheduleId?: string;
 }
 
 /** An integration's own detail read, as one row needs it. */
@@ -92,6 +94,11 @@ export function AgentIntegrationsBlock({
   const { t } = useTranslation(["agents", "settings"]);
   const { can } = usePermissions();
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
+  const { data: readiness } = useAgentConnectionReadiness(
+    scheduleOverrides ? agentPackageId : undefined,
+    scheduleOverrides?.version,
+    scheduleOverrides?.scheduleId,
+  );
   // A pin binds the agent, whatever a schedule overrides: its rows offer none.
   const canPin = !scheduleOverrides && can("integrations:configure");
 
@@ -104,8 +111,13 @@ export function AgentIntegrationsBlock({
       };
     })
     // AFPS §7.2: an integration declaring no auths binds no connection, so it has no row here.
-    // Kept while its detail is unread: only the manifest says it takes none.
-    .filter(({ state }) => !(state.detail && isUnauthenticatedIntegration(state.detail.manifest)));
+    // On a schedule, judge the integration version it fires. The live manifest may have different auths.
+    .filter(({ entry, state }) =>
+      scheduleOverrides
+        ? readiness?.integrations.find((item) => item.integration_package_id === entry.id)
+            ?.connection_required !== false
+        : !(state.detail && isUnauthenticatedIntegration(state.detail.manifest)),
+    );
   if (rows.length === 0) return empty;
 
   return (
@@ -245,6 +257,7 @@ function IntegrationConnectionCell({
           onChange: (ids) => scheduleOverrides.onChange(packageId, ids),
         }}
         version={scheduleOverrides.version}
+        scheduleId={scheduleOverrides.scheduleId}
       />
     );
   }

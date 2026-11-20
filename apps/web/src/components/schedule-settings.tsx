@@ -31,6 +31,7 @@ import { AgentIntegrationsBlock } from "./package-detail/agent-integrations-bloc
 import { InputFieldRow } from "./settings/input-field-row";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
+import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useActorName } from "../hooks/use-actor-name";
 import { ManualSave } from "./settings/manual-save";
 import { EmptyState, ErrorState } from "./page-states";
@@ -559,10 +560,13 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
   const integrations = facts.integrations;
   // After an actor move the stored picks name the previous identity's connections.
   const picks = draft.picks ?? (draft.actor ? {} : (schedule.connection_overrides ?? {}));
-  // The pickers judge the VIEWER's connections: the agent's table speaks only
-  // for a schedule that runs as the viewer. Another actor's connections are
-  // named from the candidates the server offers when it refuses a save.
   const actorIsViewer = useIsViewer(actor);
+  const scheduleId = schedule.dependency_overrides ? schedule.id : undefined;
+  const readiness = useAgentConnectionReadiness(
+    actorIsViewer || integrations?.length === 0 ? undefined : schedule.packageId,
+    firedVersion(version),
+    scheduleId,
+  );
   const actorName = useActorName(actor);
 
   const pick = (
@@ -598,16 +602,24 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
     />
   );
   if (integrations.length === 0) return empty;
+  if (!actorIsViewer && isQueryInFlight(readiness)) return <SettingsSkeleton rows={2} />;
+  if (!actorIsViewer && readiness.isError) return <ErrorState error={readiness.error} compact />;
   return actorIsViewer ? (
     <AgentIntegrationsBlock
       entries={integrations}
       agentPackageId={schedule.packageId}
-      scheduleOverrides={{ value: picks, onChange: pick, version: firedVersion(version) }}
+      scheduleOverrides={{
+        value: picks,
+        onChange: pick,
+        version: firedVersion(version),
+        scheduleId,
+      }}
       empty={empty}
     />
   ) : (
     <ScheduleActorConnectionChoice
       choices={[]}
+      shared={readiness.data ? { entries: readiness.data.integrations, actor } : undefined}
       integrations={integrations}
       value={picks}
       onChange={pick}

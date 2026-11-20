@@ -7,6 +7,7 @@ const space = (id: string): McpSpace => ({
   id,
   name: id,
   role: "admin",
+  personal: false,
   permissions: new Set(),
   surface: {} as McpSpace["surface"],
 });

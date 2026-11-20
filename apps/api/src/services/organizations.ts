@@ -22,8 +22,11 @@ import {
   oauthClient,
   modelProviderCredentials,
   modelProviderPairings,
+  spaces,
+  integrationConnections,
+  type ScheduleDisabledReason,
 } from "@appstrate/db/schema";
-import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc } from "drizzle-orm";
+import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc, type SQL } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import {
   isUuid,
@@ -43,8 +46,15 @@ import {
   deleteSpaceMembershipsInOrg,
   lockOrgMember,
   lockSpacesOfSharedConnections,
+  sharesLostIn,
   unshareConnectionsOfOwnersWithoutAccess,
 } from "./space-members.ts";
+import {
+  integrationsNamingAny,
+  selectForeignNamingScheduleIds,
+} from "./schedules-naming-connection.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
@@ -421,8 +431,12 @@ interface MemberExitResult {
 }
 
 /** Under {@link lockOrganizationRow}, which all role writers take — not the request's role. */
-async function lockedActorRole(tx: Tx, orgId: string, actor: MemberActor): Promise<OrgRole> {
-  const row = await getOrgMember(orgId, actor.userId, tx);
+async function lockedActorRole(
+  executor: DbOrTx,
+  orgId: string,
+  actor: MemberActor,
+): Promise<OrgRole> {
+  const row = await getOrgMember(orgId, actor.userId, executor);
   if (!row) throw forbidden("Not a member of this organization");
   return row.role;
 }
@@ -452,6 +466,48 @@ async function assertAnotherOwnerRemains(tx: Tx, orgId: string, userId: string):
       "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
     );
   }
+}
+
+/** The member's armed schedules in `orgId`: the ones an exit disables `actor_left_org`. */
+function armedSchedulesOf(orgId: string, userId: string): SQL {
+  return and(
+    eq(schedules.orgId, orgId),
+    eq(schedules.userId, userId),
+    eq(schedules.enabled, true),
+  )!;
+}
+
+type ExitDisableCause = Extract<ScheduleDisabledReason, "actor_left_org" | "connection_unshared">;
+
+/**
+ * The schedules {@link removeMemberInTx} would disable for `userId`'s exit, and why, read from the
+ * same selectors without writing: `connection_unshared` for another actor's schedule naming a
+ * share the exit withdraws, `actor_left_org` for the member's own. A snapshot, stale once returned.
+ */
+async function exitScheduleDisables(
+  executor: DbOrTx,
+  orgId: string,
+  userId: string,
+): Promise<Map<string, ExitDisableCause>> {
+  // Every share of the member's connections, as the exit sees them with the membership gone.
+  const lost = await sharesLostIn(executor, { orgId, userId }, userId);
+  const foreign = await selectForeignNamingScheduleIds(
+    executor,
+    // The scope filters on the connection's `user_id`: its owner is the member.
+    lost.map((share) => ({
+      id: share.connectionId,
+      owner: { type: "user", id: userId },
+      inSpaceId: share.spaceId,
+    })),
+  );
+  const own = await executor
+    .select({ id: schedules.id })
+    .from(schedules)
+    .where(armedSchedulesOf(orgId, userId));
+  const causes = new Map<string, ExitDisableCause>();
+  for (const id of foreign) causes.set(id, "connection_unshared");
+  for (const { id } of own) causes.set(id, "actor_left_org");
+  return causes;
 }
 
 /** The one exit door: leave and removal clean up the membership in one place. */
@@ -531,11 +587,7 @@ async function removeMemberInTx(
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
   // The member's own armed schedules are disabled, not deleted (org history): they would keep
   // firing under the departed identity, whose user row survives (CRIT-13).
-  const departedSchedules = and(
-    eq(schedules.orgId, orgId),
-    eq(schedules.userId, userId),
-    eq(schedules.enabled, true),
-  );
+  const departedSchedules = armedSchedulesOf(orgId, userId);
   // No space lock needed, unlike a role change: with the membership gone the owner reaches no
   // space whatever a concurrent close leaves, so this unshares every shared connection. A close
   // unsharing the same rows is ordered against this by the row locks the unshare takes, which
@@ -601,13 +653,108 @@ export async function removeMember(
   targetUserId: string,
   actor: MemberActor,
 ): Promise<MemberExitResult> {
-  return exitOrg(orgId, targetUserId, async (tx, targetRole) => {
-    const actorRole = await lockedActorRole(tx, orgId, actor);
-    const isSelf = targetUserId === actor.userId;
-    if (!canRemoveMember({ actorRole, targetRole, isSelf })) {
-      throw forbidden("You cannot remove this member");
-    }
-    if (targetRole === "owner") assertOwnerChangeInSession(actor);
+  return exitOrg(orgId, targetUserId, (tx, targetRole) =>
+    assertMayRemove(tx, orgId, targetUserId, targetRole, actor),
+  );
+}
+
+/** 403 unless `actor` may remove `targetUserId` (of `targetRole`): the removal's own rule. */
+async function assertMayRemove(
+  executor: DbOrTx,
+  orgId: string,
+  targetUserId: string,
+  targetRole: OrgRole,
+  actor: MemberActor,
+): Promise<void> {
+  const actorRole = await lockedActorRole(executor, orgId, actor);
+  const isSelf = targetUserId === actor.userId;
+  if (!canRemoveMember({ actorRole, targetRole, isSelf })) {
+    throw forbidden("You cannot remove this member");
+  }
+  if (targetRole === "owner") assertOwnerChangeInSession(actor);
+}
+
+/** One schedule a member's removal would stop in a team space, as `getMemberDepartureImpact` lists it. */
+export interface DepartureImpactItem {
+  id: string;
+  name: string | null;
+  space: { id: string; name: string };
+  packageId: string;
+  actor: { type: "user" | "end_user"; id: string; name: string | null };
+  cause: ExitDisableCause;
+  /** Integrations whose named connection is the departing member's: reassigning is not enough. */
+  lost_integrations: string[];
+}
+
+/**
+ * What removing `targetUserId` would stop in the org's TEAM spaces, on `actor`'s authority: the
+ * schedules {@link removeMember} disables there, read without writing (a snapshot). 404 when not a
+ * member, 403 on the removal's own rule. Personal-space schedules are left out: the space enters
+ * its 30-day window, and an admin cannot read a live one.
+ */
+export async function memberDepartureImpact(
+  orgId: string,
+  targetUserId: string,
+  actor: MemberActor,
+): Promise<DepartureImpactItem[]> {
+  const target = await getOrgMember(orgId, targetUserId);
+  if (!target) throw notFound("Member not found");
+  await assertMayRemove(db, orgId, targetUserId, target.role, actor);
+
+  const causes = await exitScheduleDisables(db, orgId, targetUserId);
+  if (causes.size === 0) return [];
+  const rows = await db
+    .select({
+      id: schedules.id,
+      name: schedules.name,
+      packageId: schedules.packageId,
+      userId: schedules.userId,
+      endUserId: schedules.endUserId,
+      connectionOverrides: schedules.connectionOverrides,
+      spaceId: spaces.id,
+      spaceName: spaces.name,
+    })
+    .from(schedules)
+    .innerJoin(spaces, eq(spaces.id, schedules.spaceId))
+    .where(
+      and(
+        eq(schedules.orgId, orgId),
+        inArray(schedules.id, [...causes.keys()]),
+        isNull(spaces.ownerUserId),
+      ),
+    )
+    .orderBy(asc(spaces.name), asc(schedules.name), asc(schedules.id));
+  if (rows.length === 0) return [];
+
+  const owned = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(eq(integrationConnections.orgId, orgId), eq(integrationConnections.userId, targetUserId)),
+    );
+  const ownedIds = new Set(owned.map((row) => row.id));
+  const userIds = [...new Set(rows.flatMap((row) => (row.userId ? [row.userId] : [])))];
+  const [userNames, endUserNames] = await Promise.all([
+    batchLoadUserNames(userIds),
+    batchLoadScheduleEndUserNames(orgId, rows),
+  ]);
+
+  return rows.map((row) => {
+    const actorRef = actorFromIds(row.userId, row.endUserId)!;
+    return {
+      id: row.id,
+      name: row.name,
+      space: { id: row.spaceId, name: row.spaceName },
+      packageId: row.packageId,
+      actor: {
+        ...actorRef,
+        name:
+          (actorRef.type === "user" ? userNames.get(actorRef.id) : endUserNames.get(row.id)) ??
+          null,
+      },
+      cause: causes.get(row.id)!,
+      lost_integrations: integrationsNamingAny(row.connectionOverrides, ownedIds),
+    };
   });
 }
 

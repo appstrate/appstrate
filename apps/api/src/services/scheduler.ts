@@ -16,7 +16,7 @@ import {
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
-import { batchLoadUserNames } from "../lib/user-helpers.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
@@ -778,7 +778,7 @@ export async function listPackageSchedules(
 }
 
 /** The bare schedule row, before any enrichment — what a write path reads to diff against. */
-async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
+export async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)
@@ -918,23 +918,12 @@ async function enrichSchedules(
   if (schedules.length === 0) return [];
 
   const userIds = [...new Set(schedules.map((s) => s.userId).filter((id): id is string => !!id))];
-  const endUserIds = [
-    ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
-  ];
 
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
 
-  const [userNameMap, endUserRows, runStats, packageRows] = await Promise.all([
+  const [userNameMap, endUserNameMap, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
-    endUserIds.length > 0
-      ? db
-          .select({
-            id: endUsers.id,
-            name: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-          })
-          .from(endUsers)
-          .where(inArray(endUsers.id, endUserIds))
-      : Promise.resolve([] as { id: string; name: string | null }[]),
+    batchLoadScheduleEndUserNames(orgId, schedules),
     loadScheduleRunStats(
       schedules.map((s) => s.id),
       orgId,
@@ -949,7 +938,6 @@ async function enrichSchedules(
       .from(packages)
       .where(and(inArray(packages.id, packageIds), orgOrSystemFilter(orgId))),
   ]);
-  const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
   const agentNameMap = new Map(packageRows.map((r) => [r.id, getPackageDisplayName(r)]));
 
   return schedules.map((schedule) => {
@@ -960,7 +948,7 @@ async function enrichSchedules(
       actorName = userNameMap.get(schedule.userId) ?? null;
     } else if (schedule.endUserId) {
       actorType = "end_user";
-      actorName = endUserNameMap.get(schedule.endUserId) ?? null;
+      actorName = endUserNameMap.get(schedule.id) ?? null;
     }
     // A schedule that never fired has no `runs` rows, hence no group — zeroes.
     const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;

@@ -12,11 +12,14 @@ export interface NamedSpace {
   name: string;
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
+  /** Whether it is the caller's own personal space. */
+  personal?: boolean;
 }
 
 /** One line per space, for refusals and instructions. */
 export function describeSpace(space: NamedSpace): string {
-  return `${space.name} (\`${space.id}\`, role ${space.role})`;
+  const personal = space.personal ? ", your personal space" : "";
+  return `${space.name} (\`${space.id}\`, role ${space.role}${personal})`;
 }
 
 /** The refusal of a `space_id` argument that is missing or names no reachable space. */

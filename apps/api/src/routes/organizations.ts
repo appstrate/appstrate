@@ -9,6 +9,7 @@ import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
+import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import {
   createOrganization,
   getOrgById,
@@ -18,6 +19,7 @@ import {
   getOrgMembers,
   getOrgMemberWithProfile,
   leaveOrganization,
+  memberDepartureImpact,
   removeMember,
   updateMemberRole,
   isSlugAvailable,
@@ -527,6 +529,23 @@ router.patch(
       expiresAt: updated.expiresAt?.toISOString(),
       createdAt: updated.createdAt?.toISOString(),
     });
+  },
+);
+
+// GET /api/orgs/:orgId/members/:userId/departure-impact — what the removal would stop
+// Same guard and same per-target rule as the DELETE below: a preview of an act the
+// caller may not perform is refused the same way.
+router.get(
+  "/:orgId/members/:userId/departure-impact",
+  requirePermission("members", "remove"),
+  async (c) => {
+    const items = await memberDepartureImpact(
+      c.req.param("orgId")!,
+      c.req.param("userId")!,
+      memberActor(c),
+    );
+    // A confined credential sees nothing of the spaces it may not name, as `GET /api/spaces`.
+    return c.json(listResponse(items.filter((item) => credentialAdmitsSpace(c, item.space.id))));
   },
 );
 

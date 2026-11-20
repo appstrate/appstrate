@@ -3362,9 +3362,29 @@ export interface paths {
         post?: never;
         /**
          * Remove a member
-         * @description Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here revoked, the OAuth tokens bound to this organization deleted, their MCP grants on the organization's endpoints (organization and spaces) ended, and their personal space enters the 30-day offboarding window. An MCP-bound JWT access token is refused from its next request; only a JWT of an org-level OAuth client stays valid until it expires, and the per-request membership check refuses it meanwhile.
+         * @description Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here revoked, the OAuth tokens bound to this organization deleted, their MCP grants on the organization's endpoints (organization and spaces) ended, and their personal space enters the 30-day offboarding window. An MCP-bound JWT access token is refused from its next request; only a JWT of an org-level OAuth client stays valid until it expires, and the per-request membership check refuses it meanwhile. Other members' schedules naming a connection the member shared are disabled too (`connection_unshared`); `getMemberDepartureImpact` lists, before the removal, every team-space schedule it would stop.
          */
         delete: operations["removeMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/members/{userId}/departure-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what removing a member stops
+         * @description The enabled schedules in TEAM spaces that `removeMember` would disable for this member, in one list whatever the cause: `actor_left_org` for a schedule the member is the actor of, `connection_unshared` for another actor's schedule whose `connection_overrides` name a connection the member shares into that space (the removal withdraws every share of the member's connections). Each item's `lost_integrations` lists the integrations whose named connection belongs to the departing member: reassigning the schedule to another member (`updateSchedule`) is not enough there, a replacement connection is needed too. Read with the same selectors the removal uses, without writing anything: a snapshot, which a later change can make stale before the removal runs. Schedules in personal spaces are left out — the departing member's personal space enters its 30-day offboarding window and an administrator cannot read a live one. A credential confined to spaces (a space-bound token, the chat's bearer) sees only the items in the spaces it may name. Known limit: a binding to the member's connection outside the schedule's own `connection_overrides` — an admin pin, an organization default, or a member pin of the departing member — is not listed, and is not disabled by the removal either (the schedule fails at resolution). Same guard and same per-target rule as `removeMember`: 404 when the user is not a member, 403 when the caller could not remove them (an admin previewing an owner, any token previewing an owner).
+         */
+        get: operations["getMemberDepartureImpact"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -8735,6 +8755,8 @@ export interface operations {
     getAgentConnectionReadiness: {
         parameters: {
             query?: {
+                /** @description Apply the stored dependency version overrides of this agent's schedule in the current space. Requires schedules:read. The version parameter selects the agent definition and connection visibility remains the caller's. */
+                scheduleId?: string;
                 /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it, so the modal and badge never disagree with the actual run. Ignored for system agents. */
                 version?: string;
             };
@@ -21472,6 +21494,89 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getMemberDepartureImpact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Schedules the removal would stop, ordered by space name then schedule name */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "list",
+                     *       "hasMore": false,
+                     *       "data": [
+                     *         {
+                     *           "id": "sch_abc123",
+                     *           "name": "Daily digest",
+                     *           "space": {
+                     *             "id": "spc_team",
+                     *             "name": "Sales"
+                     *           },
+                     *           "packageId": "@acme/digest",
+                     *           "actor": {
+                     *             "type": "user",
+                     *             "id": "usr_def456",
+                     *             "name": "Bob"
+                     *           },
+                     *           "cause": "actor_left_org",
+                     *           "lost_integrations": [
+                     *             "@acme/gmail"
+                     *           ]
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @description Schedule id. */
+                            id: string;
+                            name: string | null;
+                            space: {
+                                id: string;
+                                name: string;
+                            };
+                            /** @description The scheduled agent. */
+                            packageId: string;
+                            actor: {
+                                /** @enum {string} */
+                                type: "user" | "end_user";
+                                id: string;
+                                name: string | null;
+                            };
+                            /**
+                             * @description The `disabled_reason` the removal would set.
+                             * @enum {string}
+                             */
+                            cause: "actor_left_org" | "connection_unshared";
+                            /** @description Integrations whose connection named in `connection_overrides` belongs to the departing member. */
+                            lost_integrations: string[];
+                        }[];
+                        /** @description Always false: the list is complete. */
+                        hasMore: boolean;
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

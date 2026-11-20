@@ -403,6 +403,8 @@ describe("platform MCP surface cache", () => {
     );
     // A closed direct-access switch drops tools from that space's surface.
     expect(surfaceKey(org, perms, [alpha, { ...beta, credentialProxyOpen: false }])).not.toBe(both);
+    // `describeSpace` marks the caller's personal space in every `space_id` description.
+    expect(surfaceKey(org, perms, [alpha, { ...beta, personal: true }])).not.toBe(both);
   });
 
   it("surfaces a failed lazy connect as the tool call's error, retries it, and evicts the entry", async () => {
