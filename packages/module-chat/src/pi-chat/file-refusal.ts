@@ -6,9 +6,10 @@
  * A provider request carrying a file that fails as an invalid request, or with no recognised
  * cause, is replayed in the same step with those file parts replaced by a text pointer: the PDFs
  * alone first when images rode too, then both if that replay is refused the same way (same
- * category). Only a replay that succeeds names the cause; a kind it withheld stays withheld for
- * the rest of the turn. When every replay is refused the same way, the turn reports the first
- * error; when one fails otherwise, its own error. Nothing outlives the turn.
+ * category), so at most two replays, whatever the failure's real cause. Only a replay that
+ * succeeds names the cause; a kind it withheld stays withheld for the rest of the turn, even
+ * after a failure that was only flaky. When every replay is refused the same way, the turn
+ * reports the first error; when one fails otherwise, its own error. Nothing outlives the turn.
  */
 
 import {

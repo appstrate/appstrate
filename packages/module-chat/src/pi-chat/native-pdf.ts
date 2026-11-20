@@ -4,6 +4,7 @@ import { sanitizeFilename } from "@appstrate/core/naming";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { ExtensionFactory } from "@appstrate/runner-pi";
 import { hasPdfWireFormat, type FileDelivery, type PdfWireApi } from "../file-input.ts";
+import { logger } from "../logger.ts";
 
 /** A one-turn reference to a PDF, swapped for the file itself at serialization. */
 const REFERENCE = /\[pdf:[0-9a-f-]{36}\]/g;
@@ -20,11 +21,12 @@ interface PdfFile {
   data: string;
 }
 
-interface PdfReceipt {
-  note: string;
-  /** A one-turn reference placed only in the in-memory Pi message and removed on serialization. */
-  reference?: string;
-}
+/**
+ * A delivered PDF gets only a reference, placed in the in-memory Pi message and swapped at
+ * serialization for the file, or for a pointer if the file is withheld: no text of its own
+ * claims a delivery a replay could take back. Any other PDF gets a note saying why.
+ */
+type PdfReceipt = { reference: string } | { note: string };
 
 export interface TurnPdfInput {
   /** Why this turn sends no PDF, told to the model for each one; undefined when it sends them. */
@@ -36,7 +38,7 @@ export interface TurnPdfInput {
 
 interface StoredFile extends PdfFile {
   source?: string;
-  receipt: PdfReceipt & { reference: string };
+  receipt: { reference: string };
 }
 
 /** pi-ai builds payloads as plain JSON; each encoder reads only what its converter writes. */
@@ -120,26 +122,15 @@ const ANTHROPIC: PdfEncoder = {
       const blocks = message?.role === "user" && toBlocks(message.content, "text");
       if (!blocks) return message;
       // pi-ai merges a step's tool results into one user message of tool_result blocks.
-      const errorFiles: Block[] = [];
       const withResults = blocks.map((block) => {
         const inner = block?.type === "tool_result" && toBlocks(block.content, "text");
         const taken = inner && strip(inner, String(block.tool_use_id), "text");
         if (!taken) return block;
-        const documents = taken.files.map(anthropicDocument);
-        // Anthropic accepts only text in an error result: like pi-ai's error images, its PDFs
-        // follow the step's tool results in the same message.
-        if (block.is_error && documents.length) {
-          errorFiles.push(
-            { type: "text", text: `PDFs from the error result of tool call ${block.tool_use_id}:` },
-            ...documents,
-          );
-        }
-        const content = block.is_error ? taken.blocks : [...taken.blocks, ...documents];
+        const content = [...taken.blocks, ...taken.files.map(anthropicDocument)];
         return { ...block, content: content.length ? content : "" };
       });
-      const results = [...withResults, ...errorFiles];
-      const taken = strip(results, undefined, "text");
-      const next = taken ? [...taken.blocks, ...taken.files.map(anthropicDocument)] : results;
+      const taken = strip(withResults, undefined, "text");
+      const next = taken ? [...taken.blocks, ...taken.files.map(anthropicDocument)] : withResults;
       if (next.length === blocks.length && next.every((block, i) => block === blocks[i])) {
         return message;
       }
@@ -250,6 +241,7 @@ export function createTurnPdfInput(
   const unsupported = encoder ? undefined : format ? PDF_NOT_SENT.textOnly : PDF_NOT_SENT.format;
   const files: StoredFile[] = [];
   let remainingBytes = RESOURCE_BLOB_MAX_BYTES;
+  let warned = false;
 
   const strip: Strip = (blocks, source, textType) => {
     const owned = new Set<StoredFile>();
@@ -290,17 +282,26 @@ export function createTurnPdfInput(
         };
       }
       remainingBytes -= size;
-      const receipt = {
-        note: `PDF supplied to the model for this turn: ${filename}`,
-        reference: `[pdf:${crypto.randomUUID()}]`,
-      };
+      const receipt = { reference: `[pdf:${crypto.randomUUID()}]` };
       files.push({ source, receipt, name: filename, data });
       return receipt;
     },
     extension(pi) {
       pi.on("before_provider_request", ({ payload }) => {
         if (!encoder || !files.length || !payload || typeof payload !== "object") return;
-        return encoder.encode(payload as Message, strip, model.compat);
+        try {
+          return encoder.encode(payload as Message, strip, model.compat);
+        } catch (error) {
+          // Pi would send the payload unchanged on a throw: never a reference as text.
+          if (!warned) {
+            warned = true;
+            logger.warn("chat PDF encoding failed; the request is sent without its PDFs", {
+              api: model.api,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return JSON.parse(JSON.stringify(payload).replace(REFERENCE, "")) as Message;
+        }
       });
     },
   };

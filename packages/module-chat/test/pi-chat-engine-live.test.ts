@@ -930,6 +930,9 @@ describe("runPiChat against a stub provider", () => {
         expect(capture.bodies[1]).toContain(PNG);
         expect(capture.bodies[2]).toContain(PNG);
         expect(capture.bodies[2]).not.toContain(toolPdfData);
+        expect(capture.bodies[2]).toContain(PDF_POINTER);
+        // The withheld PDF is not also claimed as delivered beside its pointer.
+        expect(capture.bodies.some((body) => body.includes("PDF supplied"))).toBe(false);
         expect(capture.bodies[3]).not.toContain(PNG);
         expect(capture.bodies[3]).toContain(IMAGE_POINTER);
         expect(capture.bodies[3]).toContain(PDF_POINTER);

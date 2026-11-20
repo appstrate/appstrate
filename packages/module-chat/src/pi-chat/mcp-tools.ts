@@ -815,8 +815,8 @@ async function liveResources(
         { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
         toolCallId,
       );
-      note = pdf.note;
-      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
+      if ("reference" in pdf) content.push({ type: "text", text: pdf.reference });
+      else note = pdf.note;
     } else if (isRasterImageMime(mimeType) && opts.fileDelivery?.image) {
       content.push({ type: "image", mimeType, data: blob });
     } else {

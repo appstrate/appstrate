@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { PDF_WIRE_APIS, fileDelivery, hasPdfWireFormat } from "../src/file-input.ts";
+import { fileDelivery, hasPdfWireFormat } from "../src/file-input.ts";
 
 const VISION = ["text", "image"];
 const TEXT = ["text"];
@@ -17,7 +17,13 @@ describe("fileDelivery", () => {
   });
 
   it("sends a PDF on an API with a wire format unless the model is declared text-only", () => {
-    for (const api of PDF_WIRE_APIS) {
+    for (const api of [
+      "openai-responses",
+      "openai-codex-responses",
+      "anthropic-messages",
+      "openai-completions",
+    ]) {
+      expect(hasPdfWireFormat(api)).toBe(true);
       expect(fileDelivery({ api, input: VISION }).pdf).toBe(true);
       expect(fileDelivery({ api, input: null }).pdf).toBe(true);
       expect(fileDelivery({ api, input: TEXT }).pdf).toBe(false);

@@ -681,7 +681,7 @@ describe("temporary connector files", () => {
       const args = { arguments: { read_as_file: true } };
       const result = await call.execute("download-id", { ...args, tool: "crm__api_call" });
       expect(added).toEqual(["download-id"]);
-      expect(JSON.stringify(result.content)).toContain("PDF supplied");
+      expect(JSON.stringify(result.content)).toMatch(/\[pdf:[0-9a-f-]{36}\]/);
       const chunks = new PiChatUiStreamMapper().map({
         type: "tool_execution_end",
         toolName: call.name,

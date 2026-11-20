@@ -10,7 +10,7 @@
  * API shapes the chat has a PDF wire format for, each encoded in `pi-chat/native-pdf.ts`.
  * Mistral's conversations API takes documents only by hosted URL, so it has none.
  */
-export const PDF_WIRE_APIS = [
+const PDF_WIRE_APIS = [
   "openai-responses",
   "openai-codex-responses",
   "anthropic-messages",

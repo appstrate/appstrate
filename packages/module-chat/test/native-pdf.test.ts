@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { CHAT_FINAL_STEP_SYSTEM_PROMPT } from "@appstrate/core/chat-turn-metadata";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { fileDelivery } from "../src/file-input.ts";
+import { logger } from "../src/logger.ts";
 import { createTurnPdfInput, type TurnPdfInput } from "../src/pi-chat/native-pdf.ts";
 
 type Payload = Record<string, unknown[]>;
@@ -37,6 +38,15 @@ const turnFor = (model: TestModel) => {
   return turn;
 };
 
+type Receipt = ReturnType<TurnPdfInput["add"]>;
+const ref = (receipt: Receipt) => {
+  if (!("reference" in receipt)) throw new Error(`not delivered: ${receipt.note}`);
+  return receipt.reference;
+};
+const noteOf = (receipt: Receipt) => ("note" in receipt ? receipt.note : undefined);
+/** The receipt `mcp-tools.ts` writes next to a delivered PDF's reference. */
+const RECEIPT = '{"note":"File read for this turn."}';
+
 const VISION: TestModel = { api: "openai-responses", input: ["text", "image"] };
 
 const pdf = { name: "contract.pdf", data: btoa("%PDF-1.7\ncontract") };
@@ -54,12 +64,12 @@ describe("openai-responses", () => {
     const text = (value: string) => ({ type: "input_text", text: value });
     const prompt = {
       role: "user",
-      content: [text("Inspect the contract"), text(attachment.reference!)],
+      content: [text("Inspect the contract"), text(ref(attachment))],
     };
-    const historyPrompt = { role: "user", content: [text(attachment.note)] };
-    const historyResult = { type: "function_call_output", call_id: "call_1", output: tool.note };
+    const historyPrompt = { role: "user", content: [text("[pdf:earlier turn, gone]")] };
+    const historyResult = { type: "function_call_output", call_id: "call_1", output: RECEIPT };
     // Responses joins the Pi text blocks of a tool-only result into a single string.
-    const result = { ...historyResult, output: `${tool.reference}\n${tool.note}` };
+    const result = { ...historyResult, output: `${ref(tool)}\n${RECEIPT}` };
     const closing = { role: "user", content: [text(CHAT_FINAL_STEP_SYSTEM_PROMPT)] };
     const input = [historyPrompt, historyResult, prompt, result, closing];
     const wire = transform(turn, input);
@@ -67,12 +77,12 @@ describe("openai-responses", () => {
       historyPrompt,
       historyResult,
       { ...prompt, content: [text("Inspect the contract"), nativeFile] },
-      { ...result, output: [text(tool.note), nativeFile] },
+      { ...result, output: [text(RECEIPT), nativeFile] },
       closing,
     ]);
     expect(JSON.stringify(input)).not.toContain(pdf.data);
-    expect(JSON.stringify(wire)).not.toContain(tool.reference!);
-    expect(JSON.stringify(wire)).not.toContain(attachment.reference!);
+    expect(JSON.stringify(wire)).not.toContain(ref(tool));
+    expect(JSON.stringify(wire)).not.toContain(ref(attachment));
     const unrelated = [historyPrompt, historyResult, closing];
     expect(transform(turn, unrelated)).toEqual(unrelated);
     expect(transform(turnFor(VISION), input)).toEqual(input);
@@ -86,9 +96,9 @@ describe("openai-responses", () => {
     const other = {
       type: "function_call_output",
       call_id: "call_b",
-      output: `B ${mine.reference}`,
+      output: `B ${ref(mine)}`,
     };
-    const custom = { type: "custom_tool_call_output", call_id: "call_a", output: mine.reference! };
+    const custom = { type: "custom_tool_call_output", call_id: "call_a", output: ref(mine) };
     const assistant = { role: "assistant", content: [{ type: "output_text", text: "done" }] };
     const plain = { role: "user", content: [text("no reference here ")] };
     const wire = transform(turn, [other, custom, assistant, plain]);
@@ -104,7 +114,7 @@ describe("openai-responses", () => {
   it("sends a Codex call's PDF in the Responses shape, keyed by its call_id", () => {
     const turn = turnFor({ api: "openai-codex-responses", input: null });
     const tool = turn.add(pdf, "call_c|fc_c");
-    const item = { type: "function_call_output", call_id: "call_c", output: tool.reference };
+    const item = { type: "function_call_output", call_id: "call_c", output: ref(tool) };
     expect(transform(turn, [item])).toEqual([{ ...item, output: [nativeFile] }]);
   });
 });
@@ -113,10 +123,12 @@ it("caps cumulative file bytes before sending, including across function calls",
   const turn = turnFor(VISION);
   const full = { ...pdf, data: Buffer.alloc(RESOURCE_BLOB_MAX_BYTES).toString("base64") };
   const receipt = turn.add(full, "first|item");
-  expect(receipt.note).toContain(pdf.name);
+  ref(receipt);
   expect(turn.add(full, "first|item")).toBe(receipt);
-  expect(turn.add(pdf, "second|item").note).toContain("size limit");
-  expect(turnFor(VISION).add({ ...full, data: full.data + "AAAA" }).note).toContain("size limit");
+  expect(noteOf(turn.add(pdf, "second|item"))).toContain("size limit");
+  expect(noteOf(turnFor(VISION).add({ ...full, data: full.data + "AAAA" }))).toContain(
+    "size limit",
+  );
 });
 
 it("reports a PDF the turn does not deliver, with its cause, without exposing it as text", () => {
@@ -128,12 +140,11 @@ it("reports a PDF the turn does not deliver, with its cause, without exposing it
   for (const [model, cause] of cases) {
     const turn = turnFor(model);
     expect(turn.unsupported).toContain(cause);
-    const receipt = turn.add(pdf);
-    expect(receipt.reference).toBeUndefined();
-    expect(receipt.note).toBe(turn.unsupported!);
-    expect(receipt.note).toEndWith("Use an inline run to inspect the file.");
-    expect(receipt.note).not.toContain(pdf.data);
-    const input = [{ role: "user", content: receipt.note }];
+    const note = noteOf(turn.add(pdf))!;
+    expect(note).toBe(turn.unsupported!);
+    expect(note).toEndWith("Use an inline run to inspect the file.");
+    expect(note).not.toContain(pdf.data);
+    const input = [{ role: "user", content: note }];
     expect(transform(turn, input)).toEqual(input);
   }
 });
@@ -142,7 +153,7 @@ it("treats a PDF the rule lets through on an API without an encoder as unsupport
   for (const api of [null, "mistral-conversations"]) {
     const turn = createTurnPdfInput({ api }, { pdf: true });
     expect(turn.unsupported).toContain("has no PDF input format");
-    expect(turn.add(pdf).reference).toBeUndefined();
+    expect(noteOf(turn.add(pdf))).toContain("has no PDF input format");
   }
 });
 
@@ -165,10 +176,7 @@ describe("anthropic-messages", () => {
     // pi-ai turns the last user message's string into blocks and marks the last one.
     const prompt = {
       role: "user",
-      content: [
-        text("Inspect the contract"),
-        { ...text(attachment.reference!), cache_control: CACHE },
-      ],
+      content: [text("Inspect the contract"), { ...text(ref(attachment)), cache_control: CACHE }],
     };
     const wire = messages(turn, [earlier, assistant, prompt]);
     expect(wire).toEqual([
@@ -182,15 +190,14 @@ describe("anthropic-messages", () => {
     expect(wire[0]).toBe(earlier);
     expect(wire[1]).toBe(assistant);
     // String content, as pi-ai writes a user message it does not mark.
-    expect(messages(turn, [{ role: "user", content: attachment.reference }])).toEqual([
+    expect(messages(turn, [{ role: "user", content: ref(attachment) }])).toEqual([
       { role: "user", content: [document] },
     ]);
   });
 
-  it("puts a tool's PDF in its own tool_result, an error result's after the results", () => {
+  it("puts a tool's PDF in its own tool_result, never in another call's", () => {
     const turn = turnFor(ANTHROPIC);
     const mine = turn.add(pdf, "toolu_a");
-    const failed = turn.add({ ...pdf, data: btoa("%PDF-1.7 failed") }, "toolu_e");
     const result = (id: string, content: unknown, extra = {}) => ({
       type: "tool_result",
       tool_use_id: id,
@@ -201,9 +208,8 @@ describe("anthropic-messages", () => {
     const step = {
       role: "user",
       content: [
-        result("toolu_a", `${mine.reference}\n${mine.note}`),
-        result("toolu_e", [text(`failed ${failed.reference}`)], { is_error: true }),
-        result("toolu_b", `B ${mine.reference}`),
+        result("toolu_a", `${ref(mine)}\n${RECEIPT}`),
+        result("toolu_b", `B ${ref(mine)}`),
         result("toolu_c", "untouched", { cache_control: CACHE }),
       ],
     };
@@ -212,20 +218,37 @@ describe("anthropic-messages", () => {
       {
         role: "user",
         content: [
-          result("toolu_a", [text(mine.note), document]),
-          result("toolu_e", [text("failed")], { is_error: true }),
+          result("toolu_a", [text(RECEIPT), document]),
           result("toolu_b", [text("B")]),
-          result("toolu_c", "untouched"),
-          text("PDFs from the error result of tool call toolu_e:"),
-          {
-            ...document,
-            source: { ...document.source, data: btoa("%PDF-1.7 failed") },
-            cache_control: CACHE,
-          },
+          result("toolu_c", "untouched", { cache_control: CACHE }),
         ],
       },
     ]);
     expect(JSON.stringify(wire)).not.toContain("[pdf:");
+  });
+
+  it("sends no reference and no PDF when the encoder throws", () => {
+    const turn = turnFor(ANTHROPIC);
+    const mine = turn.add(pdf);
+    // A null block beside the marked reference: re-marking the rewritten content throws.
+    const prompt = {
+      role: "user",
+      content: [null, { ...text(`Inspect ${ref(mine)}`), cache_control: CACHE }],
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      // Every request of the turn runs the hook again; the turn warns once.
+      const serializeTwice = () => [messages(turn, [prompt]), messages(turn, [prompt])];
+      for (const wire of serializeTwice()) {
+        expect(wire).toEqual([
+          { role: "user", content: [null, { ...text("Inspect "), cache_control: CACHE }] },
+        ]);
+      }
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(pdf.data);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("leaves a request that references no PDF untouched", () => {
@@ -266,15 +289,12 @@ describe("openai-completions", () => {
     const attachment = turn.add(pdf);
     const prompt = {
       role: "user",
-      content: [
-        text("Inspect the contract"),
-        { ...text(attachment.reference!), cache_control: CACHE },
-      ],
+      content: [text("Inspect the contract"), { ...text(ref(attachment)), cache_control: CACHE }],
     };
     expect(messages(turn, [prompt])).toEqual([
       { role: "user", content: [{ ...text("Inspect the contract"), cache_control: CACHE }, file] },
     ]);
-    expect(messages(turn, [{ role: "user", content: attachment.reference }])).toEqual([
+    expect(messages(turn, [{ role: "user", content: ref(attachment) }])).toEqual([
       { role: "user", content: [file] },
     ]);
   });
@@ -285,11 +305,11 @@ describe("openai-completions", () => {
     const next = { role: "user", content: "next" };
     const wire = messages(turn, [
       calls,
-      tool("call_a", `${mine.reference}\n${mine.note}`),
-      tool("call_b", `B ${mine.reference}`),
+      tool("call_a", `${ref(mine)}\n${RECEIPT}`),
+      tool("call_b", `B ${ref(mine)}`),
       next,
     ]);
-    expect(wire).toEqual([calls, tool("call_a", mine.note), tool("call_b", "B"), pdfMessage, next]);
+    expect(wire).toEqual([calls, tool("call_a", RECEIPT), tool("call_b", "B"), pdfMessage, next]);
   });
 
   it("joins pi-ai's tool image message, bridged or not", () => {
@@ -297,7 +317,7 @@ describe("openai-completions", () => {
       const turn = turnFor(model);
       const mine = turn.add(pdf, "call_a");
       const bridging = model.compat ? [bridge] : [];
-      const run = [calls, tool("call_a", mine.reference), ...bridging];
+      const run = [calls, tool("call_a", ref(mine)), ...bridging];
       expect(messages(turn, [...run, imageFollowUp])).toEqual([
         calls,
         tool("call_a", "(see attached PDF)"),
@@ -311,7 +331,7 @@ describe("openai-completions", () => {
     const turn = turnFor(BRIDGED);
     const mine = turn.add(pdf, "call_a");
     const next = { role: "user", content: "next" };
-    expect(messages(turn, [calls, tool("call_a", mine.reference), bridge, next])).toEqual([
+    expect(messages(turn, [calls, tool("call_a", ref(mine)), bridge, next])).toEqual([
       calls,
       tool("call_a", "(see attached PDF)"),
       bridge,
@@ -326,7 +346,7 @@ describe("openai-completions", () => {
       const turn = turnFor(model);
       const mine = turn.add(pdf, "call_a");
       // pi-ai marks the last conversation message, here the tool message, as a text part.
-      const marked = tool("call_a", [{ ...text(mine.reference!), cache_control: CACHE }]);
+      const marked = tool("call_a", [{ ...text(ref(mine)), cache_control: CACHE }]);
       expect(messages(turn, [calls, marked])).toEqual([
         calls,
         tool("call_a", "(see attached PDF)"),
@@ -337,7 +357,7 @@ describe("openai-completions", () => {
     // A tool message that only drops a foreign reference keeps its mark.
     const turn = turnFor(COMPLETIONS);
     const mine = turn.add(pdf, "call_a");
-    const foreign = tool("call_b", [{ ...text(`B ${mine.reference}`), cache_control: CACHE }]);
+    const foreign = tool("call_b", [{ ...text(`B ${ref(mine)}`), cache_control: CACHE }]);
     expect(messages(turn, [calls, foreign])).toEqual([
       calls,
       tool("call_b", [{ ...text("B"), cache_control: CACHE }]),

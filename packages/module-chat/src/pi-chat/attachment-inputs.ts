@@ -118,7 +118,7 @@ export async function readPromptPdfs(
             name: part.filename ?? "attachment.pdf",
             data: Buffer.from(file.bytes).toString("base64"),
           });
-          note = pdf.reference ?? pdf.note;
+          note = "reference" in pdf ? pdf.reference : pdf.note;
         }
       } catch (error) {
         signal.throwIfAborted();
