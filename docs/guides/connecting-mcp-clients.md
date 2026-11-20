@@ -40,7 +40,7 @@ claude mcp add --transport http appstrate-<org> https://YOUR_INSTANCE/api/mcp/o/
 The `<orgId>` in the URL must be the key's own organization (the dashboard gives
 you the matching command).
 
-- `mcp:read` — connect, `search_operations`, `describe_operation`, and the
+- `mcp:read` — connect, `search`, `describe`, and the
   read-only helpers `read`, `validate_package_file`,
   `get_runtime_capabilities` and `get_me`.
 - `mcp:invoke` — `invoke_operation` (call an operation). Defence in depth: the
@@ -124,8 +124,8 @@ What happens under the hood:
 > not allow the action, `granted_in` lists the spaces where it does, and the
 > result asks the model to report the refusal rather than redo the action in
 > another space. `credential_proxy_closed` is final in the same way: the space
-> named by `space` closes `search_integration_tools` and `call_integration_tool`
-> to every role. Only
+> named by `space` closes `call_integration_tool` and the `integration_tool`
+> kind of `search` and `describe` to every role. Only
 > an unknown tool name is a JSON-RPC `-32602`.
 >
 > A refusal is about the call itself. An operation the route answered with an
@@ -304,20 +304,19 @@ operation each tool dispatches to (for `import_package_file`, the
 guards require today. The package `:write` permissions are `agents:write`,
 `skills:write` and `integrations:write` — any one will do.
 
-| Tool                       | Permission                                                            | What it does                                                                                                                                                                                                                                   |
-| -------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_me`                   | `mcp:read`                                                            | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context.                                                                    |
-| `search_operations`        | `mcp:read`                                                            | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                                                                                          |
-| `describe_operation`       | `mcp:read`                                                            | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                                                                                           |
-| `read`                     | `mcp:read`                                                            | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                                                                                              |
-| `validate_package_file`    | `mcp:read`                                                            | Check an `.afps`/ZIP archive before importing it.                                                                                                                                                                                              |
-| `get_runtime_capabilities` | `mcp:read`                                                            | The local MCP server runtimes and manifest templates package authoring works from.                                                                                                                                                             |
-| `invoke_operation`         | `mcp:invoke`                                                          | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                                                                                            |
-| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all`          | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                                                                                            |
-| `list_files`               | `files:read`                                                          | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                                                                                     |
-| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                                                                                       |
-| `search_integration_tools` | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The tools of the integrations you hold a connection of, and of those that need none, each with the connections it reaches; `best_match` carries an input schema and usage (see below). Absent in a space that closes direct connection access. |
-| `call_integration_tool`    | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call one by name: `{ns}__api_call` (a third-party API, credential injected) or a remote MCP server's `{ns}__{tool}` (see below). Absent in a space that closes direct connection access.                                                       |
+| Tool                       | Permission                                                            | What it does                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`                   | `mcp:read`                                                            | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context.                                                                                                                                                                                                                                                  |
+| `search`                   | `mcp:read`                                                            | Keyword search over every kind you may act on: `operation`, `integration_tool`, `agent`, `skill` (a kind is declared only where its listing is granted). One section per kind, each `{ total, items }`, every item carrying the `id` `describe` takes. A keyword search also returns `best_match`, the top hit across kinds, described. The `integration_tool` kind needs the grants of `call_integration_tool` (see below). |
+| `describe`                 | `mcp:read`                                                            | Definition of one item, by `kind` and `id`: an operation's input schema, an integration tool's schemas and usage, an agent's launch contract, a skill's frontmatter and files (only needed when `best_match` didn't cover it).                                                                                                                                                                                               |
+| `read`                     | `mcp:read`                                                            | Read one `appfile://` file (its own ACL decides on the row) or one `skill://` skill file, the bytes `resources/read` serves.                                                                                                                                                                                                                                                                                                 |
+| `validate_package_file`    | `mcp:read`                                                            | Check an `.afps`/ZIP archive before importing it.                                                                                                                                                                                                                                                                                                                                                                            |
+| `get_runtime_capabilities` | `mcp:read`                                                            | The local MCP server runtimes and manifest templates package authoring works from.                                                                                                                                                                                                                                                                                                                                           |
+| `invoke_operation`         | `mcp:invoke`                                                          | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                                                                                                                                                                                                                                                                          |
+| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all`          | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                                                                                                                                                                                                                                                                          |
+| `list_files`               | `files:read`                                                          | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                                                                                                                                                                                                                                                                   |
+| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `call_integration_tool`    | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call an integration tool by its `id`, found with `search`: `{ns}__api_call` (a third-party API, credential injected) or a remote MCP server's `{ns}__{tool}` (see below). Absent in a space that closes direct connection access.                                                                                                                                                                                            |
 
 `run_and_wait` needs both halves because it launches AND polls the run back
 under your own credentials: `agents:run` without a run-read permission would
@@ -369,16 +368,19 @@ it again. The MCP tasks extension (`io.modelcontextprotocol/tasks`), which
 would let a client poll a long call natively, is the future target for long
 runs; Appstrate does not implement it yet.
 
-`search_integration_tools` and `call_integration_tool` are the credential proxy
+`call_integration_tool` and the `integration_tool` kind of `search` and
+`describe` are the credential proxy
 (`/api/credential-proxy/*`) outside a run. The proxy route is not an operation
-of the catalog, so `invoke_operation` does not reach it: these two tools are the
+of the catalog, so `invoke_operation` does not reach it, and a root tool exists
+only where it does what `invoke_operation` cannot: `call_integration_tool`
+relays the upstream tool's result as is. They are the
 MCP path, and each request re-enters a route with your credential, so its
 permission check, rate limit and call journal apply as over REST. They are
 declared to a caller authenticated by a bearer (an API key or an OAuth token)
 who holds `mcp:invoke` and `credential-proxy:call-own` or `credential-proxy:call`;
 who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
 In a space whose admin turned off direct connection access
-(`credential_proxy_open: false`, `PATCH /api/spaces/{id}`), neither tool is
+(`credential_proxy_open: false`, `PATCH /api/spaces/{id}`), neither the tool nor the kind is
 declared for that space, whatever your role, and the REST route answers
 `403 credential_proxy_closed`. `get_me`'s description then says the space's
 admin closed it. On the organization URL, `space_id` naming such a
@@ -395,9 +397,18 @@ role. Runs keep their connections there:
   organization defaults. A shared connection is used when you name it
   (`connection_id`) or an organization default designates it, and under an
   enforced default only the connections it holds are reachable.
-- **Discovery.** `search_integration_tools` takes an optional `query`, an
-  optional `integration` (`@scope/name`) and a `limit`; with neither `query`
-  nor `integration` it lists every tool you can call. A tool is named
+- **Discovery.** `search` with `kinds: ["integration_tool"]` (or `integration`
+  alone) takes an optional `query`, an optional `integration` (`@scope/name`)
+  and a `limit`; with neither `query` nor `integration` it lists every tool you
+  can call, under `integration_tools`. A search that names neither that kind nor
+  an `integration` reads remote servers' catalogs from the cache only: no
+  server is contacted, no credential sent, no call journaled; a catalog not yet
+  cached lists its tools by declared name (`catalog_unreadable: true`) and the
+  integration is named in `uncached`. Naming the kind or an integration reads
+  cold catalogs from their servers, as described below. The REST route takes
+  the same choice as `catalogs=live|cached` (default `live`) and answers
+  `uncached` too. `describe` with `kind: "integration_tool"` and a tool's `id`
+  returns its `input_schema`, `output_schema`, `usage` and reached `connections`. A tool is named
   `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths of the
   integration expose it, `{ns}` being the package id in snake case, cut at 20
   characters and without a trailing `_`; while it equals the namespace of
@@ -413,7 +424,7 @@ role. Runs keep their connections there:
   connection you reach. Each result carries `tool`, `integration_package_id`,
   `description` and `connection_ids`, the connections it reaches among the
   result's `connections`, each listed once; with `query` or `integration`, `best_match`
-  adds the first result's `input_schema` and `usage` (how to call the tool and
+  describes the top hit; for a tool, it adds the first result's `input_schema` and `usage` (how to call the tool and
   read its result), so a search by a tool's exact name stands for a describe
   call, which does not exist. `note` says when more tools match than `limit`
   shows, and when a remote server's catalog was read incomplete (it lists more
@@ -451,7 +462,7 @@ role. Runs keep their connections there:
   `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
   is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
   `https://{$credential.host}/**`); the platform fills it in.
-- **A call.** `call_integration_tool` takes the `tool` name and its
+- **A call.** `call_integration_tool` takes the `tool` (the integration tool's `id`) and its
   `arguments` and hands them to the tool, whose result it returns; what holds
   for one tool only is in that tool's `usage`. An `{ns}__api_call` validates
   its arguments against its `input_schema`; a typed tool's are checked only
@@ -501,7 +512,7 @@ role. Runs keep their connections there:
   At most 500 tools are read per server, and a name over 128 characters is
   dropped, and a catalog keeps at most 512 KiB of descriptors. A tool whose
   server declares an output schema carries it as `output_schema` in
-  `best_match`. A server that cannot be listed, or not within the listing's 20 s
+  `best_match` or `describe`. A server that cannot be listed, or not within the listing's 20 s
   (5 s when a call resolves its tool by name, so that resolution and the
   call's 45 s stay under a client's 60 s), leaves the tool names alone, each
   marked `catalog_unreadable: true`; once that wait is over, the search
@@ -596,10 +607,10 @@ The exact argument and result schemas are the tools' own; the access rule is in
 credential proxy (`/api/credential-proxy/*`)".
 
 The whole surface follows your permissions the same way: the tool list, the
-operation index in the server instructions, `search_operations` (matches you
+operation index in the server instructions, `search` (operation matches you
 cannot invoke come back under `denied` with their `required_permissions`, never
 mixed into `operations`) and
-`describe_operation` (`granted`, `required_permissions`,
+`describe` of an operation (`granted`, `required_permissions`,
 `target_space_permissions`, `ceiling_permissions`). What your role makes impossible is
 **not shown** rather than shown and refused — but an operation your permission
 set alone cannot decide stays listed: either the loaded row decides it (a file
@@ -614,7 +625,7 @@ carries the scopes a delegated credential (API key, OAuth token) must include
 for an operation authorized by ownership rather than a role, such as deleting
 your own connection. A session is never filtered on them; a delegated credential
 whose scopes omit one sees the operation as not granted, and its
-`search_operations` `denied[]` entry and `403` answer name them as
+`search` `denied[]` entry and `403` answer name them as
 `ceiling_permissions`. Otherwise `denied[].required_permissions` and the `not_granted`
 hint below carry the caller-space half alone. Enforcement itself never moves: `invoke_operation` always
 dispatches. A `403` attributable to a permission

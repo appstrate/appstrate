@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### MCP clients
+
+The platform MCP server finds and details everything through two tools instead of four (#2315). An MCP client re-lists its tools on its next connection; a call to a retired name answers `-32602 Unknown tool`.
+
+| beta.70                                                  | Now                                                                                                   |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `search_operations { query, tag, limit }`                | `search { query, kinds: ["operation"], tag, limit }`, result under `operations`                       |
+| `search_integration_tools { query, integration, limit }` | `search { query, kinds: ["integration_tool"], integration, limit }`, result under `integration_tools` |
+| `describe_operation { operation_id }`                    | `describe { kind: "operation", id }`                                                                  |
+| `read_file { uri }`                                      | `read { uri }`, which also reads `skill://` URIs                                                      |
+
+- `search` also finds the agents the caller can run (`agents`) and the skills it can read (`skills`), and its `best_match` is the top hit across kinds. Every item carries the `id` that `describe` takes; an item's `operation_id` and an integration tool's `tool` are now `id`.
+- `describe` also details an integration tool (its schemas, `usage` and connections), an agent (its launch contract and a ready `run_and_wait` call) and a skill (its frontmatter and files).
+- A search that names neither the `integration_tool` kind nor an `integration` reads remote MCP catalogs from the cache only, so it contacts no server and sends no credential. A cold catalog's tools are listed by name, and the integration is named in `uncached`. `GET /api/credential-proxy/tools` takes the same choice as `catalogs=live|cached` (default `live`) and answers an `uncached` array.
+- `invoke_operation`, `call_integration_tool`, `run_and_wait`, `list_files`, `validate_package_file`, `import_package_file`, `get_runtime_capabilities` and `get_me` keep their names and arguments.
+
 ## [1.0.0-beta.70] - 2026-11-19
 
 The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.
