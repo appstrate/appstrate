@@ -90,6 +90,8 @@ interface ListProps {
    * keeps its reason.
    */
   selectable?: (model: PickerModel) => boolean;
+  /** A control at the end of a model's row (its settings): it must stop its own click. */
+  rowAction?: (model: PickerModel) => ReactNode;
   className?: string;
   listClassName?: string;
 }
@@ -104,6 +106,7 @@ export function ModelPickerList({
   renderNote,
   fixLink,
   selectable,
+  rowAction,
   className,
   listClassName,
 }: ListProps) {
@@ -177,6 +180,7 @@ export function ModelPickerList({
                     <Check
                       className={cn("mt-0.5", model.id === value ? "opacity-100" : "opacity-0")}
                     />
+                    {rowAction?.(model)}
                   </CommandItem>
                 );
               })}

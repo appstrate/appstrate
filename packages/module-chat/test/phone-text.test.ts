@@ -79,8 +79,8 @@ describe("composer row", () => {
     expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:[&:placeholder-shown]:max-h-10");
   });
 
-  it("keeps the model picker to a part of the line, so the field keeps the rest", () => {
-    expect(COMPOSER_SLOT_CLASS.split(/\s+/)).toContain("max-md:max-w-[40%]");
+  it('leaves the model out of a phone\'s line: it is in the "+" panel and the placeholder', () => {
+    expect(COMPOSER_SLOT_CLASS.split(/\s+/)).toContain("max-md:hidden");
     expect(COMPOSER_TOOLS_CLASS.split(/\s+/)).toContain("max-md:flex-none");
   });
 });

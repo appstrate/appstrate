@@ -118,3 +118,30 @@ describe("composer model list", () => {
     expect(gpt).toContain("<i>outgrown</i>");
   });
 });
+
+describe("a model row's action", () => {
+  it("draws the host's control at the end of each row, and nothing without one", () => {
+    const withAction = renderToStaticMarkup(
+      <ModelPickerList
+        groups={groups}
+        value={null}
+        onSelect={() => {}}
+        labels={labels}
+        selectable={isModelSelectable}
+        rowAction={(model) => <button data-testid="row-action" data-model={model.id} />}
+      />,
+    );
+    expect(withAction.match(/data-testid="row-action"/g)).toHaveLength(3);
+    expect(withAction).toContain('data-model="live"');
+    const without = renderToStaticMarkup(
+      <ModelPickerList
+        groups={groups}
+        value={null}
+        onSelect={() => {}}
+        labels={labels}
+        selectable={isModelSelectable}
+      />,
+    );
+    expect(without).not.toContain("row-action");
+  });
+});

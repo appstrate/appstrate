@@ -120,7 +120,8 @@ they start with `packages/` or `e2e/`.
   named in the field's placeholder and chosen from the "+" panel's "Modèle" row, so no chip or tool
   button stays beside the field. A dot on the "+" says a setting is off its default (never the space
   limit, which is on whenever a space is selected). The model panel has no tabs: one icon at the end of
-  each model that has settings picks it and opens them, with a back arrow.
+  each model that has settings picks it and opens them, with a back arrow; the panel itself has a back
+  arrow to the "+" panel it was opened from, and picking a model closes it.
 - Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
   (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
   `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll

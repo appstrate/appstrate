@@ -417,8 +417,8 @@ describe("the composer's limit chip", () => {
     );
     // One line: nothing wraps the cluster.
     expect(out).not.toContain("flex-wrap");
-    // A limit that is on gives the "+" its dot.
-    expect(out).toContain('data-testid="composer-plus-dot"');
+    // The limit is on whenever a space is selected: it does not give the "+" a dot.
+    expect(out).not.toContain("composer-plus-dot");
   });
 
   it('shows no dot on the "+" while every setting is at its default', () => {
