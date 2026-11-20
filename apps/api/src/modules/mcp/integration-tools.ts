@@ -229,7 +229,8 @@ export async function searchIntegrationTools(
         "Narrow with `integration`, or search the tool by name.",
     );
   }
-  const uncached = read.uncached.filter((id) => about(id));
+  // Every one, whatever the query: a catalog not read may hold the very tool searched for.
+  const { uncached } = read;
   if (uncached.length > 0) {
     notes.push(
       `The catalog of ${uncached.join(", ")} was not read (it is not cached), so its typed ` +

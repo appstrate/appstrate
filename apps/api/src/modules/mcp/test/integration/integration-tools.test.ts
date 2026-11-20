@@ -1020,6 +1020,36 @@ describe("mcp integration tools", () => {
       });
     });
 
+    it("reads a cold remote catalog only for a search naming the kind, never for a default one", async () => {
+      const caller = await instanceCaller(owner);
+      const section = (data: Record<string, unknown>) =>
+        data.integration_tools as {
+          items: Array<{ id: string; catalog_unreadable?: true }>;
+          uncached?: string[];
+          note?: string;
+        };
+
+      // A search over every kind sends nothing to the server: the declared names, flagged.
+      const general = await callTool(caller, "search", { query: "search" });
+      expect(server.requests).toEqual([]);
+      expect(section(general.data).uncached).toEqual([REMOTE_ID]);
+      expect(section(general.data).items.find((t) => t.id === REMOTE_TOOL)).toMatchObject({
+        catalog_unreadable: true,
+      });
+      expect(section(general.data).note).toContain('`kinds: ["integration_tool"]`');
+
+      // Naming the kind reads it from the server, as the call it journals.
+      const named = await callTool(caller, "search", {
+        kinds: ["integration_tool"],
+        query: "search",
+      });
+      expect(server.requests.some((r) => r.body.includes('"tools/list"'))).toBe(true);
+      expect(section(named.data).uncached).toBeUndefined();
+      expect(
+        section(named.data).items.find((t) => t.id === REMOTE_TOOL)?.catalog_unreadable,
+      ).toBeUndefined();
+    });
+
     it("refuses a call on the endpoint pinned to a space that closes the credential proxy, before any exchange", async () => {
       const caller = await instanceCaller(owner);
       await db
