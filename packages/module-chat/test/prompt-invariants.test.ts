@@ -717,7 +717,7 @@ describe("the persona and the spaces", () => {
 
     describe("without an origin space (the overview)", () => {
       const fallback = (id: string, label: string) =>
-        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`.`;
+        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`; when you create something there, name that space in your reply.`;
       const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };
       const DEFAULT = { ...SPACES[1]!, isDefault: true };
 
@@ -747,6 +747,7 @@ describe("the persona and the spaces", () => {
         });
         expect(out).toContain(sentence("Beta", "spc_b"));
         expect(out).not.toContain("When the user names no space, pass");
+        expect(out).not.toContain("name that space in your reply");
       });
     });
 

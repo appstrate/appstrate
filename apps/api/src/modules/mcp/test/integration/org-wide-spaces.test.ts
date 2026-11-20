@@ -74,6 +74,8 @@ describe("mcp org-wide connection", () => {
     expect(byId.get(gestion.id)?.role).toBe("admin");
     expect(byId.get(lecture.id)?.role).toBe("viewer");
     expect(byId.has(foreign.id)).toBe(false);
+    // A caller without a personal space sees none marked so.
+    expect(spaces.every((s) => (s as { personal?: boolean }).personal === false)).toBe(true);
 
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
@@ -92,6 +94,51 @@ describe("mcp org-wide connection", () => {
     // The spaces are listed by the `space_id` schema, not repeated here.
     expect(instructions).toContain("Space names are not unique");
     expect(instructions).not.toContain(`Gestion (\`${gestion.id}\``);
+  });
+
+  it("marks the caller's own personal space, where a new package goes by default", async () => {
+    const perso = await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Perso",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+
+    const me = payload(await call("get_me", { space_id: gestion.id }));
+    const spaces = me.data.spaces as Array<{ id: string; personal: boolean }>;
+    const personal = new Map(spaces.map((s) => [s.id, s.personal]));
+    expect(personal.get(perso.id)).toBe(true);
+    expect(personal.get(defaultSpaceId)).toBe(false);
+    expect(personal.get(gestion.id)).toBe(false);
+    expect(personal.get(lecture.id)).toBe(false);
+
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const spaceId = (
+      listed.envelope.result?.tools as Array<{
+        name: string;
+        inputSchema: { properties: Record<string, { description: string }> };
+      }>
+    ).find((t) => t.name === "invoke_operation")!.inputSchema.properties.space_id!;
+    expect(spaceId.description).toContain(
+      "Perso (`" + perso.id + "`, role admin, your personal space)",
+    );
+    expect(spaceId.description).toContain("Gestion (`" + gestion.id + "`, role admin)");
+    expect(spaceId.description.match(/your personal space\)/g)).toHaveLength(1);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "0" },
+      },
+    });
+    const instructions = envelope.result?.instructions as string;
+    expect(instructions).toContain("goes to your personal space");
+    expect(instructions).toContain("personal_space_takes_no_keys");
+    expect(instructions).not.toContain(`Perso (\`${perso.id}\``);
   });
 
   it("declares space_id on the tools that act in a space, and only those", async () => {

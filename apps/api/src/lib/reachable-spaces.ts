@@ -25,6 +25,11 @@ export interface ReachableSpace {
   visibility: SpaceVisibility;
   defaultRole: SpaceRolePreset;
   ownerUserId: string | null;
+  /**
+   * Whether it is the caller's own personal space. None is under a role preview (it acts as
+   * nobody) or for a principal that is not a user (a delegated key, an end-user).
+   */
+  personal: boolean;
   /** Whether the space lets an MCP caller reach the credential proxy outside a run. */
   credentialProxyOpen: boolean;
   role: SpaceRoleRef;
@@ -97,11 +102,12 @@ async function resolveReachableSpaces(
   pin: string | undefined,
 ): Promise<ReachableSpace[]> {
   if (!orgRole) return [];
+  const personalOwner = callerPersonalOwnerId(c, orgId);
   const entries = await listSpacesForPrincipal(
     orgId,
     orgRole,
     c.get("user").id,
-    callerPersonalOwnerId(c, orgId),
+    personalOwner,
     personaMemberships(personaFor(c, orgId)),
   );
   return entries.flatMap(({ space, role }) =>
@@ -114,6 +120,7 @@ async function resolveReachableSpaces(
             visibility: space.visibility,
             defaultRole: space.defaultRole,
             ownerUserId: space.ownerUserId,
+            personal: personalOwner !== null && space.ownerUserId === personalOwner,
             credentialProxyOpen: space.credentialProxyOpen,
             role,
             permissions: effectiveInSpace(c, role),

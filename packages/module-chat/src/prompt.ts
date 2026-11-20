@@ -386,7 +386,7 @@ export function formatCallerContext(
       : opts.origin
         ? `This conversation's space is ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`.`
         : fallback
-          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`.`
+          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`; when you create something there, name that space in your reply.`
           : "Ask the user which space when the request does not say; never guess it.",
   );
   // The set is the union over the turn's spaces: it bounds what the turn may attempt, while

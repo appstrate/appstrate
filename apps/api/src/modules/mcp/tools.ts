@@ -2283,6 +2283,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       id: s.id,
       name: s.name,
       role: s.role,
+      personal: s.personal,
     }));
     return readResponse(response, spaces ? { spaces } : undefined);
   };
@@ -2454,8 +2455,9 @@ function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<strin
         "them, where your role there still decides."
       : `The space this call acts in, by id: ${reached}. ` +
         "Take it from the user's request, or, when it names none, from the space your context " +
-        "designates for such a request; with neither, when several could serve, ask the user which " +
-        "one instead of choosing. The server picks no default space.",
+        "designates for such a request; with neither, a new package goes to the space marked " +
+        "`your personal space`; otherwise, when several could serve, ask the user which one " +
+        "instead of choosing. The server picks no default space.",
   };
 }
 

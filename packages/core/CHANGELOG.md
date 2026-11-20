@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ran against (`window`), its compaction threshold (`compactAt`) and whether the engine
   summarized the history during the turn (`compacted`). Optional and additive: a
   turn that measured nothing carries none.
+- **`NamedSpace.personal`** (`@appstrate/core/mcp-spaces`, #2328): optional flag for the
+  caller's own personal space; `describeSpace` then appends `, your personal space`. Additive:
+  a space without it is described exactly as before.
 
 ## [17.0.0] — 2026-11-19
 
