@@ -601,6 +601,191 @@ describe("MCP access grants", () => {
       }
     });
 
+    // MCP clients present one refresh token twice (anthropics/claude-ai-mcp#1194).
+    // Within `refreshTokenReuseInterval`, the second presentation is a replay of
+    // the first rotation's response, never a theft: no grant elsewhere is lost.
+    describe("a refresh token presented twice within the reuse window", () => {
+      async function twoOrgGrants(cookie: string, userEmail: string, userId: string) {
+        const { org: other } = await createTestOrg(userId, { name: "Beta" });
+        await mcpModule.events!.onOrgCreate!(other.id, userEmail);
+        const otherResource = getMcpOrgResourceUri(other.id);
+        const clientId = await registerClient();
+        const onA = await connect(cookie, clientId);
+        const onB = await connect(cookie, clientId, otherResource);
+        return { other, otherResource, clientId, onA, onB };
+      }
+
+      async function refreshRowCount(clientId: string): Promise<number> {
+        const rows = await db
+          .select({ id: oauthRefreshToken.id })
+          .from(oauthRefreshToken)
+          .where(eq(oauthRefreshToken.clientId, clientId));
+        return rows.length;
+      }
+
+      async function expectRefreshWorks(
+        clientId: string,
+        refreshToken: string,
+        resource: string,
+        mcpPath: string,
+      ): Promise<void> {
+        const res = await refresh(clientId, refreshToken, resource);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { access_token: string };
+        expect((await mcpInitialize(mcpPath, body.access_token)).status).toBe(200);
+      }
+
+      it("answers the second with the first's tokens and keeps the client's other grants", async () => {
+        const { other, otherResource, clientId, onA, onB } = await twoOrgGrants(
+          ctx.cookie,
+          ctx.user.email,
+          ctx.user.id,
+        );
+        try {
+          const original = String(onA.token.refresh_token);
+          const first = await refresh(clientId, original, orgResource);
+          expect(first.status).toBe(200);
+          const firstBody = (await first.json()) as { access_token: string; refresh_token: string };
+          const rowsAfterRotation = await refreshRowCount(clientId);
+
+          const second = await refresh(clientId, original, orgResource);
+          expect(second.status).toBe(200);
+          const secondBody = (await second.json()) as {
+            access_token: string;
+            refresh_token: string;
+          };
+          // A replay of the stored response: nothing new is minted or stored.
+          expect(secondBody.access_token).toBe(firstBody.access_token);
+          expect(secondBody.refresh_token).toBe(firstBody.refresh_token);
+          expect(await refreshRowCount(clientId)).toBe(rowsAfterRotation);
+          expect((await mcpInitialize(orgPath, secondBody.access_token)).status).toBe(200);
+
+          // The chain goes on from the rotated token, and B never noticed.
+          await expectRefreshWorks(clientId, secondBody.refresh_token, orgResource, orgPath);
+          await expectRefreshWorks(
+            clientId,
+            String(onB.token.refresh_token),
+            otherResource,
+            `/api/mcp/o/${other.id}`,
+          );
+        } finally {
+          await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
+        }
+      });
+
+      it("refuses a second presentation asking for other scopes, and keeps every grant", async () => {
+        const { other, otherResource, clientId, onA, onB } = await twoOrgGrants(
+          ctx.cookie,
+          ctx.user.email,
+          ctx.user.id,
+        );
+        try {
+          const original = String(onA.token.refresh_token);
+          const first = await refresh(clientId, original, orgResource);
+          expect(first.status).toBe(200);
+          const current = ((await first.json()) as { refresh_token: string }).refresh_token;
+
+          // Not the request the stored response answered: a plain refusal.
+          const narrower = await app.request("/api/auth/oauth2/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: original,
+              client_id: clientId,
+              resource: orgResource,
+              scope: "openid mcp:read",
+            }).toString(),
+          });
+          await expectInvalidGrant(narrower);
+
+          await expectRefreshWorks(clientId, current, orgResource, orgPath);
+          await expectRefreshWorks(
+            clientId,
+            String(onB.token.refresh_token),
+            otherResource,
+            `/api/mcp/o/${other.id}`,
+          );
+        } finally {
+          await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
+        }
+      });
+
+      it("refuses it once the grant was revoked, and keeps the client's other grants", async () => {
+        const { other, otherResource, clientId, onA, onB } = await twoOrgGrants(
+          ctx.cookie,
+          ctx.user.email,
+          ctx.user.id,
+        );
+        try {
+          const original = String(onA.token.refresh_token);
+          const first = await refresh(clientId, original, orgResource);
+          expect(first.status).toBe(200);
+          const rotatedAccess = ((await first.json()) as { access_token: string }).access_token;
+          const grantA = (await myGrants(ctx.cookie)).find(
+            (g) => g.kind === "mcp" && g.target?.orgId === ctx.orgId,
+          );
+          expect((await revokeMine(ctx.cookie, grantA!.id)).status).toBe(200);
+
+          // The rotated-out row is gone with the grant: no stored response to replay.
+          const replay = await refresh(clientId, original, orgResource);
+          expect(replay.status).toBe(400);
+          const body = (await replay.json()) as Record<string, unknown>;
+          expect(body.error).toBe("invalid_grant");
+          expect(body).not.toHaveProperty("access_token");
+          // What the first rotation minted is refused too.
+          expect((await mcpInitialize(orgPath, rotatedAccess)).status).toBe(401);
+          // Nothing of A came back.
+          const remaining = await db
+            .select({ resources: oauthRefreshToken.resources })
+            .from(oauthRefreshToken)
+            .where(eq(oauthRefreshToken.clientId, clientId));
+          expect(remaining.flatMap((r) => r.resources ?? [])).not.toContain(orgResource);
+
+          await expectRefreshWorks(
+            clientId,
+            String(onB.token.refresh_token),
+            otherResource,
+            `/api/mcp/o/${other.id}`,
+          );
+        } finally {
+          await db.delete(oauthResource).where(like(oauthResource.identifier, `${otherResource}%`));
+        }
+      });
+
+      it("refuses it on the revoked endpoint of an authorization covering two", async () => {
+        const ops = await seedSpace({ orgId: ctx.orgId, name: "Ops", visibility: "closed" });
+        const lab = await seedSpace({ orgId: ctx.orgId, name: "Lab", visibility: "closed" });
+        for (const space of [ops, lab]) {
+          await seedSpaceMember({ spaceId: space.id, userId: ctx.user.id, presetRole: "admin" });
+        }
+        const opsResource = getMcpSpaceResourceUri(ctx.orgId, ops.id);
+        const labResource = getMcpSpaceResourceUri(ctx.orgId, lab.id);
+        const clientId = await registerClient();
+        const { token } = await authorizationCodeFlow(app, {
+          cookie: ctx.cookie,
+          clientId,
+          redirectUri: REDIRECT_URI,
+          scope: SCOPE,
+          resource: [opsResource, labResource],
+        });
+        const original = String(token.refresh_token);
+        const rotated = await refresh(clientId, original, opsResource);
+        expect(rotated.status).toBe(200);
+        const successor = ((await rotated.json()) as { refresh_token: string }).refresh_token;
+        const opsGrant = (await myGrants(ctx.cookie)).find((g) => g.target?.spaceId === ops.id);
+        await revokeMine(ctx.cookie, opsGrant!.id);
+
+        // The rotated-out row survives for Lab, so its stored Ops response must
+        // not be served: the row no longer covers Ops.
+        const onOps = await refresh(clientId, original, opsResource);
+        expect(onOps.status).toBe(400);
+        expect(await onOps.json()).not.toHaveProperty("access_token");
+        // And it is a refusal, not a theft: the Lab chain still refreshes.
+        await expectRefreshWorks(clientId, successor, labResource, `${orgPath}/s/${lab.id}`);
+      });
+    });
+
     it("a password change refuses an old refresh token and keeps the grant made after it", async () => {
       const clientId = await registerClient();
       const before = await connect(ctx.cookie, clientId);

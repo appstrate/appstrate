@@ -220,6 +220,14 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // first restores TS2353. Do not remove.
     oauthProvider({
       accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      // MCP clients present one refresh token twice (claude.ai fires two
+      // refresh grants with it, anthropics/claude-ai-mcp#1194). With no window
+      // (the provider's default, 0), the second is taken for a stolen token and
+      // deletes every refresh token of the (client, user) pair, on every
+      // endpoint and org. Within the window, a matching second presentation
+      // gets the first rotation's response again; one that does not match is a
+      // plain `invalid_grant`.
+      refreshTokenReuseInterval: 30,
       // The provider's own default digest, stated here so the platform can
       // find an authorization code's row by the code a token request carries.
       storeTokens: { hash: hashOAuthToken },
