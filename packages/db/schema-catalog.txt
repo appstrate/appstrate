@@ -329,6 +329,16 @@ column oauth_consents.resources text[]
 column oauth_consents.scopes text[] not null
 column oauth_consents.updated_at timestamp with time zone default now()
 column oauth_consents.user_id text
+column oauth_grant_states.client_id text not null
+column oauth_grant_states.created_at timestamp with time zone not null default now()
+column oauth_grant_states.last_used_at timestamp with time zone
+column oauth_grant_states.last_used_ip text
+column oauth_grant_states.last_used_user_agent text
+column oauth_grant_states.org_id uuid not null
+column oauth_grant_states.resource text not null
+column oauth_grant_states.space_id text
+column oauth_grant_states.tokens_valid_after timestamp with time zone
+column oauth_grant_states.user_id text not null
 column oauth_refresh_tokens.auth_time timestamp with time zone
 column oauth_refresh_tokens.authorization_code_id text
 column oauth_refresh_tokens.client_id text not null
@@ -838,6 +848,11 @@ constraint oauth_clients oauth_clients_user_id_user_id_fk FOREIGN KEY (user_id) 
 constraint oauth_consents oauth_consents_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_consents oauth_consents_pkey PRIMARY KEY (id)
 constraint oauth_consents oauth_consents_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_user_id_client_id_resource_pk PRIMARY KEY (user_id, client_id, resource)
+constraint oauth_grant_states oauth_grant_states_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint oauth_refresh_tokens oauth_refresh_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_refresh_tokens oauth_refresh_tokens_pkey PRIMARY KEY (id)
 constraint oauth_refresh_tokens oauth_refresh_tokens_session_id_session_id_fk FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE SET NULL
@@ -1066,6 +1081,9 @@ index CREATE INDEX idx_oauth_clients_space ON public.oauth_clients USING btree (
 index CREATE INDEX idx_oauth_clients_user ON public.oauth_clients USING btree (user_id)
 index CREATE INDEX idx_oauth_consents_client ON public.oauth_consents USING btree (client_id)
 index CREATE INDEX idx_oauth_consents_user ON public.oauth_consents USING btree (user_id)
+index CREATE INDEX idx_oauth_grant_states_client ON public.oauth_grant_states USING btree (client_id)
+index CREATE INDEX idx_oauth_grant_states_org ON public.oauth_grant_states USING btree (org_id)
+index CREATE INDEX idx_oauth_grant_states_space ON public.oauth_grant_states USING btree (space_id)
 index CREATE INDEX idx_oauth_refresh_tokens_auth_code ON public.oauth_refresh_tokens USING btree (authorization_code_id)
 index CREATE INDEX idx_oauth_refresh_tokens_client ON public.oauth_refresh_tokens USING btree (client_id)
 index CREATE INDEX idx_oauth_refresh_tokens_session ON public.oauth_refresh_tokens USING btree (session_id)
@@ -1181,6 +1199,7 @@ index CREATE UNIQUE INDEX oauth_client_resources_pkey ON public.oauth_client_res
 index CREATE UNIQUE INDEX oauth_clients_client_id_unique ON public.oauth_clients USING btree (client_id)
 index CREATE UNIQUE INDEX oauth_clients_pkey ON public.oauth_clients USING btree (id)
 index CREATE UNIQUE INDEX oauth_consents_pkey ON public.oauth_consents USING btree (id)
+index CREATE UNIQUE INDEX oauth_grant_states_user_id_client_id_resource_pk ON public.oauth_grant_states USING btree (user_id, client_id, resource)
 index CREATE UNIQUE INDEX oauth_refresh_tokens_pkey ON public.oauth_refresh_tokens USING btree (id)
 index CREATE UNIQUE INDEX oauth_refresh_tokens_token_unique ON public.oauth_refresh_tokens USING btree (token)
 index CREATE UNIQUE INDEX oauth_resources_identifier_unique ON public.oauth_resources USING btree (identifier)

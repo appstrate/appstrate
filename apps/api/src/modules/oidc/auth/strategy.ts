@@ -41,9 +41,10 @@ import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/en
 import { lookupEndUser } from "../services/enduser-mapping.ts";
 import { getClientCached } from "../services/oauth-admin.ts";
 import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
+import { checkMcpGrantAndTouch } from "../services/mcp-grants.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { mcpBindingFromAudiences } from "../../../lib/audiences.ts";
+import { mcpBindingFromAudiences, parseMcpResourceUri } from "../../../lib/audiences.ts";
 import { getApiKeyAllowedScopes } from "../../../lib/permissions.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
@@ -115,6 +116,31 @@ export const oidcAuthStrategy: AuthStrategy = {
           module: "oidc",
           actorType: claims.actorType,
           clientLevel: client.level,
+        });
+        return null;
+      }
+    }
+
+    // A token bound to an MCP resource belongs to an MCP access grant (user,
+    // client, resource). Its JWT is verified without a database read, so a
+    // revoked grant's tokens would otherwise stay valid until they expire: the
+    // grant's revocation watermark is checked here, on every request, and the
+    // grant's last use is recorded on the way (`services/mcp-grants.ts`).
+    const mcpResource = claims.audiences.find((aud) => parseMcpResourceUri(aud) !== undefined);
+    if (mcpResource && claims.clientId) {
+      const stillActive = await checkMcpGrantAndTouch({
+        userId: claims.authUserId,
+        clientId: claims.clientId,
+        resource: mcpResource,
+        issuedAt: claims.issuedAt,
+        ip: getClientIpFromRequest(request),
+        userAgent: request.headers.get("user-agent"),
+      });
+      if (!stillActive) {
+        logger.info("OIDC strategy: MCP access grant revoked — rejecting token", {
+          module: "oidc",
+          userId: claims.authUserId,
+          clientId: claims.clientId,
         });
         return null;
       }
