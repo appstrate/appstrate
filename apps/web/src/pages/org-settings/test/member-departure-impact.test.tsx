@@ -30,7 +30,7 @@ function item(overrides: Partial<DepartureImpactItem>): DepartureImpactItem {
 describe("MemberDepartureImpact", () => {
   it("says nothing stops when the list is empty", () => {
     const html = render(
-      <MemberDepartureImpact impact={{ data: [], isLoading: false, error: null }} />,
+      <MemberDepartureImpact impact={{ data: [], isPending: false, error: null }} />,
     );
     expect(html).toContain(
       "Aucune planification d’un espace d’équipe ne sera désactivée par ce retrait.",
@@ -42,7 +42,7 @@ describe("MemberDepartureImpact", () => {
       <MemberDepartureImpact
         impact={{
           data: [item({ cause: "actor_left_org", lost_integrations: ["@a/gmail"] })],
-          isLoading: false,
+          isPending: false,
           error: null,
         }}
       />,
@@ -57,7 +57,7 @@ describe("MemberDepartureImpact", () => {
       <MemberDepartureImpact
         impact={{
           data: [item({ cause: "connection_unshared" })],
-          isLoading: false,
+          isPending: false,
           error: null,
         }}
       />,
@@ -71,7 +71,7 @@ describe("MemberDepartureImpact", () => {
       <MemberDepartureImpact
         impact={{
           data: undefined,
-          isLoading: false,
+          isPending: false,
           error: {
             type: "about:blank",
             title: "Internal Server Error",

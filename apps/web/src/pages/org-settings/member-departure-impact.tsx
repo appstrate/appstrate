@@ -21,19 +21,16 @@ function causeLabel(t: TFunction, cause: DepartureImpactItem["cause"]): string {
     : t("orgSettings.departure.causeConnectionUnshared");
 }
 
-/**
- * What removing a member would stop in team spaces, inside the removal confirmation. It informs
- * and never blocks: a failed read leaves the removal open.
- */
+/** The removal confirmation waits for the first result, including when that read is paused offline. */
 export function MemberDepartureImpact({
   impact,
 }: {
-  impact: Pick<ReturnType<typeof useMemberDepartureImpact>, "data" | "isLoading" | "error">;
+  impact: Pick<ReturnType<typeof useMemberDepartureImpact>, "data" | "isPending" | "error">;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const currentSpaceId = useCurrentSpaceId();
 
-  if (impact.isLoading) {
+  if (impact.isPending) {
     return (
       <div className="flex flex-col gap-2">
         <SkeletonLine className="w-1/2 text-sm font-medium" />

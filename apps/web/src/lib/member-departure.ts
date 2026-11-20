@@ -31,11 +31,3 @@ export function departureFixHref(
     currentSpaceId,
   );
 }
-
-/**
- * The removal waits for the first read of its impact so the admin never confirms blind. A failed
- * read does not block: the impact is then shown as unknown and the admin may still proceed.
- */
-export function departureConfirmBlocked(impact: { isLoading: boolean; error: unknown }): boolean {
-  return impact.isLoading && !impact.error;
-}

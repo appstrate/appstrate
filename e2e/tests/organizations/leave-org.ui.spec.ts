@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Browser E2E for leaving an organization from Settings → General.
+ * Browser E2E for leaving an organization and confirming a member's removal.
  *
  * After the leave, the SPA must step out of the org without a reload: onto
  * another org the user still belongs to, or into onboarding when none is
@@ -53,6 +53,53 @@ async function leaveFromSettings(page: Page, orgId: string): Promise<void> {
 
 const storedOrgId = (page: Page) =>
   page.evaluate(() => localStorage.getItem("appstrate_current_org"));
+
+for (const outcome of ["succeeds", "fails"] as const) {
+  test(`removal waits for the offline departure preview until it ${outcome}`, async ({
+    request,
+    authedPage: page,
+    browserCtx,
+    orgOnlyClient,
+  }) => {
+    const orgId = browserCtx.org.orgId;
+    const member = await registerUser(request, { name: "Departing Member" });
+    await joinAsMember(request, orgOnlyClient, orgId, member);
+    await page.goto("/org-settings/members");
+    const actions = page.getByRole("button", { name: /actions.*Departing Member/i });
+    await expect(actions).toBeVisible();
+
+    const impactUrl = `**/api/orgs/${orgId}/members/${member.userId}/departure-impact`;
+    const release = Promise.withResolvers<void>();
+    await page.route(impactUrl, async (route) => {
+      await release.promise;
+      if (outcome === "succeeds") return route.continue();
+      await route.fulfill({ status: 403, json: { code: "forbidden" } });
+    });
+
+    const dialog = page.getByRole("alertdialog");
+    const remove = dialog.getByRole("button", { name: /^(Retirer|Remove)$/ });
+    try {
+      await page.context().setOffline(true);
+      await actions.click();
+      await page.getByRole("menuitem", { name: /^(Retirer|Remove)$/ }).click();
+      await expect(remove).toBeDisabled();
+
+      const resumed = page.waitForRequest(impactUrl);
+      await page.context().setOffline(false);
+      await resumed;
+      await expect(remove).toBeDisabled();
+    } finally {
+      release.resolve();
+    }
+
+    const message =
+      outcome === "succeeds"
+        ? /Aucune planification|No team-space schedule/
+        : /Impossible de savoir|Could not tell/;
+    await expect(dialog.getByText(message)).toBeVisible();
+    await expect(remove).toBeEnabled();
+  });
+}
 
 test.describe("Leaving an organization", () => {
   test("a member leaves and lands on their other organization", async ({
