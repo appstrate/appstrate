@@ -100,6 +100,7 @@ import {
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
+  placementAccessSpaces,
   packageDetailSpaces,
   holdsHomeAuthority,
   requireAgentRead,
@@ -2059,7 +2060,8 @@ export function createPackagesRouter() {
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const accessible = await packageAccessSpaces(c);
+    // Home and target are two spaces of one act: the credential's reach, not the call's.
+    const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
     const pkg = await assertPackageShareAccess(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
@@ -2184,7 +2186,7 @@ export function createPackagesRouter() {
       assertSpaceId(target, "target");
       spaceId = target;
       // The caller's own personal space is audited as its owner, like a `user` target.
-      const own = (await packageAccessSpaces(c)).find(
+      const own = (await placementAccessSpaces(c)).find(
         (space) => space.id === target && space.ownerUserId !== null,
       );
       if (own) recipientUserId = own.ownerUserId;

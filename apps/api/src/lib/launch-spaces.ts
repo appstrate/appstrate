@@ -14,7 +14,7 @@ import type { AppEnv } from "../types/index.ts";
 import { activeHereSql } from "../services/package-activation.ts";
 import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
 import { notEphemeralFilter, orgOrSystemFilter } from "./package-helpers.ts";
-import { launchableSpaces } from "./reachable-spaces.ts";
+import { credentialReachableSpaces } from "./reachable-spaces.ts";
 import type { Permission } from "./permissions.ts";
 import { isInlineShadowPackageId } from "../services/inline-run.ts";
 import { requiredIntegrationIds } from "../services/integration-connection-resolver.ts";
@@ -41,7 +41,7 @@ export type LaunchSpacesLookup = (launch: RefusedLaunch) => Promise<LaunchSpace[
 
 /**
  * The lookup for this request: the spaces other than the one it entered where the caller holds
- * every one of `required`, the permissions of the refusing door ({@link launchableSpaces}: a
+ * every one of `required`, the permissions of the refusing door ({@link credentialReachableSpaces}: a
  * credential pinned to the space gets `[]`). An end-user acts in its own space only (RBAC spec
  * §7.2): `[]`.
  */
@@ -53,7 +53,7 @@ export function launchSpacesLookup(
     if (c.get("principalKind") === "end_user") return [];
     const orgId = c.get("orgId");
     const here = c.get("spaceId");
-    const candidates = (await launchableSpaces(c, orgId)).filter(
+    const candidates = (await credentialReachableSpaces(c, orgId)).filter(
       (space) => space.id !== here && required.every((p) => space.permissions.has(p)),
     );
     if (candidates.length === 0) return [];

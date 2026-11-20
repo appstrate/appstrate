@@ -156,7 +156,7 @@ export function requireActiveAgent(required: readonly Permission[]) {
 
 /**
  * The refusal of an agent the caller CAN see and CANNOT run here: a configuration to repair, by
- * activating it here or, with the user's agreement, launching in one of `activeInSpaces`.
+ * activating it here or, with the user's agreement, using it in one of `activeInSpaces`.
  */
 function agentNotActiveInSpace(packageId: string, spaceId: string, activeInSpaces: LaunchSpace[]) {
   return new ApiError({
@@ -165,8 +165,8 @@ function agentNotActiveInSpace(packageId: string, spaceId: string, activeInSpace
     title: "Agent Not Active",
     detail:
       `Agent '${packageId}' is placed in space '${spaceId}' but not active there. ` +
-      `Activate it with POST /api/spaces/${spaceId}/packages {"packageId":"${packageId}"}, ` +
-      `or launch it in one of active_in_spaces.`,
+      `Activate it with POST /api/spaces/${spaceId}/packages {"packageId":"${packageId}"}` +
+      (activeInSpaces.length > 0 ? ", or use it in one of active_in_spaces." : "."),
     extensions: { active_in_spaces: activeInSpaces },
   });
 }

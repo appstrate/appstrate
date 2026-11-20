@@ -6123,7 +6123,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** @description `agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or launch it in one of `active_in_spaces`. */
+        /** @description `agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). That list judges the integrations the definition a selector-less launch runs requires (the latest published version, else the draft), whatever `version` the request or the schedule names. */
         AgentNotActiveInSpaceProblem: components["schemas"]["ProblemDetail"] & {
             /** @enum {string} */
             code?: "agent_not_active_in_space";

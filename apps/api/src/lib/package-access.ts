@@ -38,7 +38,12 @@ import { isUserPrincipal } from "./principal.ts";
 import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { callerReachableSpaces, unnameableSpace, type ReachableSpace } from "./reachable-spaces.ts";
+import {
+  callerReachableSpaces,
+  credentialReachableSpaces,
+  unnameableSpace,
+  type ReachableSpace,
+} from "./reachable-spaces.ts";
 import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -138,6 +143,18 @@ export async function packageAccessSpaces(
     .from(spaces)
     .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)));
   return space ? [{ ...space, permissions: callerPermissions(c) }] : [];
+}
+
+/**
+ * The reach of an act that places a package outside its home, judged in the home while it acts in
+ * the target: the credential's own ({@link credentialReachableSpaces}), so a credential bound to a
+ * set judges the same act the same whichever of its spaces the call entered. An end-user keeps
+ * {@link packageAccessSpaces} (its own space).
+ */
+export function placementAccessSpaces(c: Context<AppEnv>): Promise<PackageAccessSpace[]> {
+  return c.get("principalKind") === "end_user"
+    ? packageAccessSpaces(c)
+    : credentialReachableSpaces(c, c.get("orgId"));
 }
 
 /**
@@ -276,6 +293,18 @@ export async function assertCatalogPackageAccess(
     loadPackageRow(packageId, sourceOrgId),
     packageAccessSpaces(c, source),
     loadPlacementSpaces(packageId, sourceOrgId),
+  ]);
+  assertPackageIsReachable(packageId, pkg, placedIn, accessible);
+  return pkg;
+}
+
+/** {@link assertCatalogPackageAccess} over {@link placementAccessSpaces}: the space-package doors, which may place. */
+export async function assertPlaceablePackageAccess(c: Context<AppEnv>, packageId: string) {
+  const orgId = c.get("orgId");
+  const [pkg, accessible, placedIn] = await Promise.all([
+    loadPackageRow(packageId, orgId),
+    placementAccessSpaces(c),
+    loadPlacementSpaces(packageId, orgId),
   ]);
   assertPackageIsReachable(packageId, pkg, placedIn, accessible);
   return pkg;
@@ -590,7 +619,7 @@ export async function callerPlacementAuthority(
   c: Context<AppEnv>,
   type: PackageType,
 ): Promise<PlacementAuthority> {
-  const accessible = await packageAccessSpaces(c);
+  const accessible = await placementAccessSpaces(c);
   const permission = packagePermission(type, "share");
   return {
     sharedBy: c.get("user").id,
@@ -684,7 +713,8 @@ async function loadGovernedPackage(
   const orgId = c.get("orgId");
   const [pkg, accessible] = await Promise.all([
     loadPackageRow(packageId, orgId),
-    packageAccessSpaces(c),
+    // `share` places outside the home: judged over the credential's reach.
+    action === "share" ? placementAccessSpaces(c) : packageAccessSpaces(c),
   ]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one —

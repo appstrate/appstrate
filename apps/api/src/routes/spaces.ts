@@ -67,7 +67,7 @@ import {
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
-  assertCatalogPackageAccess,
+  assertPlaceablePackageAccess,
   assertPackageShareAccess,
   callerPlacementAuthority,
   isPackageReadableInSpace,
@@ -316,8 +316,9 @@ async function coarseSpacePackageGate(
  *      ({@link coarseSpacePackageGate}). A caller holding none of the four
  *      strings this op can require is refused without the row being looked up,
  *      so the route is not an enumeration oracle.
- *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
- *      reachability rule the READ routes obey, for all three ops, so `POST`,
+ *   2. **Catalog lookup**, through `assertPlaceablePackageAccess` — the
+ *      reachability rule the READ routes obey, over the credential's reach
+ *      (activation may place, judged in the home), for all three ops, so `POST`,
  *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
@@ -348,7 +349,7 @@ async function gateSpacePackageWrite(
 ): Promise<void> {
   const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
-  const { type } = await assertCatalogPackageAccess(c, packageId);
+  const { type } = await assertPlaceablePackageAccess(c, packageId);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every

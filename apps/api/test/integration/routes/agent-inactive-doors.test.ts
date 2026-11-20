@@ -35,6 +35,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedApiKey,
+  seedEndUser,
   seedPackage,
   seedSpace,
   seedSpacePackage,
@@ -203,6 +205,40 @@ describe("a placed-but-switched-off agent", () => {
 
     const body = (await (await executionDoors(OFF).run()).json()) as { active_in_spaces?: unknown };
     expect(body.active_in_spaces).toEqual([{ id: on.id, name: "On" }]);
+  });
+
+  it("offers another space only when there is one, and none to a credential pinned here", async () => {
+    const detailOf = async (res: Response) =>
+      (await res.json()) as { detail?: string; active_in_spaces?: unknown };
+    const alone = await detailOf(await executionDoors(OFF).run());
+    expect(alone.detail).not.toContain("active_in_spaces");
+
+    const on = await seedSpace({ orgId: ctx.orgId, name: "On" });
+    await seedSpacePackage(on.id, OFF);
+    const session = await detailOf(await executionDoors(OFF).run());
+    expect(session.active_in_spaces).toEqual([{ id: on.id, name: "On" }]);
+    expect(session.detail).toContain("or use it in one of active_in_spaces");
+
+    // The same caller through a key pinned to this space, then impersonating an end-user of it.
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["agents:read", "agents:run"],
+    });
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const pinned = { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" };
+    for (const h of [pinned, { ...pinned, "Appstrate-User": endUser.id }]) {
+      const res = await app.request(`/api/agents/${OFF}/run`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(404);
+      const body = await detailOf(res);
+      expect(body.active_in_spaces).toEqual([]);
+      expect(body.detail).not.toContain("active_in_spaces");
+    }
   });
 
   it("lists no space where an integration the agent requires is off", async () => {

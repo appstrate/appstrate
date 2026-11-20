@@ -66,13 +66,17 @@ export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<Reac
 }
 
 /**
- * The spaces this caller may launch in from where it stands: the credential's own reach (a key
- * pinned to a space reaches it alone, a credential bound to a set reaches all of it) and the
- * endpoint's pin, its dispatches' included, but not a per-call dispatch pin, which confines the
- * call it carries, not its caller. Read by a launch refusal naming where the launch could run
- * instead (`lib/launch-spaces.ts`).
+ * The credential's own reach: a key pinned to a space reaches it alone, a credential bound to a
+ * set reaches all of it, and the endpoint's pin holds, its dispatches' included; a per-call
+ * dispatch pin does not, since it confines the call it carries, not its caller. Read by what
+ * spans two spaces of one caller: a launch refusal naming where the launch could run instead
+ * (`lib/launch-spaces.ts`), and placing a package outside its home (`placementAccessSpaces`),
+ * judged in the home while it acts in the target.
  */
-export function launchableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
+export function credentialReachableSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
   const pin = c.get("endpointSpaceId") ?? dispatchEndpointPin(c);
   return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), pin);
 }
