@@ -44,6 +44,7 @@ import {
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
+  type TerminalRunStatus,
 } from "@appstrate/core/run-status";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
@@ -2225,21 +2226,15 @@ export async function listTerminalRuns(args: {
   // artifact (a terminal written long after the run stopped, e.g. an orphan finalized at the
   // next boot) and must not be billed as consumption.
   const ceilingMs = getPlatformRunLimits().timeout_ceiling_seconds * 1000;
-  return rows.flatMap((r) =>
-    // `status` is narrowed by the WHERE; the filter below only satisfies the type.
-    r.completedAt && r.status !== "pending" && r.status !== "running"
-      ? [
-          {
-            id: r.id,
-            orgId: r.orgId,
-            runOrigin: r.runOrigin,
-            status: r.status,
-            durationMs: r.duration === null ? null : Math.min(r.duration, ceilingMs),
-            completedAt: r.completedAt,
-          },
-        ]
-      : [],
-  );
+  // The WHERE keeps only terminal rows with a `completed_at`; the column types cannot say so.
+  return rows.map((r) => ({
+    id: r.id,
+    orgId: r.orgId,
+    runOrigin: r.runOrigin,
+    status: r.status as TerminalRunStatus,
+    durationMs: r.duration === null ? null : Math.min(r.duration, ceilingMs),
+    completedAt: r.completedAt as Date,
+  }));
 }
 
 /**
