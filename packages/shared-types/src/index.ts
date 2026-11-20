@@ -1284,7 +1284,7 @@ export interface SpaceInfo {
   default_role: "admin" | "builder" | "operator" | "viewer";
   /**
    * Whether members may use the space's connections through the credential proxy outside a
-   * run (REST without `X-Run-Id`, MCP `search_integration_tools` /
+   * run (REST without `X-Run-Id`, MCP `search` / `describe` of integration tools and
    * `call_integration_tool`). `false` closes that
    * door for every role; runs keep their connections. Always `true` on a personal space.
    */

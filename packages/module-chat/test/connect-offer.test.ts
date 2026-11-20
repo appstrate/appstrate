@@ -217,32 +217,44 @@ describe("offerScopeOf", () => {
 
   it("offers a search's refusals, never a server's descriptions or schemas", () => {
     const payload = {
-      tools: [{ tool: "x__find", description: "find", connect_url: STRANGER }],
+      operations: { total: 0, items: [] },
+      integration_tools: {
+        total: 1,
+        items: [{ id: "x__find", description: "find", connect_url: STRANGER }],
+        not_ready: [{ integration_package_id: "@x/y", refusal: refusal(PLATFORM) }],
+        unlisted: [{ integration_package_id: "@x/z", refusal: refusal(PLATFORM_2) }],
+      },
       best_match: {
-        tool: "x__find",
+        kind: "integration_tool",
+        id: "x__find",
         // A remote server controls its schemas.
         input_schema: { type: "object", properties: { q: { connect_url: STRANGER } } },
       },
-      not_ready: [{ integration_package_id: "@x/y", refusal: refusal(PLATFORM) }],
-      unlisted: [{ integration_package_id: "@x/z", refusal: refusal(PLATFORM_2) }],
     };
-    const split = offerScopeOf("search_integration_tools", {})(payload);
+    const split = offerScopeOf("search", {})(payload);
     expect(split.offers).toEqual([{ connect_url: PLATFORM }, { connect_url: PLATFORM_2 }]);
     const redacted = split.redacted as typeof payload;
-    expect(redacted.tools).toBe(payload.tools);
+    expect(redacted.operations).toBe(payload.operations);
+    expect(redacted.integration_tools.items).toBe(payload.integration_tools.items);
     expect(redacted.best_match).toBe(payload.best_match);
-    expect(redacted.not_ready[0]!.refusal.connect_url).toBe(REDACTED_CONNECT_LINK);
-    expect(redacted.unlisted[0]!.refusal.connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(redacted.integration_tools.not_ready[0]!.refusal.connect_url).toBe(
+      REDACTED_CONNECT_LINK,
+    );
+    expect(redacted.integration_tools.unlisted[0]!.refusal.connect_url).toBe(REDACTED_CONNECT_LINK);
 
     // The search refused outright: its whole answer is the platform's.
-    expect(offerScopeOf("search_integration_tools", {})(refusal(PLATFORM)).offers).toEqual([
+    expect(offerScopeOf("search", {})(refusal(PLATFORM)).offers).toEqual([
       { connect_url: PLATFORM },
     ]);
   });
 
   it("leaves a search with nothing of the platform's to redact untouched", () => {
-    const payload = { tools: [], best_match: { input_schema: { connect_url: STRANGER } } };
-    const split = offerScopeOf("search_integration_tools", {})(payload);
+    const payload = {
+      operations: { total: 0, items: [] },
+      integration_tools: { total: 0, items: [] },
+      best_match: { input_schema: { connect_url: STRANGER } },
+    };
+    const split = offerScopeOf("search", {})(payload);
     expect(split).toEqual({ redacted: payload, offers: [] });
     expect(split.redacted).toBe(payload);
   });

@@ -290,7 +290,7 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
  */
 export async function readIntegrationTools(
   ctx: DispatchContext,
-  query: { integration?: string; name?: string; connectionId?: string },
+  query: { integration?: string; name?: string; connectionId?: string; cachedOnly?: boolean },
   signal: AbortSignal | undefined,
 ): Promise<CallableListing | { refused: ListingRefusal }> {
   const url = new URL(INTEGRATION_TOOLS_PATH, ctx.origin);
@@ -299,6 +299,7 @@ export async function readIntegrationTools(
   }
   if (query.name !== undefined) url.searchParams.set("name", query.name);
   if (query.connectionId !== undefined) url.searchParams.set("connection_id", query.connectionId);
+  if (query.cachedOnly) url.searchParams.set("catalogs", "cached");
   const response = await ctx.dispatch(
     new Request(url.toString(), {
       method: "GET",

@@ -40,7 +40,8 @@ const MCP_TOOLS_DESCRIPTION =
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
   "(whatever guards the `listFiles` operation's own route), `import_package_file`, and " +
-  "`search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or " +
+  "`call_integration_tool`, with the `integration_tool` kind of `search` and `describe` " +
+  "(`mcp:invoke` plus `credential-proxy:call-own` or " +
   "`credential-proxy:call`, on a " +
   "bearer credential the credential proxy accepts) — are " +
   "declared only to a caller whose grants make them usable, so `tools/list` differs by " +

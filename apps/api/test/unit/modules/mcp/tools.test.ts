@@ -166,19 +166,28 @@ describe("credential proxy closed in the space", () => {
   });
 
   for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
-    it(`withholds search_integration_tools and call_integration_tool under ${permission}, and get_me stops naming them`, () => {
+    it(`withholds the integration_tool kind and call_integration_tool under ${permission}, and get_me stops naming them`, () => {
       const ctx = ctxFor(["mcp:read", "mcp:invoke", permission]);
       const names = (open: boolean) => toolsFor(ctx, true, open).map((t) => t.descriptor.name);
-      expect(names(true)).toEqual(
-        expect.arrayContaining(["search_integration_tools", "call_integration_tool"]),
-      );
-      expect(names(false)).not.toContain("search_integration_tools");
+      const kindsOf = (tool: string, argument: string, open: boolean): unknown[] => {
+        const properties = toolsFor(ctx, true, open).find((t) => t.descriptor.name === tool)!
+          .descriptor.inputSchema.properties as Record<
+          string,
+          { enum?: unknown[]; items?: { enum?: unknown[] } }
+        >;
+        return properties[argument]!.enum ?? properties[argument]!.items?.enum ?? [];
+      };
+      expect(names(true)).toContain("call_integration_tool");
+      expect(kindsOf("search", "kinds", true)).toContain("integration_tool");
+      expect(kindsOf("describe", "kind", true)).toContain("integration_tool");
+      expect(kindsOf("search", "kinds", false)).not.toContain("integration_tool");
+      expect(kindsOf("describe", "kind", false)).not.toContain("integration_tool");
       expect(names(false)).not.toContain("call_integration_tool");
       const getMe = (open: boolean) =>
         toolsFor(ctx, true, open).find((t) => t.descriptor.name === "get_me")!.descriptor
           .description!;
-      expect(getMe(true)).toContain("`search_integration_tools`");
-      expect(getMe(false)).not.toContain("search_integration_tools");
+      expect(getMe(true)).toContain("`integration_tool` kind");
+      expect(getMe(false)).not.toContain("integration_tool");
       expect(getMe(false)).not.toContain("call_integration_tool");
     });
   }

@@ -252,15 +252,24 @@ const CONNECT_OPERATIONS: ReadonlySet<string> = new Set([
 /**
  * The tools whose result the platform writes to carry its connect links, each with the subtrees
  * that are not its own. `run_and_wait`: its launch refusal (409 readiness items), never the run's
- * `result`, which the agent wrote. `search_integration_tools`: its `not_ready` and `unlisted`
- * refusals and its own refusal, never `tools` / `best_match`, a remote server's descriptions and
- * schemas. `call_integration_tool`: its refusals and an `api_call` batch's per-request `error`,
+ * `result`, which the agent wrote. `search`: its integration tools' `not_ready` and `unlisted`
+ * refusals and its own refusals, never an item list or `best_match`: a remote server's
+ * descriptions and schemas, and the descriptions members wrote for their agents and skills. `call_integration_tool`: its refusals and an `api_call` batch's per-request `error`,
  * never the upstream's `body` and `headers` (a remote server's own result comes marked relayed,
  * see {@link offerScopeOf}).
  */
 const OFFER_SOURCES: Readonly<Record<string, OfferScope>> = {
   run_and_wait: scopeOf({ verbatim: [], unoffered: [["result"]] }),
-  search_integration_tools: scopeOf({ verbatim: [["tools"], ["best_match"]], unoffered: [] }),
+  search: scopeOf({
+    verbatim: [
+      ["operations"],
+      ["integration_tools", "items"],
+      ["agents"],
+      ["skills"],
+      ["best_match"],
+    ],
+    unoffered: [],
+  }),
   call_integration_tool: scopeOf({
     verbatim: [
       ["results", "*", "body"],

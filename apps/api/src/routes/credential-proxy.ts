@@ -116,6 +116,7 @@ const listIntegrationToolsQuerySchema = z.strictObject({
   integration_package_id: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   connection_id: z.uuid().optional(),
+  catalogs: z.enum(["live", "cached"]).optional(),
 });
 
 export const callRemoteToolSchema = z.strictObject({
@@ -523,6 +524,7 @@ export function createCredentialProxyRouter() {
         ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
         ...(query.name ? { name: query.name } : {}),
         ...(query.connection_id ? { connectionId: query.connection_id } : {}),
+        ...(query.catalogs === "cached" ? { cachedOnly: true } : {}),
       });
       return c.json(listing);
     },

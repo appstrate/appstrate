@@ -150,7 +150,6 @@ test.describe("MCP over an API key (full stack)", () => {
       "read",
       "run_and_wait",
       "search",
-      "search_integration_tools",
       "validate_package_file",
     ]);
 

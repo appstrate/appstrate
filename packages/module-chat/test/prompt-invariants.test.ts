@@ -473,7 +473,8 @@ describe("the integration tools", () => {
   });
 
   it("are preferred over a run when offered, the inline guidance kept for a run", () => {
-    expect(withTools).toContain("`search_integration_tools`");
+    expect(withTools).toContain("found with `search` and called with `call_integration_tool`");
+    expect(withTools).toContain("its `integration_tool` kind");
     expect(withTools).toContain("call it with `call_integration_tool`, and answer from its result");
     expect(withTools).toContain("Run an agent instead when the task needs a runtime");
     expect(withTools).not.toContain("MUST be carried out by running an agent");
@@ -483,7 +484,7 @@ describe("the integration tools", () => {
   });
 
   it("are absent when not offered, the run rule unchanged", () => {
-    expect(FULL).not.toContain("search_integration_tools");
+    expect(FULL).not.toContain("integration_tool");
     expect(FULL).not.toContain("call_integration_tool");
     expect(FULL).toContain("MUST be carried out by running an agent");
     expect(FULL).toContain(

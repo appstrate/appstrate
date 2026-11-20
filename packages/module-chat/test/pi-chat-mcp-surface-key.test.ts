@@ -235,7 +235,6 @@ describe("platform MCP surface key purity", () => {
       ],
     };
     const [opened, shut] = await Promise.all([handshake(open, grant), handshake(closed, grant)]);
-    expect(opened.tools).toContain("search_integration_tools");
     expect(opened.tools).toContain("call_integration_tool");
     expect(shut.tools).not.toContain("call_integration_tool");
     expect(shut.key).not.toBe(opened.key);

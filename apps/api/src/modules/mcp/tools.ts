@@ -105,7 +105,13 @@ import {
   trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
-import { buildIntegrationTools } from "./integration-tools.ts";
+import {
+  buildIntegrationTools,
+  describeIntegrationTool,
+  integrationToolsDescription,
+  searchIntegrationTools,
+  type IntegrationToolContext,
+} from "./integration-tools.ts";
 import {
   compareKeywordScores,
   DEFAULT_SEARCH_LIMIT,
@@ -155,7 +161,6 @@ export type McpToolName =
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
-  | "search_integration_tools"
   | "call_integration_tool"
   | "get_me";
 
@@ -389,7 +394,7 @@ function notGrantedRefusal(
 }
 
 /** The kinds this caller may search and describe: each is declared only where its read is granted. */
-function discoveryKinds(ctx: McpToolContext): DiscoveryKind[] {
+function discoveryKinds(ctx: McpToolContext, surface: McpSurface): DiscoveryKind[] {
   const granted = (operationId: string): boolean =>
     ctx.orgSpaces
       ? ctx.orgSpaces.reachable.some((s) =>
@@ -405,7 +410,7 @@ function discoveryKinds(ctx: McpToolContext): DiscoveryKind[] {
       case "skill":
         return granted("listSkills");
       case "integration_tool":
-        return false;
+        return surface.proxies;
     }
   });
 }
@@ -470,9 +475,13 @@ function kindUses(kinds: readonly DiscoveryKind[], surface: McpSurface): string 
     .join(", ");
 }
 
-function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
+function buildSearchTool(
+  ctx: McpToolContext,
+  surface: McpSurface,
+  integrations: IntegrationToolContext,
+): AppstrateToolDefinition {
   const { invokes } = surface;
-  const kinds = discoveryKinds(ctx);
+  const kinds = discoveryKinds(ctx, surface);
   const uses = kindUses(kinds, surface);
   const descriptor: Tool = {
     name: "search",
@@ -487,7 +496,8 @@ function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToo
         : ", so a clear single hit needs no follow-up describe call. ") +
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
       "role may not invoke are listed apart under `denied`, with the permissions they need in " +
-      "YOUR space: report that to the user instead of trying them.",
+      "YOUR space: report that to the user instead of trying them." +
+      (kinds.includes("integration_tool") ? integrationToolsDescription(surface.runs) : ""),
     annotations: {
       title: "Search",
       readOnlyHint: true,
@@ -508,6 +518,16 @@ function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToo
           type: "string",
           description: "Operations only: restrict to one OpenAPI tag (e.g. 'Agents').",
         },
+        ...(kinds.includes("integration_tool")
+          ? {
+              integration: {
+                type: "string",
+                description:
+                  "Integration tools only: restrict to one integration, by package id " +
+                  "(`@scope/name`); its remote catalog is read from its server when not cached.",
+              },
+            }
+          : {}),
         limit: {
           type: "integer",
           description: `Max items per kind (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
@@ -518,13 +538,17 @@ function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToo
     },
   };
 
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const start = performance.now();
     const requested = requestedKinds(args.kinds, kinds);
     if ("code" in requested) return refusalResult(requested);
     const limit = searchLimit(args.limit);
     const tokens = searchTokens(args.query);
     const tag = asString(args.tag)?.toLowerCase();
+    const integration = asString(args.integration);
 
     const sections = await Promise.all(
       requested.kinds.map((kind): Promise<KindSection> => {
@@ -536,7 +560,12 @@ function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToo
           case "skill":
             return searchSkillKind(ctx, tokens, limit);
           case "integration_tool":
-            throw new Error("integration_tool is not a declared kind");
+            return searchIntegrationKind(
+              ctx,
+              integrations,
+              { tokens, limit, integration, explicit: requested.explicit },
+              extra.signal,
+            );
         }
       }),
     );
@@ -558,7 +587,11 @@ function buildSearchTool(ctx: McpToolContext, surface: McpSurface): AppstrateToo
     });
 
     return jsonResult({
-      ...Object.fromEntries(sections.map(({ kind, section }) => [KIND_SECTION[kind], section])),
+      ...Object.fromEntries(
+        sections.flatMap(({ kind, section }) =>
+          section === OMITTED ? [] : [[KIND_SECTION[kind], section]],
+        ),
+      ),
       ...(best ? { best_match: await best.describe() } : {}),
     });
   };
@@ -678,6 +711,81 @@ async function searchSkillKind(
   };
 }
 
+/** A section a search leaves out: a kind it searched by default and may not search here. */
+const OMITTED: Record<string, unknown> = {};
+
+/**
+ * Why integration tools may not be searched or described in the space an org-wide call names: the
+ * space's closed credential proxy, or the caller's role there; `null` when they may. A pinned
+ * connection declares the kind only where they may.
+ */
+function integrationKindRefusal(ctx: McpToolContext): Refusal | null {
+  const spaces = ctx.orgSpaces;
+  if (!spaces) return null;
+  const { current } = spaces;
+  const proxies = (space: McpSpace) => space.surface.proxies;
+  // In the proxy route's order: its permission first, then the space's barrier.
+  if (current.surface.proxiesClosed) {
+    return {
+      code: "credential_proxy_closed",
+      error: credentialProxyClosedDetail(current),
+      space: spaceRef(current),
+      ...grantedIn(spaces, proxies),
+      hint: NO_FALLBACK_HINT,
+    };
+  }
+  if (!current.surface.proxies) {
+    return {
+      code: "not_granted",
+      error: `Your role in ${describeSpace(current)} does not allow integration tools.`,
+      space: spaceRef(current),
+      ...grantedIn(spaces, proxies),
+      hint: NO_FALLBACK_HINT,
+    };
+  }
+  return null;
+}
+
+/**
+ * The integration tools section: remote catalogs read from their servers only when the call
+ * named the kind or an integration, from the cache otherwise.
+ */
+async function searchIntegrationKind(
+  ctx: McpToolContext,
+  integrations: IntegrationToolContext,
+  query: { tokens: readonly string[]; limit: number; integration?: string; explicit: boolean },
+  signal: AbortSignal | undefined,
+): Promise<KindSection> {
+  const named = query.explicit || query.integration !== undefined;
+  const refusal = integrationKindRefusal(ctx);
+  if (refusal) {
+    return { kind: "integration_tool", section: named ? { refusal } : OMITTED };
+  }
+  const found = await searchIntegrationTools(
+    integrations,
+    {
+      tokens: query.tokens,
+      limit: query.limit,
+      cachedOnly: !named,
+      ...(query.integration !== undefined ? { integration: query.integration } : {}),
+    },
+    signal,
+  );
+  const { top } = found;
+  return {
+    kind: "integration_tool",
+    section: found.section,
+    ...(top
+      ? {
+          top: {
+            score: keywordScore(top.name, top.text, query.tokens),
+            describe: async () => top.described,
+          },
+        }
+      : {}),
+  };
+}
+
 /** An agent's `describe` payload, its route's refusal relayed as `invoke_operation` relays one. */
 async function describeAgentPayload(
   ctx: McpToolContext,
@@ -704,9 +812,13 @@ async function describeSkillPayload(
     : { kind: "skill", id: uri, refusal: described.refusal };
 }
 
-function buildDescribeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
+function buildDescribeTool(
+  ctx: McpToolContext,
+  surface: McpSurface,
+  integrations: IntegrationToolContext,
+): AppstrateToolDefinition {
   const { invokes } = surface;
-  const kinds = discoveryKinds(ctx);
+  const kinds = discoveryKinds(ctx, surface);
   const descriptor: Tool = {
     name: "describe",
     description:
@@ -727,6 +839,12 @@ function buildDescribeTool(ctx: McpToolContext, surface: McpSurface): AppstrateT
       (kinds.includes("skill")
         ? " A `skill`: its frontmatter and the `skill://` URI of each of its files, to read " +
           "with read."
+        : "") +
+      (kinds.includes("integration_tool")
+        ? " An `integration_tool`: its `input_schema`, a typed tool's `output_schema` when its " +
+          "server declares one, the `connections` it reaches and its `usage`: how to call it " +
+          "with call_integration_tool, how to read its result and what its connections' fields " +
+          "mean. Its remote catalog is read from its server when not cached."
         : ""),
     annotations: {
       title: "Describe",
@@ -747,15 +865,18 @@ function buildDescribeTool(ctx: McpToolContext, surface: McpSurface): AppstrateT
           type: "string",
           description:
             "The item's `id`, as search returned it (or already known: an operationId, an agent's " +
-            "`@scope/name`, a skill's `skill://` URI). Not needed when search's best_match already " +
-            "described it.",
+            "`@scope/name`, a skill's `skill://` URI, an integration tool's name). Not needed when " +
+            "search's best_match already described it.",
         },
       },
       required: ["kind", "id"],
     },
   };
 
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const start = performance.now();
     const kind = asString(args.kind) as DiscoveryKind | undefined;
     const id = asString(args.id);
@@ -805,8 +926,11 @@ function buildDescribeTool(ctx: McpToolContext, surface: McpSurface): AppstrateT
         if (payload.refusal) return refusalResult(payload.refusal as Refusal);
         return jsonResult(payload);
       }
-      case "integration_tool":
-        throw new Error("integration_tool is not a declared kind");
+      case "integration_tool": {
+        const refusal = integrationKindRefusal(ctx);
+        if (refusal) return refusalResult(refusal);
+        return describeIntegrationTool(integrations, id!, extra.signal);
+      }
     }
   };
 
@@ -2057,16 +2181,18 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "its own or shared into the space. An entry flagged `needs_reconnection` has no healthy " +
       "connection: its owner must reconnect it before use. " +
       (surface.proxies
-        ? "The integration tools you can call with them are listed by `search_integration_tools`, " +
-          "with those of active integrations that need no connection; integrations active in the " +
-          "space that need one and lack a usable connection are listed there under `not_ready`. "
+        ? "The integration tools you can call with them are listed by `search` (`integration_tool` " +
+          "kind), with those of active integrations that need no connection; integrations active " +
+          "in the space that need one and lack a usable connection are listed there under " +
+          "`not_ready`. "
         : surface.proxiesClosed
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "Call this first to ground who you are acting for, what the " +
-      "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
-      "to prefer when building or configuring an agent.",
+      "Its lists of agents and skills are capped: `search` finds the rest by keyword. Call this " +
+      "first to ground who you are acting for, what the caller's role allows (operations beyond " +
+      "it fail at invoke time), and which integrations to prefer when building or configuring " +
+      "an agent.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -2122,7 +2248,7 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
-  /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
+  /** `search`'s and `describe`'s integration tools, and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
   /**
    * Those two tools are withheld by the space's setting alone (`credential_proxy_open`), not by
@@ -2211,23 +2337,22 @@ function refuseUndeclaredArguments(
  * and re-lists, where an alias would be a permanent second dispatch path.
  */
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
+  const integrations: IntegrationToolContext = {
+    origin: ctx.origin,
+    authHeaders: ctx.authHeaders,
+    dispatch: ctx.dispatch,
+    observe: (event) => emit(ctx, event),
+    runs: surface.runs,
+  };
   const tools = [
-    buildSearchTool(ctx, surface),
-    buildDescribeTool(ctx, surface),
+    buildSearchTool(ctx, surface, integrations),
+    buildDescribeTool(ctx, surface, integrations),
     ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadTool(ctx),
     ...buildPackageFileTools(ctx, surface.importsPackages),
-    ...(surface.proxies
-      ? buildIntegrationTools({
-          origin: ctx.origin,
-          authHeaders: ctx.authHeaders,
-          dispatch: ctx.dispatch,
-          observe: (event) => emit(ctx, event),
-          runs: surface.runs,
-        })
-      : []),
+    ...(surface.proxies ? buildIntegrationTools(integrations) : []),
     buildGetMeTool(ctx, surface),
   ];
   const { orgSpaces } = ctx;
@@ -2251,7 +2376,6 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   read: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
-  search_integration_tools: "proxies",
   call_integration_tool: "proxies",
   get_me: null,
   get_runtime_capabilities: false,

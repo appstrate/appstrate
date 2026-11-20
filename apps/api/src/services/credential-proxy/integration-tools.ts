@@ -99,6 +99,8 @@ export interface IntegrationToolListing {
   not_ready: IntegrationOutsideRun[];
   unlisted: UnlistedIntegration[];
   truncated_catalogs: TruncatedCatalog[];
+  /** Cache-only listing: the remote integrations whose catalog was not in the cache. */
+  uncached: string[];
 }
 
 interface IntegrationToolQuery {
@@ -110,6 +112,11 @@ interface IntegrationToolQuery {
    */
   name?: string;
   connectionId?: string;
+  /**
+   * Read remote catalogs from the cache only: a cold one is not listed, so nothing is sent to its
+   * server, and its declared tools are listed `catalog_unreadable`, counted in `uncached`.
+   */
+  cachedOnly?: boolean;
 }
 
 /**
@@ -345,6 +352,7 @@ async function readRemoteCatalog(
   caller: RemoteToolsCaller,
   entry: ListedIntegration,
   connectionId: string | undefined,
+  cachedOnly: boolean,
 ): Promise<RemoteToolCatalog> {
   const named = entry.connections.find(
     (c) => c.connection_id.toLowerCase() === connectionId?.toLowerCase(),
@@ -355,6 +363,7 @@ async function readRemoteCatalog(
       integrationId: entry.id,
       manifest: entry.manifest,
       ...(id ? { connectionId: id } : {}),
+      cachedOnly,
     });
   try {
     return await list(named?.connection_id);
@@ -372,7 +381,8 @@ async function readRemoteCatalog(
 }
 
 type RemoteListing =
-  { tools: RemoteTool[]; truncatedAt: number | null } | { unlisted: UnlistedIntegration };
+  | { tools: RemoteTool[]; truncatedAt: number | null; uncached?: true }
+  | { unlisted: UnlistedIntegration };
 
 /**
  * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
@@ -417,7 +427,7 @@ function catalogUnavailable(
 async function remoteTools(
   caller: RemoteToolsCaller,
   entry: ListedIntegration,
-  query: Pick<IntegrationToolQuery, "name" | "connectionId">,
+  query: Pick<IntegrationToolQuery, "name" | "connectionId" | "cachedOnly">,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest, connections } = entry;
   if (
@@ -438,7 +448,7 @@ async function remoteTools(
   }
   let catalog: RemoteToolCatalog;
   try {
-    catalog = await readRemoteCatalog(caller, entry, query.connectionId);
+    catalog = await readRemoteCatalog(caller, entry, query.connectionId, query.cachedOnly === true);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     if (query.name !== undefined && !mayNameRemoteTool(entry, query.name)) {
@@ -517,7 +527,11 @@ async function remoteTools(
     }
     tools.push(remoteTool(named, { name: upstream, input_schema: { type: "object" } }, true));
   }
-  return { tools, truncatedAt: catalog.truncatedAt };
+  return {
+    tools,
+    truncatedAt: catalog.truncatedAt,
+    ...(catalog.listingFailure === "not_cached" ? { uncached: true as const } : {}),
+  };
 }
 
 /** Connecting it gives a tool to call outside a run: an `api_call` tool, or a remote server's. */
@@ -593,6 +607,7 @@ export async function listIntegrationTools(
       not_ready: [],
       unlisted: [],
       truncated_catalogs: [],
+      uncached: [],
     };
   }
 
@@ -633,6 +648,7 @@ export async function listIntegrationTools(
   const tools: IntegrationTool[] = [];
   const unlisted: UnlistedIntegration[] = [];
   const truncatedCatalogs: TruncatedCatalog[] = [];
+  const uncached: string[] = [];
   for (const { id } of integrations) {
     tools.push(...httpTools.get(id)!);
     const result = listed.get(id);
@@ -643,6 +659,7 @@ export async function listIntegrationTools(
       continue;
     }
     tools.push(...result.tools);
+    if (result.uncached) uncached.push(id);
     if (result.truncatedAt !== null) {
       truncatedCatalogs.push({ integration_package_id: id, listed_tools: result.truncatedAt });
     }
@@ -654,5 +671,6 @@ export async function listIntegrationTools(
     not_ready: notReady,
     unlisted,
     truncated_catalogs: query.name === undefined ? truncatedCatalogs : [],
+    uncached,
   };
 }

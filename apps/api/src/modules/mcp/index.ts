@@ -10,7 +10,7 @@
  * tools (`search`, `describe`, `invoke_operation`) rather
  * than one tool per endpoint, keeping the client tool budget tiny. Run launch
  * and waiting use the dedicated `run_and_wait` shortcut, and the credential
- * proxy the `search_integration_tools` / `call_integration_tool` discovery pair. Tool calls dispatch
+ * proxy `call_integration_tool`, its tools found by `search`. Tool calls dispatch
  * in-process through the platform app, reusing the auth pipeline and RBAC — an
  * MCP caller can do exactly what the same credential could do over REST.
  *
