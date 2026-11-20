@@ -1,26 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's context gauge: how full the conversation's context is, as the
- * engine measured it on the last turn's final model call (`turn-context.ts`).
- * A ring beside the send button, its detail one tap away — a popover, not a
- * tooltip, so it opens on a touch screen too. Nothing renders until a turn has
- * measured something: an empty ring would claim a zero nobody measured.
+ * The composer's context gauge: a ring beside the send button, filled toward the size past which
+ * the engine summarizes the history, its detail in a popover (which a touch screen opens, unlike a
+ * tooltip). Nothing renders until a turn has measured something.
  */
 
 import * as React from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { cn } from "@appstrate/ui/cn";
+import { formatCompactTokens } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { Progress } from "@appstrate/ui/components/progress";
 import { useChatHost } from "./runtime-context.ts";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
 import { latestConversationContext, type ContextLevel } from "./turn-context.ts";
 
-const LEVEL_CLASS: Record<ContextLevel, string> = {
+const LEVEL_TEXT: Record<ContextLevel, string> = {
   ok: "text-muted-foreground",
   near: "text-warning",
   full: "text-destructive",
+};
+const LEVEL_FILL: Record<ContextLevel, string> = {
+  ok: "bg-muted-foreground",
+  near: "bg-warning",
+  full: "bg-destructive",
+};
+const LEVEL_SENTENCE: Record<ContextLevel, string> = {
+  ok: "contextUsage.compactAt",
+  near: "contextUsage.compactNear",
+  full: "contextUsage.compactNext",
 };
 
 const RING_RADIUS = 6;
@@ -46,18 +56,23 @@ function Ring({ ratio }: { ratio: number }) {
 }
 
 export function ContextGauge({ className }: { className?: string }) {
-  const { t, modelLabel } = useChatHost();
+  const { t, modelId } = useChatHost();
+  const titleId = React.useId();
   const messages = useAuiState((s) => s.thread.messages);
   const context = React.useMemo(() => latestConversationContext(messages), [messages]);
   if (!context) return null;
 
-  const summary = t("contextUsage.summary", {
-    used: context.tokens,
-    max: context.window,
-    percent: context.ratio,
+  const counts = t("contextUsage.counts", {
+    used: formatCompactTokens(context.tokens),
+    max: formatCompactTokens(context.window),
   });
-  const measuredWithOther =
-    context.modelLabel !== null && modelLabel != null && context.modelLabel !== modelLabel;
+  const sentence = t(LEVEL_SENTENCE[context.level], {
+    threshold: formatCompactTokens(context.compactAt),
+  });
+  const measuredWith =
+    context.modelId !== null && modelId != null && context.modelId !== modelId
+      ? context.modelLabel
+      : null;
 
   return (
     <Popover>
@@ -66,47 +81,33 @@ export function ContextGauge({ className }: { className?: string }) {
           type="button"
           size="icon"
           variant="ghost"
-          className={cn(COMPOSER_BUTTON_CLASS, LEVEL_CLASS[context.level], className)}
-          aria-label={t("contextUsage.label", { summary })}
-          data-context-level={context.level}
+          className={cn(COMPOSER_BUTTON_CLASS, LEVEL_TEXT[context.level], className)}
+          aria-label={t("contextUsage.label", { counts, sentence })}
         >
           <Ring ratio={context.ratio} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-72 space-y-2 p-3 text-sm">
-        <p className="font-medium">{t("contextUsage.title")}</p>
-        <div className="flex items-center gap-2">
-          <div
-            className="bg-muted h-1.5 flex-1 overflow-hidden rounded-full"
-            role="meter"
-            aria-label={t("contextUsage.title")}
-            aria-valuemin={0}
-            aria-valuemax={context.window}
-            aria-valuenow={Math.min(context.tokens, context.window)}
-            aria-valuetext={summary}
-          >
-            <div
-              className={cn("h-full rounded-full bg-current", LEVEL_CLASS[context.level])}
-              style={{ width: `${context.ratio * 100}%` }}
-            />
-          </div>
-        </div>
-        <p className="tabular-nums">{summary}</p>
-        {context.compactAt !== undefined ? (
+      <PopoverContent
+        side="top"
+        align="end"
+        aria-labelledby={titleId}
+        className="w-72 space-y-2 p-3 text-sm"
+      >
+        <p id={titleId} className="font-medium">
+          {t("contextUsage.title")}
+        </p>
+        <Progress
+          aria-hidden
+          value={Math.min(context.tokens, context.compactAt)}
+          max={context.compactAt}
+          className="h-1.5"
+          indicatorClassName={LEVEL_FILL[context.level]}
+        />
+        <p className="tabular-nums">{counts}</p>
+        <p className="text-muted-foreground">{sentence}</p>
+        {measuredWith ? (
           <p className="text-muted-foreground">
-            {t(context.level === "full" ? "contextUsage.compactNext" : "contextUsage.compactAt", {
-              threshold: context.compactAt,
-            })}
-          </p>
-        ) : context.level !== "ok" ? (
-          <p className="text-muted-foreground">{t("contextUsage.noCompaction")}</p>
-        ) : null}
-        {context.compacted ? (
-          <p className="text-muted-foreground">{t("contextUsage.compacted")}</p>
-        ) : null}
-        {measuredWithOther ? (
-          <p className="text-muted-foreground">
-            {t("contextUsage.measuredWith", { model: context.modelLabel ?? "" })}
+            {t("contextUsage.measuredWith", { model: measuredWith })}
           </p>
         ) : null}
       </PopoverContent>

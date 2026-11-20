@@ -27,6 +27,7 @@ import {
   type ChatMessageMetadata,
   type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
+import type { PiUsage } from "./pi-events.ts";
 import {
   classifyClientTurnError,
   clientTurnErrorMarker,
@@ -106,29 +107,28 @@ export function turnNoticeChunks(id: string, text: string): UIMessageChunk[] {
 }
 
 /**
- * The turn's context gauge, as a spreadable member of {@link closePiTurn}'s
- * input: the last settled call's tokens over the window the session ran
- * against. Nothing when no call settled, or when the session never got as far
- * as binding a model (`sizing` unset) — a turn that measured nothing must not
- * report a zero.
+ * The turn's context, spreadable into {@link closePiTurn}'s input: the last settled call's tokens
+ * by Pi's measure over the window the session ran against. Nothing when no call settled, when it
+ * reported no tokens, or when the turn never bound a model — a zero would claim a measurement.
  */
 export function turnContextOf(
-  measured: { contextTokens?: number; compacted: boolean },
-  sizing:
+  measured: { lastSettledUsage?: PiUsage; compacted: boolean },
+  measure:
     | {
-        contextWindow: number;
-        compaction: { enabled: false } | { enabled: true; reserveTokens: number };
+        sizing: { contextWindow: number; compaction: { reserveTokens: number } };
+        contextTokens: (usage: PiUsage) => number;
       }
     | undefined,
 ): { context: AppstrateTurnContext } | Record<never, never> {
-  if (measured.contextTokens === undefined || !sizing) return {};
+  if (!measured.lastSettledUsage || !measure) return {};
+  const tokens = measure.contextTokens(measured.lastSettledUsage);
+  if (tokens <= 0) return {};
+  const { contextWindow, compaction } = measure.sizing;
   return {
     context: {
-      tokens: measured.contextTokens,
-      window: sizing.contextWindow,
-      ...(sizing.compaction.enabled
-        ? { compactAt: sizing.contextWindow - sizing.compaction.reserveTokens }
-        : {}),
+      tokens,
+      window: contextWindow,
+      compactAt: contextWindow - compaction.reserveTokens,
       ...(measured.compacted ? { compacted: true } : {}),
     },
   };
@@ -210,7 +210,6 @@ export function closePiTurn(input: {
   /** Its display name frozen at write time — never resolved back into a model. */
   modelLabel: string;
   requestId?: string;
-  /** The context the turn measured ({@link turnContextOf}); none when it measured nothing. */
   context?: AppstrateTurnContext;
   newId?: () => string;
 }): PiTurnClosure {

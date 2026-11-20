@@ -318,12 +318,8 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
-      /**
-       * The window and compaction sizing the session runs against — ONE call,
-       * so the number handed to Pi and the one stamped on the turn's context
-       * cannot drift. Unset until the model is known.
-       */
-      let sizing: ReturnType<typeof derivePiCompactionSettings> | undefined;
+      /** The sizing handed to Pi and stamped on the turn's context, and Pi's measure; set with the model. */
+      let contextMeasure: Parameters<typeof turnContextOf>[1];
       /** Detach handle for the Pi event subscription — released in `finally`. */
       let unsubscribe: (() => void) | undefined;
       try {
@@ -413,7 +409,8 @@ export function runPiChat(input: PiChatInput): Response {
         } = sdk;
 
         const piModel = model;
-        sizing = derivePiCompactionSettings(piModel);
+        const sizing = derivePiCompactionSettings(piModel);
+        contextMeasure = { sizing, contextTokens: sdk.calculateContextTokens };
         const requestedThinkingLevel =
           input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {
@@ -686,7 +683,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelId: input.presetId,
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
-          ...turnContextOf(meta, sizing),
+          ...turnContextOf(meta, contextMeasure),
         });
         // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
@@ -754,7 +751,7 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
-            ...turnContextOf(mapper.result(), sizing),
+            ...turnContextOf(mapper.result(), contextMeasure),
           });
           logger.error("Pi chat turn failed", {
             err: String(err),

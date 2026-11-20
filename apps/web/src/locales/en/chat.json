@@ -228,11 +228,10 @@
   "threads.search.placeholder": "Search",
   "threads.search.clear": "Clear search",
   "contextUsage.title": "Context size",
-  "contextUsage.summary": "{{used, number(notation: compact; maximumFractionDigits: 1)}} / {{max, number(notation: compact; maximumFractionDigits: 1)}} tokens ({{percent, number(style: percent; maximumFractionDigits: 0)}})",
-  "contextUsage.label": "Context size: {{summary}}",
-  "contextUsage.compactAt": "The history is summarized automatically past {{threshold, number(notation: compact; maximumFractionDigits: 1)}} tokens.",
-  "contextUsage.compactNext": "{{threshold, number(notation: compact; maximumFractionDigits: 1)}}-token threshold reached: the history will be summarized on the next message.",
-  "contextUsage.noCompaction": "Automatic summarizing is off for this model: past its window, a request may be refused.",
-  "contextUsage.compacted": "The history was summarized during the last turn.",
-  "contextUsage.measuredWith": "Measured with {{model}}; the selected model may have another window."
+  "contextUsage.counts": "{{used}} / {{max}} tokens",
+  "contextUsage.label": "Context size: {{counts}}. {{sentence}}",
+  "contextUsage.compactAt": "Past {{threshold}} tokens, the history is summarized automatically.",
+  "contextUsage.compactNear": "Nearing {{threshold}} tokens: the history will then be summarized automatically.",
+  "contextUsage.compactNext": "{{threshold}}-token threshold reached: the history will be summarized before the next message.",
+  "contextUsage.measuredWith": "Measured with {{model}}."
 }

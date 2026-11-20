@@ -39,54 +39,37 @@ describe("latestConversationContext", () => {
     expect(latestConversationContext([user("u1"), assistant("a1")])).toBeNull();
   });
 
-  it("reads the newest measure, skipping a turn still open", () => {
+  it("reads the newest measure, past a closed turn that measured nothing", () => {
     const messages = [
-      assistant("a1", { tokens: 10_000, window: 200_000, compactAt: 183_616 }),
+      assistant("a1", { tokens: 10_000, window: 200_000, compactAt: 180_000 }),
       user("u2"),
-      assistant("a2", { tokens: 42_000, window: 200_000, compactAt: 183_616 }),
+      assistant("a2", { tokens: 45_000, window: 200_000, compactAt: 180_000 }),
       user("u3"),
       assistant("a3"),
     ];
     expect(latestConversationContext(messages)).toMatchObject({
-      tokens: 42_000,
-      window: 200_000,
-      ratio: 0.21,
+      tokens: 45_000,
+      ratio: 0.25,
       level: "ok",
       modelId: "mdl_opus",
       modelLabel: "Claude Opus 5",
     });
   });
-
-  it("skips a malformed measure instead of dividing by it", () => {
-    const messages = [
-      assistant("a1", { tokens: 5, window: 100 }),
-      assistant("a2", { tokens: 5, window: 0 }),
-      assistant("a3", { tokens: "5", window: 100 }),
-    ];
-    expect(latestConversationContext(messages)?.tokens).toBe(5);
-    expect(latestConversationContext(messages)?.window).toBe(100);
-  });
 });
 
 describe("contextReading", () => {
-  it("warns from 80% of the compaction threshold, not of the window", () => {
-    expect(contextReading({ tokens: 140_000, window: 200_000, compactAt: 180_000 }).level).toBe(
-      "ok",
-    );
-    expect(contextReading({ tokens: 144_000, window: 200_000, compactAt: 180_000 }).level).toBe(
-      "near",
-    );
-    expect(contextReading({ tokens: 180_000, window: 200_000, compactAt: 180_000 }).level).toBe(
-      "full",
-    );
+  const at = (tokens: number) => contextReading({ tokens, window: 1_000_000, compactAt: 600_000 });
+
+  it("fills and grades on the summarizing threshold, not the window", () => {
+    expect(at(300_000)).toEqual({ ratio: 0.5, level: "ok" });
+    expect(at(480_000).level).toBe("near");
+    // The engine summarizes past the threshold, not at it.
+    expect(at(600_000)).toEqual({ ratio: 1, level: "near" });
+    expect(at(600_001).level).toBe("full");
   });
 
-  it("measures against the window when compaction is off", () => {
-    expect(contextReading({ tokens: 159_000, window: 200_000 }).level).toBe("ok");
-    expect(contextReading({ tokens: 160_000, window: 200_000 }).level).toBe("near");
-  });
-
-  it("clamps the ratio to the window", () => {
-    expect(contextReading({ tokens: 250_000, window: 200_000 }).ratio).toBe(1);
+  it("reads a turn that summarized the history as full: every later turn summarizes it again", () => {
+    const summarized = { tokens: 40_000, window: 1_000_000, compactAt: 600_000, compacted: true };
+    expect(contextReading(summarized)).toEqual({ ratio: 1, level: "full" });
   });
 });

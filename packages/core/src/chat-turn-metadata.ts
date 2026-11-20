@@ -163,35 +163,22 @@ export interface AppstrateTurnMetadata {
    */
   modelId?: string;
   modelLabel?: string;
-  /**
-   * How full the conversation's context was when the turn closed. Absent when
-   * no model call of the turn settled (a turn that failed before its first
-   * answer measured nothing, and a guess would misreport saturation).
-   */
+  /** The context of the turn's last settled model call; absent when no call settled. */
   context?: AppstrateTurnContext;
 }
 
-/**
- * The context a conversation carries into its NEXT request, measured on the
- * turn's last settled model call — never summed over the turn, which counts the
- * history once per call.
- */
+/** The context a turn's last settled model call carried, never summed over the turn's calls. */
 export interface AppstrateTurnContext {
-  /**
-   * Tokens of that call by Pi's own compaction measure (`calculateContextTokens`:
-   * the provider's `totalTokens`, else input + output + cache read + cache
-   * write). Output is included: it is re-read by the next request, and it is the
-   * number Pi compares against {@link compactAt}.
-   */
+  /** Pi's `calculateContextTokens` of that call (input, output and cache together). */
   tokens: number;
   /** Window the engine ran the turn against, its fallback included. */
   window: number;
+  /** Size past which the engine summarizes the history (`window - reserveTokens`). */
+  compactAt: number;
   /**
-   * Token count above which the engine summarizes the history before its next
-   * call (`window - reserveTokens`). Absent when compaction is off.
+   * The engine summarized the history during this turn. The summary is not kept: the history is
+   * past `compactAt`, and every later turn summarizes it again.
    */
-  compactAt?: number;
-  /** The engine summarized the history during this turn. */
   compacted?: boolean;
 }
 

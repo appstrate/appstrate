@@ -10,6 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import type { PiUsage } from "../src/pi-chat/pi-events.ts";
 import {
   ChatTurnDeadlineError,
   closePiTurn,
@@ -391,27 +392,30 @@ describe("the model a turn bound to", () => {
 });
 
 describe("turnContextOf", () => {
-  const ON = {
-    contextWindow: 200_000,
-    compaction: { enabled: true as const, reserveTokens: 16_384 },
+  const MEASURE = {
+    sizing: { contextWindow: 200_000, compaction: { reserveTokens: 16_384 } },
+    contextTokens: (u: PiUsage) => u.input + u.output + u.cacheRead + u.cacheWrite,
   };
+  const used = (input: number): PiUsage => ({
+    input,
+    output: 200,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  });
 
-  it("states the tokens over the window, with the compaction threshold", () => {
-    expect(turnContextOf({ contextTokens: 48_200, compacted: false }, ON)).toEqual({
-      context: { tokens: 48_200, window: 200_000, compactAt: 183_616 },
+  it("states the call's tokens by Pi's measure, over the window and its threshold", () => {
+    expect(turnContextOf({ lastSettledUsage: used(48_000), compacted: true }, MEASURE)).toEqual({
+      context: { tokens: 48_200, window: 200_000, compactAt: 183_616, compacted: true },
     });
   });
 
-  it("carries no threshold when compaction is off, and flags a compaction", () => {
-    const off = { contextWindow: 128_000, compaction: { enabled: false as const } };
-    expect(turnContextOf({ contextTokens: 10, compacted: true }, off)).toEqual({
-      context: { tokens: 10, window: 128_000, compacted: true },
-    });
-  });
-
-  it("states nothing when nothing was measured or no model was bound", () => {
-    expect(turnContextOf({ compacted: false }, ON)).toEqual({});
-    expect(turnContextOf({ contextTokens: 5, compacted: false }, undefined)).toEqual({});
+  it("states nothing when no call settled, it reported no tokens, or no model was bound", () => {
+    expect(turnContextOf({ compacted: false }, MEASURE)).toEqual({});
+    const empty = { ...used(0), output: 0 };
+    expect(turnContextOf({ lastSettledUsage: empty, compacted: false }, MEASURE)).toEqual({});
+    expect(turnContextOf({ lastSettledUsage: used(5), compacted: false }, undefined)).toEqual({});
   });
 
   it("persists the context with the turn's closing metadata", async () => {
@@ -423,11 +427,10 @@ describe("turnContextOf", () => {
       stepCount: 1,
       stepCapReached: false,
       ...MODEL,
-      ...turnContextOf({ contextTokens: 48_200, compacted: false }, ON),
+      ...turnContextOf({ lastSettledUsage: used(48_000), compacted: false }, MEASURE),
       newId: () => "assistant-ctx",
     }).chunks;
-    const message = await assemble(chunks);
-    expect(turnMetadataFromMessage(message)?.context).toEqual({
+    expect(turnMetadataFromMessage(await assemble(chunks))?.context).toEqual({
       tokens: 48_200,
       window: 200_000,
       compactAt: 183_616,

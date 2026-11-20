@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How full a model's context window is, in the one form every gauge of the
- * product shows it: a clamped share and compact token counts. Shared by the
+ * How full a model's context window is: a clamped share and compact token counts, shared by the
  * run gauge (`apps/web`) and the chat's composer gauge (`module-chat`).
  */
 

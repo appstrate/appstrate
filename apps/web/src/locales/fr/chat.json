@@ -228,11 +228,10 @@
   "threads.search.placeholder": "Rechercher",
   "threads.search.clear": "Effacer la recherche",
   "contextUsage.title": "Taille du contexte",
-  "contextUsage.summary": "{{used, number(notation: compact; maximumFractionDigits: 1)}} / {{max, number(notation: compact; maximumFractionDigits: 1)}} tokens ({{percent, number(style: percent; maximumFractionDigits: 0)}})",
-  "contextUsage.label": "Taille du contexte : {{summary}}",
-  "contextUsage.compactAt": "L’historique sera résumé automatiquement au-delà de {{threshold, number(notation: compact; maximumFractionDigits: 1)}} tokens.",
-  "contextUsage.compactNext": "Seuil de {{threshold, number(notation: compact; maximumFractionDigits: 1)}} tokens atteint : l’historique sera résumé au prochain message.",
-  "contextUsage.noCompaction": "Le résumé automatique est désactivé pour ce modèle : au-delà de la fenêtre, la requête peut être refusée.",
-  "contextUsage.compacted": "L’historique a été résumé pendant le dernier tour.",
-  "contextUsage.measuredWith": "Mesuré avec {{model}} ; le modèle choisi peut avoir une autre fenêtre."
+  "contextUsage.counts": "{{used}} / {{max}} tokens",
+  "contextUsage.label": "Taille du contexte : {{counts}}. {{sentence}}",
+  "contextUsage.compactAt": "Au-delà de {{threshold}} tokens, l’historique est résumé automatiquement.",
+  "contextUsage.compactNear": "Bientôt {{threshold}} tokens : l’historique sera alors résumé automatiquement.",
+  "contextUsage.compactNext": "Seuil de {{threshold}} tokens atteint : l’historique sera résumé avant le prochain message.",
+  "contextUsage.measuredWith": "Mesuré avec {{model}}."
 }

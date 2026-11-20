@@ -40,7 +40,8 @@ const mcpFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 type Usage = { input: number; output: number; cacheRead: number; cacheWrite: number };
 
-function replaySession(usages: Usage[], compacts = false): PiChatSession {
+/** `compacts`: where Pi summarized — before the first call, or after the last. */
+function replaySession(usages: Usage[], compacts?: "before" | "after"): PiChatSession {
   let listener: (event: unknown) => void = () => {};
   return {
     agent: {},
@@ -50,9 +51,13 @@ function replaySession(usages: Usage[], compacts = false): PiChatSession {
       return () => {};
     },
     prompt: async () => {
-      if (compacts) {
-        listener({ type: "compaction_end", reason: "threshold", result: {}, aborted: false });
-      }
+      const compaction = {
+        type: "compaction_end",
+        reason: "threshold",
+        result: {},
+        aborted: false,
+      };
+      if (compacts === "before") listener(compaction);
       usages.forEach((usage, i) => {
         const message = {
           role: "assistant",
@@ -66,6 +71,7 @@ function replaySession(usages: Usage[], compacts = false): PiChatSession {
         listener({ type: "message_start", message });
         listener({ type: "message_end", message });
       });
+      if (compacts === "after") listener(compaction);
     },
     abort: async () => {},
   };
@@ -87,7 +93,7 @@ async function closingTurn(res: Response): Promise<Record<string, unknown> | und
   return undefined;
 }
 
-function turn(usages: Usage[], contextWindow: number | null, compacts = false) {
+function turn(usages: Usage[], contextWindow: number | null, compacts?: "before" | "after") {
   const binding = createPiOAuthModelBinding(
     {
       modelId: "claude-sonnet-4-5",
@@ -146,10 +152,13 @@ describe("chat turn context", () => {
     expect(meta?.context).toMatchObject({ tokens: 15, window: 128_000 });
   }, 20_000);
 
-  it("flags a compaction the engine ran during the turn", async () => {
-    const meta = await closingTurn(
-      turn([{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }], 200_000, true),
-    );
-    expect(meta?.context).toMatchObject({ compacted: true });
+  it("flags a summary made before the first call or after the last", async () => {
+    const call = [{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }];
+    for (const when of ["before", "after"] as const) {
+      expect((await closingTurn(turn(call, 200_000, when)))?.context).toMatchObject({
+        compacted: true,
+      });
+    }
+    expect((await closingTurn(turn(call, 200_000)))?.context).not.toHaveProperty("compacted");
   }, 20_000);
 });

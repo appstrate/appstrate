@@ -74,13 +74,9 @@ interface PiChatResultMeta {
   usage: TokenUsage;
   finishReason: PiFinishReason;
   errorText?: string;
-  /**
-   * Context tokens of the turn's LAST settled model call (Pi's
-   * `calculateContextTokens`), or none when no call settled. Not derived from
-   * `usage`, which sums every call and so counts the history once per call.
-   */
-  contextTokens?: number;
-  /** Pi summarized the history during the turn (`compaction_end` with a result). */
+  /** Usage of the turn's last settled call, which `usage` (a sum over calls) cannot give back. */
+  lastSettledUsage?: PiUsage;
+  /** Pi summarized the history during the turn. */
   compacted: boolean;
 }
 
@@ -162,7 +158,7 @@ export class PiChatUiStreamMapper {
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
-  private lastContextTokens: number | undefined;
+  private lastSettledUsage: PiUsage | undefined;
   private compacted = false;
 
   /** The opening `start` chunk (engine writes this before iterating). */
@@ -231,8 +227,6 @@ export class PiChatUiStreamMapper {
         // only assistant entry in its list, so it is still captured.
         this.captureFailure(lastAssistantMessage(e.messages ?? []));
         return [];
-      // A compaction that produced a summary shrinks the context the next call
-      // carries: the turn says so, or the gauge's drop reads as a fault.
       case "compaction_end":
         if (!e.aborted && e.result !== undefined) this.compacted = true;
         return [];
@@ -345,8 +339,10 @@ export class PiChatUiStreamMapper {
     const m = assistantView(message);
     if (!m) return;
     if (m.usage) this.accUsage = addRequestUsage(this.accUsage, m.usage, this.cost);
-    const contextTokens = settledContextTokens(m);
-    if (contextTokens !== undefined) this.lastContextTokens = contextTokens;
+    // Pi's own rule for a call that measured something (`getLastAssistantUsage`).
+    if (m.usage && m.stopReason !== "aborted" && m.stopReason !== "error") {
+      this.lastSettledUsage = m.usage;
+    }
     this.finishReason = mapStopReason(m.stopReason);
     // A model call that SETTLED retires the previous failure. Pi retries inside
     // one turn, so an early 503 the next call recovered from is no longer this
@@ -397,22 +393,10 @@ export class PiChatUiStreamMapper {
       usage: this.accUsage,
       finishReason: this.finishReason,
       ...(this.lastError ? { errorText: this.lastError } : {}),
-      ...(this.lastContextTokens !== undefined ? { contextTokens: this.lastContextTokens } : {}),
+      ...(this.lastSettledUsage ? { lastSettledUsage: this.lastSettledUsage } : {}),
       compacted: this.compacted,
     };
   }
-}
-
-/**
- * The context a settled call measured, by the rule Pi applies before deciding
- * to compact (`calculateContextTokens` over `getLastAssistantUsage`): an
- * aborted or failed call, or one reporting no tokens at all, measured nothing.
- */
-function settledContextTokens(m: PiAssistantView): number | undefined {
-  if (!m.usage || m.stopReason === "aborted" || m.stopReason === "error") return undefined;
-  const u = m.usage;
-  const tokens = u.totalTokens || u.input + u.output + u.cacheRead + u.cacheWrite;
-  return tokens > 0 ? tokens : undefined;
 }
 
 interface PiAssistantView {
