@@ -324,6 +324,13 @@ describe("the conversation's forwarded tools and resources", () => {
       transport.events.length = 0;
       await tool("search").execute("c4", { kinds: ["operation"] });
       expect(transport.events).toEqual(["tools/call"]);
+      // The filter alone makes it an operations search; beside `integration` it is not.
+      transport.events.length = 0;
+      await tool("search").execute("c6", { tag: "Agents" });
+      expect(transport.events).toEqual(["tools/call"]);
+      transport.events.length = 0;
+      await tool("search").execute("c7", { tag: "Agents", integration: "@acme/crm" });
+      expect(transport.events.slice(0, 2).sort()).toEqual(["touch spc_alpha", "touch spc_beta"]);
       for (const kinds of [["agent"], ["skill"], ["integration_tool"], ["operation", "agent"]]) {
         transport.events.length = 0;
         await tool("search").execute("c5", { kinds });

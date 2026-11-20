@@ -508,9 +508,17 @@ async function enterNamedSpace(
   return undefined;
 }
 
+/** A search of operations alone: `kinds` is `["operation"]`, or omitted with `tag` and no `integration`. */
+function searchesOperationsOnly(args: Record<string, unknown>): boolean {
+  const { kinds } = args;
+  return kinds === undefined
+    ? args.tag !== undefined && args.integration === undefined
+    : Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
+}
+
 /**
  * Whether a call reads every space of the turn: it omits a `space_id` its tool declares and does
- * not require, so the platform covers each space reached. Not an operation-only search, which
+ * not require, so the platform covers each space reached. Not an operations-only search, which
  * reads the static catalog and the caller's permissions, no space's data.
  */
 function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
@@ -518,11 +526,9 @@ function readsEveryTurnSpace(inputSchema: unknown, args: Record<string, unknown>
     properties?: Record<string, unknown>;
     required?: unknown;
   };
-  const kinds = args.kinds;
-  const operationsOnly = Array.isArray(kinds) && kinds.length === 1 && kinds[0] === "operation";
   return (
     args.space_id === undefined &&
-    !operationsOnly &&
+    !searchesOperationsOnly(args) &&
     schema.properties?.space_id !== undefined &&
     !(Array.isArray(schema.required) && schema.required.includes("space_id"))
   );

@@ -49,6 +49,8 @@ function makeTools(
   /** Org-wide: spaces whose agents route refuses. */
   refusingSpaces: string[] = [],
   orgWide = false,
+  /** Org-wide: spaces where the caller cannot launch (no `mcp:invoke`). */
+  readOnlySpaces: string[] = [],
 ) {
   const requests: string[] = [];
   const dispatch: Dispatch = async (req) => {
@@ -81,12 +83,19 @@ function makeTools(
       credentialProxyOpen: true,
     },
   );
+  const readOnly = deriveMcpSurface(
+    new Set(permissions.filter((p) => p !== "mcp:invoke")),
+    undefined,
+    { type: "user", id: "user_1" },
+    true,
+    { credentialProxyOpen: true },
+  );
   const space = (id: string) => ({
     id,
     name: id,
     role: "admin",
     permissions: new Set(permissions),
-    surface,
+    surface: readOnlySpaces.includes(id) ? readOnly : surface,
   });
   const orgSpaces = orgWide
     ? {
@@ -351,5 +360,41 @@ describe("search across spaces", () => {
     const agents = result.agents as { items: Array<{ granted_in: string[] }>; unsearched: unknown };
     expect(agents.items.every((item) => item.granted_in.join() === SPACE)).toBe(true);
     expect(agents.unsearched).toEqual([{ space_id: "spc_2", status: 403, code: "forbidden" }]);
+  });
+});
+
+describe("agents across spaces", () => {
+  const grantedIn = (result: Record<string, unknown>) =>
+    (result.agents as { items: Array<{ id: string; granted_in: string[] }> }).items.find(
+      (item) => item.id === "@acme/invoice-sorter",
+    )?.granted_in;
+
+  it("names the spaces where the caller can launch an agent, or where it is listed when none", async () => {
+    const mixed = makeTools(READER, 200, [], true, ["spc_2"]);
+    expect(grantedIn(await mixed.call("search", { kinds: ["agent"] }))).toEqual([SPACE]);
+    const viewer = makeTools(READER, 200, [], true, [SPACE, "spc_2"]);
+    expect(grantedIn(await viewer.call("search", { kinds: ["agent"] }))).toEqual([SPACE, "spc_2"]);
+  });
+
+  it("says which space an agent's per-space settings were read in", async () => {
+    const { call } = makeTools(READER, 200, [], true);
+    const described = await call("describe", {
+      kind: "agent",
+      id: "@acme/invoice-sorter",
+      space_id: SPACE,
+    });
+    expect(described.space_id).toBe(SPACE);
+    const found = await call("search", { query: "@acme/invoice-sorter", kinds: ["agent"] });
+    expect((found.best_match as { space_id: string }).space_id).toBe(SPACE);
+  });
+
+  it("falls back to the next hit when the best one cannot be described", async () => {
+    const { call } = makeTools(READER);
+    // The draft-only agent outranks every operation but its detail answers 404.
+    const result = await call("search", { query: "draft only" });
+    expect((result.agents as { items: Array<{ id: string }> }).items.map((i) => i.id)).toContain(
+      "@acme/draft-only",
+    );
+    expect(result.best_match).toMatchObject({ kind: "operation" });
   });
 });

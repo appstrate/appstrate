@@ -656,10 +656,10 @@ function buildSearchTool(
     if (refused && "result" in refused) return refused.result;
     const sections = outcomes.filter((outcome): outcome is KindSection => outcome !== null);
 
-    let best: KindSection["top"];
-    for (const { top } of sections) {
-      if (top && (!best || compareKeywordScores(top.score, best.score, tokens) < 0)) best = top;
-    }
+    // The kinds' best hits, best first: the first whose describe is not refused is the best match.
+    const candidates = sections
+      .flatMap(({ top }) => (top ? [top] : []))
+      .sort((a, b) => compareKeywordScores(a.score, b.score, tokens));
     const shown = sections.reduce(
       (count, { section }) => count + (Array.isArray(section.items) ? section.items.length : 0),
       0,
@@ -673,11 +673,17 @@ function buildSearchTool(
       ...(typeof denied === "number" ? { deniedCount: denied } : {}),
     });
 
-    // A best match whose describe was refused is left out.
-    const described = best ? await best.describe() : undefined;
+    let bestMatch: Record<string, unknown> | undefined;
+    for (const candidate of candidates) {
+      const described = await candidate.describe();
+      if ("payload" in described) {
+        bestMatch = described.payload;
+        break;
+      }
+    }
     return jsonResult({
       ...Object.fromEntries(sections.map(({ kind, section }) => [KIND_SECTION[kind], section])),
-      ...(described && "payload" in described ? { best_match: described.payload } : {}),
+      ...(bestMatch ? { best_match: bestMatch } : {}),
     });
   };
 
@@ -812,12 +818,18 @@ async function searchAgentKind(
     return named ? { result: jsonResult({ ...refused[0].refused }, true) } : null;
   }
   const merged = new Map<string, SpaceAgent>();
+  // `granted_in` is where the caller can launch it; a caller who can launch in no searched
+  // space (read-only) gets where it is listed, which is all they can describe.
+  const launches = spaces?.some((space) => space.surface.runs) ?? false;
   for (const { space, value } of answered) {
     for (const hit of value.agents) {
       const found = merged.get(hit.id) ?? { hit, spaceIds: [] };
-      if (space) found.spaceIds.push(space.id);
+      if (space && (!launches || space.surface.runs)) found.spaceIds.push(space.id);
       merged.set(hit.id, found);
     }
+  }
+  if (launches) {
+    for (const [id, agent] of merged) if (agent.spaceIds.length === 0) merged.delete(id);
   }
   const fields = ({ hit }: SpaceAgent) => ({
     name: hit.id,
@@ -977,7 +989,11 @@ async function describeAgentPayload(
       ? { ...(spaceNamed && space ? { spaceId: space.id } : {}) }
       : null,
   );
-  if ("agent" in described) return { payload: { kind: "agent", ...described.agent } };
+  if ("agent" in described) {
+    // Its stored values and locks are the space's: say which space they were read in.
+    const read = space && ctx.orgSpaces ? { space_id: space.id } : {};
+    return { payload: { kind: "agent", ...described.agent, ...read } };
+  }
   if ("refused" in described) return { result: jsonResult({ ...described.refused }, true) };
   return { result: refusalResult(described.refusal) };
 }
