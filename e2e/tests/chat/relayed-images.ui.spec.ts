@@ -181,7 +181,8 @@ for (const [scenario, title] of [
           await page.getByRole("button", { name: "Envoyer", exact: true }).click();
           const outcome = page.getByText(answer, { exact: true });
           await expect(outcome).toBeVisible();
-          await expect(page.getByRole("alert")).toHaveCount(0);
+          // The answer has rendered, so a failed turn would already show its alert: read once.
+          expect(await page.getByRole("alert").count()).toBe(0);
           const response = await streamResponse;
           expect(response.ok()).toBe(true);
           const stream = await response.text();

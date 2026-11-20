@@ -36,7 +36,9 @@ export type PdfWireApi = {
 }[WireApi];
 
 export function wireParts(api: string | null | undefined): WireParts | undefined {
-  return api && Object.hasOwn(WIRE_PARTS, api) ? WIRE_PARTS[api as WireApi] : undefined;
+  return api && Object.prototype.hasOwnProperty.call(WIRE_PARTS, api)
+    ? WIRE_PARTS[api as WireApi]
+    : undefined;
 }
 
 export function hasPdfWireFormat(api: string): api is PdfWireApi {
