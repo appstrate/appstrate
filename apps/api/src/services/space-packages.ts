@@ -458,9 +458,7 @@ export async function packagePlacementsInSpaces(
     .from(packages)
     .$dynamic();
   return joinSpacePlacements(query, orgId, spaceIds)
-    .where(
-      and(eq(packages.id, packageId), eq(packages.type, type), readablePlacementFilter(orgId)),
-    )
+    .where(and(eq(packages.id, packageId), eq(packages.type, type), readablePlacementFilter(orgId)))
     .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
 }
 

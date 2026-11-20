@@ -144,7 +144,11 @@ export function seedIntegrationManifests(
     .from(packages)
     .where(inArray(packages.id, missing))
     .then((found) => new Map(found.map((row) => [row.id, row])));
-  for (const id of missing) cache.set(id, rows.then((byId) => manifestLoadResult(byId.get(id))));
+  for (const id of missing)
+    cache.set(
+      id,
+      rows.then((byId) => manifestLoadResult(byId.get(id))),
+    );
 }
 
 // ---------------------------------------------------------------------------
