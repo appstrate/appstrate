@@ -233,5 +233,17 @@
   "contextUsage.compactAt": "Au-delà de {{threshold}} tokens, l’historique est résumé automatiquement.",
   "contextUsage.compactNear": "Bientôt {{threshold}} tokens : l’historique sera alors résumé automatiquement.",
   "contextUsage.compactNext": "Seuil de {{threshold}} tokens atteint : l’historique sera résumé avant le prochain message.",
-  "contextUsage.measuredWith": "Mesuré avec {{model}}."
+  "contextUsage.measuredWith": "Mesuré avec {{model}}.",
+  "context.info.usageTitle": "Modèles et tokens",
+  "context.info.noTurn": "Rien n’a encore été mesuré pour cette conversation.",
+  "context.info.currentContext": "Contexte actuel",
+  "context.info.models_one": "Modèle",
+  "context.info.models_other": "Modèles",
+  "context.info.modelTurns_one": "{{model}} · {{count}} tour",
+  "context.info.modelTurns_other": "{{model}} · {{count}} tours",
+  "context.info.modelTurnsFailed_one": "{{model}} · {{count}} tour, en échec",
+  "context.info.modelTurnsFailed_other": "{{model}} · {{count}} tours, dont {{failed}} en échec",
+  "context.info.tokens": "Tokens",
+  "context.info.tokensReadGenerated": "{{read}} lus · {{generated}} générés",
+  "context.info.tokensScope": "Hors runs lancés depuis la conversation, comptés dans l’onglet Runs."
 }
