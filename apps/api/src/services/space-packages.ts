@@ -279,16 +279,10 @@ export async function selectorlessAgentManifest(
   return manifest!;
 }
 
-/** One `warnings[]` item of an activation: a declared integration not active where the agent is now on. */
+/** A declared integration not active where the agent is now on (`warnings[]` of an activation). */
 export type ActivationWarning = ResolutionFieldError & { required: boolean };
 
-/**
- * What switching agent `packageId` on in `spaceId` leaves the run gate to refuse
- * (`required`) or start without: its declared integrations not active there, in
- * the definition a selector-less launch runs, as `integration_not_active` items.
- * `[]` for any other package type. Activates nothing — activating an integration
- * opens its credentials to the space, and "the agent alone" is a legitimate choice.
- */
+/** Declared integrations of an agent not active in `spaceId`; activates nothing, since that opens credentials to the space. */
 export async function activationWarnings(
   spaceId: string,
   packageId: string,

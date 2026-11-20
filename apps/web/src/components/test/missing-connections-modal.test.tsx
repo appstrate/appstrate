@@ -16,6 +16,7 @@ import { MissingRow } from "../missing-connections-modal.tsx";
 import {
   onlyAwaitingActivation,
   retryDecision,
+  stillActivated,
   type MissingIntegrationFieldError,
 } from "../../lib/connection-choice.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
@@ -353,6 +354,12 @@ describe("MissingRow", () => {
       expect(onlyAwaitingActivation(errors, new Set())).toBe(true);
       expect(onlyAwaitingActivation(errors, new Set([INTEGRATION]))).toBe(false);
       expect(onlyAwaitingActivation([fieldError("not_connected")], new Set())).toBe(false);
+    });
+
+    it("drops 'activated' once a fresh 409 refuses the integration for another code", () => {
+      const switchedOn = new Set([INTEGRATION]);
+      expect(stillActivated([inactive()], switchedOn).has(INTEGRATION)).toBe(true);
+      expect(stillActivated([fieldError("not_connected")], switchedOn).size).toBe(0);
     });
 
     it("tells a caller without the right who can activate it", () => {

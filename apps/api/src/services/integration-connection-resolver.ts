@@ -971,7 +971,7 @@ export async function requiredIntegrationIds(
 }
 
 /** A declared integration not active in the space, with the agent's `required` flag. */
-export interface InactiveDeclaredIntegration {
+interface InactiveDeclaredIntegration {
   integrationId: string;
   required: boolean;
 }

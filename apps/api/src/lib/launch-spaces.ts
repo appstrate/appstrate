@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Where a launch refused here for a configuration reason could run instead — the
- * `active_in_spaces` extension of `404 agent_not_active_in_space` and of a `409` carrying
- * `integration_not_active`. Computed on those refusals only, never on a read.
- */
+/** Where a launch refused here for a configuration reason could run instead (`active_in_spaces`); computed on refusals only. */
 
 import type { Context } from "hono";
 import { and, eq, inArray } from "drizzle-orm";
@@ -27,23 +23,19 @@ export interface LaunchSpace {
 }
 
 /** The launch refused here: the agent and the manifest the gate judged. */
-export interface RefusedLaunch {
+interface RefusedLaunch {
   packageId: string;
   manifest: Record<string, unknown>;
   manifestCache?: IntegrationManifestCache;
 }
 
-/**
- * The spaces where the launch passes both activation checks: the agent placed and active (an
- * inline run's shadow has no placement) and every integration it requires active.
- */
+/** The spaces where the agent (an inline shadow has no placement) and every required integration are active. */
 export type LaunchSpacesLookup = (launch: RefusedLaunch) => Promise<LaunchSpace[]>;
 
 /**
- * The lookup for this request: the spaces other than the one it entered where the caller holds
- * every one of `required`, the permissions of the refusing door ({@link credentialReachableSpaces}: a
- * credential pinned to the space gets `[]`). An end-user acts in its own space only (RBAC spec
- * §7.2): `[]`.
+ * Other spaces where the caller holds every `required` permission of the refusing door, within
+ * the credential's reach ({@link credentialReachableSpaces}: pinned gets `[]`). An end-user
+ * acts in its own space only (RBAC spec §7.2): `[]`.
  */
 export function launchSpacesLookup(
   c: Context<AppEnv>,

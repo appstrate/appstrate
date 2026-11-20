@@ -190,6 +190,18 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
+/** The activated ids still refused `integration_not_active`: a fresh 409 with another code drops the row's "activated". */
+export function stillActivated(
+  errors: MissingIntegrationFieldError[],
+  activated: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const ids = errors
+    .filter((e) => e.code === "integration_not_active")
+    .map((e) => integrationIdOfField(e.field))
+    .filter((id) => activated.has(id));
+  return new Set(ids);
+}
+
 /** The inactive-only intro holds while every refusal is `integration_not_active` and one is not yet activated. */
 export function onlyAwaitingActivation(
   errors: MissingIntegrationFieldError[],

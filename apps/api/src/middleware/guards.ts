@@ -154,10 +154,7 @@ export function requireActiveAgent(required: readonly Permission[]) {
   }, ACTIVE_AGENT_GATE);
 }
 
-/**
- * The refusal of an agent the caller CAN see and CANNOT run here: a configuration to repair, by
- * activating it here or, with the user's agreement, using it in one of `activeInSpaces`.
- */
+/** An agent the caller can see but not run here: activate it here or, with consent, use `activeInSpaces`. */
 function agentNotActiveInSpace(packageId: string, spaceId: string, activeInSpaces: LaunchSpace[]) {
   return new ApiError({
     status: 404,

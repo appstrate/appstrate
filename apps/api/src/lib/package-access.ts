@@ -474,7 +474,7 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 }
 
 /**
- * {@link assertPackageShareAccess} as a question, for bundle import: place the
+ * {@link assertPackagePlacementAccess} as a question, for bundle import: place the
  * root here when the caller may ({@link callerPlacementAuthority}), else `null`
  * and `root_active: false`.
  */
@@ -692,10 +692,10 @@ export async function assertPlacementRemovalAccess(
   return { pkg, authorityFor };
 }
 
-/** `share` asked by a placement write: the same permission, over the credential's reach. */
+/** The home-rule verbs; `place` is `share` asked by a placement write, over the credential's reach. */
 type GovernedAction = "write" | "delete" | "share" | "place";
 
-/** The home rule itself, for each of the three verbs that ask it. */
+/** The home rule itself, for each of the four verbs that ask it. */
 async function assertHomeAuthority(
   c: Context<AppEnv>,
   packageId: string,

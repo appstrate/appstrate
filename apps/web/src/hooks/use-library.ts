@@ -239,15 +239,17 @@ export function usePackageActivationInSpaces(
 }
 
 /** The working space's « Activer »: whether its library row lets the reader switch it on, and the act. */
-export function usePackageActivation(packageId: string) {
+export function usePackageActivation(
+  packageId: string,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
-  const { data: library } = useSpaceLibrary();
+  const { data: library } = useSpaceLibrary({ enabled });
   const spaceRow = libraryRow(library, packageId);
-  // A package homed elsewhere and not placed here may be absent from the space library (a
-  // personal space lists only what is placed): the org-wide library's per-space verdict
-  // (`activation`, "may place") answers then. Read only when needed.
-  const { data: orgLibrary } = useCatalogueLibrary({ enabled: !!library && !spaceRow });
+  // Homed elsewhere and not placed here, a package is absent from a personal space's library:
+  // the org-wide library's per-space `activation` verdict answers then.
+  const { data: orgLibrary } = useCatalogueLibrary({ enabled: enabled && !!library && !spaceRow });
   const row = spaceRow ?? libraryRow(orgLibrary, packageId);
   return {
     mayActivate: !!spaceId && !!row && activationGate(row, spaceId, true).allowed,

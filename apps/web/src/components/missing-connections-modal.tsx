@@ -23,6 +23,7 @@ import {
   isStructuralCode,
   onlyAwaitingActivation,
   retryDecision,
+  stillActivated,
   type MissingIntegrationFieldError,
 } from "../lib/connection-choice";
 import { refusalMessage } from "../lib/mutation-error";
@@ -68,7 +69,8 @@ export function MissingConnectionsModal({
 
   // Integrations activated from this modal: their row is resolved, so a re-run is worth offering
   // even when every refusal was the structural `integration_not_active`.
-  const [activated, setActivated] = useState<ReadonlySet<string>>(new Set());
+  const [switchedOn, setActivated] = useState<ReadonlySet<string>>(new Set());
+  const activated = stillActivated(errors, switchedOn);
   const decision = retryDecision(errors, retrying, stillBlocking);
   const showRetry = decision.showRetry || activated.size > 0;
   const { canRetry } = decision;
@@ -145,7 +147,11 @@ export function MissingRow({
   const isInactive = err.code === "integration_not_active";
   const awaitingActivation = isInactive && !activated;
   const isStructural = awaitingActivation || (!isInactive && isStructuralCode(err.code));
-  const { mayActivate, activate, pending: activating } = usePackageActivation(packageId);
+  const {
+    mayActivate,
+    activate,
+    pending: activating,
+  } = usePackageActivation(packageId, { enabled: awaitingActivation });
 
   // The server's verdict for the launched version, under the key the picker below reads it
   // from. The header follows it live: a connect, a renew or a `connection_update` event
