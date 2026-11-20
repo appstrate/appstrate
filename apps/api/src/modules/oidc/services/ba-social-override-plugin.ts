@@ -28,14 +28,13 @@
  * call below remains visible for the entire request — no explicit `run()`
  * wrapper is required.
  *
- * No-op when the pending-client cookie is missing, the referenced client is
- * not `level=space`, or no per-space creds are configured. In that last
- * case the getters fall through to env — which, for a space-level client
- * that hasn't configured the provider, will be empty. The provider factory's
- * own `CLIENT_ID_AND_SECRET_REQUIRED` guard then rejects the request — but
- * that path should never execute because the login page's feature-flag
- * gating (`features.socialGoogle` / `features.socialGithub`) prevents the
- * button from being rendered in the first place.
+ * No-op when the pending-client cookie is missing or the referenced client is
+ * not `level=space`. For a space client, a provider its space has not
+ * configured (Microsoft is never per-space) is refused with 403
+ * `social_provider_not_configured`: falling through to the env getters would
+ * run the instance's own OAuth app inside the space's flow. The login page
+ * hides those buttons (`features.socialGoogle` / `features.socialGithub`); the
+ * refusal covers a request built by hand.
  */
 
 import { APIError, createAuthMiddleware } from "better-auth/api";
@@ -43,16 +42,68 @@ import { enterSocialOverride, type SocialOverride } from "@appstrate/db/auth";
 import { logger } from "../../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../../lib/stored-credential.ts";
 import { getClientCached } from "./oauth-admin.ts";
+import { analyzeOAuthCallbackURL } from "./oauth-transaction-binding.ts";
 import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
-import { resolveSocialProviderForClient } from "./social.ts";
+import { resolveSocialProviderForClient, SOCIAL_PROVIDER_IDS } from "./social.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-async function applyOverride(ctx: { request?: Request }): Promise<void> {
-  const pendingClientId = readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
+/** The provider a social sign-in or callback request is for. */
+function requestedProvider(ctx: { path?: string; body?: unknown }): string | undefined {
+  if (ctx.path === "/sign-in/social") {
+    const provider = (ctx.body as { provider?: unknown } | undefined)?.provider;
+    return typeof provider === "string" ? provider : undefined;
+  }
+  return ctx.path?.split("/")[2];
+}
+
+/**
+ * A space client signs in only through the providers its space configured.
+ * Without this, a provider the space lacks (or one that is never per-space,
+ * like Microsoft) would run on the instance's own app inside the space's flow.
+ */
+function providerNotConfigured(provider: string | undefined): APIError {
+  return new APIError("FORBIDDEN", {
+    code: "social_provider_not_configured",
+    message: `Social provider ${provider ?? "(none)"} is not configured for this space`,
+  });
+}
+
+/**
+ * The client this social transaction is for. At initiation the authoritative
+ * source is the `callbackURL` resuming our authorize endpoint, the same one
+ * the realm resolver reads back from the OAuth state at the callback
+ * (`resolvePendingClientBinding`): a caller can drop the cookie, not the
+ * destination the transaction is stored with. Otherwise the pending-client
+ * cookie, as before.
+ */
+function transactionClientId(ctx: {
+  request?: Request;
+  path?: string;
+  body?: unknown;
+}): string | null {
+  if (ctx.path === "/sign-in/social") {
+    const callbackURL = (ctx.body as { callbackURL?: unknown } | undefined)?.callbackURL;
+    if (typeof callbackURL === "string") {
+      const analyzed = analyzeOAuthCallbackURL(callbackURL);
+      if (analyzed.kind === "oidc") return analyzed.clientId;
+    }
+  }
+  return readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
+}
+
+async function applyOverride(ctx: {
+  request?: Request;
+  path?: string;
+  body?: unknown;
+}): Promise<void> {
+  const pendingClientId = transactionClientId(ctx);
   if (!pendingClientId) return;
 
   const client = await getClientCached(pendingClientId);
   if (!client || client.level !== "space" || !client.referencedSpaceId) return;
+
+  const provider = requestedProvider(ctx);
+  if (!SOCIAL_PROVIDER_IDS.some((id) => id === provider)) throw providerNotConfigured(provider);
 
   try {
     const [google, github] = await Promise.all([
@@ -66,10 +117,10 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
     if (github) {
       override.github = { clientId: github.clientId, clientSecret: github.clientSecret };
     }
-    if (Object.keys(override).length > 0) {
-      enterSocialOverride(override);
-    }
+    if (!override[provider as keyof SocialOverride]) throw providerNotConfigured(provider);
+    enterSocialOverride(override);
   } catch (err) {
+    if (err instanceof APIError) throw err;
     // A missing key must not fall back to the instance's GOOGLE_*/GITHUB_* creds below.
     if (err instanceof EncryptionKeyUnavailableError) {
       throw new APIError("SERVICE_UNAVAILABLE", { code: err.code, message: err.message });
@@ -106,7 +157,7 @@ export function socialOverridePlugin() {
         {
           matcher: (ctx: { path?: string }) => matchesSocialPath(ctx.path),
           handler: createAuthMiddleware(async (ctx) => {
-            await applyOverride(ctx as { request?: Request });
+            await applyOverride(ctx);
           }),
         },
       ],

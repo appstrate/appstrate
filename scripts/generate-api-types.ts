@@ -38,8 +38,10 @@ const BANNER = `/* eslint-disable */
 // Regenerate with: bun run generate:api
 //
 // Source: apps/api/src/openapi/ merged with the OpenAPI contribution of EVERY
-// module in the tree — apps/api/src/modules/*/ and packages/module-*/ — found
-// on the FILESYSTEM, not through MODULES, so this file does not vary by config.
+// module in the tree — apps/api/src/modules/*/, packages/module-*/ and ee/ —
+// found on the FILESYSTEM, not through MODULES, so this file does not vary by
+// config. That includes ee/, which is under the commercial licence in
+// ee/LICENSE: its Sso* schemas and /api/org-sso/* paths appear below.
 
 `;
 

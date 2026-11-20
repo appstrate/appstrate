@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
@@ -17,7 +17,9 @@ import { EmailField, PasswordField } from "./auth-fields";
 import { AuthLink } from "./auth-message";
 import { LegalFooter } from "./legal-footer";
 import { EmailNotVerifiedError } from "../lib/auth-errors";
-import { errorMessage } from "../lib/mutation-error";
+import { errorMessage, refusalMessage } from "../lib/mutation-error";
+import { ApiError } from "../api/errors";
+import { errorCallbackURL, isSsoRefusal, socialCallbackError } from "../lib/org-sso";
 
 type LoginFormData = {
   email: string;
@@ -44,6 +46,7 @@ export function LoginForm({
 }: LoginFormProps) {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
+  const location = useLocation();
   const { resolvedTheme } = useTheme();
   const { login } = useAuth();
   const { features } = useAppConfig();
@@ -52,6 +55,7 @@ export function LoginForm({
     register,
     handleSubmit,
     setError,
+    clearErrors,
     showError,
     getValues,
     formState: { errors, isSubmitting },
@@ -59,15 +63,36 @@ export function LoginForm({
     defaultValues: { email: fixedEmail ?? "", password: "" },
   });
 
+  // An owner's way in while their organization requires Microsoft and Microsoft is down. Offered
+  // only where the enterprise sign-in module runs; its failure reads like any wrong password.
+  const [emergency, setEmergency] = useState(false);
+  // The refusal of the last password attempt, when it names the organization's sign-in policy.
+  const [passwordRefusal, setPasswordRefusal] = useState<string | null>(null);
+
+  // A social sign-in refused at its callback comes back here with `?error=<code>`.
+  const callbackError = socialCallbackError(location.search);
+  const callbackMessage = callbackError
+    ? (refusalMessage({ code: callbackError }) ?? t("login.socialFailed"))
+    : null;
+  const socialErrorCallbackURL = errorCallbackURL(location.pathname, location.search);
+  const pointToMicrosoft = isSsoRefusal(passwordRefusal) || isSsoRefusal(callbackError);
+
+  const toggleEmergency = () => {
+    setEmergency((on) => !on);
+    setPasswordRefusal(null);
+    clearErrors("root");
+  };
+
   const onSubmit = async (data: LoginFormData) => {
     const email = fixedEmail ?? data.email;
     try {
-      await login(email, data.password, callbackURL);
+      await login(email, data.password, callbackURL, { emergency });
     } catch (err) {
       if (err instanceof EmailNotVerifiedError) {
         navigate("/verify-email", { state: { email, callbackURL } });
         return;
       }
+      setPasswordRefusal(err instanceof ApiError ? err.code.toLowerCase() : null);
       setError("root", { message: errorMessage(err) });
     }
   };
@@ -101,7 +126,8 @@ export function LoginForm({
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
 
-  const hasSocialAuth = features.googleAuth || features.githubAuth || features.smtp;
+  const hasSocialAuth =
+    features.googleAuth || features.githubAuth || features.microsoftAuth || features.smtp;
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -135,10 +161,13 @@ export function LoginForm({
               )
             }
           />
-          {errors.root && <FieldError>{errors.root.message}</FieldError>}
+          {(errors.root?.message ?? callbackMessage) && (
+            <FieldError>{errors.root?.message ?? callbackMessage}</FieldError>
+          )}
+          {emergency && <p className="text-muted-foreground text-xs">{t("login.emergencyHint")}</p>}
         </div>
         <PendingButton size="lg" className="w-full" type="submit" pending={isSubmitting}>
-          {t("login.login")}
+          {emergency ? t("login.emergencySubmit") : t("login.login")}
         </PendingButton>
         {hasSocialAuth && (
           <>
@@ -149,10 +178,26 @@ export function LoginForm({
             </div>
             <div className="flex flex-col gap-2">
               {features.googleAuth && (
-                <SocialSignInButton provider="google" callbackURL={callbackURL} />
+                <SocialSignInButton
+                  provider="google"
+                  callbackURL={callbackURL}
+                  errorCallbackURL={socialErrorCallbackURL}
+                />
               )}
               {features.githubAuth && (
-                <SocialSignInButton provider="github" callbackURL={callbackURL} />
+                <SocialSignInButton
+                  provider="github"
+                  callbackURL={callbackURL}
+                  errorCallbackURL={socialErrorCallbackURL}
+                />
+              )}
+              {features.microsoftAuth && (
+                <SocialSignInButton
+                  provider="microsoft"
+                  callbackURL={callbackURL}
+                  errorCallbackURL={socialErrorCallbackURL}
+                  emphasized={pointToMicrosoft}
+                />
               )}
               {features.smtp && (
                 <Button
@@ -167,6 +212,15 @@ export function LoginForm({
               )}
             </div>
           </>
+        )}
+        {features.enterpriseSso && (
+          <button
+            type="button"
+            onClick={toggleEmergency}
+            className="text-muted-foreground hover:text-primary self-center text-xs underline-offset-4 hover:underline"
+          >
+            {emergency ? t("login.emergencyLeave") : t("login.emergencyLink")}
+          </button>
         )}
       </form>
       {resolvedFooter}

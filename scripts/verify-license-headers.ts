@@ -2,11 +2,12 @@
 /// <reference types="bun" />
 
 /**
- * Verify that every source file states its licence,
- * `// SPDX-License-Identifier: Apache-2.0`, within the first 3 lines, so a
- * shebang or `/// <reference>` may precede it. The whole repository is
- * Apache-2.0; a file under a second licence would be a deliberate change to
- * this gate, not a header to add. THE TRAP: the set comes from `git ls-files`,
+ * Verify that every source file states its licence within the first 3 lines,
+ * so a shebang or `/// <reference>` may precede it:
+ *   ee/**          →  // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+ *   everything else →  // SPDX-License-Identifier: Apache-2.0
+ * `ee/` is the one directory under a second licence (`ee/LICENSE`); widening
+ * that set is a deliberate change to this gate, not a header to add. THE TRAP: the set comes from `git ls-files`,
  * so a file not yet `git add`ed passes here and fails the moment it is staged.
  */
 
@@ -18,7 +19,15 @@ const REPO_ROOT = join(import.meta.dir, "..");
 
 const HEADER_LINES = 3;
 
-const EXPECTED_HEADER = "// SPDX-License-Identifier: Apache-2.0";
+/** The repository's one directory under the commercial licence (`ee/LICENSE`). */
+const COMMERCIAL_PREFIX = "ee/";
+
+export type ExpectedLicense = "Apache-2.0" | "LicenseRef-Appstrate-Commercial";
+
+/** The licence `path` must declare. Pure; a prefix match, not a substring one. */
+export function expectedLicenseFor(path: string): ExpectedLicense {
+  return path.startsWith(COMMERCIAL_PREFIX) ? "LicenseRef-Appstrate-Commercial" : "Apache-2.0";
+}
 
 // Exempt: a hand-added header is erased on the next regeneration and
 // `verify:api-types` then fails on the diff. Explicit paths, never a directory.
@@ -59,11 +68,12 @@ export function checkLicenseHeader(path: string, lines: readonly string[]): stri
     .slice(0, HEADER_LINES)
     .find((line) => line.includes("SPDX-License-Identifier"));
 
+  const expected = `// SPDX-License-Identifier: ${expectedLicenseFor(path)}`;
   if (header === undefined) {
-    return `${path} — no SPDX header in the first ${HEADER_LINES} lines. Add \`${EXPECTED_HEADER}\`.`;
+    return `${path} — no SPDX header in the first ${HEADER_LINES} lines. Add \`${expected}\`.`;
   }
-  if (header.trim() !== EXPECTED_HEADER) {
-    return `${path} — declares \`${header.trim()}\`, expected \`${EXPECTED_HEADER}\`.`;
+  if (header.trim() !== expected) {
+    return `${path} — declares \`${header.trim()}\`, expected \`${expected}\`.`;
   }
   return null;
 }
@@ -118,7 +128,8 @@ if (import.meta.main) {
     for (const problem of problems) console.error(`❌ ${problem}`);
     console.error(
       `\n${problems.length} file(s) with a wrong or missing licence header. ` +
-        `The repository is Apache-2.0.\n` +
+        `The repository is Apache-2.0 except \`${COMMERCIAL_PREFIX}\`, which is under the ` +
+        `commercial licence in that directory.\n` +
         `Note: this gate reads \`git ls-files\`, so a file you have not \`git add\`ed yet is ` +
         `not listed above — stage it and re-run.`,
     );
@@ -126,7 +137,7 @@ if (import.meta.main) {
   }
 
   console.log(
-    `✅ licence headers clean — ${files.length} files checked, all Apache-2.0, ` +
+    `✅ licence headers clean — ${files.length} files checked, \`${COMMERCIAL_PREFIX}\` commercial, the rest Apache-2.0, ` +
       `${GENERATED_ALLOWLIST.length} generated file(s) exempt.`,
   );
 }

@@ -256,6 +256,7 @@ export type EnrichedRun = RunWireDto & {
 export interface AppConfigFeatures {
   googleAuth: boolean;
   githubAuth: boolean;
+  microsoftAuth: boolean;
   smtp: boolean;
   /** AUTH_DISABLE_SIGNUP — webapp hides "Create account" links and copy. */
   signupDisabled: boolean;

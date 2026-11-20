@@ -215,6 +215,18 @@ export function renderLayout(props: LayoutProps): RawHtml {
           .footer-links .sep {
             margin: 0 8px;
           }
+          .emergency {
+            margin-top: 16px;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+          }
+          .emergency summary {
+            cursor: pointer;
+          }
+          .emergency form {
+            text-align: left;
+          }
         </style>
       </head>
       <body>

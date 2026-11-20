@@ -396,7 +396,7 @@ For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenan
 - `services/social.ts` — resolver with a 60s/30s TTL in-memory cache. Invalidated on every upsert/delete so admin changes are visible within one request.
 - `services/ba-social-override-plugin.ts` — a Better Auth plugin whose `before` hook matches `/sign-in/social` + `/callback/:provider`. It reads the signed `oidc_pending_client` cookie, looks up the OIDC client, resolves per-space creds, and calls `enterSocialOverride()` (AsyncLocalStorage).
 - `packages/db/src/auth.ts` — the `socialProviders.{google,github}.{clientId,clientSecret}` entries are **getters** that first consult `getSocialOverride()` and fall back to env. This relies on Better Auth's provider factories (`@better-auth/core/social-providers/{google,github}.mjs`) reading `options.clientId` / `options.clientSecret` lazily via property access inside `createAuthorizationURL` / `validateAuthorizationCode` rather than destructuring at init time — verified against BA 1.6.2.
-- `loadPageContext` in `routes.ts` populates `ctx.features.socialGoogle` / `.socialGithub` per-client: `space` → resolver result, `org`/`instance` → env presence.
+- `loadPageContext` in `routes.ts` populates `ctx.features.socialGoogle` / `.socialGithub` / `.socialMicrosoft` per-client: `space` → resolver result (Google/GitHub only), `org`/`instance` → env presence (Microsoft is platform-level, never per-space).
 
 **Tenant setup**:
 

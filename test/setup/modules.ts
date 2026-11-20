@@ -28,11 +28,15 @@ function scanRoot(
     .filter(({ dir, entry }) => statSync(dir).isDirectory() && existsSync(entry));
 }
 
-/** Every module: `apps/api/src/modules/<n>/index.ts`, `packages/module-<n>/src/index.ts`. */
+/**
+ * Every module: `apps/api/src/modules/<n>/index.ts`, `packages/module-<n>/src/index.ts`, and the
+ * commercial `ee/src/index.ts` at the repository root.
+ */
 export function discoverModules(repoRoot: string): DiscoveredModule[] {
   return [
     ...scanRoot(resolve(repoRoot, "apps/api/src/modules"), "index.ts", () => true),
     ...scanRoot(resolve(repoRoot, "packages"), "src/index.ts", (n) => n.startsWith("module-")),
+    ...scanRoot(repoRoot, "src/index.ts", (n) => n === "ee"),
   ];
 }
 

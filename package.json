@@ -132,6 +132,7 @@
   "workspaces": [
     "apps/*",
     "packages/*",
+    "ee",
     "runtime-pi",
     "runtime-pi/sidecar",
     "e2e"

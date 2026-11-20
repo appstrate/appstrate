@@ -107,6 +107,10 @@ tree, no `__drizzle_migrations_<id>` table.
    the billing tables cannot sit in the core schema. It reads
    platform data through `ctx.services` (e.g. `services.usage.list`), never a
    SQL join across the module boundary.
+   The commercial `@appstrate/ee` at the root `ee/` follows the same rule for
+   another reason: it is under its own licence (`ee/LICENSE`), so its tables
+   cannot sit in the Apache-2.0 core schema. Its journal is
+   `drizzle.appstrate_ee_migrations`.
    `bun run verify:module-sql-boundary` (in `bun run check`) enforces that last
    sentence: because those tables sit in the platform database, a `SELECT …
 FROM organizations` written in the module compiles, runs and returns rows, so

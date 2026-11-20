@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ReauthMethod = { kind: "social"; provider: "google" | "github" } | { kind: "password" };
+export type ReauthMethod =
+  { kind: "social"; provider: "google" | "github" | "microsoft" } | { kind: "password" };
 
 /**
  * Which re-authentication methods to offer for a step-up re-login. Password
@@ -9,7 +10,7 @@ export type ReauthMethod = { kind: "social"; provider: "google" | "github" } | {
  */
 export function availableReauthMethods(
   accounts: Array<{ providerId: string }> | undefined,
-  features: { googleAuth: boolean; githubAuth: boolean },
+  features: { googleAuth: boolean; githubAuth: boolean; microsoftAuth: boolean },
 ): ReauthMethod[] {
   if (!accounts || accounts.length === 0) return [];
 
@@ -24,6 +25,9 @@ export function availableReauthMethods(
   }
   if (linked.has("github") && features.githubAuth) {
     methods.push({ kind: "social", provider: "github" });
+  }
+  if (linked.has("microsoft") && features.microsoftAuth) {
+    methods.push({ kind: "social", provider: "microsoft" });
   }
 
   return methods;

@@ -10,6 +10,7 @@ import {
   KeyRound,
   Laptop,
   LayoutGrid,
+  LockKeyhole,
   Palette,
   Plug,
   Settings,
@@ -68,6 +69,7 @@ export function visibleSettingsSections(
         entry("/org-settings/oauth", KeyRound, "orgSettings.tabOauth"),
         entry("/org-settings/cli-sessions", Laptop, "orgSettings.tabCliSessions"),
         entry("/org-settings/billing", CreditCard, "billing.tabTitle"),
+        entry("/org-settings/enterprise-sso", LockKeyhole, "orgSso.tabTitle"),
       ],
     },
     {
