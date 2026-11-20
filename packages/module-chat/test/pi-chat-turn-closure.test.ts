@@ -16,6 +16,7 @@ import {
   isChatTurnDeadline,
   resolveTurnClosure,
   turnDeadlineNoticeText,
+  turnContextOf,
   turnNoticeChunks,
 } from "../src/pi-chat/pi-turn-closure.ts";
 
@@ -385,6 +386,51 @@ describe("the model a turn bound to", () => {
       modelId: "mdl_opus",
       modelLabel: "Claude Opus 5",
       errorCategory: "upstream_unavailable",
+    });
+  });
+});
+
+describe("turnContextOf", () => {
+  const ON = {
+    contextWindow: 200_000,
+    compaction: { enabled: true as const, reserveTokens: 16_384 },
+  };
+
+  it("states the tokens over the window, with the compaction threshold", () => {
+    expect(turnContextOf({ contextTokens: 48_200, compacted: false }, ON)).toEqual({
+      context: { tokens: 48_200, window: 200_000, compactAt: 183_616 },
+    });
+  });
+
+  it("carries no threshold when compaction is off, and flags a compaction", () => {
+    const off = { contextWindow: 128_000, compaction: { enabled: false as const } };
+    expect(turnContextOf({ contextTokens: 10, compacted: true }, off)).toEqual({
+      context: { tokens: 10, window: 128_000, compacted: true },
+    });
+  });
+
+  it("states nothing when nothing was measured or no model was bound", () => {
+    expect(turnContextOf({ compacted: false }, ON)).toEqual({});
+    expect(turnContextOf({ contextTokens: 5, compacted: false }, undefined)).toEqual({});
+  });
+
+  it("persists the context with the turn's closing metadata", async () => {
+    const chunks = closePiTurn({
+      finishReason: "stop",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 1,
+      stepCapReached: false,
+      ...MODEL,
+      ...turnContextOf({ contextTokens: 48_200, compacted: false }, ON),
+      newId: () => "assistant-ctx",
+    }).chunks;
+    const message = await assemble(chunks);
+    expect(turnMetadataFromMessage(message)?.context).toEqual({
+      tokens: 48_200,
+      window: 200_000,
+      compactAt: 183_616,
     });
   });
 });

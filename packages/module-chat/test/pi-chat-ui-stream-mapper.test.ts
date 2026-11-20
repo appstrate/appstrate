@@ -549,3 +549,63 @@ describe("the space a tool call is stamped with", () => {
     expect("providerMetadata" in available({ space_id: "spc_x" }, new Set(["spc_o"]))).toBe(false);
   });
 });
+
+describe("PiChatUiStreamMapper — context of the last settled call", () => {
+  const usage = (
+    input: number,
+    output: number,
+    cacheRead = 0,
+    cacheWrite = 0,
+    totalTokens = 0,
+  ) => ({
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    totalTokens,
+    cost: ZERO_COST,
+  });
+  const end = (stopReason: string, u: ReturnType<typeof usage>): AgentSessionEvent => ({
+    type: "message_end",
+    message: { role: "assistant", stopReason, usage: u },
+  });
+
+  it("keeps the LAST call's tokens, never the turn's sum", () => {
+    const { mapper } = run([
+      end("toolUse", usage(1_000, 200, 9_000)),
+      end("stop", usage(1_500, 300, 10_200)),
+    ]);
+    const meta = mapper.result();
+    expect(meta.contextTokens).toBe(12_000);
+    // The billing sum counts the history once per call — not the context.
+    expect(meta.usage.cache_read_input_tokens).toBe(19_200);
+  });
+
+  it("prefers the provider's totalTokens, as Pi's compaction measure does", () => {
+    const { mapper } = run([end("stop", usage(100, 50, 0, 0, 777))]);
+    expect(mapper.result().contextTokens).toBe(777);
+  });
+
+  it("ignores an aborted, failed or empty call, which measured nothing", () => {
+    const { mapper } = run([
+      end("stop", usage(4_000, 100)),
+      end("aborted", usage(9_000, 0)),
+      end("error", usage(9_000, 0)),
+      end("stop", usage(0, 0)),
+    ]);
+    expect(mapper.result().contextTokens).toBe(4_100);
+  });
+
+  it("reports no context when no call settled", () => {
+    const { mapper } = run([end("error", usage(9_000, 0))]);
+    expect("contextTokens" in mapper.result()).toBe(false);
+    expect(mapper.result().compacted).toBe(false);
+  });
+
+  it("flags a compaction that produced a summary, not an aborted one", () => {
+    const aborted = run([{ type: "compaction_end", result: undefined, aborted: true }]);
+    expect(aborted.mapper.result().compacted).toBe(false);
+    const done = run([{ type: "compaction_end", result: { summary: "…" }, aborted: false }]);
+    expect(done.mapper.result().compacted).toBe(true);
+  });
+});
