@@ -32,7 +32,7 @@ const OPTIONS = { estimateTokens: () => 1, baseTokens: 0 };
 /**
  * A v6-persisted thread: a user turn, an assistant turn carrying every part kind
  * chat can persist — text, reasoning, a step boundary, a static tool call
- * (`tool-search_operations`) and a dynamic tool call (`dynamic-tool`), each in
+ * (`tool-search`) and a dynamic tool call (`dynamic-tool`), each in
  * the completed `output-available` shape (input + output) — then the new user
  * turn this projection is being built for. Ids match the wire shape
  * assistant-ui writes.
@@ -49,7 +49,7 @@ function v6Thread(): UIMessage[] {
         { type: "step-start" },
         {
           // Static tool part: `type: "tool-<name>"`, completed with input+output.
-          type: "tool-search_operations",
+          type: "tool-search",
           toolCallId: "call_static_1",
           state: "output-available",
           input: { query: "gmail connect" },
@@ -120,7 +120,7 @@ describe("v6 message replay through the structured Pi projection", () => {
         .filter((c) => c.type === "toolCall")
         .map((c) => c.name)
         .sort(),
-    ).toEqual(["invoke_operation", "search_operations"]);
+    ).toEqual(["invoke_operation", "search"]);
     expect(turn.toolCallCount).toBe(2);
     expect(turn.toolResultCount).toBe(2);
 
@@ -154,7 +154,7 @@ describe("v6 message replay through the structured Pi projection", () => {
     assistant.parts = [
       { type: "text", text: "working" },
       {
-        type: "tool-search_operations",
+        type: "tool-search",
         toolCallId: "call_orphan",
         state: "input-available",
         input: { query: "gmail" },

@@ -30,7 +30,7 @@ const toolThread: UIMessage[] = [
       { type: "step-start" },
       {
         type: "dynamic-tool",
-        toolName: "search_operations",
+        toolName: "search",
         toolCallId: "call_search",
         state: "output-available",
         input: { query: "agents" },
@@ -88,7 +88,7 @@ describe("structured Pi session reconstruction", () => {
     const results = turn.history.filter((message) => message.role === "toolResult");
     expect(results[0]).toMatchObject({
       toolCallId: "call_search",
-      toolName: "search_operations",
+      toolName: "search",
       isError: false,
     });
     expect(results[1]).toMatchObject({
@@ -211,7 +211,7 @@ describe("structured Pi session reconstruction", () => {
         parts: [
           {
             type: "dynamic-tool",
-            toolName: "search_operations",
+            toolName: "search",
             toolCallId: "call_cut",
             state: "input-available",
             input: { query: "x" },

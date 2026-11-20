@@ -84,7 +84,7 @@ export type ReadAttachment = (
 ) => Promise<ChatAttachmentContent | null>;
 
 /**
- * Only a PDF explicitly attached to this prompt is sent. Later turns may use read_file
+ * Only a PDF explicitly attached to this prompt is sent. Later turns may use read
  * with the durable pointer, which checks the caller's current permissions again.
  */
 export async function readPromptPdfs(

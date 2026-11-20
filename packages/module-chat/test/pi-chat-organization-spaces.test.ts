@@ -47,8 +47,10 @@ interface RegisteredTool {
 }
 
 /** Everything the transport saw, in order, with the touches interleaved. */
-function transcript() {
+function transcript(searchKinds?: string[]) {
   const events: string[] = [];
+  /** The `searched_spaces` the stub's `search` answers with, when set. */
+  const answers: { searched?: unknown } = {};
   const launches: Array<{ spaceHeader: string | null; body: string }> = [];
   const polls: Array<string | null> = [];
   const toolCalls: unknown[] = [];
@@ -94,10 +96,24 @@ function transcript() {
               },
             },
             {
-              name: "read_file",
+              name: "read",
               inputSchema: {
                 type: "object",
                 properties: { uri: { type: "string" }, space_id: spaceId },
+                required: ["space_id"],
+              },
+            },
+            {
+              name: "search",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  query: { type: "string" },
+                  ...(searchKinds
+                    ? { kinds: { type: "array", items: { type: "string", enum: searchKinds } } }
+                    : {}),
+                  space_id: spaceId,
+                },
               },
             },
             {
@@ -118,6 +134,24 @@ function transcript() {
           return reply({
             content: [{ type: "text", text: JSON.stringify(PLATFORM_REFUSAL) }],
             isError: true,
+          });
+        }
+        const uri = (msg.params as { arguments?: { uri?: string } }).arguments?.uri;
+        if (uri?.startsWith("skill://")) {
+          return reply({
+            content: [
+              { type: "resource", resource: { uri, mimeType: "text/markdown", text: "# Tone" } },
+            ],
+          });
+        }
+        if ((msg.params as { name?: string }).name === "search") {
+          const found = {
+            operations: { total: 0, items: [] },
+            ...(answers.searched !== undefined ? { searched_spaces: answers.searched } : {}),
+          };
+          return reply({
+            content: [{ type: "text", text: JSON.stringify(found) }],
+            structuredContent: found,
           });
         }
         return reply({ content: [{ type: "text", text: "{}" }] });
@@ -156,7 +190,7 @@ function transcript() {
   }) as typeof fetch;
 
   const lookups: string[] = [];
-  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups };
+  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups, answers };
 }
 
 function organizationOf(
@@ -292,6 +326,77 @@ describe("the conversation's forwarded tools and resources", () => {
     }
   });
 
+  it("records, after a call that omits an optional space_id, the spaces its result says it read, and none before", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_alpha"];
+    const { built, tool } = await tools(transport);
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(transport.events).toEqual(["tools/call", "touch spc_alpha"]);
+      expect(text(result)).toContain("searched_spaces");
+
+      // A result that lists none records none.
+      transport.answers.searched = undefined;
+      transport.events.length = 0;
+      await tool("search").execute("c2", { query: "x" });
+      expect(transport.events).toEqual(["tools/call"]);
+
+      // A named space is recorded before the call, as ever.
+      transport.events.length = 0;
+      await tool("search").execute("c3", { query: "x", space_id: "spc_beta" });
+      expect(transport.events).toEqual(["touch spc_beta", "tools/call"]);
+
+      transport.events.length = 0;
+      await tool("invoke_operation").execute("c4", { operation_id: "listAgents" });
+      expect(transport.events).toEqual(["tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("withholds the result of a call that read a space outside the turn", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_alpha", "spc_elsewhere"];
+    const { built, tool } = await tools(transport);
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+      expect(text(result)).not.toContain("operations");
+      expect(transport.events).toEqual(["tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("withholds the result of a call whose read spaces cannot be recorded", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_beta"];
+    const { built, tool } = await tools(transport, "spc_beta");
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+      expect(text(result)).not.toContain("operations");
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("keeps the text of a skill read through `read` in the replay", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const result = (await tool("read").execute("c1", {
+        uri: "skill://spc_beta/acme/tone/tone/SKILL.md",
+        space_id: "spc_beta",
+      })) as { content: Array<{ text?: string }>; persistedContent?: unknown };
+      expect(result.content.map((block) => block.text).join("")).toContain("# Tone");
+      // No receipt stands in for it: the stored content is the text itself.
+      expect(result.persistedContent).toBeUndefined();
+    } finally {
+      await built.close();
+    }
+  });
+
   it("records the space of a resource URI it can place, before the read", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
@@ -336,7 +441,7 @@ describe("the files a call names", () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      await tool("read_file").execute("c1", {
+      await tool("read").execute("c1", {
         uri: "appfile://file_beta0001",
         space_id: "spc_alpha",
         again: ["appfile://file_gamma001", { deep: "appfile://file_own00001" }],

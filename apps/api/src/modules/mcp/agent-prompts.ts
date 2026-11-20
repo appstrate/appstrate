@@ -27,7 +27,7 @@ import {
   type AgentLaunchView,
 } from "./agent-prompt-render.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
-import { dispatchHeaders } from "./tool-results.ts";
+import { dispatchGet, listAgents, readSpaces } from "./discovery.ts";
 
 /** A space the connection reaches, as the prompts need it. */
 export interface PromptSpace {
@@ -39,18 +39,16 @@ export interface PromptSpace {
 export interface AgentPromptContext {
   origin: string;
   authHeaders: Headers;
-  dispatch: Dispatch;
+  /** A dispatch run in one of `spaces`. */
+  dispatchIn: (spaceId: string) => Dispatch;
   spaces: readonly PromptSpace[];
 }
 
-/** A `GET /api/agents` row that gets a prompt: a published agent. */
-interface ListedAgent {
+/** A published agent of a space, with the prompt name it gets. */
+interface NamedAgent {
   packageId: string;
   title: string;
   description: string;
-}
-
-interface NamedAgent extends ListedAgent {
   name: string;
   spaceId: string;
 }
@@ -62,40 +60,12 @@ const REQUEST_ARGUMENT = {
   required: false,
 };
 
-function get(ctx: AgentPromptContext, spaceId: string, path: string): Promise<Response> {
-  const headers = dispatchHeaders(ctx.authHeaders);
-  headers.set("x-space-id", spaceId);
-  return ctx.dispatch(
-    new Request(new URL(path, ctx.origin).toString(), { method: "GET", headers }),
-  );
-}
-
-async function listPublishedAgents(
-  ctx: AgentPromptContext,
-  spaceId: string,
-): Promise<ListedAgent[]> {
-  const response = await get(ctx, spaceId, "/api/agents");
-  if (!response.ok) return [];
-  const body = (await response.json()) as {
-    data?: { id?: unknown; display_name?: unknown; description?: unknown; published?: unknown }[];
-  };
-  return (body.data ?? [])
-    .flatMap((row): ListedAgent[] => {
-      const { id } = row;
-      if (typeof id !== "string" || parseScopedName(id) === null || row.published !== true) {
-        return [];
-      }
-      return [
-        {
-          packageId: id,
-          title:
-            typeof row.display_name === "string" && row.display_name.trim() ? row.display_name : id,
-          description: typeof row.description === "string" ? row.description : "",
-        },
-      ];
-    })
-    .sort((a, b) => (a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0));
-}
+/** `ctx` reading in `spaceId`. */
+const readingIn = (ctx: AgentPromptContext, spaceId: string) => ({
+  origin: ctx.origin,
+  authHeaders: ctx.authHeaders,
+  dispatch: ctx.dispatchIn(spaceId),
+});
 
 /**
  * Names in space order, then package id order, over published agents only. The
@@ -104,23 +74,28 @@ async function listPublishedAgents(
  * `run-<scope>-<name>`.
  */
 async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
-  const spaces = ctx.spaces.filter((space) => space.surface.runs);
-  const listed = await Promise.all(spaces.map((space) => listPublishedAgents(ctx, space.id)));
+  const { answered } = await readSpaces(
+    ctx.spaces.filter((space) => space.surface.runs),
+    (space) => listAgents(readingIn(ctx, space.id)),
+  );
   const taken = new Set<string>();
   const named: NamedAgent[] = [];
-  spaces.forEach((space, i) => {
-    for (const agent of listed[i]!) {
-      const segment = parseScopedName(agent.packageId)!.name;
+  for (const { space, value } of answered) {
+    const published = value.agents
+      .filter((agent) => agent.published)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const { id, display_name: title, description } of published) {
+      const segment = parseScopedName(id)!.name;
       const preferred = agentPromptName(segment);
       const name = !taken.has(preferred)
         ? preferred
-        : named.some((other) => other.packageId === agent.packageId)
+        : named.some((other) => other.packageId === id)
           ? spaceCollisionPromptName(segment, space.name, taken)
-          : scopeCollisionPromptName(agent.packageId, taken);
+          : scopeCollisionPromptName(id, taken);
       taken.add(name);
-      named.push({ ...agent, name, spaceId: space.id });
+      named.push({ packageId: id, title, description, name, spaceId: space.id });
     }
-  });
+  }
   return named;
 }
 
@@ -129,9 +104,8 @@ async function resolveAgent(
   ctx: AgentPromptContext,
   agent: NamedAgent,
 ): Promise<AgentLaunchView | null> {
-  const response = await get(
-    ctx,
-    agent.spaceId,
+  const response = await dispatchGet(
+    readingIn(ctx, agent.spaceId),
     `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
   );
   if (!response.ok) return null;

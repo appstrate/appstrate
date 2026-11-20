@@ -105,8 +105,12 @@ for (const [scenario, title] of [
         const results = body.messages.filter((m) => m.role === "tool");
         if (!results.length)
           return {
-            name: "search_integration_tools",
-            arguments: { integration, space_id: defaultSpaceId },
+            name: "search",
+            arguments: {
+              kinds: ["integration_tool"],
+              integration,
+              space_id: defaultSpaceId,
+            },
           };
         if (results.length === 1) {
           const tool = JSON.stringify(results[0]?.content).match(

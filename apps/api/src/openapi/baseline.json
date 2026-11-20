@@ -25179,7 +25179,7 @@
                   },
                   "credential_proxy_open": {
                     "type": "boolean",
-                    "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
+                    "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools' integration tools (`search` and `describe` of the `integration_tool` kind, `call_integration_tool`). `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
                   }
                 },
                 "additionalProperties": false
@@ -28886,6 +28886,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "catalogs",
+            "in": "query",
+            "required": false,
+            "description": "`live` (the default) reads a remote catalog the cache does not hold from its server, as described above. `cached` reads the cache alone: a catalog not in it is not listed, so no server is contacted, no credential sent and no call journaled; its declared tools are listed `catalog_unreadable`, and the integration in `uncached`.",
+            "schema": {
+              "type": "string",
+              "enum": ["live", "cached"]
+            }
           }
         ],
         "responses": {
@@ -28908,7 +28918,8 @@
                     "connections",
                     "not_ready",
                     "unlisted",
-                    "truncated_catalogs"
+                    "truncated_catalogs",
+                    "uncached"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -29192,6 +29203,13 @@
                             "description": "The tools read: the first ones the server lists."
                           }
                         }
+                      }
+                    },
+                    "uncached": {
+                      "type": "array",
+                      "description": "With `catalogs=cached`: the remote integrations whose catalog the cache did not hold, listed by their declared tools. Empty otherwise.",
+                      "items": {
+                        "type": "string"
                       }
                     }
                   }
@@ -38350,7 +38368,7 @@
           },
           "credential_proxy_open": {
             "type": "boolean",
-            "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
+            "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools' integration tools (`search` and `describe` of the `integration_tool` kind, `call_integration_tool`). `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
           },
           "personal": {
             "type": "boolean",

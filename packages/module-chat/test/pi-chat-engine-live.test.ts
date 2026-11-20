@@ -1000,7 +1000,7 @@ describe("runPiChat against a stub provider", () => {
       instructions: "Stub platform instructions.\n\n## Operation index\n## Agents\nlistAgents",
       tools: [
         {
-          name: "search_operations",
+          name: "search",
           description: "Search the stub's operations.",
           inputSchema: { type: "object", properties: { query: { type: "string" } } },
         },
@@ -1016,7 +1016,7 @@ describe("runPiChat against a stub provider", () => {
     expect(mcpInitializes).toBe(1);
     expect(capture.bodies).toHaveLength(2);
     expect(capture.bodies[0]).toContain("Stub platform instructions.");
-    expect(capture.bodies[0]).toContain("search_operations");
+    expect(capture.bodies[0]).toContain("Search the stub's operations.");
     expect(capture.bodies[1]).toBe(capture.bodies[0]!);
   }, 30_000);
 

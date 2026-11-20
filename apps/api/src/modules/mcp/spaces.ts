@@ -11,7 +11,7 @@ import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { enterableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
-import type { McpSurface } from "./tools.ts";
+import type { Dispatch, McpSurface } from "./tools.ts";
 import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
 
@@ -30,6 +30,29 @@ export interface McpSpace {
 export interface OrgWideSpaces {
   reachable: readonly McpSpace[];
   current: McpSpace;
+}
+
+/** An org-wide connection as a tool reads it. */
+export interface OrgWideToolSpaces extends OrgWideSpaces {
+  /** A dispatch run in one reachable space; throws for any other. */
+  dispatchIn: (spaceId: string) => Dispatch;
+}
+
+/** {@link OrgWideToolSpaces.dispatchIn} over `send`: a `bound` credential is pinned to the space per dispatch, any other enters it by `x-space-id`. */
+export function spaceDispatcher(
+  spaces: OrgWideSpaces,
+  send: (request: Request, spacePin?: string) => Promise<Response>,
+  bound: boolean,
+): (spaceId: string) => Dispatch {
+  return (spaceId) => {
+    if (!spaces.reachable.some((space) => space.id === spaceId)) {
+      throw new Error(`Space ${spaceId} is not one this connection reaches.`);
+    }
+    return (request) => {
+      request.headers.set("x-space-id", spaceId);
+      return send(request, bound ? spaceId : undefined);
+    };
+  };
 }
 
 /** The credential's space and the URL's (`/api/mcp/o/:org/s/:space`), when set. */
@@ -93,6 +116,14 @@ export function grantedSpaces(
   return matching.length === spaces.reachable.length ? undefined : matching;
 }
 
+/** The ids of the spaces where `granted` holds. */
+export function spaceIdsWhere(
+  spaces: readonly McpSpace[],
+  granted: (space: McpSpace) => boolean,
+): string[] {
+  return spaces.filter(granted).map((space) => space.id);
+}
+
 /** `granted_in` by space ID. */
 export function grantedIn(
   spaces: OrgWideSpaces | undefined,
@@ -112,19 +143,20 @@ export const NO_FALLBACK_HINT =
   "Do not retry this action in another space to get around the refusal; report it to the " +
   "user, who decides which space the action belongs in.";
 
+export function spaceMismatchRefusal(acts: string, argument: string, space?: McpSpace): Refusal {
+  return {
+    code: "space_mismatch",
+    error: `This request acts in ${acts}; send a call for another space as its own request.`,
+    arguments: [argument],
+    ...(space ? { space: spaceRef(space) } : {}),
+  };
+}
+
 /** The refusal a call's `space_id` earns, or undefined when it names the entered space. */
 export function spaceArgumentRefusal(spaces: OrgWideSpaces, spaceId: unknown): Refusal | undefined {
   const named = spaceIdRefusal(spaces.reachable, spaceId);
   if (named) return named;
-  if (spaceId !== spaces.current.id) {
-    return {
-      code: "space_mismatch",
-      error:
-        `This request acts in ${describeSpace(spaces.current)}; ` +
-        "send a call for another space as its own request.",
-      arguments: ["space_id"],
-      space: spaceRef(spaces.current),
-    };
-  }
-  return undefined;
+  return spaceId !== spaces.current.id
+    ? spaceMismatchRefusal(describeSpace(spaces.current), "space_id", spaces.current)
+    : undefined;
 }

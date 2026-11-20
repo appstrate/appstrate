@@ -110,7 +110,7 @@ describe("full persona invariants", () => {
   });
 
   it("reads file content directly before considering a run", () => {
-    expect(FULL).toMatch(/call `read_file` first/);
+    expect(FULL).toMatch(/call `read` first/);
     expect(FULL).toMatch(/answer directly from that content/);
     expect(FULL).toMatch(/do NOT launch a run merely to read or analyse it/);
     expect(FULL).toContain("Use files already supplied to your model directly");
@@ -188,7 +188,7 @@ describe("full persona invariants", () => {
     expect(REDUCED).not.toContain("list the exact tool names the task needs");
   });
 
-  // `describe_operation` answers with the operation's definition; the integration comes from the call.
+  // `describe` answers with the operation's definition; the integration comes from the call.
   it("reads an integration's tool names with invoke_operation, naming the field that holds each", () => {
     expect(FULL).toContain(
       'read it with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
@@ -378,7 +378,7 @@ describe("the persona without inline composition", () => {
     expect(REDUCED).toContain("You are Appstrate's assistant");
     expect(REDUCED).toContain("Never quote run metrics");
     expect(REDUCED).toContain("use an available integration rather than answering from memory");
-    expect(REDUCED).toContain("call `read_file` first");
+    expect(REDUCED).toContain("call `read` first");
     expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
     expect(REDUCED).toContain("The context lists the permissions this turn holds");
   });
@@ -473,7 +473,8 @@ describe("the integration tools", () => {
   });
 
   it("are preferred over a run when offered, the inline guidance kept for a run", () => {
-    expect(withTools).toContain("`search_integration_tools`");
+    expect(withTools).toContain("found with `search` and called with `call_integration_tool`");
+    expect(withTools).toContain("its `integration_tool` kind");
     expect(withTools).toContain("call it with `call_integration_tool`, and answer from its result");
     expect(withTools).toContain("Run an agent instead when the task needs a runtime");
     expect(withTools).not.toContain("MUST be carried out by running an agent");
@@ -483,7 +484,7 @@ describe("the integration tools", () => {
   });
 
   it("are absent when not offered, the run rule unchanged", () => {
-    expect(FULL).not.toContain("search_integration_tools");
+    expect(FULL).not.toContain("integration_tool");
     expect(FULL).not.toContain("call_integration_tool");
     expect(FULL).toContain("MUST be carried out by running an agent");
     expect(FULL).toContain(
@@ -558,7 +559,7 @@ describe("the persona without agent runs", () => {
 
   it("keeps every rule that is not about running", () => {
     expect(NO_RUNS).toContain("You are Appstrate's assistant");
-    expect(NO_RUNS).toContain("call `read_file` first");
+    expect(NO_RUNS).toContain("call `read` first");
     expect(NO_RUNS).toContain("Never invent an operationId or argument shape");
     expect(NO_RUNS).toContain("The context lists the permissions this turn holds");
   });
@@ -607,15 +608,18 @@ describe("the persona of a turn that can look but not act", () => {
   });
 
   it("still teaches discovery and direct file reading", () => {
-    expect(DISCOVERY).toContain("search_operations");
-    expect(DISCOVERY).toContain("describe_operation");
+    expect(DISCOVERY).toContain("`search`");
+    expect(DISCOVERY).toContain("`describe`");
+    // An operation lookup names its kind: operations are the one kind searched without reading a space.
+    expect(DISCOVERY).toContain('`kinds: ["operation"]`');
+    expect(FULL).toContain('`kinds: ["operation"]`');
     expect(DISCOVERY).toContain("you can look things up, you cannot act");
-    expect(DISCOVERY).toContain("call `read_file` first");
+    expect(DISCOVERY).toContain("call `read` first");
     expect(DISCOVERY).toContain("Never invent an operationId or argument shape");
     // Control: the discovery tools are named to the full persona too, so their
     // presence here is not an artifact of a branch only this turn renders.
-    expect(FULL).toContain("search_operations");
-    expect(FULL).toContain("describe_operation");
+    expect(FULL).toContain("`search`");
+    expect(FULL).toContain("`describe`");
   });
 
   it("still carries the permission list, without promising an attempt", () => {

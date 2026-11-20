@@ -460,7 +460,7 @@ It must stay byte-stable: changing it stops the background re-runs until the use
 }
 ```
 
-It contains no tokens. The setup plugin has no MCP configuration. In Claude Code, open `/mcp`, select `plugin:appstrate:appstrate`, and complete the browser OAuth flow if authentication is needed. This login is separate from `appstrate login`; the CLI's keyring session is never copied into the plugin. Tools use names such as `mcp__plugin_appstrate_appstrate__search_operations`. [Claude Code plugin MCP reference](https://code.claude.com/docs/en/mcp#plugin-provided-mcp-servers).
+It contains no tokens. The setup plugin has no MCP configuration. In Claude Code, open `/mcp`, select `plugin:appstrate:appstrate`, and complete the browser OAuth flow if authentication is needed. This login is separate from `appstrate login`; the CLI's keyring session is never copied into the plugin. Tools use names such as `mcp__plugin_appstrate_appstrate__search`. [Claude Code plugin MCP reference](https://code.claude.com/docs/en/mcp#plugin-provided-mcp-servers).
 
 **MCP reaches every space.** The organization's URL is not pinned to a space: it reaches every space you hold a role in, as the claude.ai connector does, and each tool call that acts in a space names it (`space_id`). An agent prompt names its own space. A free-form request has no implicit space: Claude takes `space_id` from what you asked, or asks you which space when several could serve; `appstrate space list` shows them. `--space`, `syncSpaces` and the CLI's pinned space change nothing here.
 

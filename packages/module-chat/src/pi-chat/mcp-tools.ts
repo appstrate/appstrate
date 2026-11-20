@@ -3,9 +3,8 @@
 /**
  * Build the Pi extension factories that expose the platform's own MCP tools
  * to the in-process Pi chat session — exactly the tools the platform MCP server
- * declares to the caller (`search_operations` / `describe_operation` /
- * `invoke_operation`, `run_and_wait`, `search_integration_tools` /
- * `call_integration_tool`, and whatever it adds later), so the assistant pilots
+ * declares to the caller (`search` / `describe` / `invoke_operation`,
+ * `run_and_wait`, `call_integration_tool`, and whatever it adds later), so the assistant pilots
  * the platform with the caller's own permissions, through the one door every
  * MCP client uses.
  *
@@ -27,6 +26,7 @@ import {
   parseSkillUri,
   parseSkillUriPackage,
   SKILL_DEFINITION_META_KEY,
+  SKILL_URI_PREFIX,
 } from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
@@ -508,6 +508,68 @@ async function enterNamedSpace(
   return undefined;
 }
 
+/** Whether a tool declares a `space_id` it does not require, and the call omits it. */
+function omitsOptionalSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
+  const schema = (inputSchema ?? {}) as {
+    properties?: Record<string, unknown>;
+    required?: unknown;
+  };
+  return (
+    args.space_id === undefined &&
+    schema.properties?.space_id !== undefined &&
+    !(Array.isArray(schema.required) && schema.required.includes("space_id"))
+  );
+}
+
+/**
+ * A call that names no space records the spaces its result says it read (`searched_spaces`),
+ * before the result is returned. The refusal that withholds the result when a listed space is not
+ * the turn's or cannot be recorded; `undefined` when every one is recorded.
+ */
+async function enterSearchedSpaces(
+  organization: TurnSpaces,
+  structuredContent: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  const listed = (structuredContent as { searched_spaces?: unknown } | null | undefined)
+    ?.searched_spaces;
+  if (listed === undefined) return undefined;
+  const turnSpaces = new Set(organization.spaces.map((space) => space.id));
+  const ids: unknown[] = Array.isArray(listed) ? listed : [null];
+  const recorded =
+    ids.every((id) => typeof id === "string" && turnSpaces.has(id)) &&
+    (await Promise.all(ids.map((id) => organization.touch(id as string))).then(
+      () => true,
+      () => false,
+    ));
+  return recorded
+    ? undefined
+    : {
+        code: "spaces_not_recorded",
+        error: "The spaces this call read could not be recorded on the conversation.",
+      };
+}
+
+/** A refusal rendered as a tool result, as the platform renders its own (`refusalResult`). */
+function refusalToolResult(
+  refusal: Record<string, unknown>,
+  scope: OfferScope,
+  turnBudget: PiTurnBudget,
+) {
+  return withTurnBudgetNote(
+    mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] }, scope),
+    turnBudget,
+  );
+}
+
+/** A read of a skill's text, kept whole in the replay so its procedure still applies on later turns. */
+function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
+  return (
+    typeof uri === "string" &&
+    uri.startsWith(SKILL_URI_PREFIX) &&
+    resources.every((resource) => "text" in resource)
+  );
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -531,12 +593,9 @@ function makeForwardExtension(
         if (spaceId !== undefined) {
           const refusal = await enterNamedSpace(organization, spaceId);
           if (refusal) {
-            // Rendered as the platform renders its own refusals (`refusalResult`).
-            return withTurnBudgetNote(
-              mcpResultToPi(
-                { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] },
-                offerScopeOf(toolName, { arguments: args }),
-              ),
+            return refusalToolResult(
+              refusal,
+              offerScopeOf(toolName, { arguments: args }),
               turnBudget,
             );
           }
@@ -550,6 +609,10 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
+        if (spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)) {
+          const refusal = await enterSearchedSpaces(organization, result.structuredContent);
+          if (refusal) return refusalToolResult(refusal, scope, turnBudget);
+        }
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
             await relayedToolResult(result, scope, opts.modelSeesImages === true),
@@ -559,7 +622,7 @@ function makeForwardExtension(
         // Only platform file reads may interpret embedded resources as governed files.
         const arg = args.arguments;
         if (
-          toolName === "read_file" ||
+          toolName === "read" ||
           (toolName === "call_integration_tool" &&
             arg &&
             typeof arg === "object" &&
@@ -579,10 +642,14 @@ function makeForwardExtension(
               {
                 ...meta,
                 content: [...meta.content, ...file.content],
-                persistedContent: [
-                  ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
-                  ...file.receipts,
-                ],
+                ...(keepsSkillText(args.uri, resources)
+                  ? {}
+                  : {
+                      persistedContent: [
+                        ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                        ...file.receipts,
+                      ],
+                    }),
               },
               turnBudget,
             );
@@ -598,7 +665,7 @@ function makeForwardExtension(
  * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
  * only server it reaches — how the model reads a skill's `SKILL.md` or one of
  * its files by its `skill://` URI. The same live projection serves embedded resources
- * from `read_file` and governed connector reads.
+ * from `read` and governed connector reads.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
@@ -650,10 +717,12 @@ function makeReadResourceExtension(
           await organization.touch(fileSpace);
         }
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
-        // Keep the text of skills in the replay so their procedures still apply on later turns.
-        const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
         return withTurnBudgetNote(
-          { content, details: { uri }, ...(keepSkill ? {} : { persistedContent: receipts }) },
+          {
+            content,
+            details: { uri },
+            ...(keepsSkillText(uri, result.contents) ? {} : { persistedContent: receipts }),
+          },
           turnBudget,
         );
       },

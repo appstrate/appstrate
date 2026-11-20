@@ -104,7 +104,7 @@ describe("file reads on the space-pinned MCP endpoint", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "read_file", arguments: { uri, ...(spaceId ? { space_id: spaceId } : {}) } },
+      params: { name: "read", arguments: { uri, ...(spaceId ? { space_id: spaceId } : {}) } },
     });
     const resource = await post({
       jsonrpc: "2.0",

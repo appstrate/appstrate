@@ -19,7 +19,7 @@ function run(events: AgentSessionEvent[]) {
 
 describe("stripMcpToolPrefix", () => {
   it("strips the mcp__<server>__ prefix but keeps inner __", () => {
-    expect(stripMcpToolPrefix("mcp__platform__search_operations")).toBe("search_operations");
+    expect(stripMcpToolPrefix("mcp__platform__search")).toBe("search");
     expect(stripMcpToolPrefix("mcp__platform__run__and__wait")).toBe("run__and__wait");
   });
   it("passes non-MCP names through", () => {
@@ -84,7 +84,7 @@ describe("PiChatUiStreamMapper", () => {
           type: "toolcall_start",
           contentIndex: 0,
           partial: {
-            content: [{ type: "toolCall", id: "call_1", name: "mcp__platform__search_operations" }],
+            content: [{ type: "toolCall", id: "call_1", name: "mcp__platform__search" }],
           },
         },
       },
@@ -96,7 +96,7 @@ describe("PiChatUiStreamMapper", () => {
           contentIndex: 0,
           toolCall: {
             id: "call_1",
-            name: "mcp__platform__search_operations",
+            name: "mcp__platform__search",
             arguments: { q: "x" },
           },
           partial: {},
@@ -105,7 +105,7 @@ describe("PiChatUiStreamMapper", () => {
       {
         type: "tool_execution_end",
         toolCallId: "call_1",
-        toolName: "mcp__platform__search_operations",
+        toolName: "mcp__platform__search",
         result: { content: [{ type: "text", text: "ok" }] },
         isError: false,
       },
@@ -114,12 +114,12 @@ describe("PiChatUiStreamMapper", () => {
     expect(chunks).toContainEqual({
       type: "tool-input-start",
       toolCallId: "call_1",
-      toolName: "search_operations",
+      toolName: "search",
     });
     expect(chunks).toContainEqual({
       type: "tool-input-available",
       toolCallId: "call_1",
-      toolName: "search_operations",
+      toolName: "search",
       input: { q: "x" },
     });
     expect(chunks).toContainEqual({
