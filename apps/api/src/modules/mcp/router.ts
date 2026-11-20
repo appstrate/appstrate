@@ -661,6 +661,18 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // need no actor context. get_me likewise carries no actor context: it
     // dispatches in-process to /api/me/context, which resolves the caller from
     // the forwarded auth headers. The index is scoped to the caller's role.
+    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
+    // connection reaches, each read with the caller's permissions in that space.
+    const skills = buildSkillServer(
+      servedSkillsContext(
+        c,
+        org,
+        (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
+          spaceId: space.id,
+          permissions: space.permissions,
+        })),
+      ),
+    );
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
       placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
@@ -686,6 +698,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       scope,
       fileAccess: () => requestFileAccess(c),
       orgSpaces,
+      // The `read` tool serves `skill://` through the Skills extension's own reader.
+      readSkill: skills.read,
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
@@ -695,18 +709,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
     const files = buildFileResourceProvider(toolCtx);
-    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
-    // connection reaches, each read with the caller's permissions in that space.
-    const skills = buildSkillServer(
-      servedSkillsContext(
-        c,
-        org,
-        (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
-          spaceId: space.id,
-          permissions: space.permissions,
-        })),
-      ),
-    );
     const resources: AppstrateResourceProvider = {
       read: (uri, extra) =>
         uri.startsWith(SKILL_URI_PREFIX) ? skills.read(uri) : files.read(uri, extra),

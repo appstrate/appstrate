@@ -53,6 +53,7 @@ import {
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -129,7 +130,7 @@ export type McpToolName =
   | "invoke_operation"
   | "run_and_wait"
   | "list_files"
-  | "read_file"
+  | "read"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
@@ -210,6 +211,8 @@ export interface McpToolContext {
   observe?: McpObserver;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
+  /** `resources/read` of a `skill://` URI, over the spaces the connection reaches (`./skills.ts`). */
+  readSkill: (uri: string) => Promise<ReadResourceResult>;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -291,7 +294,7 @@ function fileResourceLink(doc: RunAndWaitFile): {
     name: doc.name,
     mimeType: doc.mime,
     size: doc.size,
-    description: `File published by this run — read it with read_file or pass its URI to a follow-up run_and_wait input file field.`,
+    description: `File published by this run — read it with read or pass its URI to a follow-up run_and_wait input file field.`,
   };
 }
 
@@ -1480,7 +1483,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
       "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
-      "or read with read_file. Returns `{ files: [...], hasMore }`.",
+      "or read with read. Returns `{ files: [...], hasMore }`.",
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1551,15 +1554,19 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildReadTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
-    name: "read_file",
+    name: "read",
     description:
-      "Read an appfile:// URI through the same file ACL and storage path as resources/read. " +
-      "Small text and binary files are returned as embedded MCP resources; oversized or " +
-      "non-downloadable files return capability-aware metadata.",
+      "Read a resource by its URI: an `appfile://` file (from list_files, a run's output or an " +
+      "attachment) through the file's own ACL, or a skill file by its `skill://` URI (from " +
+      'search with `kinds: ["skill"]`, or describe of a skill), the same bytes `resources/read` ' +
+      "serves. A skill's `SKILL.md` is at its `uri`; replace `SKILL.md` with a path its " +
+      "`resources` list to read another of its files. Small text and binary files are returned " +
+      "as embedded MCP resources; an oversized or non-downloadable file returns " +
+      "capability-aware metadata.",
     annotations: {
-      title: "Read file",
+      title: "Read resource",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
@@ -1569,7 +1576,10 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
       additionalProperties: false,
       required: ["uri"],
       properties: {
-        uri: { type: "string", description: "An appfile:// URI returned by list_files." },
+        uri: {
+          type: "string",
+          description: "An `appfile://` or `skill://` URI, verbatim as a tool returned it.",
+        },
       },
     },
   };
@@ -1585,7 +1595,9 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
       });
     }
     try {
-      const result = await readFile(uri);
+      const result = uri.startsWith(SKILL_URI_PREFIX)
+        ? await readSkillResource(ctx, uri)
+        : await readFile(uri);
       return {
         content: result.contents.map((resource) => ({ type: "resource", resource })),
         isError: false,
@@ -1598,10 +1610,29 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+/**
+ * A `skill://` read through the Skills extension's reader, its JSON-RPC errors as the refusals a
+ * tool result carries: an unknown or unreadable URI is `not_found`, a malformed one
+ * `invalid_argument`.
+ */
+async function readSkillResource(ctx: McpToolContext, uri: string): Promise<ReadResourceResult> {
+  try {
+    return await ctx.readSkill(uri);
+  } catch (err) {
+    if (!(err instanceof McpError)) throw err;
+    throw new ToolRefusal({
+      code: err.code === RESOURCE_NOT_FOUND_ERROR_CODE ? "not_found" : "invalid_argument",
+      error:
+        err.code === RESOURCE_NOT_FOUND_ERROR_CODE ? `Skill file not found: ${uri}` : err.message,
+      arguments: ["uri"],
+    });
+  }
+}
+
 // --- resources/read for appfile:// ----------------------------------------
 
 /**
- * The file read shared by `read_file` and `resources/read`, through the files
+ * The file read shared by `read` and `resources/read`, through the files
  * service's container ACL in the file's own space (`resolveFileAcrossSpaces`) and straight
  * from storage (`readStoredFileBytes`, so no presigned redirect to follow). A bad
  * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
@@ -1916,7 +1947,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
-    buildReadFileTool(ctx),
+    buildReadTool(ctx),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     ...(surface.proxies
       ? buildIntegrationTools({
@@ -1947,7 +1978,7 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   invoke_operation: "invokes",
   run_and_wait: "runs",
   list_files: "listsFiles",
-  read_file: null,
+  read: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
   search_integration_tools: "proxies",

@@ -559,7 +559,7 @@ function makeForwardExtension(
         // Only platform file reads may interpret embedded resources as governed files.
         const arg = args.arguments;
         if (
-          toolName === "read_file" ||
+          toolName === "read" ||
           (toolName === "call_integration_tool" &&
             arg &&
             typeof arg === "object" &&
@@ -598,7 +598,7 @@ function makeForwardExtension(
  * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
  * only server it reaches — how the model reads a skill's `SKILL.md` or one of
  * its files by its `skill://` URI. The same live projection serves embedded resources
- * from `read_file` and governed connector reads.
+ * from `read` and governed connector reads.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,

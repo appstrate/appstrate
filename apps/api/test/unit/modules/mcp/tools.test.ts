@@ -60,6 +60,9 @@ function makeTools(
     dispatch,
     actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    readSkill: async () => {
+      throw new Error("no skill reads here");
+    },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
@@ -144,6 +147,9 @@ describe("credential proxy closed in the space", () => {
     dispatch: async () => new Response("{}", { status: 200 }),
     actor: { type: "user", id: "user_1" } as Actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    readSkill: async () => {
+      throw new Error("no skill reads here");
+    },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
@@ -218,7 +224,7 @@ describe("buildMcpTools declarations", () => {
     "describe_operation",
     "get_me",
     "get_runtime_capabilities",
-    "read_file",
+    "read",
     "search_operations",
     "validate_package_file",
   ];
@@ -558,6 +564,9 @@ describe("describe_operation", () => {
             dispatch: async () => new Response("{}"),
             actor: { type: "user", id: "user_1" },
             scope: { orgId: "org_1", spaceId: "spc_1" },
+            readSkill: async () => {
+              throw new Error("no skill reads here");
+            },
             fileAccess: async () => ({ grants: [] }),
             authorizeBundle: async () => {},
             placeRootAs: async () => null,

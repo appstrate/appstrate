@@ -114,7 +114,7 @@ describe("closePiTurn", () => {
       stepCount: 0,
       stepCapReached: false,
       ...MODEL,
-      lastToolName: "read_file",
+      lastToolName: "read",
       newId: () => "assistant-before-start",
     }).chunks;
 
@@ -131,7 +131,7 @@ describe("closePiTurn", () => {
       toolStepBudget: 15,
       toolStepBudgetReached: false,
       maxStepsReached: false,
-      lastToolName: "read_file",
+      lastToolName: "read",
     });
     expect(JSON.stringify(message)).not.toContain("leaked detail");
   });

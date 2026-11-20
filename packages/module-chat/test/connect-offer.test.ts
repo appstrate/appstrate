@@ -166,7 +166,7 @@ describe("offerScopeOf", () => {
     for (const [tool, args] of [
       ["invoke_operation", { operation_id: "getRun" }],
       ["invoke_operation", {}],
-      ["read_file", {}],
+      ["read", {}],
     ] as const) {
       const split = offerScopeOf(tool, { arguments: args })(payload);
       expect(split.offers).toEqual([]);

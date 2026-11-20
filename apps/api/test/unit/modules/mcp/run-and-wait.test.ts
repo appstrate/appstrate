@@ -150,6 +150,9 @@ function makeRunAndWait(opts: {
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    readSkill: async () => {
+      throw new Error("no skill reads here");
+    },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
     placeRootAs: async () => null,

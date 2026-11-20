@@ -234,6 +234,9 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
       ceiling: undefined,
       actor: { type: "user", id: ctx.user.id },
       scope,
+      readSkill: async () => {
+        throw new Error("no skill reads here");
+      },
       fileAccess: async () => ({
         grants: [{ spaceId: scope.spaceId, permissions: new Set(["files:read"]) }],
       }),

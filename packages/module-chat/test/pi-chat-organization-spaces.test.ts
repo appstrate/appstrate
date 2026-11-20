@@ -94,7 +94,7 @@ function transcript() {
               },
             },
             {
-              name: "read_file",
+              name: "read",
               inputSchema: {
                 type: "object",
                 properties: { uri: { type: "string" }, space_id: spaceId },
@@ -336,7 +336,7 @@ describe("the files a call names", () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      await tool("read_file").execute("c1", {
+      await tool("read").execute("c1", {
         uri: "appfile://file_beta0001",
         space_id: "spc_alpha",
         again: ["appfile://file_gamma001", { deep: "appfile://file_own00001" }],

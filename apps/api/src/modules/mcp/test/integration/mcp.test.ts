@@ -404,7 +404,7 @@ describe("mcp tool round-trip", () => {
       "get_runtime_capabilities",
       "invoke_operation",
       "list_files",
-      "read_file",
+      "read",
       "run_and_wait",
       "search_operations",
       "validate_package_file",

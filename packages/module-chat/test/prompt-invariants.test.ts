@@ -110,7 +110,7 @@ describe("full persona invariants", () => {
   });
 
   it("reads file content directly before considering a run", () => {
-    expect(FULL).toMatch(/call `read_file` first/);
+    expect(FULL).toMatch(/call `read` first/);
     expect(FULL).toMatch(/answer directly from that content/);
     expect(FULL).toMatch(/do NOT launch a run merely to read or analyse it/);
     expect(FULL).toContain("Use files already supplied to your model directly");
@@ -378,7 +378,7 @@ describe("the persona without inline composition", () => {
     expect(REDUCED).toContain("You are Appstrate's assistant");
     expect(REDUCED).toContain("Never quote run metrics");
     expect(REDUCED).toContain("use an available integration rather than answering from memory");
-    expect(REDUCED).toContain("call `read_file` first");
+    expect(REDUCED).toContain("call `read` first");
     expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
     expect(REDUCED).toContain("The context lists the permissions this turn holds");
   });
@@ -558,7 +558,7 @@ describe("the persona without agent runs", () => {
 
   it("keeps every rule that is not about running", () => {
     expect(NO_RUNS).toContain("You are Appstrate's assistant");
-    expect(NO_RUNS).toContain("call `read_file` first");
+    expect(NO_RUNS).toContain("call `read` first");
     expect(NO_RUNS).toContain("Never invent an operationId or argument shape");
     expect(NO_RUNS).toContain("The context lists the permissions this turn holds");
   });
@@ -610,7 +610,7 @@ describe("the persona of a turn that can look but not act", () => {
     expect(DISCOVERY).toContain("search_operations");
     expect(DISCOVERY).toContain("describe_operation");
     expect(DISCOVERY).toContain("you can look things up, you cannot act");
-    expect(DISCOVERY).toContain("call `read_file` first");
+    expect(DISCOVERY).toContain("call `read` first");
     expect(DISCOVERY).toContain("Never invent an operationId or argument shape");
     // Control: the discovery tools are named to the full persona too, so their
     // presence here is not an artifact of a branch only this turn renders.

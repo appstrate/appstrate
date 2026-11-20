@@ -147,7 +147,7 @@ test.describe("MCP over an API key (full stack)", () => {
       "import_package_file",
       "invoke_operation",
       "list_files",
-      "read_file",
+      "read",
       "run_and_wait",
       "search_integration_tools",
       "search_operations",
