@@ -563,7 +563,7 @@ function buildSearchTool(
       "YOUR space: report that to the user instead of trying them." +
       (ctx.orgSpaces
         ? " Without `space_id`, every space you reach is searched; an item's `granted_in` names " +
-          "the spaces where it is usable."
+          "the spaces where it is usable (an agent: where you can launch it, else where you can read it)."
         : "") +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
     annotations: discoveryAnnotations("Search", kinds),
@@ -817,19 +817,21 @@ async function searchAgentKind(
   if (answered.length === 0 && refused[0]) {
     return named ? { result: jsonResult({ ...refused[0].refused }, true) } : null;
   }
-  const merged = new Map<string, SpaceAgent>();
-  // `granted_in` is where the caller can launch it; a caller who can launch in no searched
-  // space (read-only) gets where it is listed, which is all they can describe.
-  const launches = spaces?.some((space) => space.surface.runs) ?? false;
+  // `granted_in` is where the caller can launch the agent; for one they can launch nowhere,
+  // where it is listed (they can only describe it there).
+  const merged = new Map<string, SpaceAgent & { launchIds: string[] }>();
   for (const { space, value } of answered) {
     for (const hit of value.agents) {
-      const found = merged.get(hit.id) ?? { hit, spaceIds: [] };
-      if (space && (!launches || space.surface.runs)) found.spaceIds.push(space.id);
+      const found = merged.get(hit.id) ?? { hit, spaceIds: [], launchIds: [] };
+      if (space) {
+        found.spaceIds.push(space.id);
+        if (space.surface.runs) found.launchIds.push(space.id);
+      }
       merged.set(hit.id, found);
     }
   }
-  if (launches) {
-    for (const [id, agent] of merged) if (agent.spaceIds.length === 0) merged.delete(id);
+  for (const agent of merged.values()) {
+    if (agent.launchIds.length > 0) agent.spaceIds = agent.launchIds;
   }
   const fields = ({ hit }: SpaceAgent) => ({
     name: hit.id,

@@ -51,6 +51,8 @@ function makeTools(
   orgWide = false,
   /** Org-wide: spaces where the caller cannot launch (no `mcp:invoke`). */
   readOnlySpaces: string[] = [],
+  /** Org-wide: spaces listing no agent. */
+  emptySpaces: string[] = [],
 ) {
   const requests: string[] = [];
   const dispatch: Dispatch = async (req) => {
@@ -104,7 +106,9 @@ function makeTools(
         dispatchIn: (spaceId: string): Dispatch =>
           refusingSpaces.includes(spaceId)
             ? async () => Response.json({ code: "forbidden" }, { status: 403 })
-            : dispatch,
+            : emptySpaces.includes(spaceId)
+              ? async () => Response.json({ object: "list", data: [], hasMore: false })
+              : dispatch,
       }
     : undefined;
   const tools = toolsFor({
@@ -369,9 +373,13 @@ describe("agents across spaces", () => {
       (item) => item.id === "@acme/invoice-sorter",
     )?.granted_in;
 
-  it("names the spaces where the caller can launch an agent, or where it is listed when none", async () => {
+  it("names where the caller can launch each agent, else where it is listed", async () => {
+    // Operator in A, viewer in B, the agent in both: where it can be launched.
     const mixed = makeTools(READER, 200, [], true, ["spc_2"]);
     expect(grantedIn(await mixed.call("search", { kinds: ["agent"] }))).toEqual([SPACE]);
+    // Viewer in A, operator in B, the agent in A only: still found, where it is readable.
+    const viewerFirst = makeTools(READER, 200, [], true, [SPACE], ["spc_2"]);
+    expect(grantedIn(await viewerFirst.call("search", { kinds: ["agent"] }))).toEqual([SPACE]);
     const viewer = makeTools(READER, 200, [], true, [SPACE, "spc_2"]);
     expect(grantedIn(await viewer.call("search", { kinds: ["agent"] }))).toEqual([SPACE, "spc_2"]);
   });
