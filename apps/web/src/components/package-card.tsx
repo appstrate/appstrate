@@ -13,7 +13,6 @@ import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
 import { packageDetailPath } from "../lib/package-paths";
-import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 import { useSharedFromText } from "../hooks/use-shared-from-text";
 import { PackageSharedFrom } from "./package-shared-from";
@@ -168,21 +167,18 @@ export function PackageCard({
         {status && <div className="relative z-10 shrink-0 self-start">{status}</div>}
       </div>
       {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
-        <ScrollArea className="relative z-10 mt-2 w-full">
-          <div className="flex gap-1">
-            {keywords?.map((kw) => (
-              <UIBadge key={kw} variant="outline" className={KEYWORD_PILL}>
-                {kw}
-              </UIBadge>
-            ))}
-            {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
-              <UIBadge variant="outline" className={KEYWORD_PILL}>
-                {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
-              </UIBadge>
-            )}
-          </div>
-          <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
-        </ScrollArea>
+        <div className="no-scrollbar scroll-fade-x relative z-10 mt-2 flex w-full gap-1 overflow-x-auto">
+          {keywords?.map((kw) => (
+            <UIBadge key={kw} variant="outline" className={KEYWORD_PILL}>
+              {kw}
+            </UIBadge>
+          ))}
+          {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
+            <UIBadge variant="outline" className={KEYWORD_PILL}>
+              {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
+            </UIBadge>
+          )}
+        </div>
       ) : null}
       {actions && <div className="min-h-3" aria-hidden />}
       {actions && (
