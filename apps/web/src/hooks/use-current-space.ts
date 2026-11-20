@@ -3,7 +3,7 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 import {
   linkedSpaceEnterable,
@@ -164,23 +164,20 @@ export function useSpaceResolver(search: string): void {
  * wait: its gate and first reads would otherwise use the previous space.
  */
 export function useEnterLinkedSpace(): boolean {
-  const [params, setParams] = useSearchParams();
-  const linked = params.get(ENTER_SPACE_PARAM);
+  const { search, hash } = useLocation();
+  const navigate = useNavigate();
+  const linked = new URLSearchParams(search).get(ENTER_SPACE_PARAM);
   const current = useCurrentSpaceId();
   const { data: spaces, isError } = useSpaces();
   const enterable = linkedSpaceEnterable(spaces, isError, linked);
 
   useEffect(() => {
     if (linkedSpaceStep(linked, current, enterable) !== "drop") return;
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete(ENTER_SPACE_PARAM);
-        return next;
-      },
-      { replace: true },
-    );
-  }, [linked, enterable, current, setParams]);
+    const next = new URLSearchParams(search);
+    next.delete(ENTER_SPACE_PARAM);
+    // Navigating with the hash kept: `setSearchParams` would lose it (`#settings` opens a tab).
+    navigate({ search: next.toString(), hash }, { replace: true });
+  }, [linked, enterable, current, search, hash, navigate]);
 
   return !!linked;
 }

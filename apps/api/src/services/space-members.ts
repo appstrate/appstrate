@@ -430,18 +430,7 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
 ): Promise<ConnectionsUnshared> {
   const c = integrationConnections;
   const s = integrationConnectionShares;
-  const lost = await sharesOfOwnersWithoutAccess(
-    tx,
-    and(
-      sharedInto(spaces.id),
-      scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
-    )!,
-    and(
-      eq(c.orgId, scope.orgId),
-      scope.userId === undefined ? undefined : eq(c.userId, scope.userId),
-      scope.spaceId === undefined ? undefined : sharedInto(scope.spaceId),
-    ),
-  );
+  const lost = await sharesLostIn(tx, scope);
   const stopAllSpaces = scope.stopSharingAllSpaces
     ? and(
         eq(c.orgId, scope.orgId),
@@ -494,6 +483,33 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     alsoLockSchedules,
   );
   return { shares: withdrawn, disabledScheduleIds };
+}
+
+/**
+ * The shares in `scope` (`spaceId`: the target) whose owner no longer reaches the target — what
+ * {@link unshareConnectionsOfOwnersWithoutAccess} withdraws. `departedUserId` is judged without
+ * access everywhere, as the org exit sees it once the membership row is deleted: how a preview of
+ * that exit reads the same set before anything is written.
+ */
+export function sharesLostIn(
+  executor: DbOrTx,
+  scope: { orgId: string; userId?: string; spaceId?: string },
+  departedUserId?: string,
+): Promise<ConnectionShare[]> {
+  const c = integrationConnections;
+  return sharesOfOwnersWithoutAccess(
+    executor,
+    and(
+      sharedInto(spaces.id),
+      scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
+    )!,
+    and(
+      eq(c.orgId, scope.orgId),
+      scope.userId === undefined ? undefined : eq(c.userId, scope.userId),
+      scope.spaceId === undefined ? undefined : sharedInto(scope.spaceId),
+    ),
+    departedUserId,
+  );
 }
 
 /** One share of a connection into a space. */
@@ -602,13 +618,17 @@ async function lockSpaceRow(tx: Tx, spaceId: string): Promise<void> {
   await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for("share");
 }
 
-/** (user-owned row matching `filter`, same-org target joined `on`) pairs whose owner lost the target. */
+/**
+ * (user-owned row matching `filter`, same-org target joined `on`) pairs whose owner lost the
+ * target; `departedUserId`, when set, counts as having lost every target.
+ */
 async function sharesOfOwnersWithoutAccess(
-  tx: Tx,
+  executor: DbOrTx,
   on: SQL,
   filter: SQL | undefined,
+  departedUserId?: string,
 ): Promise<ConnectionShare[]> {
-  const rows = await tx
+  const rows = await executor
     .select({
       id: integrationConnections.id,
       userId: integrationConnections.userId,
@@ -644,6 +664,7 @@ async function sharesOfOwnersWithoutAccess(
     .filter(
       (row) =>
         row.orgRole === null ||
+        row.userId === departedUserId ||
         resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId) === null,
     )
     .map((row) => ({ connectionId: row.id, spaceId: row.space.id }));

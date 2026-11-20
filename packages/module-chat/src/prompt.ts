@@ -346,6 +346,13 @@ type CallerContextOpts = {
   skillCatalogue?: readonly CatalogueSkill[];
 };
 
+/**
+ * What the personal fallback space does not cover: the server instructions send what a personal
+ * space refuses to a team space the user picks, and the fallback must not contradict them.
+ */
+const PERSONAL_FALLBACK_CARVE_OUT =
+  " — except what a personal space refuses (an API key, an end-user, a space-level OIDC client), for which you offer team spaces first";
+
 /** Render the caller context into a system-prompt block, with the skills it injected. */
 export function formatCallerContext(
   identity: CallerIdentity,
@@ -386,7 +393,7 @@ export function formatCallerContext(
       : opts.origin
         ? `This conversation's space is ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`.`
         : fallback
-          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`.`
+          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`${fallback.personal ? PERSONAL_FALLBACK_CARVE_OUT : ""}; when you create something there, name that space in your reply.`
           : "Ask the user which space when the request does not say; never guess it.",
   );
   // The set is the union over the turn's spaces: it bounds what the turn may attempt, while

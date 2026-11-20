@@ -35,6 +35,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
+import { loadSchedule } from "../services/scheduler.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
   assertExplicitModelExists,
@@ -420,13 +421,25 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
+      const scope = getSpaceScope(c);
+      const scheduleId = c.req.query("scheduleId");
+      let dependencyOverrides: Record<string, string> | null = null;
+      if (scheduleId !== undefined) {
+        await requirePermission("schedules", "read")(c, async () => {});
+        const schedule = await loadSchedule(scheduleId, scope);
+        if (!schedule || schedule.packageId !== agent.id) throw notFound("Schedule not found");
+        // The schedule write authorized these stored pins. This read may reuse them but
+        // cannot select a new dependency draft or resolve connections as the schedule's actor.
+        dependencyOverrides = schedule.dependency_overrides;
+      }
       // Resolved ONCE and handed to both: the gate and the default selector ask
       // the same question of the same package, and each one resolving the
       // caller's spaces for itself is two full space walks per badge.
       await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
       return c.json(
         await resolveAgentConnectionReadiness({
-          scope: getSpaceScope(c),
+          scope,
+          dependencyOverrides,
           agentPackageId: agent.id,
           principal: connectionPrincipal(c),
           // Drive `can_add_connection` with the connect routes' own guard and

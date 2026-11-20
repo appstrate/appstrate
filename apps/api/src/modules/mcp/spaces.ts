@@ -22,6 +22,8 @@ export interface McpSpace {
   name: string;
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
+  /** Whether it is the caller's own personal space. */
+  personal: boolean;
   permissions: ReadonlySet<string>;
   /** The acts the caller holds there (`deriveMcpSurface` over `permissions` and the space). */
   surface: McpSurface;
@@ -79,6 +81,7 @@ export async function listReachableSpaces(
       id: space.id,
       name: space.name,
       role: toSpaceRoleWire(space.role)!.name,
+      personal: space.personal,
       permissions: space.permissions,
       surface: surfaceOf(space.permissions, space),
     }));

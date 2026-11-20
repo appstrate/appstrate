@@ -24,7 +24,7 @@ export const MCP_SURFACE_CACHE_MAX_ENTRIES = 64;
 /**
  * `permissions` and `spaces` MUST be the lists minted into the bearer (its permissions and its
  * space allowlist). The org id of the path reaches no descriptor; `spaces` (ids, names, roles,
- * sets and direct-access switches, in reach order) are written into every one.
+ * sets, direct-access switches and personal marks, in reach order) are written into every one.
  */
 export function platformMcpSurfaceKey(
   url: string,
@@ -44,6 +44,7 @@ export function platformMcpSurfaceKey(
       space.role,
       [...space.permissions].sort(),
       space.credentialProxyOpen,
+      space.personal,
     ]),
   ]);
 }

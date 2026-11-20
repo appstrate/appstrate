@@ -1,7 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { spaceIdRefusal } from "../src/mcp-spaces.ts";
+import { describeSpace, spaceIdRefusal } from "../src/mcp-spaces.ts";
+
+describe("describeSpace", () => {
+  it("names the space, its id and the caller's role there", () => {
+    expect(describeSpace({ id: "spc_a", name: "Alpha", role: "admin" })).toBe(
+      "Alpha (`spc_a`, role admin)",
+    );
+    expect(describeSpace({ id: "spc_a", name: "Alpha", role: "admin", personal: false })).toBe(
+      "Alpha (`spc_a`, role admin)",
+    );
+  });
+
+  it("marks the caller's own personal space", () => {
+    expect(describeSpace({ id: "spc_p", name: "Perso", role: "admin", personal: true })).toBe(
+      "Perso (`spc_p`, role admin, your personal space)",
+    );
+  });
+});
 
 describe("spaceIdRefusal", () => {
   const spaces = [
