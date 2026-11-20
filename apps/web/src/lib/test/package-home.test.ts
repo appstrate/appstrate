@@ -14,7 +14,8 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { homeNameBesideTiles, writableDestinations } = await import("../package-home.ts");
+const { homeNameBesideTiles, previousHomeSchedules, writableDestinations } =
+  await import("../package-home.ts");
 
 type Space = { id: string; name: string; permissions: string[] };
 
@@ -79,5 +80,39 @@ describe("homeNameBesideTiles", () => {
 
   it("says nothing while the tiles are read, so the line does not jump", () => {
     expect(homeNameBesideTiles({ ...home, spaceIds: undefined })).toBeNull();
+  });
+});
+
+describe("previousHomeSchedules", () => {
+  const ok = { readable: true, isError: false };
+  const rows = [
+    { spaceId: "spc_old", enabled: true },
+    { spaceId: "spc_old", enabled: true },
+    { spaceId: "spc_old", enabled: false },
+    { spaceId: "spc_other", enabled: true },
+  ];
+
+  it("counts only the enabled rows of the old home", () => {
+    expect(previousHomeSchedules(rows, "spc_old", ok)).toBe(2);
+  });
+
+  it("is 0 when the old home has none", () => {
+    expect(previousHomeSchedules(rows, "spc_none", ok)).toBe(0);
+  });
+
+  it("is loading while the list is read", () => {
+    expect(previousHomeSchedules(undefined, "spc_old", ok)).toBe("loading");
+  });
+
+  it("is unknown when not readable or on error, even with data", () => {
+    expect(previousHomeSchedules(rows, "spc_old", { readable: false, isError: false })).toBe(
+      "unknown",
+    );
+    expect(previousHomeSchedules(rows, "spc_old", { readable: true, isError: true })).toBe(
+      "unknown",
+    );
+    expect(previousHomeSchedules(undefined, "spc_old", { readable: false, isError: false })).toBe(
+      "unknown",
+    );
   });
 });

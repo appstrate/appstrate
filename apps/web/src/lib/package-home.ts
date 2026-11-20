@@ -43,3 +43,18 @@ export function homeNameBesideTiles({
   if (!spaceIds || (homeSpaceId && spaceIds.includes(homeSpaceId))) return null;
   return homeSpaceName;
 }
+
+/**
+ * The enabled schedules of `homeSpaceId` that withdrawing the package from it would disable.
+ * "unknown" when the reader cannot count them (no `schedules:read` there, or the read failed),
+ * "loading" while the list is read, so a count is never said before it is known.
+ */
+export function previousHomeSchedules(
+  schedules: readonly { spaceId: string; enabled: boolean }[] | undefined,
+  homeSpaceId: string,
+  opts: { readable: boolean; isError: boolean },
+): number | "unknown" | "loading" {
+  if (!opts.readable || opts.isError) return "unknown";
+  if (!schedules) return "loading";
+  return schedules.filter((s) => s.spaceId === homeSpaceId && s.enabled).length;
+}

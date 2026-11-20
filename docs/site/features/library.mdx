@@ -29,7 +29,7 @@ curl -X PUT https://your-instance/api/packages/@acme/support-triage/home \
   -d '{ "home_space_id": "spc_...", "keep_in_previous_home": true }'
 ```
 
-By default (`keep_in_previous_home: true`) the space the package leaves keeps reading and running it through an automatic offer, so its schedules do not stop. Set it to `false` to withdraw the package from the old home entirely. The new home activates the package, unless that space had switched it off on purpose.
+By default (`keep_in_previous_home: true`) the space the package leaves keeps reading and running it through an automatic offer, so its schedules do not stop. Set it to `false` to withdraw the package from the old home entirely: its settings there are deleted and its schedules there are disabled. The new home activates the package, unless that space had switched it off on purpose.
 
 ## Sharing
 
