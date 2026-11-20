@@ -51,6 +51,8 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   await expect(code).toHaveCSS("font-size", "14px");
   await page.locator('header [data-sidebar="trigger"]:visible').click();
   const sheet = page.getByRole("dialog");
+  // Below md the search is a magnifier that unfolds the field.
+  await page.getByTestId("chat-search-toggle").click();
   await search.fill("Search destination");
   // Desktop Chromium has no on-screen keyboard. Feed a resize through the mounted hook.
   await page.evaluate(() => {
