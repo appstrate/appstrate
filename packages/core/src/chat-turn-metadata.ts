@@ -165,6 +165,11 @@ export interface AppstrateTurnMetadata {
   modelLabel?: string;
   /** The context of the turn's last settled model call; absent when no call settled. */
   context?: AppstrateTurnContext;
+  /**
+   * The summary the engine made during this turn, absent when it made none. Beside `context`, not
+   * in it: a turn that summarized and then failed before any call settled still carries it.
+   */
+  summary?: AppstrateTurnSummary;
 }
 
 /** The context a turn's last settled model call carried, never summed over the turn's calls. */
@@ -175,11 +180,21 @@ export interface AppstrateTurnContext {
   window: number;
   /** Size past which the engine summarizes the history (`window - reserveTokens`). */
   compactAt: number;
+}
+
+/**
+ * A summary of the history and where the history kept beside it starts. Later turns on the same
+ * branch replay the summary, then the history from `keptFrom`, instead of the whole history.
+ */
+export interface AppstrateTurnSummary {
+  text: string;
   /**
-   * The engine summarized the history during this turn. The summary is not kept: the history is
-   * past `compactAt`, and every later turn summarizes it again.
+   * The first message kept: a branch message id and the rank, within that message's projection
+   * into engine messages, of the first one kept (an assistant message projects one per step).
    */
-  compacted?: boolean;
+  keptFrom: { messageId: string; offset: number };
+  /** Context size the engine measured before summarizing. */
+  tokensBefore: number;
 }
 
 export interface ChatMessageMetadata {

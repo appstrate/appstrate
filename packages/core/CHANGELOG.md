@@ -11,9 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`AppstrateTurnContext`, `AppstrateTurnMetadata.context`** (`@appstrate/core/chat-turn-metadata`,
   #2318): the context of a chat turn's last settled model call (`tokens`), the window the engine
-  ran against (`window`), its compaction threshold (`compactAt`) and whether the engine
-  summarized the history during the turn (`compacted`). Optional and additive: a
+  ran against (`window`) and its compaction threshold (`compactAt`). Optional and additive: a
   turn that measured nothing carries none.
+- **`AppstrateTurnSummary`, `AppstrateTurnMetadata.summary`** (`@appstrate/core/chat-turn-metadata`,
+  #2324): the summary of the history a chat turn made (`text`), the first message kept beside it
+  (`keptFrom: { messageId, offset }`) and the context size before summarizing (`tokensBefore`).
+  Later turns on the branch start from it instead of summarizing the whole history again.
+  Optional and additive: a turn that summarized nothing carries none.
 
 ## [17.0.0] — 2026-11-19
 

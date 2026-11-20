@@ -10,10 +10,14 @@
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
-import { mergeTurnMetadata, type AppstrateTurnContext } from "@appstrate/core/chat-turn-metadata";
+import {
+  mergeTurnMetadata,
+  type AppstrateTurnContext,
+  type AppstrateTurnSummary,
+} from "@appstrate/core/chat-turn-metadata";
 import { contextReading, latestConversationContext } from "../src/ui/turn-context.ts";
 
-function assistant(id: string, context?: unknown): UIMessage {
+function assistant(id: string, context?: unknown, summary?: AppstrateTurnSummary): UIMessage {
   return {
     id,
     role: "assistant",
@@ -26,6 +30,7 @@ function assistant(id: string, context?: unknown): UIMessage {
       modelId: "mdl_opus",
       modelLabel: "Claude Opus 5",
       ...(context === undefined ? {} : { context: context as AppstrateTurnContext }),
+      ...(summary ? { summary } : {}),
     }),
   } as UIMessage;
 }
@@ -51,9 +56,18 @@ describe("latestConversationContext", () => {
       tokens: 45_000,
       ratio: 0.25,
       level: "ok",
+      summarized: false,
       modelId: "mdl_opus",
       modelLabel: "Claude Opus 5",
     });
+  });
+
+  it("says the history is summarized once any turn summarized it, even one that measured nothing", () => {
+    const summary = { text: "Résumé", keptFrom: { messageId: "u2", offset: 0 }, tokensBefore: 9 };
+    const measure = { tokens: 10_000, window: 200_000, compactAt: 180_000 };
+    const later = [assistant("a1", measure), user("u2"), assistant("a2", undefined, summary)];
+    expect(latestConversationContext(later)).toMatchObject({ tokens: 10_000, summarized: true });
+    expect(latestConversationContext([assistant("a1", measure, summary)])?.summarized).toBe(true);
   });
 });
 
@@ -68,8 +82,7 @@ describe("contextReading", () => {
     expect(at(600_001).level).toBe("full");
   });
 
-  it("reads a turn that summarized the history as full: every later turn summarizes it again", () => {
-    const summarized = { tokens: 40_000, window: 1_000_000, compactAt: 600_000, compacted: true };
-    expect(contextReading(summarized)).toEqual({ ratio: 1, level: "full" });
+  it("grades a turn that summarized by its tokens alone: the summary is not made again", () => {
+    expect(at(40_000).level).toBe("ok");
   });
 });

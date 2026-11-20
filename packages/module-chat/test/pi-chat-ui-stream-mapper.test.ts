@@ -564,7 +564,11 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
     type: "message_end",
     message: { role: "assistant", stopReason, usage: u },
   });
-  const compaction: AgentSessionEvent = { type: "compaction_end", result: {}, aborted: false };
+  const compaction = (summary: string): AgentSessionEvent => ({
+    type: "compaction_end",
+    result: { summary, firstKeptEntryId: `kept_${summary}`, tokensBefore: 9_000, usage: {} },
+    aborted: false,
+  });
 
   it("keeps the last call's usage, which the turn's summed usage cannot give back", () => {
     const { mapper } = run([
@@ -585,14 +589,20 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
     expect("lastSettledUsage" in run([end("error", usage(9, 0))]).mapper.result()).toBe(false);
   });
 
-  it("flags a summary made at any point of the turn, not an aborted one", () => {
-    expect(run([compaction, start, end("stop", usage(10, 5))]).mapper.result().compacted).toBe(
-      true,
-    );
-    expect(run([start, end("stop", usage(10, 5)), compaction]).mapper.result().compacted).toBe(
-      true,
-    );
+  it("keeps the summary made at any point of the turn, the last one winning", () => {
+    expect(
+      run([compaction("s1"), start, end("stop", usage(10, 5))]).mapper.result().compaction,
+    ).toEqual({ summary: "s1", firstKeptEntryId: "kept_s1", tokensBefore: 9_000 });
+    expect(
+      run([compaction("s1"), start, end("stop", usage(10, 5)), compaction("s2")]).mapper.result()
+        .compaction?.summary,
+    ).toBe("s2");
+  });
+
+  it("ignores an aborted or failed summary", () => {
     const aborted: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: true };
-    expect(run([aborted, start]).mapper.result().compacted).toBe(false);
+    const failed: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: false };
+    expect(run([aborted, failed, start]).mapper.result()).not.toHaveProperty("compaction");
+    expect(run([compaction("s1"), aborted]).mapper.result().compaction?.summary).toBe("s1");
   });
 });

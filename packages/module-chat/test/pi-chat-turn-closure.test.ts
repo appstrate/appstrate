@@ -406,19 +406,47 @@ describe("turnContextOf", () => {
   });
 
   it("states the call's tokens by Pi's measure, over the window and its threshold", () => {
-    expect(turnContextOf({ lastSettledUsage: used(48_000), compacted: true }, MEASURE)).toEqual({
-      context: { tokens: 48_200, window: 200_000, compactAt: 183_616, compacted: true },
+    expect(turnContextOf({ lastSettledUsage: used(48_000) }, MEASURE)).toEqual({
+      context: { tokens: 48_200, window: 200_000, compactAt: 183_616 },
     });
   });
 
   it("states nothing when no call settled, it reported no tokens, or no model was bound", () => {
-    expect(turnContextOf({ compacted: false }, MEASURE)).toEqual({});
+    expect(turnContextOf({}, MEASURE)).toEqual({});
     const empty = { ...used(0), output: 0 };
-    expect(turnContextOf({ lastSettledUsage: empty, compacted: false }, MEASURE)).toEqual({});
-    expect(turnContextOf({ lastSettledUsage: used(5), compacted: false }, undefined)).toEqual({});
+    expect(turnContextOf({ lastSettledUsage: empty }, MEASURE)).toEqual({});
+    expect(turnContextOf({ lastSettledUsage: used(5) }, undefined)).toEqual({});
   });
 
-  it("persists the context with the turn's closing metadata", async () => {
+  const ANCHORS = {
+    origins: new Map([["entry_a2", { messageId: "a2", offset: 1 }]]),
+    branchHeadId: "u3",
+  };
+  const compaction = (firstKeptEntryId: string) => ({
+    summary: "Résumé",
+    firstKeptEntryId,
+    tokensBefore: 190_000,
+  });
+
+  it("states where the kept history starts, in branch message ids", () => {
+    expect(turnContextOf({ compaction: compaction("entry_a2") }, MEASURE, ANCHORS)).toEqual({
+      summary: { text: "Résumé", keptFrom: { messageId: "a2", offset: 1 }, tokensBefore: 190_000 },
+    });
+  });
+
+  it("starts the kept history at the turn's user message when Pi kept one of the turn's own entries", () => {
+    expect(
+      turnContextOf({ compaction: compaction("entry_live") }, MEASURE, ANCHORS).summary?.keptFrom,
+    ).toEqual({ messageId: "u3", offset: 0 });
+  });
+
+  it("keeps the summary of a turn whose calls all failed", () => {
+    const state = turnContextOf({ compaction: compaction("entry_a2") }, undefined, ANCHORS);
+    expect(state).not.toHaveProperty("context");
+    expect(state.summary?.text).toBe("Résumé");
+  });
+
+  it("persists the context and the summary with the turn's closing metadata", async () => {
     const chunks = closePiTurn({
       finishReason: "stop",
       streamStarted: false,
@@ -427,13 +455,15 @@ describe("turnContextOf", () => {
       stepCount: 1,
       stepCapReached: false,
       ...MODEL,
-      ...turnContextOf({ lastSettledUsage: used(48_000), compacted: false }, MEASURE),
+      ...turnContextOf(
+        { lastSettledUsage: used(48_000), compaction: compaction("entry_a2") },
+        MEASURE,
+        ANCHORS,
+      ),
       newId: () => "assistant-ctx",
     }).chunks;
-    expect(turnMetadataFromMessage(await assemble(chunks))?.context).toEqual({
-      tokens: 48_200,
-      window: 200_000,
-      compactAt: 183_616,
-    });
+    const turn = turnMetadataFromMessage(await assemble(chunks));
+    expect(turn?.context).toEqual({ tokens: 48_200, window: 200_000, compactAt: 183_616 });
+    expect(turn?.summary?.keptFrom).toEqual({ messageId: "a2", offset: 1 });
   });
 });

@@ -24,10 +24,13 @@ import {
   CHAT_TURN_DEADLINE_MS,
   mergeTurnMetadata,
   type AppstrateTurnContext,
+  type AppstrateTurnSummary,
   type ChatMessageMetadata,
   type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
 import type { PiUsage } from "./pi-events.ts";
+import type { MessageOrigin } from "./structured-session.ts";
+import type { PiCompaction } from "./ui-stream-mapper.ts";
 import {
   classifyClientTurnError,
   clientTurnErrorMarker,
@@ -106,31 +109,58 @@ export function turnNoticeChunks(id: string, text: string): UIMessageChunk[] {
   ];
 }
 
+/** Where a projected session entry came from, and the turn's own user message. */
+export interface TurnAnchors {
+  origins: ReadonlyMap<string, MessageOrigin>;
+  branchHeadId: string;
+}
+
 /**
- * The turn's context, spreadable into {@link closePiTurn}'s input: the last settled call's tokens
- * by Pi's measure over the window the session ran against. Nothing when no call settled, when it
- * reported no tokens, or when the turn never bound a model — a zero would claim a measurement.
+ * The turn's context and summary, spreadable into {@link closePiTurn}'s input.
+ *
+ * `context`: the last settled call's tokens by Pi's measure over the window the session ran
+ * against. Absent when no call settled, when it reported no tokens, or when the turn never bound a
+ * model — a zero would claim a measurement.
+ *
+ * `summary`: Pi's last summary of the turn, written even when no call settled so a failed turn
+ * does not pay for it again. A kept entry the projection did not produce is one of this turn's own,
+ * so the kept history starts at the turn's user message.
  */
 export function turnContextOf(
-  measured: { lastSettledUsage?: PiUsage; compacted: boolean },
+  measured: { lastSettledUsage?: PiUsage; compaction?: PiCompaction },
   measure:
     | {
         sizing: { contextWindow: number; compaction: { reserveTokens: number } };
         contextTokens: (usage: PiUsage) => number;
       }
     | undefined,
-): { context: AppstrateTurnContext } | Record<never, never> {
-  if (!measured.lastSettledUsage || !measure) return {};
-  const tokens = measure.contextTokens(measured.lastSettledUsage);
-  if (tokens <= 0) return {};
-  const { contextWindow, compaction } = measure.sizing;
+  anchors?: TurnAnchors,
+): { context?: AppstrateTurnContext; summary?: AppstrateTurnSummary } {
+  const tokens =
+    measured.lastSettledUsage && measure ? measure.contextTokens(measured.lastSettledUsage) : 0;
+  const { compaction } = measured;
   return {
-    context: {
-      tokens,
-      window: contextWindow,
-      compactAt: contextWindow - compaction.reserveTokens,
-      ...(measured.compacted ? { compacted: true } : {}),
-    },
+    ...(measure && tokens > 0
+      ? {
+          context: {
+            tokens,
+            window: measure.sizing.contextWindow,
+            compactAt: measure.sizing.contextWindow - measure.sizing.compaction.reserveTokens,
+          },
+        }
+      : {}),
+    ...(compaction && anchors
+      ? {
+          summary: {
+            text: compaction.summary,
+            keptFrom: anchors.origins.get(compaction.firstKeptEntryId) ?? {
+              messageId: anchors.branchHeadId,
+              offset: 0,
+            },
+            tokensBefore: compaction.tokensBefore,
+          },
+        }
+      : {}),
   };
 }
 
@@ -144,6 +174,7 @@ function buildPiTurnMetadata(input: {
   modelId: string;
   modelLabel: string;
   context?: AppstrateTurnContext;
+  summary?: AppstrateTurnSummary;
 }): ChatMessageMetadata {
   return mergeTurnMetadata(undefined, {
     finishReason: input.finishReason,
@@ -167,6 +198,7 @@ function buildPiTurnMetadata(input: {
     maxStepsReached: input.stepCapReached,
     ...(input.lastToolName ? { lastToolName: input.lastToolName } : {}),
     ...(input.context ? { context: input.context } : {}),
+    ...(input.summary ? { summary: input.summary } : {}),
   });
 }
 
@@ -211,6 +243,7 @@ export function closePiTurn(input: {
   modelLabel: string;
   requestId?: string;
   context?: AppstrateTurnContext;
+  summary?: AppstrateTurnSummary;
   newId?: () => string;
 }): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
@@ -241,6 +274,7 @@ export function closePiTurn(input: {
       modelId: input.modelId,
       modelLabel: input.modelLabel,
       ...(input.context ? { context: input.context } : {}),
+      ...(input.summary ? { summary: input.summary } : {}),
     }),
   });
   return {

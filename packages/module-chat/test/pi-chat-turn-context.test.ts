@@ -40,8 +40,20 @@ const mcpFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 type Usage = { input: number; output: number; cacheRead: number; cacheWrite: number };
 
-/** `compacts`: where Pi summarized — before the first call, or after the last. */
-function replaySession(usages: Usage[], compacts?: "before" | "after"): PiChatSession {
+interface Replay {
+  /** Where Pi summarized: before the first call, or after the last. */
+  compacts?: "before" | "after";
+  /** The entry Pi kept from, picked off the reconstructed session; default: a live one. */
+  keep?: (session: { getBranch(): Array<{ id: string }> }) => string;
+  /** Every call fails, so none settles. */
+  fails?: boolean;
+}
+
+function replaySession(
+  usages: Usage[],
+  sessionManager: { getBranch(): Array<{ id: string }> },
+  { compacts, keep, fails }: Replay,
+): PiChatSession {
   let listener: (event: unknown) => void = () => {};
   return {
     agent: {},
@@ -54,14 +66,19 @@ function replaySession(usages: Usage[], compacts?: "before" | "after"): PiChatSe
       const compaction = {
         type: "compaction_end",
         reason: "threshold",
-        result: {},
+        result: {
+          summary: "Résumé du fil",
+          firstKeptEntryId: keep?.(sessionManager) ?? "entry_live",
+          tokensBefore: 150_000,
+        },
         aborted: false,
       };
       if (compacts === "before") listener(compaction);
       usages.forEach((usage, i) => {
         const message = {
           role: "assistant",
-          stopReason: i < usages.length - 1 ? "toolUse" : "stop",
+          stopReason: fails ? "error" : i < usages.length - 1 ? "toolUse" : "stop",
+          ...(fails ? { errorMessage: "upstream 503" } : {}),
           usage: {
             ...usage,
             totalTokens: 0,
@@ -93,7 +110,17 @@ async function closingTurn(res: Response): Promise<Record<string, unknown> | und
   return undefined;
 }
 
-function turn(usages: Usage[], contextWindow: number | null, compacts?: "before" | "after") {
+const HISTORY = [
+  { id: "u0", role: "user", parts: [{ type: "text", text: "première question" }] },
+  { id: "a0", role: "assistant", parts: [{ type: "text", text: "première réponse" }] },
+] as UIMessage[];
+
+function turn(
+  usages: Usage[],
+  contextWindow: number | null,
+  replay: Replay = {},
+  history: UIMessage[] = [],
+) {
   const binding = createPiOAuthModelBinding(
     {
       modelId: "claude-sonnet-4-5",
@@ -109,7 +136,6 @@ function turn(usages: Usage[], contextWindow: number | null, compacts?: "before"
     },
     { pi_provider: "anthropic", pi_dialect: null },
   );
-  const session = replaySession(usages, compacts);
   return runPiChat({
     slot: { release() {} },
     modelBinding: binding,
@@ -119,6 +145,7 @@ function turn(usages: Usage[], contextWindow: number | null, compacts?: "before"
     userId: "user_context",
     chatSessionId: null,
     messages: [
+      ...history,
       { id: "u1", role: "user", parts: [{ type: "text", text: "bonjour" }] },
     ] as UIMessage[],
     system: "You are a helpful assistant.",
@@ -127,7 +154,13 @@ function turn(usages: Usage[], contextWindow: number | null, compacts?: "before"
     abortSignal: new AbortController().signal,
     onError: (error) => String(error),
     recordUsage: () => {},
-    createSession: async () => ({ session }),
+    createSession: async (options) => ({
+      session: replaySession(
+        usages,
+        options!.sessionManager as unknown as { getBranch(): Array<{ id: string }> },
+        replay,
+      ),
+    }),
   });
 }
 
@@ -152,13 +185,38 @@ describe("chat turn context", () => {
     expect(meta?.context).toMatchObject({ tokens: 15, window: 128_000 });
   }, 20_000);
 
-  it("flags a summary made before the first call or after the last", async () => {
+  it("keeps a summary made before the first call or after the last", async () => {
     const call = [{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }];
-    for (const when of ["before", "after"] as const) {
-      expect((await closingTurn(turn(call, 200_000, when)))?.context).toMatchObject({
-        compacted: true,
+    for (const compacts of ["before", "after"] as const) {
+      expect((await closingTurn(turn(call, 200_000, { compacts })))?.summary).toEqual({
+        text: "Résumé du fil",
+        keptFrom: { messageId: "u1", offset: 0 },
+        tokensBefore: 150_000,
       });
     }
-    expect((await closingTurn(turn(call, 200_000)))?.context).not.toHaveProperty("compacted");
+    expect(await closingTurn(turn(call, 200_000))).not.toHaveProperty("summary");
+  }, 20_000);
+
+  it("names a kept history entry by the branch message it was projected from", async () => {
+    const meta = await closingTurn(
+      turn(
+        [{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }],
+        200_000,
+        { compacts: "before", keep: (session) => session.getBranch()[1]!.id },
+        HISTORY,
+      ),
+    );
+    expect(meta?.summary).toMatchObject({ keptFrom: { messageId: "a0", offset: 0 } });
+  }, 20_000);
+
+  it("keeps the summary of a turn that failed before any call settled", async () => {
+    const meta = await closingTurn(
+      turn([{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }], 200_000, {
+        compacts: "before",
+        fails: true,
+      }),
+    );
+    expect(meta).toMatchObject({ finishReason: "error", summary: { text: "Résumé du fil" } });
+    expect(meta).not.toHaveProperty("context");
   }, 20_000);
 });

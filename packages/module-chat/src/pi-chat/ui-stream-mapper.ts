@@ -76,8 +76,24 @@ interface PiChatResultMeta {
   errorText?: string;
   /** Usage of the turn's last settled call, which `usage` (a sum over calls) cannot give back. */
   lastSettledUsage?: PiUsage;
-  /** Pi summarized the history during the turn. */
-  compacted: boolean;
+  /** The turn's last summary of the history, absent when Pi made none. */
+  compaction?: PiCompaction;
+}
+
+/** What Pi's `compaction_end` result says about the summary it appended. */
+export interface PiCompaction {
+  summary: string;
+  /** Session entry id of the first message kept beside the summary. */
+  firstKeptEntryId: string;
+  tokensBefore: number;
+}
+
+function compactionOf(result: unknown): PiCompaction | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const { summary, firstKeptEntryId, tokensBefore } = result as Record<string, unknown>;
+  if (typeof summary !== "string" || typeof firstKeptEntryId !== "string") return undefined;
+  if (typeof tokensBefore !== "number") return undefined;
+  return { summary, firstKeptEntryId, tokensBefore };
 }
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
@@ -159,7 +175,7 @@ export class PiChatUiStreamMapper {
   private lastError: string | undefined;
   private lastTool: string | undefined;
   private lastSettledUsage: PiUsage | undefined;
-  private compacted = false;
+  private compaction: PiCompaction | undefined;
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -227,9 +243,12 @@ export class PiChatUiStreamMapper {
         // only assistant entry in its list, so it is still captured.
         this.captureFailure(lastAssistantMessage(e.messages ?? []));
         return [];
-      case "compaction_end":
-        if (!e.aborted && e.result !== undefined) this.compacted = true;
+      case "compaction_end": {
+        // A later summary in the same turn starts from the earlier one, so it replaces it.
+        const compaction = e.aborted ? undefined : compactionOf(e.result);
+        if (compaction) this.compaction = compaction;
         return [];
+      }
       default:
         return [];
     }
@@ -394,7 +413,7 @@ export class PiChatUiStreamMapper {
       finishReason: this.finishReason,
       ...(this.lastError ? { errorText: this.lastError } : {}),
       ...(this.lastSettledUsage ? { lastSettledUsage: this.lastSettledUsage } : {}),
-      compacted: this.compacted,
+      ...(this.compaction ? { compaction: this.compaction } : {}),
     };
   }
 }

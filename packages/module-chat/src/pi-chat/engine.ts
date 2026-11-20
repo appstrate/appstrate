@@ -52,11 +52,20 @@ import {
   DEFAULT_MODEL_REASONING_LEVEL,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { ChatTurnDeadlineError, closePiTurn, turnContextOf } from "./pi-turn-closure.ts";
+import {
+  ChatTurnDeadlineError,
+  closePiTurn,
+  turnContextOf,
+  type TurnAnchors,
+} from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
-import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
+import {
+  buildStructuredPiTurn,
+  reconstructPiSession,
+  resolveSummaryCheckpoint,
+} from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiChatInput {
@@ -320,6 +329,8 @@ export function runPiChat(input: PiChatInput): Response {
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
       /** The sizing handed to Pi and stamped on the turn's context, and Pi's measure; set with the model. */
       let contextMeasure: Parameters<typeof turnContextOf>[1];
+      /** Where the session's entries came from, for the summary Pi may make; set with the session. */
+      let anchors: TurnAnchors | undefined;
       /** Detach handle for the Pi event subscription — released in `finally`. */
       let unsubscribe: (() => void) | undefined;
       try {
@@ -444,11 +455,13 @@ export function runPiChat(input: PiChatInput): Response {
         // pointer lines it always had.
         const read = input.readAttachment;
         const signal = turnAbort.signal;
+        // Messages before a summary's kept history are not sent: their images are not read.
+        const checkpoint = resolveSummaryCheckpoint(input.messages);
         const images =
           modelSeesImages && read
             ? await untilAborted(
                 loadAttachmentImages(
-                  input.messages,
+                  input.messages.slice(checkpoint?.anchorIndex ?? 0),
                   (uri, maxBytes) => read(uri, { kind: "image", maxBytes, signal }),
                   signal,
                 ),
@@ -469,6 +482,7 @@ export function runPiChat(input: PiChatInput): Response {
             images,
             pdfReceipts,
             modelSeesImages,
+            checkpoint,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
             // Still a floor, not a measurement: tool schemas and this turn's own
@@ -482,7 +496,9 @@ export function runPiChat(input: PiChatInput): Response {
             }),
           },
         );
-        const sessionManager = reconstructPiSession(SessionManager, projectedTurn.history);
+        const reconstruction = reconstructPiSession(SessionManager, projectedTurn);
+        const sessionManager = reconstruction.session;
+        anchors = { origins: reconstruction.origins, branchHeadId: projectedTurn.branchHeadId };
         timings.projectionMs = Date.now() - projectionStartedAt;
         logger.info("Pi chat session reconstructed", {
           chatSessionId: input.chatSessionId,
@@ -492,6 +508,7 @@ export function runPiChat(input: PiChatInput): Response {
           toolCallCount: projectedTurn.toolCallCount,
           toolResultCount: projectedTurn.toolResultCount,
           contextTokens: projectedTurn.contextTokens,
+          summarized: projectedTurn.summary !== undefined,
           sessionFile: sessionManager.getSessionFile() ?? null,
         });
 
@@ -683,7 +700,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelId: input.presetId,
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
-          ...turnContextOf(meta, contextMeasure),
+          ...turnContextOf(meta, contextMeasure, anchors),
         });
         // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
@@ -751,7 +768,7 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
-            ...turnContextOf(mapper.result(), contextMeasure),
+            ...turnContextOf(mapper.result(), contextMeasure, anchors),
           });
           logger.error("Pi chat turn failed", {
             err: String(err),
