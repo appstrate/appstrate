@@ -58,7 +58,7 @@ test("sends image pixels and the PDF to the configured provider and reloads the 
       ).toBeVisible();
       await expect(page.getByText("contract.pdf", { exact: true })).toBeVisible();
       // A Chat Completions model with vision is sent the PDF: the chip warns about nothing.
-      await expect(page.getByText("Les PDF ne sont pas envoyés à ce modèle.")).toHaveCount(0);
+      await expect(page.getByText("PDF non envoyé à ce modèle.")).toHaveCount(0);
       await message.fill("Peux-tu lire ces deux fichiers ?");
       await page.getByRole("button", { name: "Envoyer", exact: true }).click();
       await expect(page.getByText(answer, { exact: true })).toBeVisible();
@@ -95,7 +95,7 @@ test("sends image pixels and the PDF to the configured provider and reloads the 
         { name: "draft.pdf", mimeType: "application/pdf", buffer: pdf },
       ]);
       await expect(page.getByText("Ce modèle ne peut pas voir l’image.")).toBeVisible();
-      await expect(page.getByText("Les PDF ne sont pas envoyés à ce modèle.")).toBeVisible();
+      await expect(page.getByText("PDF non envoyé à ce modèle.")).toBeVisible();
     },
   );
 });

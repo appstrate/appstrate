@@ -10,7 +10,7 @@
   "composer.attach": "Attach files",
   "composer.removeAttachment": "Remove attachment",
   "composer.imageNotSeen": "This model cannot view the image.",
-  "composer.pdfNotRead": "PDFs are not sent to this model.",
+  "composer.pdfNotRead": "PDF not sent to this model.",
   "composer.send": "Send",
   "composer.stop": "Stop",
   "welcome.hint": "Launch an agent, inspect a run, create a package or search your files.",

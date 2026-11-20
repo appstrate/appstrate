@@ -10,7 +10,7 @@
   "composer.attach": "Joindre des fichiers",
   "composer.removeAttachment": "Retirer la pièce jointe",
   "composer.imageNotSeen": "Ce modèle ne peut pas voir l’image.",
-  "composer.pdfNotRead": "Les PDF ne sont pas envoyés à ce modèle.",
+  "composer.pdfNotRead": "PDF non envoyé à ce modèle.",
   "composer.send": "Envoyer",
   "composer.stop": "Arrêter",
   "welcome.hint": "Lancez un agent, inspectez un run, créez un package ou cherchez dans vos fichiers.",
