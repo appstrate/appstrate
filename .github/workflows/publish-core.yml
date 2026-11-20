@@ -85,7 +85,7 @@ jobs:
         working-directory: .
 
       - name: TypeScript type-check
-        run: tsc --noEmit
+        run: bun run typecheck
 
       # The package's `test` script carries the per-test timeout the PR gate
       # applies (`scripts/run-tests.ts`); bare `bun test` would run with Bun's 5 s.

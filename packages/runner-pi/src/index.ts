@@ -63,6 +63,8 @@ export type { PiSdkAgentSessionEvent, PiSdkAssistantMessageEvent, PiSdkUsage } f
 
 export { bundleMemberDir, prepareBundleForPi } from "./bundle-extensions.ts";
 
+export { INLINE_IMAGE_BUDGET_BYTES } from "./inline-image-budget.ts";
+
 export { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 
 export { buildApiCallExtensionFactory } from "./api-call-bridge.ts";

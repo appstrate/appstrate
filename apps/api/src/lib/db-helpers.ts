@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, inArray, ne, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, inArray, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spacePackages, spaces } from "@appstrate/db/schema";
-import { findCause } from "./error-cause.ts";
+import { findCause } from "@appstrate/core/error-cause";
 import { notFound } from "./errors.ts";
 import { logger } from "./logger.ts";
 
@@ -21,6 +21,27 @@ import { logger } from "./logger.ts";
  * from `db.transaction`: a spelling copied by hand is a spelling that drifts.
  */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * The boundary for lists ordered by (timestamp DESC, id DESC) that restart at
+ * the head for a missing or unreadable cursor. PostgreSQL timestamps can carry
+ * microseconds. Keep that precision when crossing the JS driver boundary.
+ */
+export async function olderThanTimestampCursor(
+  timestamp: PgColumn,
+  id: PgColumn,
+  cursorId: string | undefined,
+  visible: SQL | undefined,
+): Promise<SQL | undefined> {
+  if (!cursorId) return undefined;
+  const [cursor] = await db
+    .select({ timestamp: sql<string>`${timestamp}::text` })
+    .from(id.table)
+    .where(and(eq(id, cursorId), visible))
+    .limit(1);
+  if (!cursor) return undefined;
+  return sql`(${timestamp}, ${id}) < (${cursor.timestamp}::timestamptz, ${cursorId})`;
+}
 
 /**
  * A Drizzle executor — the root `db`, or a transaction handle a caller already
@@ -158,16 +179,6 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
         typeof e.message === "string" && e.message.includes("invalid input syntax for type uuid"),
     )
   );
-}
-
-/**
- * True when a DB error is a referential-integrity violation on write:
- * PostgreSQL raises `23503` (foreign_key_violation), while PGlite (tier 0)
- * surfaces an `ON DELETE RESTRICT` as `23001` (restrict_violation). Both mean
- * "rows still reference this one".
- */
-export function isForeignKeyViolation(err: unknown): boolean {
-  return hasSqlState(err, "23503", "23001");
 }
 
 /** True when a DB error is Postgres `23505` (unique_violation). */

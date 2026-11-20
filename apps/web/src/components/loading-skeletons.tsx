@@ -11,6 +11,7 @@
  */
 
 import {
+  ComposerSkeleton,
   ConversationRowSkeleton,
   ConversationSkeleton,
 } from "@appstrate/module-chat/conversation-skeleton";
@@ -44,8 +45,20 @@ import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
+import { useChatFilter } from "../modules/chat/use-chat-runtime";
 import { useListView } from "../stores/list-view-store";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
+import {
+  agentSectionVisible,
+  isSpaceSetting,
+  resolveAgentSettingsSection,
+  SECTION_PERMISSION,
+} from "../lib/agent-settings-sections";
+import {
+  isIntegrationSpaceSection,
+  resolveIntegrationSettingsSection,
+} from "../lib/integration-settings-sections";
+import { useSpacesFor } from "../hooks/use-space-action";
 import { CardGridSkeleton } from "./card-grid";
 import { FileTileSkeleton } from "./file-tile";
 import { ShellHeaderActions } from "./shell-header-slots";
@@ -144,18 +157,27 @@ export function DetailPageSkeleton({
   tabCount,
   panel,
   meta,
+  spaces,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount: number;
   /** Whether the page draws a line under its title (`DetailBarSkeleton`). */
   meta?: boolean;
+  /** Whether that line opens with the resource's spaces (`DetailBarSkeleton`). */
+  spaces?: boolean;
   /** The first tab's own skeleton, when the page has one; generic blocks otherwise. */
   panel?: ReactNode;
 }) {
   return (
     <Waiting>
-      <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} meta={meta} />
+      <DetailBarSkeleton
+        title={title}
+        trail={trail}
+        tabCount={tabCount}
+        meta={meta}
+        spaces={spaces}
+      />
       {/* The first tab lays its blocks on the page, like `DetailTabPanel`: no frame around them. */}
       {panel ?? <CardBlocks count={3} />}
     </Waiting>
@@ -167,10 +189,21 @@ function useOpenTab(): string {
   return useLocation().hash.replace(/^#/, "");
 }
 
+/** The space a per-space tab is read in (`ConfigurationSpace`): its label, then its button. */
+function SpaceLineBlocks() {
+  return (
+    <div className="mb-6 flex min-h-8 items-center gap-2">
+      <SkeletonLine className="w-36 text-sm" />
+      <Skeleton className="h-8 w-32" />
+    </div>
+  );
+}
+
 /** A list tab (runs, connections, usage): its toolbar over the table's own card. */
-function ListTabBlocks() {
+function ListTabBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <>
+      {spaceLine && <SpaceLineBlocks />}
       <ToolbarBlocks columns />
       <TableBlocks framed />
     </>
@@ -178,10 +211,60 @@ function ListTabBlocks() {
 }
 
 /**
+ * Whether a package's open tab starts with the space it is read in, in « Tous les espaces »
+ * (`ConfigurationSpace`): the section the page opens (its own resolver, from the reader's grants
+ * in any space, before the detail says which spaces are the package's), when it asks a permission
+ * of its space: always for an agent's setting set there, else when the working space refuses it;
+ * an integration's Connexions, and its Authentification or Accès.
+ */
+function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
+  const { on } = useOverviewMode();
+  const { can } = usePermissions();
+  const search = new URLSearchParams(useLocation().search);
+  const configures = useSpacesFor({ permission: "agents:configure" }).offered;
+  const readsIntegrations = useSpacesFor({ permission: "integrations:read" }).offered;
+  const readsAgent = useSpacesFor({ permission: "agents:read" }).offered;
+  const readsSchedules = useAdmittingSpaces("schedules").length > 0;
+  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
+  if (!on) return false;
+  if (type === "agent" && tab === "settings") {
+    const grants: Record<string, boolean> = {
+      "agents:configure": configures,
+      "integrations:read": readsIntegrations,
+      "agents:read": readsAgent,
+    };
+    // An organization agent, its definition read only: what most readers open.
+    const sectionGrants = {
+      grants: (permission: string) => !!grants[permission],
+      readsSchedules,
+      canEditDefinition: false,
+      isSystem: false,
+    };
+    const section = resolveAgentSettingsSection(search.get("agentSettings"), sectionGrants);
+    const permission = SECTION_PERMISSION[section];
+    return (
+      !!permission &&
+      agentSectionVisible(section, sectionGrants) &&
+      (isSpaceSetting(section) || !can(permission))
+    );
+  }
+  if (type !== "integration") return false;
+  if (tab === "connections") return true;
+  if (tab !== "settings") return false;
+  // A section named in the address exists: the rail offers it.
+  const section = resolveIntegrationSettingsSection(search.get("integrationSettings"), {
+    canConfigure: configuresIntegration,
+    isOwned: true,
+    hasDefinition: true,
+  });
+  return isIntegrationSpaceSection(section);
+}
+
+/**
  * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
  * in the tab panel's card.
  */
-function RailPanelBlocks() {
+function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <Card className="@container/split overflow-hidden">
       <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
@@ -196,6 +279,7 @@ function RailPanelBlocks() {
             <Skeleton className="h-11 w-full" />
           </div>
           <div className="p-6">
+            {spaceLine && <SpaceLineBlocks />}
             {/* The open section's `SettingsHeading` (title over its hint), then its rows. */}
             <header className="mb-6">
               <SkeletonLine className="w-32 text-xl font-semibold" />
@@ -286,19 +370,23 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const listCrumb = usePackageListCrumb(type);
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
+  const spaceLine = useOpensWithSpaceLine(type, tab);
   return (
     <DetailPageSkeleton
       title={title}
       trail={[listCrumb]}
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
+      // A package's line opens with the spaces it is active in where the reader reaches one, as
+      // most do: a package active nowhere they reach draws none, which only its detail says.
+      spaces
       panel={
         tab === "settings" ? (
-          <RailPanelBlocks />
+          <RailPanelBlocks spaceLine={spaceLine} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
-          <ListTabBlocks />
+          <ListTabBlocks spaceLine={spaceLine} />
         ) : type === "agent" ? (
           <AgentOverviewSkeleton />
         ) : type === "integration" ? (
@@ -344,10 +432,13 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
 /** A notification's page: the bar, then the card holding its message. */
 export function NotificationDetailSkeleton() {
   const { t } = useTranslation("common");
+  // The page names its notification's space in « Tous les espaces ».
+  const { on } = useOverviewMode();
   return (
     <DetailPageSkeleton
       trail={[{ label: t("notifications.ariaLabel") }]}
       tabCount={0}
+      spaces={on}
       panel={
         <div className="bg-muted/40 flex min-w-0 flex-col overflow-hidden rounded-lg border">
           <div className="flex min-h-5 items-center gap-2 px-4 py-3">
@@ -648,8 +739,18 @@ function MetricCardSkeleton() {
   );
 }
 
-/** `RunRow`: icon, agent and date, status badge, duration. */
-function RunRowSkeleton() {
+/** `RowSpaceName`: a space's small tile and its name, in a row spanning spaces. */
+function RowSpaceNameSkeleton() {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+      <SkeletonLine className="w-16 text-xs" />
+    </span>
+  );
+}
+
+/** `RunRow`: icon, agent and date, its space when `spanning`, status badge, duration. */
+function RunRowSkeleton({ spanning = false }: { spanning?: boolean }) {
   return (
     <div className="flex min-h-16 items-center gap-3 px-4 py-3">
       <Skeleton className="size-8 shrink-0 rounded-lg" />
@@ -657,6 +758,7 @@ function RunRowSkeleton() {
         <SkeletonLine className="w-40 text-sm font-medium" />
         <SkeletonLine className="mt-0.5 w-28 text-xs" />
       </div>
+      {spanning && <RowSpaceNameSkeleton />}
       {/* `RunStatusBadge`'s own wrapper: its line box makes the row's badge column taller than the badge. */}
       <span className="relative shrink-0">
         <SkeletonBadge className="w-16" />
@@ -666,8 +768,8 @@ function RunRowSkeleton() {
   );
 }
 
-/** The dashboard's schedule row: icon, label and agent, state badge and next run. */
-function ScheduleRowSkeleton() {
+/** The dashboard's schedule row: icon, label and agent, its space when `spanning`, state badge and next run. */
+function ScheduleRowSkeleton({ spanning }: { spanning: boolean }) {
   return (
     <div className="flex min-h-[74px] items-center gap-3 px-4 py-3">
       <Skeleton className="size-9 shrink-0 rounded-lg" />
@@ -675,6 +777,7 @@ function ScheduleRowSkeleton() {
         <SkeletonLine className="w-36 text-sm font-medium" />
         <SkeletonLine className="mt-0.5 w-24 text-xs" />
       </div>
+      {spanning && <RowSpaceNameSkeleton />}
       <div className="flex shrink-0 flex-col items-end">
         <SkeletonBadge className="w-14" />
         <SkeletonLine className="mt-1 w-24 text-[11px]" />
@@ -688,7 +791,7 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
- * In « Tous les espaces » the agent cards name their space.
+ * In « Tous les espaces » the agent cards and the rows name their space.
  */
 export function DashboardBodySkeleton() {
   const { on } = useOverviewMode();
@@ -714,7 +817,7 @@ export function DashboardBodySkeleton() {
           <DashboardSectionHeadingSkeleton />
           <CardList>
             {Array.from({ length: 7 }, (_, i) => (
-              <RunRowSkeleton key={i} />
+              <RunRowSkeleton key={i} spanning={on} />
             ))}
           </CardList>
         </div>
@@ -722,7 +825,7 @@ export function DashboardBodySkeleton() {
           <DashboardSectionHeadingSkeleton />
           <CardList>
             {Array.from({ length: 2 }, (_, i) => (
-              <ScheduleRowSkeleton key={i} />
+              <ScheduleRowSkeleton key={i} spanning={on} />
             ))}
           </CardList>
         </div>
@@ -786,27 +889,6 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
 }
 
 /**
- * The chat's composer (`module-chat` `Composer`): a `min-h-9` line over its tool row, in a card
- * of the thread's width.
- */
-function ComposerBlock() {
-  return (
-    <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className="flex min-h-9 items-center py-1">
-        <Skeleton className="h-3.5 w-48" />
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <Skeleton className="size-8 rounded-lg" />
-          <Skeleton className="h-7 w-32 rounded-md" />
-        </div>
-        <Skeleton className="size-8 rounded-lg" />
-      </div>
-    </div>
-  );
-}
-
-/**
  * The chat's header actions (`ChatModulePage`): the context tabs (one `size-7` tab per readable
  * pane in a `p-1` list), and for a stored conversation the writer's settings button.
  */
@@ -822,33 +904,29 @@ function ChatHeaderActionsBlocks({ conversation }: { conversation: boolean }) {
 }
 
 /**
- * `/chat` while its code loads: `ThreadWelcome` — the title and hint, the composer, then the
- * suggestions (a writer's only), centred in the thread's 42rem column. The module's own wait for
- * a stored conversation is {@link ChatConversationSkeleton}'s shape.
+ * `/chat` while its code loads: `ThreadWelcome` — the greeting and hint over the composer (with
+ * its limit chip when a space is selected), centred in the thread's 42rem column. The module's own wait for a stored conversation is
+ * {@link ChatConversationSkeleton}'s shape.
  */
 export function ChatPanelSkeleton() {
   const canWrite = usePermissions().can("chat:write");
+  // A new conversation is limited to the selected space, and its composer shows the chip.
+  const limited = useChatFilter().spaceId !== null;
   return (
-    <Waiting className="flex h-full flex-col items-center justify-center px-4">
+    <Waiting className="flex h-full min-h-0 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
       <ChatHeaderActionsBlocks conversation={false} />
-      <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
-        <div className="flex flex-col items-center">
-          <div className="flex h-7 items-center">
-            <Skeleton className="h-5 w-40" />
+      <div className="flex w-full max-w-2xl flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
+        <div className="flex flex-1 flex-col items-center justify-center md:flex-none">
+          {/* The `text-2xl` greeting's 32px line. */}
+          <div className="flex h-8 items-center">
+            <Skeleton className="h-6 w-44" />
           </div>
-          <div className="mt-1 flex h-5 items-center">
-            <Skeleton className="h-3.5 w-72 max-w-full" />
+          <div className="mt-1 flex h-6 items-center md:h-5">
+            <Skeleton className="h-3.5 w-96 max-w-full" />
           </div>
         </div>
         {canWrite ? (
-          <>
-            <ComposerBlock />
-            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-              {Array.from({ length: 4 }, (_, i) => (
-                <Skeleton key={i} className="h-[38px] rounded-lg" />
-              ))}
-            </div>
-          </>
+          <ComposerSkeleton placeholder={<Skeleton className="h-4 w-48" />} limited={limited} />
         ) : (
           // A reader's composer is a read-only note.
           <Skeleton className="h-[46px] w-full rounded-xl" />
@@ -863,14 +941,22 @@ export function ChatPanelSkeleton() {
  * draws it (`ConversationSkeleton`) — turns at the top, the composer and its line at the bottom.
  */
 export function ChatConversationSkeleton() {
-  const { t } = useTranslation("common");
+  // The chat namespace loads with the module: its disclaimer text once loaded, a line until then.
+  const { t, i18n } = useTranslation("common");
   const canWrite = usePermissions().can("chat:write");
   return (
     <>
       <ChatHeaderActionsBlocks conversation />
       <ConversationSkeleton
         label={t("loading")}
-        placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
+        placeholder={canWrite ? <Skeleton className="h-4 w-48" /> : null}
+        disclaimer={
+          i18n.hasLoadedNamespace("chat") ? (
+            t("chat:thread.disclaimer")
+          ) : (
+            <Skeleton className="mx-auto my-0.5 h-3 w-64" />
+          )
+        }
       />
     </>
   );
@@ -897,7 +983,7 @@ export function ChatSidebarSkeleton() {
         </SidebarMenu>
       </SidebarGroup>
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
+        <SidebarGroupLabel className="text-sm md:text-xs">{t("threads.title")}</SidebarGroupLabel>
         <SidebarMenu>
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>

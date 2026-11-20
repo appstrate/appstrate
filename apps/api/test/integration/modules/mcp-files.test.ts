@@ -32,7 +32,9 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
+import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -373,6 +375,41 @@ describe("mcp resources/read (appfile://)", () => {
     }
   });
 
+  it("requires the file-family grant to read bytes through either MCP entry point", async () => {
+    const docId = await publishDoc(
+      scope,
+      await seedRun(scope),
+      "report.txt",
+      "text/plain",
+      "private-report",
+    );
+    const uri = `appfile://${docId}`;
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["mcp:read", "mcp:invoke"],
+    });
+    const limited = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
+    const viaTool = await rpc(limited, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "read_file", arguments: { uri } },
+    });
+    // Without `files:read` in the file's space the file is as absent as a missing one.
+    expect(viaTool.envelope.result?.isError).toBe(true);
+    expect(JSON.stringify(viaTool.envelope)).toContain("not_found");
+    const direct = await rpc(limited, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "resources/read",
+      params: { uri },
+    });
+    expect(direct.envelope.error?.message).toContain("File not found");
+    expect(JSON.stringify([direct.envelope, viaTool.envelope])).not.toContain("private-report");
+  });
+
   it("exposes the same file through the chat-callable read_file tool", async () => {
     const runId = await seedRun(scope);
     const docId = await publishDoc(scope, runId, "report.txt", "text/plain", "hello tool reader");
@@ -624,12 +661,16 @@ describe("mcp file-backed package workflow", () => {
       packageArchive(true),
     );
 
-    const sessionHeaders = mcpAuthHeaders(ctx);
+    // On the organization endpoint: one pinned to a space reaches that space alone.
+    const sessionHeaders = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
     const { envelope } = await rpc(sessionHeaders, {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "import_package_file", arguments: { file_uri: `appfile://${docId}` } },
+      params: {
+        name: "import_package_file",
+        arguments: { file_uri: `appfile://${docId}`, space_id: ctx.defaultSpaceId },
+      },
     });
     const result = toolData(envelope);
     expect(result.isError, JSON.stringify(envelope)).toBe(false);
@@ -650,6 +691,59 @@ describe("mcp file-backed package workflow", () => {
     ]);
   });
 
+  it("the chat bearer imports in the one space it entered: a root homed in another is out of reach", async () => {
+    const packageId = "@mcppkgdoc/file-server";
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedPackage({
+      id: packageId,
+      orgId: ctx.orgId,
+      type: "integration",
+      homeSpaceId: elsewhere.id,
+    });
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "server.afps",
+      "application/zip",
+      packageArchive(true),
+    );
+    // Bound to both spaces with the owner's grants: a session would place the root, as above.
+    const bearer = loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "owner",
+      permissions: [
+        "mcp:read",
+        "mcp:invoke",
+        "files:read",
+        "integrations:read",
+        "integrations:write",
+        "integrations:share",
+        "integrations:install",
+      ],
+      spaceIds: [ctx.defaultSpaceId, elsewhere.id],
+    });
+    const { envelope } = await rpc(bearer, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "import_package_file",
+        arguments: { file_uri: `appfile://${docId}`, space_id: ctx.defaultSpaceId },
+      },
+    });
+    const result = toolData(envelope);
+    // The refusal of a package outside the caller's reach: the opaque not-found.
+    expect(result).toEqual({
+      isError: true,
+      data: { error: `Package '${packageId}' not found` },
+    });
+    const rows = await db
+      .select({ spaceId: spacePackages.spaceId })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, packageId));
+    expect(rows).toEqual([]);
+  });
+
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
     const packageId = "@mcppkgdoc/file-server";
     const manifest = localIntegrationManifest({
@@ -664,6 +758,37 @@ describe("mcp file-backed package workflow", () => {
     if (includeEntryPoint) entries["main.js"] = new TextEncoder().encode(source);
     return zipSync(entries as unknown as Parameters<typeof zipSync>[0]);
   }
+
+  it("refuses to read the archive of a caller without files:read", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "invalid.afps",
+      "application/zip",
+      packageArchive(false),
+    );
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["mcp:read", "mcp:invoke"],
+    });
+    const { envelope } = await rpc(
+      { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId },
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "validate_package_file", arguments: { file_uri: `appfile://${docId}` } },
+      },
+    );
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    // Refused before the bytes are read, as a missing file: no validation verdict comes back.
+    expect(result.data).toMatchObject({ code: "not_found" });
+    expect(result.data.valid).toBeUndefined();
+  });
 
   it("validates without writing and reports a missing entry point", async () => {
     const runId = await seedRun(scope);
@@ -832,5 +957,160 @@ describe("mcp file-backed package workflow", () => {
       importable: false,
       conflicts: [{ identity: `${packageId}@1.0.0` }],
     });
+  });
+});
+
+describe("mcp file reads of a chat conversation's own attachments", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "mcpchatfiles" });
+    runOwner = ctx.user.id;
+  });
+
+  /** A chat upload of `userId`, held by conversation `sessionId`, in their personal space. */
+  async function chatUpload(userId: string, sessionId: string, content: string): Promise<string> {
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, userId);
+    const scope = { orgId: ctx.orgId, spaceId: personal.id };
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId });
+    const upload = await stageUpload(scope, userId, "notes.csv", new TextEncoder().encode(content));
+    const file = await createFileFromUpload(scope, { type: "user", id: userId }, upload, {
+      chatSessionId: sessionId,
+    });
+    return `appfile://${file.id}`;
+  }
+
+  it("a limited conversation's bearer reads its own personal-space upload, and no other file", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    const own = await chatUpload(ctx.user.id, sessionId, "a,b\n1,2");
+    const otherConversation = await chatUpload(
+      ctx.user.id,
+      `chs_${crypto.randomUUID()}`,
+      "autre conversation",
+    );
+    const colleague = await createTestUser({ email: "colleague@mcp-chat-files.test" });
+    await addOrgMember(ctx.orgId, colleague.id, "member");
+    const theirs = await chatUpload(colleague.id, `chs_${crypto.randomUUID()}`, "leur fichier");
+
+    // The bearer of a turn limited to the default space: the personal space is not its.
+    const bearer = (chatSessionId?: string) =>
+      loopbackHeaders(ctx, ctx.orgId, {
+        orgRole: "owner",
+        permissions: ["mcp:read", "mcp:invoke", "files:read"],
+        spaceIds: [ctx.defaultSpaceId],
+        chatSessionId,
+      });
+    const readFile = async (headers: Record<string, string>, uri: string) => {
+      const { envelope } = await rpc(headers, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "read_file", arguments: { uri, space_id: ctx.defaultSpaceId } },
+      });
+      return envelope;
+    };
+    const readResource = async (headers: Record<string, string>, uri: string) =>
+      (await rpc(headers, { jsonrpc: "2.0", id: 2, method: "resources/read", params: { uri } }))
+        .envelope;
+
+    const viaTool = await readFile(bearer(sessionId), own);
+    expect(viaTool.result?.isError).toBe(false);
+    expect(JSON.stringify(viaTool.result?.content)).toContain("a,b\\n1,2");
+    const direct = await readResource(bearer(sessionId), own);
+    expect((direct.result?.contents as Array<{ text?: string }>)?.[0]?.text).toBe("a,b\n1,2");
+
+    // Another conversation's file, another member's, or no conversation at all: as missing.
+    for (const [headers, uri] of [
+      [bearer(sessionId), otherConversation],
+      [bearer(sessionId), theirs],
+      [bearer(), own],
+    ] as const) {
+      const refused = await readFile(headers, uri);
+      expect(refused.result?.isError).toBe(true);
+      expect(JSON.stringify(refused.result?.content)).toContain("not_found");
+      expect(JSON.stringify(refused)).not.toMatch(/a,b|autre conversation|leur fichier/);
+      const refusedDirect = await readResource(headers, uri);
+      expect(refusedDirect.result).toBeUndefined();
+    }
+  });
+});
+
+describe("the content_url of an oversized MCP file read", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "mcpcontenturl" });
+    runOwner = ctx.user.id;
+  });
+
+  /** `read_file` from the default space, answered as metadata; returns its `content_url`. */
+  async function contentUrlOf(headers: Record<string, string>, uri: string): Promise<string> {
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "read_file", arguments: { uri, space_id: ctx.defaultSpaceId } },
+    });
+    const content = envelope.result?.content as Array<{ resource: { text: string } }>;
+    const meta = JSON.parse(content[0]!.resource.text) as { content_url: string };
+    return new URL(meta.content_url).pathname;
+  }
+
+  /** Follow it as the same caller, in the space it entered. */
+  const follow = (headers: Record<string, string>, path: string) =>
+    app.request(path, { headers: { ...headers, "X-Space-Id": ctx.defaultSpaceId } });
+
+  it("serves a file of another space to a session that reached it", async () => {
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Autre", visibility: "closed" });
+    const otherScope = { orgId: ctx.orgId, spaceId: other.id };
+    const big = "B".repeat(700 * 1024 + 16);
+    const docId = await publishDoc(
+      otherScope,
+      await seedRun(otherScope),
+      "big.bin",
+      "application/octet-stream",
+      big,
+    );
+    const session = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
+
+    const path = await contentUrlOf(session, `appfile://${docId}`);
+    const res = await follow(session, path);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(big);
+    // Its metadata door follows the same rule.
+    expect((await follow(session, `/api/files/${docId}`)).status).toBe(200);
+
+    // An API key bound to the default space reaches no other: as missing.
+    const key = await apiKeyHeaders(ctx);
+    expect((await follow(key, path)).status).toBe(404);
+    expect((await follow(key, `/api/files/${docId}`)).status).toBe(404);
+  });
+
+  it("serves a limited conversation's own personal upload to its bearer, and to no other", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    const scope = { orgId: ctx.orgId, spaceId: personal.id };
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const big = "a,b\n".repeat(300 * 1024);
+    const upload = await stageUpload(scope, ctx.user.id, "big.csv", new TextEncoder().encode(big));
+    const file = await createFileFromUpload(scope, { type: "user", id: ctx.user.id }, upload, {
+      chatSessionId: sessionId,
+    });
+    const bearer = (chatSessionId?: string) =>
+      loopbackHeaders(ctx, ctx.orgId, {
+        orgRole: "owner",
+        permissions: ["mcp:read", "mcp:invoke", "files:read"],
+        spaceIds: [ctx.defaultSpaceId],
+        chatSessionId,
+      });
+
+    const path = await contentUrlOf(bearer(sessionId), `appfile://${file.id}`);
+    const res = await follow(bearer(sessionId), path);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(big);
+    // The bearer of another turn naming no conversation does not reach it.
+    expect((await follow(bearer(), path)).status).toBe(404);
   });
 });

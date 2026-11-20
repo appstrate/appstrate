@@ -199,4 +199,72 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
       expected({ un: 1, deux: 1, default: 1 }),
     );
   });
+
+  describe("packageId", () => {
+    /** One agent homed in Un, placed in Deux, with a schedule in each; another agent's beside it in Un. */
+    async function seedAgentInTwoSpaces() {
+      const id = `@orgsched/two-${crypto.randomUUID().slice(0, 8)}`;
+      await seedPackage({
+        id,
+        orgId: owner.orgId,
+        homeSpaceId: s.un,
+        createdBy: owner.user.id,
+        draftManifest: { name: id, version: "0.1.0", type: "agent" },
+      });
+      const schedule = (spaceId: string) =>
+        seedSchedule({ packageId: id, orgId: owner.orgId, spaceId, userId: owner.user.id });
+      return { id, inUn: (await schedule(s.un)).id, inDeux: (await schedule(s.deux)).id };
+    }
+
+    it("narrows the list spanning spaces to one agent's schedules, each naming its space", async () => {
+      const agent = await seedAgentInTwoSpaces();
+      const { body } = await list({ Cookie: member.cookie }, `?packageId=${agent.id}`);
+      expect(body.data.map((row) => [row.id, row.spaceId]).sort()).toEqual(
+        [
+          [agent.inUn, s.un],
+          [agent.inDeux, s.deux],
+        ].sort(),
+      );
+    });
+
+    it("keeps the per-space grant: a space without schedules:read contributes nothing", async () => {
+      const agent = await seedAgentInTwoSpaces();
+      const inTrois = await seedSchedule({
+        packageId: agent.id,
+        orgId: owner.orgId,
+        spaceId: s.trois,
+        userId: owner.user.id,
+      });
+      const { body } = await list({ Cookie: member.cookie }, `?packageId=${agent.id}`);
+      expect(body.data.map((row) => row.id)).not.toContain(inTrois.id);
+      expect(body.data).toHaveLength(2);
+    });
+
+    it("narrows the space's own list the same way", async () => {
+      const agent = await seedAgentInTwoSpaces();
+      const res = await app.request(`/api/schedules?packageId=${agent.id}`, {
+        headers: { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": s.un },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as { data: ListedSchedule[] };
+      expect(body.data.map((row) => row.id)).toEqual([agent.inUn]);
+    });
+
+    it("reads an empty value as absent", async () => {
+      expect((await list({ Cookie: member.cookie }, "?packageId=")).counters).toEqual(
+        expected({ un: 2, deux: 1, default: 1 }),
+      );
+    });
+
+    it("refuses a value that is not a package id, and any other parameter, with 400", async () => {
+      for (const query of ["?packageId=not-a-package", "?agent=@orgsched/x"]) {
+        const org = await app.request(path(query), { headers: { Cookie: member.cookie } });
+        expect(org.status).toBe(400);
+        const space = await app.request(`/api/schedules${query}`, {
+          headers: { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": s.un },
+        });
+        expect(space.status).toBe(400);
+      }
+    });
+  });
 });

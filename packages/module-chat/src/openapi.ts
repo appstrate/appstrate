@@ -75,7 +75,7 @@ export const chatComponentSchemas = {
         type: "array",
         items: { type: "string" },
         description:
-          "The touched spaces: the origin space (first), then those a tool call named by `space_id`, a `skill://` or `appfile://` read or an attachment touched, by touch time. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`.",
+          "The touched spaces: the origin space (first), then those a tool call named by `space_id` or a `skill://` read, those of the files a served call or a gallery attachment named, by touch time. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -259,7 +259,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Rename a chat session or change its limit",
       description:
-        "`title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with. At least one field is required.",
+        "`title` renames the conversation. `restricted: true` limits it to its origin space, which the caller must be able to act in; `false` lifts the limit and keeps the origin. `spaceId` sets the origin of a conversation without one: once, only together with `restricted: true`, and only to a space the conversation can act in. The conversation is then listed under that space; the spaces it touched before stay recorded. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with.",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -273,8 +273,22 @@ export const chatPaths = {
               properties: {
                 title: { type: "string", minLength: 1, maxLength: 200 },
                 restricted: { type: "boolean" },
+                spaceId: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "The origin space of a conversation without one (with `restricted: true` only).",
+                },
               },
-              minProperties: 1,
+              // `title` or `restricted` (a top-level `anyOf` would read as a union of shapes).
+              if: { not: { properties: { title: {} }, required: ["title"] } },
+              then: { properties: { restricted: {} }, required: ["restricted"] },
+              dependentSchemas: {
+                spaceId: {
+                  properties: { restricted: { const: true } },
+                  required: ["restricted"],
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -361,7 +375,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Run a conversational turn (streaming)",
       description:
-        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The default space of a request that names none (never a pin) is the conversation's origin space; without one, the caller's personal space, else the organization's default space, when the turn acts there; the assistant asks only when none of them is. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The default space of a request that names none (never a pin) is the conversation's origin space; without one, the caller's personal space, else the organization's default space, when the turn acts there; the assistant asks only when none of them is. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         {

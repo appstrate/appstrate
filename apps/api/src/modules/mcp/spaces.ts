@@ -9,7 +9,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../../types/index.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
-import { callerReachableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
+import { enterableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
 import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
@@ -49,7 +49,7 @@ export async function listReachableSpaces(
     space: Pick<ReachableSpace, "credentialProxyOpen">,
   ) => McpSurface,
 ): Promise<McpSpace[]> {
-  return (await callerReachableSpaces(c, orgId))
+  return (await enterableSpaces(c, orgId))
     .filter((space) => space.permissions.has("mcp:read"))
     .map((space) => ({
       id: space.id,

@@ -24,6 +24,7 @@ import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useUrlModal } from "../../hooks/use-url-modal";
+import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
 import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
@@ -303,6 +304,7 @@ export function ClientsTable({
   autoProvisioned: boolean;
 }) {
   const { t } = useTranslation("settings");
+  const spaceWording = useWorkingSpaceWording("settings");
   const { can } = usePermissions();
   // An auto-provisioned auth has no org list to manage (no client an admin registers or chooses
   // there); its org-tier machine client, listed with the space's clients, stays the org admin's to
@@ -415,7 +417,10 @@ export function ClientsTable({
         <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => setNewTier("space")}>
-            {t("integration.clients.registerSpace")}
+            {spaceWording(
+              "integration.clients.registerSpace",
+              "integration.clients.registerSpaceIn",
+            )}
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => setNewTier("org")}
@@ -439,7 +444,7 @@ export function ClientsTable({
       {loading && <Skeleton className="mb-1 h-5 w-64 max-w-full" />}
       {inUse && (
         <p className="mb-1 text-sm" data-testid={`oauth-client-in-use-${authKey}`}>
-          {t("integration.clients.inUse", {
+          {spaceWording("integration.clients.inUse", "integration.clients.inUseIn", {
             client: inUse.client.client_id,
             level: t(clientLevelKey(inUse)),
           })}

@@ -589,21 +589,21 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
       />
     );
   }
-  if (integrations.length === 0) {
-    return (
-      <EmptyState
-        message={t("detail.emptyConnections")}
-        hint={t("schedule.settings.noIntegrations")}
-        icon={Unplug}
-        compact
-      />
-    );
-  }
+  const empty = (
+    <EmptyState
+      message={t("detail.emptyConnections")}
+      hint={t("schedule.settings.noIntegrations")}
+      icon={Unplug}
+      compact
+    />
+  );
+  if (integrations.length === 0) return empty;
   return actorIsViewer ? (
     <AgentIntegrationsBlock
       entries={integrations}
       agentPackageId={schedule.packageId}
       scheduleOverrides={{ value: picks, onChange: pick, version: firedVersion(version) }}
+      empty={empty}
     />
   ) : (
     <ScheduleActorConnectionChoice

@@ -168,6 +168,72 @@ describe("package indexes across the organization's spaces", () => {
     return listing.filter((spaceId) => ids.includes(spaceId));
   }
 
+  it("names on the agent detail the spaces its index row names", async () => {
+    const detail = async (spaceId: string) => {
+      const res = await app.request(`/api/packages/agents/${id("a")}`, {
+        headers: { ...session(member), "X-Org-Id": owner.orgId, "X-Space-Id": spaceId },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      return (await res.json()) as {
+        active: boolean;
+        space_ids: string[];
+        read_space_ids: string[];
+      };
+    };
+    expect((await detail(s.deux)).space_ids).toEqual(
+      (await rows("agents", session(member))).a!.space_ids,
+    );
+    // Switched off in the space read from: still readable there, no longer named.
+    await seedSpacePackage(s.deux, id("a"), { enabled: false });
+    const off = await detail(s.deux);
+    expect(off.active).toBe(false);
+    expect(off.space_ids).toEqual([s.un]);
+    expect(off.read_space_ids).toEqual([s.un, s.deux]);
+  });
+
+  it("leaves out of the agent detail a space where the caller has no agent sight", async () => {
+    // Trois grants the member skills and integrations, no agent sight.
+    await seedSpacePackage(s.trois, id("a"));
+    const res = await app.request(`/api/packages/agents/${id("a")}`, {
+      headers: { ...session(member), "X-Org-Id": owner.orgId, "X-Space-Id": s.un },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { space_ids: string[] }).space_ids).toEqual([s.un, s.deux]);
+  });
+
+  it("names on the detail read through a space-pinned API key that space only", async () => {
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: s.un,
+      createdBy: member.user.id,
+      scopes: ["agents:read"],
+    });
+    const res = await app.request(`/api/packages/agents/${id("a")}`, {
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    // Active in Un and Deux, both of which the member reaches: the key reaches Un only.
+    expect(((await res.json()) as { space_ids: string[] }).space_ids).toEqual([s.un]);
+  });
+
+  it("names on the skill and integration details the spaces their index rows name", async () => {
+    const detail = async (segment: string, name: string, spaceId: string) => {
+      const res = await app.request(`/api/packages/${segment}/${id(name)}`, {
+        headers: { ...session(member), "X-Org-Id": owner.orgId, "X-Space-Id": spaceId },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      return ((await res.json()) as { space_ids: string[] }).space_ids;
+    };
+    const skills = await rows("packages/skills", session(member));
+    const integrations = await rows("packages/integrations", session(member));
+    // Homed in Deux, where the member reads no skill: Deux is not named.
+    expect(await detail("skills", "s4", s.un)).toEqual(skills.s4!.space_ids);
+    expect(await detail("integrations", "i1", s.un)).toEqual(integrations.i1!.space_ids);
+    // Switched off in the space read from: still readable there, no longer named.
+    await seedSpacePackage(s.un, id("s4"), { enabled: false });
+    expect(await detail("skills", "s4", s.un)).toEqual([s.trois]);
+  });
+
   it("lists each agent once, its spaces read, its counters over them", async () => {
     const agents = await rows("agents", session(member));
     expect(Object.keys(agents).sort()).toEqual(["a", "b"]);

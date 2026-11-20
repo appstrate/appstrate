@@ -27,11 +27,19 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSessionSpaces, files } from "@appstrate/db/schema";
+import {
+  chatMessages,
+  chatSessions,
+  chatSessionSpaces,
+  files,
+  uploads,
+} from "@appstrate/db/schema";
+import { uploadStream } from "@appstrate/db/storage";
+import { createUpload } from "../../../apps/api/src/services/uploads.ts";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
-import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
-import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import { seedRun, seedSpace } from "../../../apps/api/test/helpers/seed.ts";
+import { createUIMessageStreamResponse, type UIMessage, type UIMessageChunk } from "ai";
 import {
   CHAT_MESSAGE_MAX_BYTES,
   handleChatStream,
@@ -59,7 +67,14 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
-import { ensureSession } from "../src/persistence.ts";
+import { ensureSession, persistAssistantMessage, persistUserMessage } from "../src/persistence.ts";
+import {
+  createFileFromStream,
+  readChatAttachment,
+  resolveChatAttachment,
+} from "../../../apps/api/src/services/files.ts";
+import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
+import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
@@ -142,7 +157,8 @@ function scriptedDispatch(
 
 /**
  * A scripted engine: records what the handler handed it, then streams the same
- * chunk sequence the Pi mapper emits for a plain text answer. The concurrency
+ * chunk sequence the Pi mapper emits for a plain text answer, with the route's
+ * `leadingChunks` right after `start` as `runPiChat` writes them. The concurrency
  * slot is released when the stream closes — exactly as the real engine does, so
  * one test cannot starve the next.
  */
@@ -156,6 +172,7 @@ function scriptedEngine(text = "Bonjour le monde"): {
     const id = "txt_1";
     const chunks: UIMessageChunk[] = [
       { type: "start", messageId: "asst_1" },
+      ...(input.leadingChunks ?? []),
       { type: "text-start", id },
       { type: "text-delta", id, delta: text },
       { type: "text-end", id },
@@ -341,6 +358,8 @@ describe("handleChatStream", () => {
       permissions?: Set<string>;
       /** Replace the single user message (to carry a composer attachment). */
       parts?: unknown[];
+      /** The new message's id; an empty one makes an unpersisted turn. */
+      messageId?: string;
       /** The kind the auth pipeline resolved; production reaches here as `user` only. */
       principalKind?: PrincipalKind;
       /** The composer's package-authoring switch for this turn; omitted = on. */
@@ -386,7 +405,7 @@ describe("handleChatStream", () => {
         messages: [
           ...(overrides?.history ?? []),
           {
-            id: "u1",
+            id: overrides?.messageId ?? "u1",
             role: "user",
             parts: overrides?.parts ?? [{ type: "text", text: "dis bonjour" }],
           },
@@ -461,6 +480,64 @@ describe("handleChatStream", () => {
       "mcp:read",
       "runs:read-all",
     ]);
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("tells the browser which file each sent upload became, without persisting it", async () => {
+    // The browser's copy of the user message keeps its optimistic `upload://`
+    // parts; only this chunk lets its chips open the file before a reload.
+    const sessionId = mintSessionId();
+    const { engine } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      parts: [
+        { type: "text", text: "lis ceci" },
+        { type: "file", url: "upload://upl_sent", mediaType: "text/plain", filename: "a.txt" },
+        // Already stored (picked from the gallery): nothing to tell.
+        {
+          type: "file",
+          url: "appfile://file_picked12",
+          mediaType: "text/plain",
+          filename: "b.txt",
+        },
+      ],
+      resolveChatAttachment: async (request) => ({
+        uri: request.uri === "upload://upl_sent" ? "appfile://file_sent12345" : request.uri,
+        name: "a.txt",
+        mime: "text/plain",
+        size: 3,
+        spaceId: ctx.defaultSpaceId,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const chunks = await collectUiChunks(res);
+    expect(chunks.filter((chunk) => chunk.type === "data-upload-resolutions")).toEqual([
+      {
+        type: "data-upload-resolutions",
+        data: [
+          { uri: "upload://upl_sent", file: { id: "file_sent12345", spaceId: ctx.defaultSpaceId } },
+        ],
+        transient: true,
+      },
+    ]);
+
+    await waitForAssistantPersist(sessionId);
+    const rows = await db
+      .select({ content: chatMessages.content })
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId));
+    const assistant = rows
+      .map((row) => row.content as UIMessage)
+      .find((message) => message.role === "assistant");
+    expect(assistant?.parts.map((part) => part.type)).toEqual(["text"]);
+  });
+
+  it("writes no resolutions for a turn that sent no upload", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine);
+    await collectUiChunks(res);
+    expect(calls[0]?.leadingChunks).toBeUndefined();
     await waitForAssistantPersist(sessionId);
   });
 
@@ -613,6 +690,316 @@ describe("handleChatStream", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.messages.map((m) => m.id)).toEqual(["a0", "u1"]);
     await waitForAssistantPersist(sessionId);
+  });
+
+  it.each(["read_file", "read_resource"])(
+    "keeps an old tab's %s result out of the next model request after the grant is revoked",
+    async (toolName) => {
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const run = await seedRun({ ...scope, userId: ctx.user.id });
+      const pdf = new Blob(["%PDF-1.4\nSynthetic contract version 3\n%%EOF"]);
+      const { row } = await createFileFromStream(
+        scope,
+        run.id,
+        { userId: ctx.user.id, endUserId: null },
+        null,
+        {
+          name: "contract.pdf",
+          mime: "application/pdf",
+          body: pdf.stream(),
+        },
+      );
+      const uri = `appfile://${row.id}`;
+      const read = {
+        kind: "pdf",
+        maxBytes: pdf.size,
+        signal: new AbortController().signal,
+      } as const;
+      const previousRead = await readChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        chatSessionId: null,
+        spaces: [{ id: scope.spaceId, permissions: new Set(["files:read"]) }],
+        personalSpaceId: null,
+        beforeResolve: async () => {},
+        uri,
+        ...read,
+      });
+      expect(previousRead?.bytes).toEqual(new Uint8Array(await pdf.arrayBuffer()));
+      const blob = Buffer.from(previousRead!.bytes).toString("base64");
+      const question: UIMessage = {
+        id: "u0",
+        role: "user",
+        parts: [{ type: "text", text: "Lis le contrat." }],
+      };
+      const answer = (result: string): UIMessage => ({
+        id: "a0",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolCallId: "read_0",
+            toolName,
+            state: "output-available",
+            input: { uri },
+            output: { content: [{ type: "text", text: result }] },
+          },
+        ],
+      });
+      // The stored row was migrated while the tab retained the result of its authorized read.
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+      await persistUserMessage(sessionId, question);
+      await persistAssistantMessage(
+        sessionId,
+        answer(
+          JSON.stringify({
+            uri,
+            mimeType: row.mime,
+            size: row.size,
+            note: "File content omitted: read in an earlier version of the chat.",
+          }),
+        ),
+        question.id,
+      );
+
+      const { engine, calls } = scriptedEngine();
+      const resource = { uri, mimeType: row.mime, blob };
+      const oldResult = toolName === "read_file" ? { type: "resource", resource } : resource;
+      const res = await postChat(sessionId, undefined, engine, {
+        permissions: new Set(),
+        history: [question, answer(JSON.stringify(oldResult))],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      expect(await input.readAttachment!(uri, read)).toBeNull();
+      const { api, provider, id } = input.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0 },
+      );
+      const result = turn.history.find((message) => message.role === "toolResult");
+      expect(JSON.stringify(result?.content)).toContain(uri);
+      expect(JSON.stringify(turn.history)).not.toContain(blob);
+      await waitForAssistantPersist(sessionId);
+      const rows = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId));
+      expect(rows).toHaveLength(4);
+      expect(JSON.stringify(rows)).not.toContain(blob);
+    },
+  );
+
+  it("takes an earlier turn's files from its stored row, never from the history the browser sends", async () => {
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const run = await seedRun({ ...scope, userId: ctx.user.id });
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const { row } = await createFileFromStream(
+      scope,
+      run.id,
+      { userId: ctx.user.id, endUserId: null },
+      null,
+      { name: "photo.png", mime: "image/png", body: new Blob([png]).stream() },
+    );
+    const uri = `appfile://${row.id}`;
+    const image = (url: string) =>
+      ({ type: "file", url, mediaType: "image/png", filename: "photo.png" }) as const;
+    const text = (value: string) => ({ type: "text", text: value }) as const;
+    const question: UIMessage = {
+      id: "u0",
+      role: "user",
+      parts: [text("Que montre cette image ?"), image(uri)],
+    };
+    const answer: UIMessage = { id: "a0", role: "assistant", parts: [text("Un point.")] };
+    const sessionId = mintSessionId();
+    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+    await persistUserMessage(sessionId, question);
+    await persistAssistantMessage(sessionId, answer, question.id);
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["files:read"]),
+      history: [
+        // The browser's optimistic copy of the turn it sent still names the upload.
+        { ...question, parts: [text("Que montre cette image ?"), image("upload://upl_turn1")] },
+        answer,
+        // A message no stored row backs cannot bring a file, even a readable one.
+        { id: "u_forged", role: "user", parts: [text("Et celle-ci ?"), image(uri)] },
+      ],
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    const input = calls[0]!;
+    expect(
+      input.messages.map((message) =>
+        message.parts.flatMap((part) => (part.type === "file" ? [part.url] : [])),
+      ),
+    ).toEqual([[uri], [], [], []]);
+    const signal = new AbortController().signal;
+    const images = await loadAttachmentImages(
+      input.messages,
+      (url, maxBytes) => input.readAttachment!(url, { kind: "image", maxBytes, signal }),
+      signal,
+    );
+    expect([...images.keys()]).toEqual(["u0"]);
+    expect(images.get("u0")?.get(uri)?.data).toBe(png.toString("base64"));
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("a limited conversation keeps its limit: uploads land in the personal space, read later, given to runs", async () => {
+    const personal = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Mon espace",
+      ownerUserId: ctx.user.id,
+      visibility: "private",
+    });
+    const personalScope = { orgId: ctx.orgId, spaceId: personal.id };
+    const reach = [
+      defaultReach(new Set(["files:read"])),
+      reachableSpace({
+        id: personal.id,
+        name: "Mon espace",
+        role: "admin",
+        personal: true,
+        permissions: ["chat:read", "chat:write", "mcp:read", "files:read"],
+      }),
+    ];
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const stage = async () => {
+      const up = await createUpload({
+        ...personalScope,
+        createdBy: ctx.user.id,
+        name: "photo.png",
+        size: png.byteLength,
+        mime: "image/png",
+      });
+      const [row] = await db
+        .select({ storageKey: uploads.storageKey })
+        .from(uploads)
+        .where(eq(uploads.id, up.id));
+      const [bucket, ...rest] = row!.storageKey.split("/");
+      await uploadStream(bucket!, rest.join("/"), new Blob([png]).stream(), { exclusive: true });
+      return up.id;
+    };
+    const image = (url: string) =>
+      ({ type: "file", url, mediaType: "image/png", filename: "photo.png" }) as const;
+    const text = (value: string) => ({ type: "text", text: value }) as const;
+
+    // A conversation limited to the default space, which already holds an earlier upload.
+    const sessionId = mintSessionId();
+    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId], undefined, () => ({
+      spaceId: ctx.defaultSpaceId,
+      restricted: true,
+    }));
+    const earlier = await resolveChatAttachment({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      chatSessionId: sessionId,
+      uri: `upload://${await stage()}`,
+      spaces: [],
+      personalSpaceId: personal.id,
+      beforeResolve: async () => {},
+    });
+    const question: UIMessage = {
+      id: "u0",
+      role: "user",
+      parts: [text("Et ça ?"), image(earlier.uri)],
+    };
+    const answer: UIMessage = { id: "a0", role: "assistant", parts: [text("Un point.")] };
+    await persistUserMessage(sessionId, question);
+    await persistAssistantMessage(sessionId, answer, question.id);
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      reachable: reach,
+      history: [question, answer],
+      parts: [text("Et celle-ci ?"), image(`upload://${await stage()}`)],
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    await waitForAssistantPersist(sessionId);
+    const input = calls[0]!;
+
+    // Both uploads live in the personal space, held by the conversation, which stays limited.
+    const held = await db
+      .select({ id: files.id, spaceId: files.spaceId })
+      .from(files)
+      .where(eq(files.chatSessionId, sessionId));
+    expect(held.map((file) => file.spaceId)).toEqual([personal.id, personal.id]);
+    expect(
+      await db.select().from(chatSessionSpaces).where(eq(chatSessionSpaces.sessionId, sessionId)),
+    ).toEqual([]);
+    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(row).toMatchObject({ spaceId: ctx.defaultSpaceId, restricted: true });
+    expect(await tokenSpaceIds(input)).toEqual([ctx.defaultSpaceId]);
+
+    // The turn reads both, the earlier turn's included, though the personal space is not its.
+    const signal = new AbortController().signal;
+    const images = await loadAttachmentImages(
+      input.messages,
+      (url, maxBytes) => input.readAttachment!(url, { kind: "image", maxBytes, signal }),
+      signal,
+    );
+    expect([...images.keys()].sort()).toEqual(["u0", "u1"]);
+
+    // Its bearer names the conversation, so a run it launches may consume those files.
+    const resolved = await chatLoopbackStrategy.authenticate({
+      headers: new Headers({ authorization: input.platformMcp!.headers!.Authorization as string }),
+    } as never);
+    expect(resolved?.extra?.chatSessionId).toBe(sessionId);
+
+    // An unpersisted turn naming the same conversation is not it: its reads get no widening.
+    const { engine: ephemeralEngine, calls: ephemeralCalls } = scriptedEngine();
+    // The personal space reads files but takes no chat there: only the conversation reaches it.
+    const ephemeral = await postChat(sessionId, undefined, ephemeralEngine, {
+      reachable: [
+        reach[0]!,
+        reachableSpace({ id: personal.id, personal: true, permissions: ["files:read"] }),
+      ],
+      messageId: "",
+      parts: [text("Et ça ?"), image(`upload://${await stage()}`)],
+    });
+    expect(ephemeral.status).toBe(200);
+    await collectUiChunks(ephemeral);
+    expect(
+      await ephemeralCalls[0]!.readAttachment!(earlier.uri, {
+        kind: "image",
+        maxBytes: 4096,
+        signal,
+      }),
+    ).toBeNull();
+    // Nor does it exempt the conversation's file from its space's checks, nor hold an upload.
+    expect(await ephemeralCalls[0]!.platformMcp!.organization.fileSpace(earlier.uri)).toBe(
+      personal.id,
+    );
+    const heldNow = await db
+      .select({ id: files.id })
+      .from(files)
+      .where(eq(files.chatSessionId, sessionId));
+    expect(heldNow).toHaveLength(2);
+
+    // A file the conversation holds names no space; another file of the same space names it.
+    expect(await input.platformMcp!.organization.fileSpace(earlier.uri)).toBeUndefined();
+    const run = await seedRun({ ...personalScope, userId: ctx.user.id });
+    const { row: output } = await createFileFromStream(
+      personalScope,
+      run.id,
+      { userId: ctx.user.id, endUserId: null },
+      null,
+      { name: "out.txt", mime: "text/plain", body: new Blob(["x"]).stream() },
+    );
+    expect(await input.platformMcp!.organization.fileSpace(`appfile://${output.id}`)).toBe(
+      personal.id,
+    );
   });
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {
@@ -1498,7 +1885,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
 
         expect(calls[0]!.system).toContain(
-          `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
+          `This conversation's space is Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
         );
         // The default pins nothing: the turn acts on the organization endpoint.
         expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
@@ -1561,7 +1948,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
         // The stable origin is the default, and the body's space touched and limited nothing.
         expect(calls[0]!.system).toContain(
-          `This conversation was started in Alpha (\`${ctx.defaultSpaceId}\`)`,
+          `This conversation's space is Alpha (\`${ctx.defaultSpaceId}\`)`,
         );
         expect([...(await tokenSpaceIds(calls[0]!))!].sort()).toEqual(
           [ctx.defaultSpaceId, spaceB].sort(),
@@ -1813,14 +2200,12 @@ describe("handleChatStream", () => {
         }
         expect(await touched(sessionId)).toEqual([spaceB]);
 
-        expect(await organization.spaceOfUri(`skill://${spaceB}/acme/tone/tone/SKILL.md`)).toBe(
-          spaceB,
-        );
-        expect(await organization.spaceOfUri("appfile://file_missing00")).toBeUndefined();
-        expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
+        // Only files are looked up: a missing one, or no file at all, has no space.
+        expect(await organization.fileSpace("appfile://file_missing00")).toBeUndefined();
+        expect(await organization.fileSpace("https://example.com")).toBeUndefined();
       });
 
-      it("places an existing file in its space, which `read_resource` refuses outside the turn's", async () => {
+      it("places an existing file in its space, even one outside the turn's, which no call records", async () => {
         const fileId = "file_gammareport0";
         await db.insert(files).values({
           id: fileId,
@@ -1835,8 +2220,8 @@ describe("handleChatStream", () => {
           sha256: "deadbeef",
         });
         const organization = await organizationOf(mintSessionId());
-        // Gamma is reached but outside the acting set: the space `read_resource` checks.
-        expect(await organization.spaceOfUri(`appfile://${fileId}`)).toBe(spaceC);
+        // Gamma is reached but outside the acting set.
+        expect(await organization.fileSpace(`appfile://${fileId}`)).toBe(spaceC);
         expect(spaceIdRefusal(organization.spaces, spaceC)).toMatchObject({
           code: "unknown_space",
         });

@@ -6,7 +6,8 @@
  * auths expose one), reached through `/api/credential-proxy/proxy`, and the typed tools of a
  * remote MCP server (`{ns}__{tool}`), read by `listRemoteTools` and reached through
  * `callRemoteTool`. The connections the tools reach are listed once; each tool names its own
- * among them, a typed tool with the scopes its `tools_policy` entry requires that one lacks.
+ * among them (none, for an unauthenticated integration's), a typed tool with the scopes its
+ * `tools_policy` entry requires that one lacks.
  *
  * Tool names are unique in a space ({@link integrationNamespaces}): a name resolves to one tool of
  * one integration, whatever connections the caller holds. Within an integration, a typed tool's
@@ -16,6 +17,8 @@
 import {
   allowsUndeclaredTools,
   getApiCallConfigs,
+  getRemoteSource,
+  isUnauthenticatedIntegration,
   missingScopesForConnection,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
@@ -42,6 +45,7 @@ import {
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
 import {
+  connectionIdRefusedWithoutAuth,
   listingDeadline,
   listRemoteTools,
   offeredRemoteToolNames,
@@ -416,6 +420,22 @@ async function remoteTools(
   query: Pick<IntegrationToolQuery, "name" | "connectionId">,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest, connections } = entry;
+  if (
+    query.name !== undefined &&
+    query.connectionId !== undefined &&
+    isUnauthenticatedIntegration(manifest)
+  ) {
+    // A call naming a connection of an integration that binds none: refused before any exchange.
+    if (!mayNameRemoteTool(entry, query.name)) return { tools: [], truncatedAt: null };
+    return {
+      unlisted: {
+        integration_package_id: integrationId,
+        refusal: connectionIdRefusedWithoutAuth(integrationId).toProblemDetail(
+          caller.caller.requestId,
+        ),
+      },
+    };
+  }
   let catalog: RemoteToolCatalog;
   try {
     catalog = await readRemoteCatalog(caller, entry, query.connectionId);
@@ -500,17 +520,20 @@ async function remoteTools(
   return { tools, truncatedAt: catalog.truncatedAt };
 }
 
-/**
- * Every tool the caller may call outside a run in the space, sorted by integration, `api_call`
- * tools first, with the connections they reach, the integrations without a usable connection and
- * the remote ones the proxy refused to list. Read under `reach`, activation checked before any
- * connection is selected; servers are waited for until {@link listingDeadline}.
- */
 /** Connecting it gives a tool to call outside a run: an `api_call` tool, or a remote server's. */
 function offersToolsOutsideRun(manifest: IntegrationManifest): boolean {
   return manifest.source?.kind === "remote" || getApiCallConfigs(manifest).length > 0;
 }
 
+/**
+ * Every tool the caller may call outside a run in the space, sorted by integration, `api_call`
+ * tools first, with the connections they reach, the integrations without a usable connection and
+ * the remote ones the proxy refused to list. The remote integrations listed are those the caller
+ * reaches a connection of, and the unauthenticated Streamable HTTP ones (AFPS §7.2), which need
+ * none: their tools reach no connection, and they are never `not_ready`. Read under `reach`,
+ * activation checked before any connection is selected; servers are waited for until
+ * {@link listingDeadline}.
+ */
 export async function listIntegrationTools(
   caller: RemoteToolsCaller,
   query: IntegrationToolQuery,
@@ -528,6 +551,14 @@ export async function listIntegrationTools(
   const reachable = await connectionsOutsideRun(scope, actor, reach, manifests);
 
   const byIntegration = new Map<string, ConnectionOutsideRun[]>();
+  for (const [id, manifest] of manifests) {
+    if (
+      getRemoteSource(manifest)?.transport === "streamable-http" &&
+      isUnauthenticatedIntegration(manifest)
+    ) {
+      byIntegration.set(id, []);
+    }
+  }
   for (const connection of reachable) {
     const id = connection.integration_package_id;
     byIntegration.set(id, [...(byIntegration.get(id) ?? []), connection]);

@@ -74,7 +74,7 @@ function caller(
   },
   /**
    * The caller's reach, seeded into the per-request memo `callerReachableSpaces`
-   * reads, under the key that function uses — organization AND role.
+   * reads, under the key that function uses — organization, role and pin (none here).
    */
   accessible?: AccessibleSpaces,
 ): Context<AppEnv> {
@@ -87,7 +87,7 @@ function caller(
     ...(accessible
       ? {
           reachableSpacesCache: new Map([
-            [`${ctx.orgId}:${opts.orgRole}`, Promise.resolve(accessible)],
+            [`${ctx.orgId}:${opts.orgRole}:`, Promise.resolve(accessible)],
           ]),
         }
       : {}),

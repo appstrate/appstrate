@@ -86,7 +86,7 @@ images of that commit exist, and restart the stack on the previous build for not
 
 Nothing of production's goes on this stack: no secret, no Stripe key, no OAuth client, no data. Its
 Stripe webhook endpoint is created at the API version `STRIPE_API_VERSION` pins
-(`packages/module-ee/src/stripe/client.ts`), since a webhook payload is rendered at the endpoint's
+(`packages/module-billing/src/stripe/client.ts`), since a webhook payload is rendered at the endpoint's
 version, not the client's.
 
 Under Coolify, which is what `deploy/README.md` documents, the hook is the application's deploy

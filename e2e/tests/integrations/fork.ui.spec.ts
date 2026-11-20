@@ -10,6 +10,8 @@
  * is an org-owned package that remembers where it came from.
  */
 
+import { createOverviewContext } from "../../helpers/overview.ts";
+import { createSpace } from "../../helpers/seed.ts";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 
 const SOURCE = "@appstrate/slack";
@@ -55,4 +57,42 @@ test("a system integration forks from its detail page into the org's scope", asy
     source: "local",
     forked_from: SOURCE,
   });
+});
+
+test("a fork from Tous les espaces keeps the destination until the copy opens there", async ({
+  browser,
+  browserCtx,
+  orgOnlyClient,
+  apiClient,
+}) => {
+  const { orgId, orgSlug, defaultSpaceId } = browserCtx.org;
+  const target = await createSpace(orgOnlyClient, `Studio ${Date.now()}`);
+  const context = await createOverviewContext(browser, browserCtx.auth, orgId, defaultSpaceId);
+  const name = `slack-across-${Date.now().toString(36)}`;
+  const id = `@${orgSlug}/${name}`;
+  try {
+    const page = await context.newPage();
+    await page.goto(`/integrations/${SOURCE}`);
+    await page.getByRole("button", { name: "Actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Dupliquer dans…" }).hover();
+    await page.getByRole("menuitem", { name: target.name, exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Dupliquer le package" });
+    await expect(dialog.getByText(target.name, { exact: true })).toBeVisible();
+    await dialog.getByLabel("Nom du package").fill(name);
+    const fork = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        decodeURIComponent(new URL(response.url()).pathname) === `/api/packages/${SOURCE}/fork`,
+    );
+    await dialog.getByRole("button", { name: "Dupliquer" }).click();
+    const response = await fork;
+    expect(response.request().headers()["x-space-id"]).toBe(target.id);
+    expect(response.status()).toBe(201);
+    await expect(page).toHaveURL(new RegExp(`/integrations/${id}$`));
+    const copy = await apiClient.withSpace(target.id).get(`/packages/integrations/${id}`);
+    expect(await copy.json()).toMatchObject({ id, home_space_id: target.id, forked_from: SOURCE });
+  } finally {
+    await context.close();
+  }
 });

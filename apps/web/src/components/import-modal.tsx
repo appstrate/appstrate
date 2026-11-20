@@ -19,6 +19,7 @@ import { errorMessage, onMutationError } from "../lib/mutation-error";
 
 interface ImportModalProps {
   onClose: () => void;
+  spaceId?: string;
   /**
    * The package type imported for, when the import is opened from that type's
    * page or field: the server refuses an archive of another type before
@@ -44,7 +45,7 @@ function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
   return f.size > MAX_SIZE ? "import.errSize" : null;
 }
 
-export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
+export function ImportModal({ onClose, type, onImported, spaceId }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [file, setFile] = useState<File | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
@@ -105,7 +106,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
     if (file) {
       const force = !!confirmOverwrite || !!confirmIntegrity;
       importPackage.mutate(
-        { file, force, type },
+        { file, force, type, spaceId },
         {
           onSuccess: finish,
           onError: (err) => {
@@ -128,7 +129,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
       );
     } else if (hasUrl) {
       importGithub.mutate(
-        { url: githubUrl.trim(), type },
+        { url: githubUrl.trim(), type, spaceId },
         {
           onSuccess: finish,
           onError: (err) => setError(errorMessage(err)),
@@ -147,7 +148,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
 
   return (
     <FormModal
-      inSpace
+      inSpace={spaceId ?? true}
       onClose={onClose}
       onSubmit={(e) => {
         e.preventDefault();

@@ -50,11 +50,17 @@ export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
 export const requireRunsRead = requireAnyPermission(RUNS_READ_PERMISSIONS);
 
 /** The in-memory twin of `actorFilter` on a loaded run row: did this principal launch it? */
-export function ownsRun(
+function ownsRun(actor: Actor, row: { userId: string | null; endUserId: string | null }): boolean {
+  return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+}
+
+/** Whether a caller holding `permissions` in a run's space reads that loaded run. */
+export function readsRun(
+  permissions: ReadonlySet<string>,
   actor: Actor,
   row: { userId: string | null; endUserId: string | null },
 ): boolean {
-  return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+  return canReadEveryRun(permissions) || ownsRun(actor, row);
 }
 
 /**
@@ -105,6 +111,5 @@ export function assertRunVisible(
   c: Context<AppEnv>,
   row: { userId: string | null; endUserId: string | null },
 ): void {
-  if (canReadEveryRun(callerPermissions(c))) return;
-  if (!ownsRun(getActor(c), row)) throw notFound("Run not found");
+  if (!readsRun(callerPermissions(c), getActor(c), row)) throw notFound("Run not found");
 }

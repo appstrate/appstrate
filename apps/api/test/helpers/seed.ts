@@ -36,6 +36,10 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import * as storage from "@appstrate/db/storage";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../src/services/package-storage-keys.ts";
+import {
+  SYSTEM_STORAGE_NAMESPACE,
+  uploadPackageFiles,
+} from "../../src/services/package-items/storage.ts";
 import { extractKeyPrefix, generateApiKey, hashApiKey } from "../../src/services/api-keys.ts";
 
 // ─── Packages / Agents ───────────────────────────────────
@@ -98,6 +102,29 @@ export async function seedPackage(
 
 /** Alias for seedPackage — the default type is already "agent". */
 export const seedAgent = seedPackage;
+
+/** A shipped skill's canonical row and file tree, as installed by system package sync. */
+export async function seedSystemSkill(
+  id: string,
+  content: string,
+  extraFiles: Record<string, Uint8Array> = {},
+): Promise<void> {
+  const manifest = { name: id, version: "1.0.0", type: "skill" };
+  await seedPackage({
+    id,
+    orgId: null,
+    source: "system",
+    type: "skill",
+    draftManifest: manifest,
+    draftContent: content,
+  });
+  const encoder = new TextEncoder();
+  await uploadPackageFiles("skills", SYSTEM_STORAGE_NAMESPACE, id, {
+    ...extraFiles,
+    "manifest.json": encoder.encode(JSON.stringify(manifest)),
+    "SKILL.md": encoder.encode(content),
+  });
+}
 
 /**
  * Place a package in a space, switched ON unless `overrides` says otherwise —

@@ -3,13 +3,15 @@
 /**
  * The open conversation's origin space and limit (`ConversationScope`), and what its first turn
  * carries. Before the first message the conversation does not exist: its origin is the space the
- * host has selected and its limit a local choice, both sent with that message. Afterwards the
- * origin is frozen and the limit is the server's, changed by a PATCH (optimistic, rolled back on
- * failure, refused while a turn generates) that keeps the session detail and every list row in step.
+ * host has selected (or, without one, the space the user limits it to) and its limit a local
+ * choice, both sent with that message. Afterwards the limit is the server's, changed by a PATCH
+ * (refused while a turn generates): every reader projects it while it is pending, and a success
+ * writes it into the session detail and every list row. The origin is immutable once set: a conversation without one
+ * takes it only by being limited to it.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import type { ConversationCreation } from "./chat-route.ts";
 import type { ConversationScope } from "./conversation-scope.ts";
 import type { ChatTransport } from "./runtime-context.ts";
@@ -18,63 +20,59 @@ import {
   patchSessionsCache,
   sessionQueryKey,
   SESSIONS_QUERY_KEY,
-  setSessionRestricted,
+  setSessionLimit,
   type SessionHistory,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 
-/** The origin and limit a conversation started in this mount took, frozen at its first message. */
-interface Created {
-  spaceId: string | null;
-  restricted: boolean;
-}
+/** A conversation's origin space and limit. */
+type Limit = Pick<SessionSummary, "spaceId" | "restricted">;
 
 /** The creation fields of a first turn: only what is set, so « Tous les espaces » sends neither. */
-export function creationFields(created: Created): ConversationCreation {
+export function creationFields(created: Limit): ConversationCreation {
   return {
     ...(created.spaceId && { spaceId: created.spaceId }),
     ...(created.spaceId && created.restricted && { restricted: true as const }),
   };
 }
 
-/** Writes `restricted` on the session detail and on every cached list row of the conversation. */
-function writeRestricted(
-  queryClient: QueryClient,
-  transport: ChatTransport,
-  id: string,
-  restricted: boolean,
-): void {
-  queryClient.setQueryData<SessionHistory | null>(sessionQueryKey(transport.orgId, id), (prev) =>
-    prev ? { ...prev, restricted } : prev,
-  );
-  queryClient.setQueriesData<SessionsCache>({ queryKey: SESSIONS_QUERY_KEY }, (prev) =>
-    patchSessionsCache(prev, (rows) => rows.map((s) => (s.id === id ? { ...s, restricted } : s))),
-  );
+type LimitChange = { id: string; restricted: boolean; spaceId?: string };
+
+function limitedRow<T extends SessionSummary>(row: T, change: LimitChange): T {
+  if (row.id !== change.id) return row;
+  const spaceId = change.spaceId ?? row.spaceId;
+  return {
+    ...row,
+    spaceId,
+    restricted: change.restricted,
+    space_ids: change.spaceId
+      ? [change.spaceId, ...row.space_ids.filter((id) => id !== change.spaceId)]
+      : row.space_ids,
+  };
 }
 
-/**
- * Limits or lifts an existing conversation: shown at once (`show` and the caches), rolled back to
- * `previous` when the server refuses, and the refusal rethrown for the host's error handling.
- */
-export async function changeLimit(args: {
-  queryClient: QueryClient;
-  transport: ChatTransport;
-  id: string;
-  next: boolean;
-  previous: boolean;
-  show: (restricted: boolean) => void;
-}): Promise<void> {
-  const { queryClient, transport, id, next, previous, show } = args;
-  show(next);
-  writeRestricted(queryClient, transport, id, next);
-  try {
-    await setSessionRestricted(transport, id, next);
-  } catch (error) {
-    show(previous);
-    writeRestricted(queryClient, transport, id, previous);
-    throw error;
-  }
+const limitMutationKey = (orgId: string | undefined) => ["chat-session-limit", orgId] as const;
+
+/** The limit changes in flight, read by every reader: a refusal simply drops them. */
+function usePendingLimits(orgId: string | undefined): LimitChange[] {
+  return useMutationState({
+    filters: { mutationKey: limitMutationKey(orgId), status: "pending" },
+    select: (mutation) => mutation.state.variables as LimitChange,
+  });
+}
+
+/** List and detail readers project pending changes over their latest server row, so a refetch
+ * during the PATCH keeps its own changes whatever the PATCH's outcome. */
+export function usePendingSessionLimits(orgId: string | undefined) {
+  const pending = usePendingLimits(orgId);
+  return useCallback(
+    <T extends SessionSummary>(row: T): T => {
+      const change = pending.find((limit) => limit.id === row.id);
+      return change ? limitedRow(row, change) : row;
+    },
+    [pending],
+  );
 }
 
 interface UseConversationLimitArgs {
@@ -83,7 +81,7 @@ interface UseConversationLimitArgs {
   /** The conversation existed when the page opened (its id came from the URL). */
   persistedAtMount: boolean;
   /** Its stored origin and limit, once its session row is known. */
-  stored: Pick<SessionSummary, "spaceId" | "restricted"> | undefined;
+  stored: Limit | undefined;
   /** The space a new conversation would take as origin (selected and acted in), if any. */
   selectedSpaceId: string | undefined;
   /** A turn is generating: the server refuses to change the limit until it ends. */
@@ -103,68 +101,82 @@ export function useConversationLimit({
   getCreation: () => ConversationCreation | undefined;
 } {
   const queryClient = useQueryClient();
-  const [created, setCreated] = useState<Created | null>(null);
+  const [created, setCreated] = useState<Limit | null>(null);
   // Frozen at the first message: a retry after a failed first turn keeps it. Every later turn
   // carries it too, and the server reads it only on the turn that creates the conversation.
-  const frozen = useRef<Created | null>(null);
-  // A conversation started in a space is limited to it unless the user lifts the limit before
-  // sending; from the overview there is no origin to limit to, so it starts unlimited.
-  const [draftRestricted, setDraftRestricted] = useState(true);
-  // The limit the user last set on a conversation that exists, over what was loaded or frozen.
-  const [override, setOverride] = useState<boolean>();
-
+  const frozen = useRef<Limit | null>(null);
+  // A draft belongs to the current selection. Changing space resets both its origin and limit.
+  const initialDraft = { spaceId: selectedSpaceId ?? null, restricted: !!selectedSpaceId };
+  const [draft, setDraft] = useState({ ...initialDraft, under: selectedSpaceId });
   const exists = persistedAtMount || created !== null;
-  const originSpaceId = persistedAtMount
-    ? (stored?.spaceId ?? null)
-    : created
-      ? created.spaceId
-      : (selectedSpaceId ?? null);
-  const restricted = exists
-    ? (override ?? (persistedAtMount ? stored?.restricted : created?.restricted) ?? false)
-    : draftRestricted && originSpaceId !== null;
+  if (!exists && draft.under !== selectedSpaceId)
+    setDraft({ ...initialDraft, under: selectedSpaceId });
+  const current = stored ?? created ?? { spaceId: null, restricted: false };
 
-  // Read at request time: the turn's transport outlives the render that built it.
-  const getLatest = useLatest({ selectedSpaceId, draftRestricted });
+  // Read at request time: the turn's transport outlives the render that built it. What it
+  // freezes is what the scope shows, so the first message carries what the composer said.
+  const getLatest = useLatest(draft);
   const getCreation = useCallback((): ConversationCreation | undefined => {
     if (persistedAtMount) return undefined;
     if (!frozen.current) {
-      const { selectedSpaceId: space, draftRestricted: draft } = getLatest();
-      frozen.current = { spaceId: space ?? null, restricted: draft && !!space };
+      frozen.current = getLatest();
       setCreated(frozen.current);
     }
     return creationFields(frozen.current);
   }, [persistedAtMount, getLatest]);
 
-  const { mutate, isPending } = useMutation({
-    mutationFn: (next: boolean) =>
-      changeLimit({
-        queryClient,
-        transport: transport!,
-        id,
-        next,
-        previous: restricted,
-        show: setOverride,
-      }),
-    // The server's answer is now the stored value: drop the local override so a later change of
-    // the stored limit (another tab, a refetch) is not masked by it.
-    onSuccess: (_data, next) => {
-      setOverride(undefined);
-      setCreated((prev) => (prev ? { ...prev, restricted: next } : prev));
+  const detailKey = sessionQueryKey(transport?.orgId, id);
+  // The scope reads the same projection as the list and detail: it also covers a conversation
+  // created in this mount that no list holds yet.
+  const pending = usePendingLimits(transport?.orgId).find((limit) => limit.id === id);
+  const isPending = pending !== undefined;
+  const { mutate } = useMutation({
+    mutationKey: limitMutationKey(transport?.orgId),
+    mutationFn: ({ id: sessionId, ...patch }: LimitChange) =>
+      setSessionLimit(transport!, sessionId, patch),
+    onSuccess: (_, change) => {
+      setCreated(
+        (prev) =>
+          prev && { spaceId: change.spaceId ?? prev.spaceId, restricted: change.restricted },
+      );
+      queryClient.setQueryData<SessionHistory | null>(
+        detailKey,
+        (row) => row && limitedRow(row, change),
+      );
+      queryClient.setQueriesData<SessionsCache>({ queryKey: SESSIONS_QUERY_KEY }, (cache) =>
+        patchSessionsCache(cache, (rows) => rows.map((row) => limitedRow(row, change))),
+      );
     },
   });
 
-  // One change at a time: a second one would roll back to the first's optimistic value.
-  const setRestricted = useCallback(
-    (next: boolean) => {
-      if (!exists) setDraftRestricted(next);
-      else if (transport && !isPending) mutate(next);
+  const originSpaceId = exists ? (pending?.spaceId ?? current.spaceId) : draft.spaceId;
+  const restricted = exists ? (pending?.restricted ?? current.restricted) : draft.restricted;
+  const change = useCallback(
+    (next: Limit) => {
+      if (!exists) setDraft({ ...next, under: selectedSpaceId });
+      else if (transport && !isPending) {
+        mutate({
+          id,
+          restricted: next.restricted,
+          ...(current.spaceId === null && next.spaceId && { spaceId: next.spaceId }),
+        });
+      }
     },
-    [exists, transport, isPending, mutate],
+    [exists, transport, isPending, mutate, id, current.spaceId, selectedSpaceId],
+  );
+  const limitTo = useCallback(
+    (spaceId: string) => change({ spaceId: originSpaceId ?? spaceId, restricted: true }),
+    [change, originSpaceId],
+  );
+  const lift = useCallback(
+    () =>
+      change({ spaceId: exists ? originSpaceId : (selectedSpaceId ?? null), restricted: false }),
+    [change, exists, originSpaceId, selectedSpaceId],
   );
 
   const scope = useMemo(
-    () => ({ originSpaceId, restricted, generating, pending: isPending, setRestricted }),
-    [originSpaceId, restricted, generating, isPending, setRestricted],
+    () => ({ originSpaceId, restricted, generating, pending: isPending, limitTo, lift }),
+    [originSpaceId, restricted, generating, isPending, limitTo, lift],
   );
   return { scope, getCreation };
 }

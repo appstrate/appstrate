@@ -11,7 +11,7 @@
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { EmptyState, NoMatchState } from "./page-states";
@@ -85,9 +85,11 @@ export function DocumentListPanel({
   // A deep-linked doc may be outside the currently loaded page, so an empty name
   // is fine — the preview modal falls back to the fetched DTO's name.
   const preview = useUrlModal("preview");
-  const previewDoc = preview.value
-    ? { id: preview.value, name: documents.find((d) => d.id === preview.value)?.name ?? "" }
-    : null;
+  const previewed = preview.value ? documents.find((d) => d.id === preview.value) : undefined;
+  const previewDoc = preview.value ? { id: preview.value, name: previewed?.name ?? "" } : null;
+  // A listed file of another space is read in its own (the reader), as its row opens it: the
+  // in-place preview reads the working space only.
+  const previewElsewhere = previewed ? readerHref(previewed) : undefined;
 
   // Wire the delete/keep handlers unconditionally — per-document visibility is
   // driven by the server-computed `capabilities` (delete/keep) inside the tile,
@@ -209,7 +211,11 @@ export function DocumentListPanel({
         isPending={deleteDoc.isPending}
       />
 
-      {previewDoc && <FilePreview file={previewDoc} onClose={preview.close} />}
+      {previewElsewhere ? (
+        <Navigate to={previewElsewhere} replace />
+      ) : (
+        previewDoc && <FilePreview file={previewDoc} onClose={preview.close} />
+      )}
     </>
   );
 }

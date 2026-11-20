@@ -1176,6 +1176,35 @@ describe("Runs API", () => {
     });
   });
 
+  describe("GET /api/runs — ?packageId", () => {
+    it("lists only that agent's runs, and only in the request's space", async () => {
+      await seedAgent({ id: "@runorg/pkg-a", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({ id: "@runorg/pkg-b", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
+      const seed = (packageId: string, spaceId: string) =>
+        seedRun({ packageId, orgId: ctx.orgId, spaceId, userId: ctx.user.id, status: "success" });
+      const here = await seed("@runorg/pkg-a", ctx.defaultSpaceId);
+      await seed("@runorg/pkg-b", ctx.defaultSpaceId);
+      await seed("@runorg/pkg-a", other.id);
+
+      const res = await app.request("/api/runs?packageId=@runorg/pkg-a", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[]; total: number };
+      expect(body.data.map((run) => run.id)).toEqual([here.id]);
+      expect(body.total).toBe(1);
+    });
+
+    it("refuses a value that is not a package id, naming the param", async () => {
+      const res = await app.request("/api/runs?packageId=not-a-package", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { param?: string }).param).toBe("packageId");
+    });
+  });
+
   // ─── GET /api/runs/:id/logs ────────────────────────────────
 
   describe("GET /api/runs/:id/logs", () => {

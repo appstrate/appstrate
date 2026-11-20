@@ -21,7 +21,8 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
   chatMessages,
@@ -31,11 +32,11 @@ import {
   type ChatMessageContent,
 } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
-import { notFound } from "@appstrate/core/api-errors";
+import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection } from "./skills.ts";
-import type { UIMessage } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 
 /**
  * The slice of the Drizzle client the writers below use — satisfied by `db` and
@@ -127,6 +128,20 @@ export async function touchSessionSpace(
   if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
 }
 
+/**
+ * Runs a write that sets a conversation's origin space, checked in the acting set before it:
+ * the space deleted in between refuses the write on its foreign key, answered as the same 400
+ * naming `spaceId` the check gives.
+ */
+export async function writingOriginSpace<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isForeignKeyViolation(error, "chat_sessions_space_id_org_id_fk")) throw error;
+    throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+  }
+}
+
 /** Create a conversation with its origin space and limit (`restricted` needs the space). */
 export async function createSession(input: {
   id: string;
@@ -136,16 +151,37 @@ export async function createSession(input: {
   spaceId: string | null;
   restricted: boolean;
 }): Promise<typeof chatSessions.$inferSelect> {
-  const [row] = await db.insert(chatSessions).values(input).returning();
-  return row!;
+  const insert = async () => (await db.insert(chatSessions).values(input).returning())[0]!;
+  return input.spaceId === null ? insert() : writingOriginSpace(insert);
 }
 
-/** The space a file belongs to, or undefined when `orgId` holds no such file. */
-export async function fileSpaceId(orgId: string, fileId: string): Promise<string | undefined> {
+/**
+ * The space of the file `fileId` names in `orgId`, undefined for a missing file and for one the
+ * conversation holds in the caller's personal space: that one is reached through its container,
+ * not a space. A file the conversation holds in any other space names that space.
+ */
+export async function fileSpaceId(
+  orgId: string,
+  fileId: string,
+  conversation: { chatSessionId: string | null; personalSpaceId: string | null },
+): Promise<string | undefined> {
+  const { chatSessionId, personalSpaceId } = conversation;
   const [row] = await db
     .select({ spaceId: files.spaceId })
     .from(files)
-    .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
+    .where(
+      and(
+        eq(files.id, fileId),
+        eq(files.orgId, orgId),
+        chatSessionId && personalSpaceId
+          ? or(
+              isNull(files.chatSessionId),
+              ne(files.chatSessionId, chatSessionId),
+              ne(files.spaceId, personalSpaceId),
+            )
+          : undefined,
+      ),
+    )
     .limit(1);
   return row?.spaceId;
 }
@@ -226,14 +262,16 @@ export async function ensureSession(
         created: sql<boolean>`(xmax = 0)`,
       });
   const row = origin
-    ? await db.transaction(async (tx) => {
-        const [inserted] = await upsert(tx);
-        if (!inserted?.created) return inserted;
-        const created = origin();
-        if (!created) return inserted;
-        await tx.update(chatSessions).set(created).where(eq(chatSessions.id, id));
-        return { ...inserted, ...created };
-      })
+    ? await writingOriginSpace(() =>
+        db.transaction(async (tx) => {
+          const [inserted] = await upsert(tx);
+          if (!inserted?.created) return inserted;
+          const created = origin();
+          if (!created) return inserted;
+          await tx.update(chatSessions).set(created).where(eq(chatSessions.id, id));
+          return { ...inserted, ...created };
+        }),
+      )
     : (await upsert(db))[0];
   if (!row || row.orgId !== orgId || row.userId !== userId) {
     throw notFound("Chat session not found");
@@ -319,6 +357,35 @@ async function upsertMessage(
     })
     .returning({ seq: chatMessages.seq });
   return { messageId, seq: row!.seq };
+}
+
+/**
+ * The file parts of the session's stored messages among `messageIds` that hold any, by message
+ * id: what an earlier turn of a conversation attached, as the server materialized it.
+ */
+export async function storedFileParts(
+  sessionId: string,
+  messageIds: readonly string[],
+): Promise<Map<string, FileUIPart[]>> {
+  if (!messageIds.length) return new Map();
+  const rows = await db
+    .select({ messageId: chatMessages.messageId, content: chatMessages.content })
+    .from(chatMessages)
+    .where(
+      and(
+        eq(chatMessages.sessionId, sessionId),
+        inArray(chatMessages.messageId, [...messageIds]),
+        sql`${chatMessages.content}->'parts' @> '[{"type":"file"}]'::jsonb`,
+      ),
+    );
+  return new Map(
+    rows.map((row) => [
+      row.messageId,
+      row.content.parts.filter(
+        (part): part is FileUIPart => (part as { type?: unknown }).type === "file",
+      ),
+    ]),
+  );
 }
 
 /**

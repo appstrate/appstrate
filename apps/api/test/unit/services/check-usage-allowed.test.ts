@@ -24,7 +24,7 @@
  *   - a model no credential of the session user serves is refused, hook or no
  *     hook: the turn could not run anyway.
  *
- * These are the exact facts a metering module (the ee module) quotes against, so a
+ * These are the exact facts a metering module (the billing module) quotes against, so a
  * regression that stopped reporting one — or resurrected the old "skip the hook
  * for an org model" short-circuit — surfaces here rather than as a billing
  * incident.

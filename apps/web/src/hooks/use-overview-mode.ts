@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
@@ -15,7 +16,7 @@ import {
   spacesWhere,
   type SpaceList,
 } from "../lib/space-lists";
-import { useSpaces } from "./use-spaces";
+import { useSpaceLabelOf, useSpaces } from "./use-spaces";
 import { useCurrentSpaceId } from "./use-current-space";
 
 /** Where the reader's choice is kept in the current org: per account and org; null before both. */
@@ -27,8 +28,9 @@ function useChoiceKey(): string | null {
 
 /**
  * « Tous les espaces »: a mode laid over the working space, on while the reader chose it AND it is
- * offered; `known` once the space listing answered. A list page passes `on` to its data hooks as
- * `spanning`; a data hook never reads it, since a detail page runs in one space while it is on.
+ * offered; `known` once the space listing answered. A surface passes `on` to its data hooks as
+ * `spanning`; a data hook never reads it itself. A row's detail page acts in the one space it was
+ * opened in, and reads it to name that space, list across spaces, or ask where to act.
  */
 export function useOverviewMode() {
   const userId = useStore(authStore, (s) => s.user?.id);
@@ -47,6 +49,19 @@ export function useOverviewMode() {
   const on = chosen && overviewOffered(spaces);
   const known = spaces !== undefined || isError;
   return { on, known, choose };
+}
+
+/**
+ * A sentence about the working space, its keys in `ns`: `plain` (« cet espace ») with a space
+ * selected; in « Tous les espaces », where the page names it, `named` with that space as
+ * `{{space}}`, and nothing until its name is known.
+ */
+export function useWorkingSpaceWording(ns: string) {
+  const { t } = useTranslation(ns);
+  const { on } = useOverviewMode();
+  const space = useSpaceLabelOf()(useCurrentSpaceId());
+  return (plain: string, named: string, options: Record<string, unknown> = {}): string =>
+    !on ? t(plain, options) : space ? t(named, { ...options, space }) : "";
 }
 
 /**

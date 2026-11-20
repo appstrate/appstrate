@@ -62,80 +62,44 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { searchOpenRouterModels } from "../services/model-search.ts";
 
+function validTokenBudget({
+  maxTokens,
+  contextWindow,
+}: {
+  maxTokens?: number | null;
+  contextWindow?: number | null;
+}) {
+  return maxTokens == null || contextWindow == null || maxTokens < contextWindow;
+}
+const tokenBudgetIssue = {
+  message: "maxTokens must be strictly less than contextWindow",
+  path: ["maxTokens"],
+};
+
+const modelFields = {
+  label: z.string().min(1).optional(),
+  modelId: z.string().min(1, "modelId is required"),
+  input: z.array(modelInputModalitySchema).optional(),
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  reasoning: z.boolean().optional(),
+  // Request-only strictness keeps a misspelled cost key from silently changing billing.
+  cost: modelCostSchema.strict().optional(),
+};
+const choiceModelSchema = z.strictObject(modelFields).refine(validTokenBudget, tokenBudgetIssue);
+
 export const createModelSchema = z
-  .object({
-    /**
-     * Optional. When omitted, the server derives the label from the catalog
-     * (`<catalog>.label`) and dedupes against existing org rows. See
-     * {@link deriveModelLabel}.
-     */
-    label: z.string().min(1).optional(),
-    modelId: z.string().min(1, "modelId is required"),
-    // `org_models.credential_id` is a strict UUID FK to
-    // `model_provider_credentials.id` — built-in (system) credentials live
-    // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
-    // slugs (e.g. "anthropic"). Validating as UUID here turns a
-    // 500 ("invalid input syntax for type uuid") into a clean 400
-    // and lets the route handler emit a hint that points operators at the
-    // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
-    // credential). `null`: each member serves the model with their own
-    // credential for `providerId`.
+  .strictObject({
+    ...modelFields,
+    // A null credential uses the caller's own credential for the named provider.
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).nullable(),
-    /** The provider of a model without a credential. A bound model takes its credential's. */
     providerId: z.string().min(1).optional(),
-    /**
-     * Catalog-derivable overrides. Omit (or send null on update) to let the
-     * read path fall back to the catalog — keeps existing rows in sync with
-     * a Pi registry bump.
-     */
-    input: z.array(modelInputModalitySchema).optional(),
-    contextWindow: z.number().int().positive().optional(),
-    maxTokens: z.number().int().positive().optional(),
-    reasoning: z.boolean().optional(),
-    // Closed HERE, not in `modelCostSchema` itself: that schema doubles as the
-    // reader of STORED rows (`appstrate-event-sink.ts`, `model-registry.ts`),
-    // where a row carrying a future key must keep parsing or its tokens bill at
-    // zero. At the REQUEST site the opposite is true — an open object strips a
-    // misspelt `cache_read`/`cache_write` and returns 201 on a row that then
-    // bills cache tokens at an absent rate, while the same typo one level up
-    // (`costs`) is a 400.
-    cost: modelCostSchema.strict().optional(),
-    /**
-     * Model-alias flag (LLM-gateway alias pattern). When true, this model's
-     * `id` becomes a public alias and its real binding (modelId, provider,
-     * baseUrl, capabilities/cost) is stripped from user-facing surfaces; the
-     * sidecar rewrites the `model` field on every inference call.
-     */
     aliased: z.boolean().optional(),
   })
-  .strict()
-  .refine(
-    // Canonical model invariant: `input + output <= context`, so a response
-    // cap can never reach the full window. Reject impossible overrides at the
-    // edge so the runtime never derives a reserve that swallows the window.
-    (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
-    { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
-  )
+  .refine(validTokenBudget, tokenBudgetIssue)
   .refine((d) => d.credentialId !== null || d.providerId !== undefined, {
     message: "providerId is required when credentialId is null",
     path: ["providerId"],
-  });
-
-/** One model of a choice to create: what `POST /api/models` takes, minus the shared binding. */
-const choiceModelSchema = z
-  .object({
-    label: z.string().min(1).optional(),
-    modelId: z.string().min(1, "modelId is required"),
-    input: z.array(modelInputModalitySchema).optional(),
-    contextWindow: z.number().int().positive().optional(),
-    maxTokens: z.number().int().positive().optional(),
-    reasoning: z.boolean().optional(),
-    cost: modelCostSchema.strict().optional(),
-  })
-  .strict()
-  .refine((d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow, {
-    message: "maxTokens must be strictly less than contextWindow",
-    path: ["maxTokens"],
   });
 
 /**
@@ -172,20 +136,15 @@ export const updateModelSchema = z
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).nullable().optional(),
     providerId: z.string().min(1).optional(),
     enabled: z.boolean().optional(),
-    input: z.array(modelInputModalitySchema).nullable().optional(),
-    contextWindow: z.number().int().positive().nullable().optional(),
-    maxTokens: z.number().int().positive().nullable().optional(),
-    reasoning: z.boolean().nullable().optional(),
-    // `.strict()` for the same reason as on create — see the note there.
-    cost: modelCostSchema.strict().nullable().optional(),
+    input: modelFields.input.nullable(),
+    contextWindow: modelFields.contextWindow.nullable(),
+    maxTokens: modelFields.maxTokens.nullable(),
+    reasoning: modelFields.reasoning.nullable(),
+    cost: modelFields.cost.nullable(),
     aliased: z.boolean().optional(),
   })
   .strict()
-  .refine(
-    // See createModelSchema: `max_output_tokens < context_window` always holds.
-    (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
-    { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
-  );
+  .refine(validTokenBudget, tokenBudgetIssue);
 
 export const setDefaultSchema = z
   .object({
@@ -258,7 +217,7 @@ function throwOnTokenBudgetViolation(
   maxTokens: number | null | undefined,
   contextWindow: number | null | undefined,
 ): void {
-  if (maxTokens != null && contextWindow != null && maxTokens >= contextWindow) {
+  if (!validTokenBudget({ maxTokens, contextWindow })) {
     throw invalidRequest(
       `maxTokens (${maxTokens}) must be strictly less than the effective contextWindow (${contextWindow})`,
       "maxTokens",

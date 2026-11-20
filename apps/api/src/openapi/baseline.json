@@ -1320,7 +1320,7 @@
         "operationId": "listAgentPersistence",
         "tags": ["Agents"],
         "summary": "List unified agent persistence (pinned slots + memories)",
-        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
+        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote. Every row names its `spaceId`. An unknown query parameter, or a `kind` / `actor_type` outside its set, is a `400`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1359,9 +1359,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
-            "description": "Required when `actor_type` is `user` or `end_user`."
+            "description": "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected."
           },
           {
             "name": "runId",
@@ -1406,7 +1407,8 @@
                           "actor_type",
                           "actor_id",
                           "createdAt",
-                          "updatedAt"
+                          "updatedAt",
+                          "spaceId"
                         ],
                         "properties": {
                           "id": {
@@ -1433,6 +1435,11 @@
                           "updatedAt": {
                             "type": ["string", "null"],
                             "format": "date-time"
+                          },
+                          "spaceId": {
+                            "type": "string",
+                            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                            "description": "The space this row belongs to."
                           }
                         }
                       }
@@ -1447,7 +1454,8 @@
                           "runId",
                           "actor_type",
                           "actor_id",
-                          "createdAt"
+                          "createdAt",
+                          "spaceId"
                         ],
                         "properties": {
                           "id": {
@@ -1472,6 +1480,11 @@
                           },
                           "pinned": {
                             "type": "boolean"
+                          },
+                          "spaceId": {
+                            "type": "string",
+                            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                            "description": "The space this row belongs to."
                           }
                         }
                       }
@@ -1480,6 +1493,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1496,7 +1512,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204. An unknown query parameter, or a `kind` / `actor_type` outside its set, is a `400`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1533,8 +1549,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
-            }
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected."
           }
         ],
         "responses": {
@@ -1566,6 +1584,200 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/agents/{scope}/{name}/persistence": {
+      "get": {
+        "operationId": "listOrgAgentPersistence",
+        "tags": ["Agents"],
+        "summary": "List an agent's persistence across the organization's spaces",
+        "description": "Read-only: the agent's pinned slots and memories in every space of the organization where the caller holds `persistence:read` and the space reads the agent (homed, placed or shipped with the deployment), each row naming its `spaceId`. The query and the actor partition are those of `GET /api/agents/{scope}/{name}/persistence`, judged per space: where the caller holds `persistence:delete` they see every actor's rows (or the `actor_type` they name), elsewhere their own actor scope plus the shared rows. Pinned slots come newest update first and memories oldest first, across spaces. `404` when no such space reads the agent. An inline run's shadow agent is not served here. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pinned", "memory"]
+            },
+            "description": "Limit the response to one kind. Omitted → both."
+          },
+          {
+            "name": "actor_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["user", "end_user", "shared"]
+            },
+            "description": "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope."
+          },
+          {
+            "name": "actor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Required for `actor_type=user` or `end_user`. Omit for shared rows or when no actor type is selected."
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Narrow `memories` and `pinned` to rows touched during a specific run."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["agent_persistence"]
+                    },
+                    "pinned": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "key",
+                          "content",
+                          "runId",
+                          "actor_type",
+                          "actor_id",
+                          "createdAt",
+                          "updatedAt",
+                          "spaceId"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "content": {},
+                          "runId": {
+                            "type": ["string", "null"]
+                          },
+                          "actor_type": {
+                            "type": "string",
+                            "enum": ["user", "end_user", "shared"]
+                          },
+                          "actor_id": {
+                            "type": ["string", "null"]
+                          },
+                          "createdAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "spaceId": {
+                            "type": "string",
+                            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                            "description": "The space this row belongs to."
+                          }
+                        }
+                      }
+                    },
+                    "memories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "content",
+                          "runId",
+                          "actor_type",
+                          "actor_id",
+                          "createdAt",
+                          "spaceId"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": ["string", "null"]
+                          },
+                          "actor_type": {
+                            "type": "string",
+                            "enum": ["user", "end_user", "shared"]
+                          },
+                          "actor_id": {
+                            "type": ["string", "null"]
+                          },
+                          "createdAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "spaceId": {
+                            "type": "string",
+                            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                            "description": "The space this row belongs to."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2020,7 +2232,7 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references (an existing file the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
+                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references (an existing file, under its container ACL. The file resolves in its own space, which may differ from `X-Space-Id`, when the request reaches it: a session or an organization-audience token every space where it holds a role, an API key or a space-audience token its own space, a credential bound to a set of spaces (a chat turn's) the one space the request entered, plus its own conversation's uploads (the credential matrix is in `docs/architecture/SPACES.md`). Anything else is indistinguishable from a missing file (404). Reading it needs `files:read` in the file's space.), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
                   },
                   "rerun_from": {
                     "type": "string",
@@ -2185,7 +2397,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2673,7 +2885,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2968,6 +3180,15 @@
             "description": "Return only runs launched from this chat session."
           },
           {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
+          },
+          {
             "$ref": "#/components/parameters/RunSearch"
           },
           {
@@ -3111,6 +3332,15 @@
               "type": "string"
             },
             "description": "Return only runs launched from this chat session."
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
           },
           {
             "$ref": "#/components/parameters/RunSearch"
@@ -3433,7 +3663,168 @@
             }
           },
           "400": {
-            "description": "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description)",
+            "description": "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description), or a query parameter other than `wait`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "about:blank",
+                  "title": "Bad Request",
+                  "status": 400,
+                  "detail": "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
+                  "code": "invalid_request",
+                  "request_id": "req_abc123"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/runs/{id}": {
+      "get": {
+        "operationId": "getOrgRun",
+        "tags": ["Runs"],
+        "summary": "Get a run in any space of the organization",
+        "description": "One run, in whichever space of the organization holds it — `GET /api/runs/{id}` without naming the space, with the same body, the same `?wait` long-poll and the same rule, judged in the run's own space: where the caller holds `runs:read-all` there every run, where they hold `runs:read` only their own runs, and `input` is `null` on a registered agent's run where they lack `agents:read` there. The run carries its `spaceId`; every act on it (cancel, logs, read state) goes to its single-space route in that space. 404, the same as for an unknown id, for a run in a space the caller does not reach or may not read there. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "description": "`true` waits the maximum 55 s; `false` disables."
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Wait budget in seconds. Values above 55 are clamped to 55."
+                }
+              ]
+            },
+            "description": "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if `wait` were 0 (degrade-to-immediate, see operation description)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                },
+                "example": {
+                  "id": "run_cm1abc123def456",
+                  "packageId": "@acme/email-sorter",
+                  "userId": "usr_k7x9m2p4q1",
+                  "endUserId": null,
+                  "apiKeyId": null,
+                  "orgId": "org_r3t5w8y1z6",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
+                  "scheduleId": "sched_cm1abc456def789",
+                  "status": "success",
+                  "input": {
+                    "folder": "inbox",
+                    "maxEmails": 50
+                  },
+                  "result": {
+                    "output": {
+                      "processed": 42,
+                      "labeled": 38
+                    }
+                  },
+                  "artifacts": {
+                    "status": "complete",
+                    "published": 2,
+                    "failed": []
+                  },
+                  "checkpoint": {
+                    "lastProcessedId": "msg_99f2a"
+                  },
+                  "error": null,
+                  "model_error": null,
+                  "metadata": null,
+                  "generation": {
+                    "reasoning_level": "medium"
+                  },
+                  "generation_override": null,
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": "2026-01-15T10:31:12Z",
+                  "duration": 72000,
+                  "cost": 0.0034,
+                  "cost_pricing_status": "priced",
+                  "unread": true,
+                  "runNumber": 17,
+                  "token_usage": {
+                    "input_tokens": 8200,
+                    "output_tokens": 4250,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 1024
+                  },
+                  "version_label": "1.2.0",
+                  "version_ref": "1.2.0",
+                  "proxy_label": null,
+                  "model_label": "Claude Sonnet 4",
+                  "model_source": "system",
+                  "runner_name": null,
+                  "runner_kind": null,
+                  "agent_scope": "@acme",
+                  "agent_name": "email-sorter",
+                  "runOrigin": "platform",
+                  "contextSnapshot": null,
+                  "modelCredentialId": null,
+                  "connection_overrides": null,
+                  "dependency_overrides": null,
+                  "user_name": "Pierre",
+                  "end_user_name": null,
+                  "api_key_name": null,
+                  "schedule_name": "Weekday morning sort",
+                  "connections_used": null,
+                  "integrations_unbound": null,
+                  "package_ephemeral": false,
+                  "file_counts": {
+                    "input": 0,
+                    "output": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description), or a query parameter other than `wait`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3906,7 +4297,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "description": "Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5493,13 +5884,22 @@
         "operationId": "listSchedules",
         "tags": ["Schedules"],
         "summary": "List all schedules",
-        "description": "List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.",
+        "description": "List the schedules of the space, every agent's or one agent's (`packageId`). Any other query parameter is rejected with `400`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
           }
         ],
         "responses": {
@@ -5554,10 +5954,19 @@
         "operationId": "listOrgSchedules",
         "tags": ["Schedules"],
         "summary": "List schedules across the organization's spaces",
-        "description": "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "description": "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. A caller who reads schedules in no space gets an empty list. `packageId` narrows it to one agent's schedules; any other query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "description": "Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent."
           }
         ],
         "responses": {
@@ -7082,7 +7491,7 @@
             }
           },
           "403": {
-            "description": "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
+            "description": "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). For a draft declaring no auths, `blocked_target` (`Proxy-Status` error `destination_ip_prohibited`) is the egress guard refusing its server URL or a redirect hop, `https` required for a host the operator has not allowlisted.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7142,7 +7551,7 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`; `error=http_protocol_error` with `received-status=<status>` on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` that received an answer (a credential asked of an integration declaring none included), `error=http_protocol_error` alone on any other `bad_gateway`; `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code.",
+            "description": "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB, or the credential proxy's `max_response_bytes` when lower; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`; `error=http_protocol_error` with `received-status=<status>` on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` that received an answer (a credential asked of an integration declaring none included), `error=http_protocol_error` alone on any other `bad_gateway`; `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -7530,7 +7939,7 @@
                             "proxy_closed",
                             "not_required"
                           ],
-                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
+                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
                         },
                         "imposed": {
                           "type": "boolean",
@@ -10454,7 +10863,7 @@
                             "proxy_closed",
                             "not_required"
                           ],
-                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
+                          "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
                         },
                         "imposed": {
                           "type": "boolean",
@@ -19064,7 +19473,7 @@
             "schema": {
               "type": "boolean"
             },
-            "description": "When true, only unread notifications are returned"
+            "description": "When true, only unread notifications are returned. A value that is neither `true` nor `false` is rejected with `400`, as is any parameter this list does not name."
           },
           {
             "name": "limit",
@@ -19118,12 +19527,24 @@
                         "oneOf": [
                           {
                             "type": "object",
-                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
                                 "format": "uuid",
                                 "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                               },
                               "type": {
                                 "type": "string",
@@ -19166,12 +19587,24 @@
                           },
                           {
                             "type": "object",
-                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
                                 "format": "uuid",
                                 "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                               },
                               "type": {
                                 "type": "string",
@@ -19212,12 +19645,24 @@
                           },
                           {
                             "type": "object",
-                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
                                 "format": "uuid",
                                 "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                               },
                               "type": {
                                 "type": "string",
@@ -19276,6 +19721,7 @@
                   "data": [
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
                       "type": "package_shared",
                       "runId": null,
                       "payload": {
@@ -19288,6 +19734,352 @@
                     }
                   ],
                   "hasMore": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/notifications": {
+      "get": {
+        "operationId": "listOrgNotifications",
+        "tags": ["Notifications"],
+        "summary": "List notifications across the organization's spaces",
+        "description": "The current recipient's notifications in every space of the organization where they hold a role, in one keyset-paginated page, newest first. The rule of `GET /api/notifications` holds in each space: the caller's own notifications, no role grant asked. Each item carries its `spaceId`: read one with `GET /api/notifications/{id}` and mark it read with `PUT /api/notifications/{id}/read`, both in that space; `PUT /api/notifications/read-all` reads one space's feed. Takes the query of `GET /api/notifications`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "When true, only unread notifications are returned. A value that is neither `true` nor `false` is rejected with `400`, as is any parameter this list does not name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "startingAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel=\"next\"` header."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Link": {
+                "$ref": "#/components/headers/Link"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "run_failed"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "agent_name", "status"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": ["string", "null"],
+                                    "description": "The run's agent; null once the agent is deleted."
+                                  },
+                                  "agent_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted)."
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["failed", "timeout"]
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "package_shared"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "package_type", "shared_by_name"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string"
+                                  },
+                                  "package_type": {
+                                    "type": "string",
+                                    "enum": ["agent", "skill", "integration"]
+                                  },
+                                  "shared_by_name": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "agent_message"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "agent_name", "title", "message"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent of the run that sent it; null when the run no longer references its agent."
+                                  },
+                                  "agent_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "description": "Headline the agent wrote (`notify` tool)."
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "description": "Body the agent wrote (`notify` tool)."
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "True when another page follows — page via the Link header cursor"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
+                      "type": "package_shared",
+                      "runId": null,
+                      "payload": {
+                        "packageId": "@acme/email-sorter",
+                        "package_type": "agent",
+                        "shared_by_name": "Ada Lovelace"
+                      },
+                      "read_at": null,
+                      "createdAt": "2026-01-15T10:31:12Z"
+                    }
+                  ],
+                  "hasMore": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/notifications/unread-count": {
+      "get": {
+        "operationId": "getOrgUnreadNotificationCount",
+        "tags": ["Notifications"],
+        "summary": "Get unread notification count across the organization's spaces",
+        "description": "The number of unread notifications of the current recipient in every space of the organization where they hold a role — the spaces `GET /api/orgs/{orgId}/notifications` lists. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unread count",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "description": "Number of unread notifications"
+                    }
+                  },
+                  "required": ["count"]
+                },
+                "example": {
+                  "count": 5
                 }
               }
             }
@@ -19403,12 +20195,24 @@
                   "oneOf": [
                     {
                       "type": "object",
-                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
                           "format": "uuid",
                           "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                         },
                         "type": {
                           "type": "string",
@@ -19451,12 +20255,24 @@
                     },
                     {
                       "type": "object",
-                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
                           "format": "uuid",
                           "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                         },
                         "type": {
                           "type": "string",
@@ -19497,12 +20313,24 @@
                     },
                     {
                       "type": "object",
-                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
                           "format": "uuid",
                           "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
                         },
                         "type": {
                           "type": "string",
@@ -19551,6 +20379,259 @@
                 },
                 "example": {
                   "id": "550e8400-e29b-41d4-a716-446655440000",
+                  "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
+                  "type": "agent_message",
+                  "runId": "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
+                  "payload": {
+                    "packageId": "@acme/weekly-report",
+                    "agent_name": "Weekly report",
+                    "title": "Report ready",
+                    "message": "This week's report is in the shared drive."
+                  },
+                  "read_at": null,
+                  "createdAt": "2026-01-15T10:31:12Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/notifications/{id}": {
+      "get": {
+        "operationId": "getOrgNotification",
+        "tags": ["Notifications"],
+        "summary": "Get a notification in any space of the organization",
+        "description": "One notification of the current recipient, in whichever space of the organization they hold a role in — `GET /api/notifications/{id}` without naming the space. The item carries its `spaceId`, where its page opens and where `PUT /api/notifications/{id}/read` marks it read. 404, the same as for an unknown id, when it is another recipient's or lies in a space the caller does not reach. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgIdPath"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Notification id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The notification",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "run_failed"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "agent_name", "status"],
+                          "properties": {
+                            "packageId": {
+                              "type": ["string", "null"],
+                              "description": "The run's agent; null once the agent is deleted."
+                            },
+                            "agent_name": {
+                              "type": ["string", "null"],
+                              "description": "The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted)."
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed", "timeout"]
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "package_shared"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "package_type", "shared_by_name"],
+                          "properties": {
+                            "packageId": {
+                              "type": "string"
+                            },
+                            "package_type": {
+                              "type": "string",
+                              "enum": ["agent", "skill", "integration"]
+                            },
+                            "shared_by_name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "agent_message"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "agent_name", "title", "message"],
+                          "properties": {
+                            "packageId": {
+                              "type": ["string", "null"],
+                              "description": "The agent of the run that sent it; null when the run no longer references its agent."
+                            },
+                            "agent_name": {
+                              "type": ["string", "null"],
+                              "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
+                            },
+                            "title": {
+                              "type": "string",
+                              "description": "Headline the agent wrote (`notify` tool)."
+                            },
+                            "message": {
+                              "type": "string",
+                              "description": "Body the agent wrote (`notify` tool)."
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "550e8400-e29b-41d4-a716-446655440000",
+                  "spaceId": "spc_8f14e45fceea167a5a36dedd4bea2543",
                   "type": "agent_message",
                   "runId": "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
                   "payload": {
@@ -21031,6 +22112,9 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           }
@@ -21084,6 +22168,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound",
             "description": "No skill the caller may read in this space is served at `uri`."
+          },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -21290,7 +22377,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22078,7 +23165,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "description": "Agent in use: it has runs in progress in some space of the organization. RFC 9457 problem+json with `code` of `agent_in_use`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22219,7 +23306,7 @@
         "operationId": "createAgentVersion",
         "tags": ["Packages"],
         "summary": "Create an agent version from draft",
-        "description": "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.",
+        "description": "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22285,7 +23372,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
+            "description": "The draft is unchanged, or the version already exists (`no_changes`, `version_exists`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22305,7 +23392,7 @@
         "operationId": "restoreAgentVersion",
         "tags": ["Packages"],
         "summary": "Restore an agent version into the draft",
-        "description": "Restore a published version into the draft. Requires no runs in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.",
+        "description": "Restore a published version into the draft. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22364,7 +23451,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Agent in use. RFC 9457 problem+json with `code` `agent_in_use`.",
+            "description": "The draft was modified concurrently (`conflict`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22489,7 +23576,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Agent has runs in progress (`agent_in_use`).",
+            "description": "Agent has runs in progress in some space of the organization (`agent_in_use`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22506,7 +23593,7 @@
         "operationId": "getPackageHome",
         "tags": ["Packages"],
         "summary": "Locate a package: its type, its home and the spaces you read it from",
-        "description": "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.",
+        "description": "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's sight permission (agents:read or agents:run for an agent) and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23321,7 +24408,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -26404,7 +27491,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Filter to files anchored to this run."
+            "description": "Filter to the files of this run, for a caller who reads it as its container (its launcher, or `runs:read-all`): those it produced and the inputs it consumed, each input resolved as a file read by id. Anyone else is listed nothing."
           },
           {
             "name": "packageId",
@@ -26673,7 +27760,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Filter to files anchored to this run."
+            "description": "Filter to the files of this run, for a caller who reads it as its container (its launcher, or `runs:read-all`): those it produced and the inputs it consumed, each input resolved as a file read by id. Anyone else is listed nothing."
           },
           {
             "name": "packageId",
@@ -26917,7 +28004,7 @@
         "operationId": "getFile",
         "tags": ["Files"],
         "summary": "Get file metadata",
-        "description": "Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. Requires the `files:read` permission; on top of it access is inherited from the file's container, so an id the caller cannot read returns 404.",
+        "description": "Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. The file resolves in its own space, which may differ from `X-Space-Id`, when the request reaches it: a session or an organization-audience token every space where it holds a role, an API key or a space-audience token its own space, a credential bound to a set of spaces (a chat turn's) the one space the request entered, plus its own conversation's uploads (the credential matrix is in `docs/architecture/SPACES.md`). Anything else is indistinguishable from a missing file (404). Reading it needs `files:read` in the file's space. On top of it access is inherited from the file's container. A credential whose scopes omit `files:read` is refused (403).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27100,7 +28187,7 @@
         "operationId": "deleteFile",
         "tags": ["Files"],
         "summary": "Delete a file",
-        "description": "Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file referenced by a run cannot be deleted until those consumer runs are removed.",
+        "description": "Delete a file (storage object + row) and release its quota. The file resolves in its own space, which may differ from `X-Space-Id`, when the request reaches it: a session or an organization-audience token every space where it holds a role, an API key or a space-audience token its own space, a credential bound to a set of spaces (a chat turn's) the one space the request entered, plus its own conversation's uploads (the credential matrix is in `docs/architecture/SPACES.md`). Anything else is indistinguishable from a missing file (404). Allowed with the `files:delete` permission in the file's space, or for the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file consumed by a run of its own space cannot be deleted until those runs are removed; a run of another space keeps no claim on it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27139,7 +28226,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "File is still referenced by one or more consumer runs.",
+            "description": "File is still consumed by one or more runs of its own space.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27167,7 +28254,7 @@
         "operationId": "keepFile",
         "tags": ["Files"],
         "summary": "Keep a file (clear its expiry)",
-        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.",
+        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission in the file's space, or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. The file resolves in its own space, which may differ from `X-Space-Id`, when the request reaches it: a session or an organization-audience token every space where it holds a role, an API key or a space-audience token its own space, a credential bound to a set of spaces (a chat turn's) the one space the request entered, plus its own conversation's uploads (the credential matrix is in `docs/architecture/SPACES.md`). Anything else is indistinguishable from a missing file (404).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27347,7 +28434,7 @@
         "operationId": "getFileContent",
         "tags": ["Files"],
         "summary": "Download file content",
-        "description": "Download the file bytes with `Content-Disposition: attachment`. Requires the `files:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
+        "description": "Download the file bytes with `Content-Disposition: attachment`. The file resolves in its own space, which may differ from `X-Space-Id`, when the request reaches it: a session or an organization-audience token every space where it holds a role, an API key or a space-audience token its own space, a credential bound to a set of spaces (a chat turn's) the one space the request entered, plus its own conversation's uploads (the credential matrix is in `docs/architecture/SPACES.md`). Anything else is indistinguishable from a missing file (404). Reading it needs `files:read` in the file's space. A credential whose scopes omit `files:read` is refused (403). When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27759,7 +28846,7 @@
         "operationId": "listIntegrationTools",
         "tags": ["Credential Proxy"],
         "summary": "List the tools the caller can call outside a run",
-        "description": "Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's OWN connections it accepts: a connection another member shared serves only when named or designated by an org default), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. Reaching a server sends the connection's credential: a 401 goes through the proxy's forced refresh, and a server refusing the credential can flag the connection `needs_reconnection`, as a call does. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all (5 s when it resolves a `name`), and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. `connections` lists the connections the tools reach, each once, as `GET /api/credential-proxy/connections` lists them; each tool names its own (`connection_ids`). `not_ready` lists the integrations active in the space the caller has no usable connection of and that offer a tool outside a run (an `api_call` tool, or a remote server's), with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`), each with that refusal; resolving a `name` only the unread catalog could map (under `allow_undeclared_tools`, neither a declared tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could not be read (`listing_failure`, when known: the proxy's problem code or `timeout`), nothing was sent, and a later listing may read it. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "description": "Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. An integration declaring no `auths` (AFPS §7.2) is listed with its typed tools and `connection_ids: []`, never in `not_ready`: its server is reached directly, nothing injected, its catalog cached per organization, integration version and server URL, and the listing journaled as one call with no connection. Every other server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's OWN connections it accepts: a connection another member shared serves only when named or designated by an org default), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. Reaching such a server sends the connection's credential: a 401 goes through the proxy's forced refresh, and a server refusing the credential can flag the connection `needs_reconnection`, as a call does. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all (5 s when it resolves a `name`), and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. `connections` lists the connections the tools reach, each once, as `GET /api/credential-proxy/connections` lists them; each tool names its own (`connection_ids`). `not_ready` lists the integrations active in the space the caller has no usable connection of and that offer a tool outside a run (an `api_call` tool, or a remote server's), with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`) or, declaring no auths, asked for one (`bad_gateway`), each with that refusal; resolving a `name` only the unread catalog could map (under `allow_undeclared_tools`, neither a declared tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could not be read (`listing_failure`, when known: the proxy's problem code or `timeout`), nothing was sent, and a later listing may read it. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, unauthenticated integrations included.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27887,7 +28974,7 @@
                               "type": "string",
                               "format": "uuid"
                             },
-                            "description": "The listing's `connections` the tool reaches, by `connection_id`."
+                            "description": "The listing's `connections` the tool reaches, by `connection_id`; empty for a tool of an integration that declares no `auths` (AFPS §7.2), which binds no connection."
                           },
                           "missing_scopes": {
                             "type": "object",
@@ -28001,7 +29088,7 @@
                                   "proxy_closed",
                                   "not_required"
                                 ],
-                                "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
+                                "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections."
                               },
                               "imposed": {
                                 "type": "boolean",
@@ -28156,7 +29243,7 @@
         "operationId": "callRemoteIntegrationTool",
         "tags": ["Credential Proxy"],
         "summary": "Call a typed tool of a remote MCP integration",
-        "description": "One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks, a transport fault, or an answer of the server the platform turns into a problem carries RFC 9209 `Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. The arguments go to the server as given: it validates them. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "description": "One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks, a transport fault, or an answer of the server the platform turns into a problem carries RFC 9209 `Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. The arguments go to the server as given: it validates them. An integration declaring no `auths` (AFPS §7.2) is called without any connection: its server is reached directly (egress-guarded on the URL and every redirect hop, https required for an untrusted host, a refusal answered as the proxy's `403 blocked_target` and a host that does not resolve `502 upstream_unresolvable`, as the proxy answers them; the same exchange bound; nothing injected; activation re-checked before each exchange), the call is journaled with no connection, a `connection_id` is refused (`credential_not_found`) before any exchange, and the server's 401 or 403 is a `502 bad_gateway` (it declares no authentication) that flags nothing. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, unauthenticated integrations included.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28185,7 +29272,7 @@
                   "connection_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics)."
+                    "description": "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no `auths`: call it without `connection_id`."
                   },
                   "name": {
                     "type": "string",
@@ -28243,7 +29330,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`).",
+            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also answers the egress guard refusing a redirect hop, after the first hop was sent; for an integration declaring no auths, also plain `http` to a host the operator does not trust, on the server URL (nothing sent) or a hop.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28262,7 +29349,7 @@
             }
           },
           "404": {
-            "description": "`not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all).",
+            "description": "`not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all), or `connection_id` is passed for an integration that declares no authentication (call it without `connection_id`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -30333,7 +31420,7 @@
         "operationId": "listMyConnectionCalls",
         "tags": ["Profile"],
         "summary": "The credential proxy's calls made with one of the caller's connections",
-        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
+        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call or MCP operation dispatched to the upstream, and so may have sent the credential, successful or not; `connection_id` is never null here. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
         "parameters": [
           {
             "name": "connectionId",
@@ -30431,97 +31518,112 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "description": "One call the credential proxy made with a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
-                        "required": [
-                          "id",
-                          "createdAt",
-                          "spaceId",
-                          "connection_id",
-                          "integration_package_id",
-                          "owner_type",
-                          "owner_id",
-                          "actor_type",
-                          "actor_id",
-                          "apiKeyId",
-                          "auth_method",
-                          "runId",
-                          "method",
-                          "host",
-                          "outcome",
-                          "duration_ms",
-                          "request_id"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "integer",
-                            "description": "Monotonic row id; the pagination cursor."
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "description": "One call or MCP operation the credential proxy dispatched (so it may have reached its upstream) outside a run or for a remote run, with or without a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
+                            "required": [
+                              "id",
+                              "createdAt",
+                              "spaceId",
+                              "connection_id",
+                              "integration_package_id",
+                              "owner_type",
+                              "owner_id",
+                              "actor_type",
+                              "actor_id",
+                              "apiKeyId",
+                              "auth_method",
+                              "runId",
+                              "method",
+                              "host",
+                              "outcome",
+                              "duration_ms",
+                              "request_id"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "integer",
+                                "description": "Monotonic row id; the pagination cursor."
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space the call was made in."
+                              },
+                              "connection_id": {
+                                "type": ["string", "null"],
+                                "format": "uuid",
+                                "description": "The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too."
+                              },
+                              "integration_package_id": {
+                                "type": "string",
+                                "description": "The integration (`@scope/name`)."
+                              },
+                              "owner_type": {
+                                "type": ["string", "null"],
+                                "enum": ["user", "end_user", null],
+                                "description": "The connection's owner when the call was made; null when it was gone by then, or when the call used no connection."
+                              },
+                              "owner_id": {
+                                "type": ["string", "null"]
+                              },
+                              "actor_type": {
+                                "type": "string",
+                                "enum": ["user", "end_user"],
+                                "description": "Who acted. Under an API key, the principal acting through it."
+                              },
+                              "actor_id": {
+                                "type": "string"
+                              },
+                              "apiKeyId": {
+                                "type": ["string", "null"],
+                                "description": "The API key the actor acted through, if any."
+                              },
+                              "auth_method": {
+                                "type": "string",
+                                "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "The run the call declared (`X-Run-Id`), if any."
+                              },
+                              "method": {
+                                "type": "string",
+                                "description": "The call's HTTP method."
+                              },
+                              "host": {
+                                "type": "string",
+                                "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host."
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "description": "The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …)."
+                              },
+                              "duration_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "request_id": {
+                                "type": "string",
+                                "description": "The call's `Request-Id`."
+                              }
+                            }
                           },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "spaceId": {
-                            "type": "string",
-                            "description": "The space the call was made in."
-                          },
-                          "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "integration_package_id": {
-                            "type": "string",
-                            "description": "The integration (`@scope/name`)."
-                          },
-                          "owner_type": {
-                            "type": ["string", "null"],
-                            "enum": ["user", "end_user", null],
-                            "description": "The connection's owner when the call was made; null when it was gone by then."
-                          },
-                          "owner_id": {
-                            "type": ["string", "null"]
-                          },
-                          "actor_type": {
-                            "type": "string",
-                            "enum": ["user", "end_user"],
-                            "description": "Who acted. Under an API key, the principal acting through it."
-                          },
-                          "actor_id": {
-                            "type": "string"
-                          },
-                          "apiKeyId": {
-                            "type": ["string", "null"],
-                            "description": "The API key the actor acted through, if any."
-                          },
-                          "auth_method": {
-                            "type": "string",
-                            "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
-                          },
-                          "runId": {
-                            "type": ["string", "null"],
-                            "description": "The run the call declared (`X-Run-Id`), if any."
-                          },
-                          "method": {
-                            "type": "string",
-                            "description": "The call's HTTP method."
-                          },
-                          "host": {
-                            "type": "string",
-                            "description": "The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host."
-                          },
-                          "outcome": {
-                            "type": "string",
-                            "description": "The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …)."
-                          },
-                          "duration_ms": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "request_id": {
-                            "type": "string",
-                            "description": "The call's `Request-Id`."
+                          {
+                            "type": "object",
+                            "properties": {
+                              "connection_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "The connection the call used: never null here, the caller owns it."
+                              }
+                            }
                           }
-                        }
+                        ]
                       }
                     },
                     "hasMore": {
@@ -30557,7 +31659,7 @@
         "operationId": "listConnectionCalls",
         "tags": ["Integrations"],
         "summary": "The credential proxy's calls made in the current space",
-        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
+        "description": "Every call the credential proxy (`/api/credential-proxy/proxy`, `/api/credential-proxy/tools` and `/tools/call`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`), and every direct MCP operation toward an unauthenticated integration's server, made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call or MCP operation dispatched to an upstream (and so may have reached it), with or without a credential (`connection_id` null when the integration binds no connection), successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -30663,7 +31765,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "description": "One call the credential proxy made with a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
+                        "description": "One call or MCP operation the credential proxy dispatched (so it may have reached its upstream) outside a run or for a remote run, with or without a connection's credential. The journal outlives what it describes: every id is a plain value and may name a connection, space, run, key or principal that no longer exists.",
                         "required": [
                           "id",
                           "createdAt",
@@ -30697,8 +31799,9 @@
                             "description": "The space the call was made in."
                           },
                           "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
+                            "type": ["string", "null"],
+                            "format": "uuid",
+                            "description": "The connection the call used; null when the integration binds none (unauthenticated, AFPS §7.2), and then `owner_type` and `owner_id` are null too."
                           },
                           "integration_package_id": {
                             "type": "string",
@@ -30707,7 +31810,7 @@
                           "owner_type": {
                             "type": ["string", "null"],
                             "enum": ["user", "end_user", null],
-                            "description": "The connection's owner when the call was made; null when it was gone by then."
+                            "description": "The connection's owner when the call was made; null when it was gone by then, or when the call used no connection."
                           },
                           "owner_id": {
                             "type": ["string", "null"]
@@ -34745,6 +35848,8 @@
           "last_run",
           "effective_timeout_seconds",
           "active",
+          "space_ids",
+          "read_space_ids",
           "home_space_id",
           "home_writable",
           "home_deletable",
@@ -34967,6 +36072,22 @@
           "active": {
             "type": "boolean",
             "description": "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted."
+          },
+          "read_space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The reached spaces where the caller can open this package detail, including inactive placements."
+          },
+          "space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The spaces the caller reaches where the agent is ACTIVE (spc_ prefix), as the agent's row of `GET /api/orgs/{orgId}/agents` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted."
           }
         }
       },
@@ -36159,6 +37280,8 @@
           "home_writable",
           "home_deletable",
           "home_shareable",
+          "space_ids",
+          "read_space_ids",
           "agents",
           "definition"
         ],
@@ -36235,6 +37358,22 @@
           "home_shareable": {
             "type": "boolean",
             "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+          },
+          "read_space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The reached spaces where the caller can open this package detail, including inactive placements."
+          },
+          "space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "description": "The spaces the caller reaches where the package is ACTIVE (spc_ prefix), as its row of `GET /api/orgs/{orgId}/packages/{skills|integrations}` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted."
           },
           "agents": {
             "type": "array",

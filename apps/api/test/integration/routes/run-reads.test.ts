@@ -25,7 +25,8 @@ import { deleteEndUser } from "../../../src/services/end-users.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
 import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
 import { encrypt } from "@appstrate/connect";
-import { db } from "@appstrate/db/client";
+import { db, toRows } from "@appstrate/db/client";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import { notifications, organizationMembers, runReads, runs } from "@appstrate/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -494,6 +495,35 @@ describe("Run read state (per-recipient)", () => {
   // ─── PUT /api/runs/read-all ─────────────────────────────────
 
   describe("PUT /api/runs/read-all", () => {
+    describeRequiresPostgres("concurrent finalization", () => {
+      it("leaves both the new run and its failure notice unread", async () => {
+        const opts = { actor: { userId: ctx.user.id }, status: "failed" } as const;
+        const existing = await seedFinishedRun({ ...opts, agentName: "existing" });
+        let pending: Promise<Response> | undefined;
+        const late = await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT 1 FROM ${runReads} WHERE ${runReads.runId} = ${existing.id} FOR UPDATE`,
+          );
+          pending = readAll(authHeaders(ctx));
+          const deadline = Date.now() + 5000;
+          while (true) {
+            const [row] = toRows<{ waiting: boolean }>(
+              await tx.execute(sql`
+              SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))) AS waiting`),
+            );
+            if (row!.waiting) break;
+            if (Date.now() >= deadline) throw new Error("read-all did not reach the locked run");
+            await Bun.sleep(10);
+          }
+          return seedFinishedRun({ ...opts, agentName: "late" });
+        });
+        expect((await pending)?.status).toBe(200);
+        expect((await rowsOf(existing.id))[0]!.readAt).not.toBeNull();
+        expect((await rowsOf(late.id))[0]!.readAt).toBeNull();
+        expect((await notificationsOf(late.id))[0]!.readAt).toBeNull();
+      });
+    });
+
     it("marks only the caller's runs read", async () => {
       const userB = await createTestUser();
       // Admin so the actor-less run fans out to B too.
@@ -1110,7 +1140,7 @@ describe("Run read state (per-recipient)", () => {
       expect(body.data[0]!.userId).toBe(ctx.user.id);
     });
 
-    it("pages by keyset: limit + startingAfter", async () => {
+    it("pages through runs sharing a timestamp with PostgreSQL microsecond precision", async () => {
       await seedAgent({ id: "@notiforg/page-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       for (let i = 0; i < 5; i++) {
         await seedRun({
@@ -1121,6 +1151,12 @@ describe("Run read state (per-recipient)", () => {
           status: "success",
         });
       }
+
+      // The DB default can produce a timestamp that a JavaScript Date cannot represent.
+      await db
+        .update(runs)
+        .set({ startedAt: sql`'2026-01-01T00:00:00.123456Z'::timestamptz` })
+        .where(eq(runs.orgId, ctx.orgId));
 
       const seen: string[] = [];
       let cursor = "";
@@ -1134,6 +1170,7 @@ describe("Run read state (per-recipient)", () => {
         };
         expect(body.total).toBe(5);
         expect(body.hasMore).toBe(page < 2);
+        expect(body.data).toHaveLength(page < 2 ? 2 : 1);
         seen.push(...body.data.map((r) => r.id));
         cursor = `&startingAfter=${body.data.at(-1)!.id}`;
       }

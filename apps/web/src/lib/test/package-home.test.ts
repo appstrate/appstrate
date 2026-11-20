@@ -14,7 +14,7 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { writableDestinations } = await import("../package-home.ts");
+const { homeNameBesideTiles, writableDestinations } = await import("../package-home.ts");
 
 type Space = { id: string; name: string; permissions: string[] };
 
@@ -65,5 +65,19 @@ describe("writableDestinations", () => {
 
   it("offers nothing while the space list is loading", () => {
     expect(writableDestinations(undefined, "skill", "spc_home")).toEqual([]);
+  });
+});
+
+describe("homeNameBesideTiles", () => {
+  const home = { homeSpaceId: "spc_b", homeSpaceName: "Studio" };
+
+  it("says the home only where no tile names it", () => {
+    expect(homeNameBesideTiles({ ...home, spaceIds: ["spc_b", "spc_a"] })).toBeNull();
+    expect(homeNameBesideTiles({ ...home, spaceIds: ["spc_a"] })).toBe("Studio");
+    expect(homeNameBesideTiles({ ...home, spaceIds: [] })).toBe("Studio");
+  });
+
+  it("says nothing while the tiles are read, so the line does not jump", () => {
+    expect(homeNameBesideTiles({ ...home, spaceIds: undefined })).toBeNull();
   });
 });

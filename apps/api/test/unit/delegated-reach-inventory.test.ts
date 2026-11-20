@@ -132,10 +132,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "public",
     reason: "verifyFsUploadToken HMAC minted by createUpload",
   },
-  receiveEeBillingStripeWebhook: {
+  receiveBillingStripeWebhook: {
     category: "public",
     reason: "Stripe webhook, stripe-signature verified",
-    module: "ee",
+    module: "billing",
   },
 
   // user-only — refuses every delegate: needs a Better Auth session or a user principal.
@@ -251,7 +251,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   deleteFile: {
     category: "handler-guarded",
-    reason: "getFileForActor: files:delete, or creator with fileLifecycleCeiling admitting it",
+    reason:
+      "resolveFileAcrossSpaces: files:delete, or creator with fileLifecycleCeiling admitting it",
   },
   deleteIntegrationPackage: {
     category: "handler-guarded",
@@ -292,7 +293,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   keepFile: {
     category: "handler-guarded",
-    reason: "getFileForActor: files:delete, or creator with fileLifecycleCeiling admitting it",
+    reason:
+      "resolveFileAcrossSpaces: files:delete, or creator with fileLifecycleCeiling admitting it",
   },
   listPackageFiles: {
     category: "handler-guarded",
@@ -432,7 +434,7 @@ describe("delegated reach inventory", () => {
       .filter((id) => {
         if (undeclared.has(id)) return false;
         const owner = UNDECLARED_OPERATIONS[id]!.module;
-        // Absent only because its module is not loaded here (e.g. module-ee at tier 0).
+        // Absent only because its module is not loaded here (e.g. module-billing at tier 0).
         return !(owner !== undefined && !loaded.has(owner) && !documented.has(id));
       })
       .sort();

@@ -24,7 +24,7 @@ export function OnboardingWaitingStep() {
   // The page's own frame while the organizations load, not a blank screen.
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-dvh items-center justify-center px-4">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <Skeleton className="size-12 rounded-full" />
           <TextSkeleton lines={3} className="w-full" />
@@ -36,7 +36,7 @@ export function OnboardingWaitingStep() {
   if (redirect) return <Navigate to={redirect} replace />;
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="flex min-h-dvh items-center justify-center px-4">
       <div className="flex max-w-md flex-col items-center gap-6 text-center">
         <div className="bg-muted flex size-12 items-center justify-center rounded-full">
           <Mail className="text-muted-foreground size-6" aria-hidden />

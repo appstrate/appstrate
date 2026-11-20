@@ -8,12 +8,11 @@
  * their own.
  */
 
-import { Alert } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertDescription } from "@appstrate/ui/components/alert";
 import { useOrgStorage } from "../hooks/use-org-storage";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useListScope } from "../hooks/use-org-scope";
 import { useFilesPaged, type FileDto } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
 import { ListViewTabs } from "../components/list-view-tabs";
@@ -28,51 +27,22 @@ import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode"
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
 export function FilesPage() {
-  // Remount on space switch so the loaded pages reset.
-  const spaceId = useCurrentSpaceId();
-  return <DocumentsPageContent key={spaceId ?? "none"} />;
+  const { on: spanning } = useOverviewMode();
+  const { orgId, keySpace } = useListScope(spanning, true);
+  // This also closes pending file confirmations when the active collection changes.
+  return <FilesCollection key={JSON.stringify([orgId, keySpace])} spanning={spanning} />;
 }
 
-function DocumentsPageContent() {
+function FilesCollection({ spanning }: { spanning: boolean }) {
   const list = useListParams(["purpose"]);
   const purposes = list.values("purpose", PURPOSES);
   const effectivePurpose = purposes.length === 1 ? purposes[0] : undefined;
-  const search = list.search;
-
-  return (
-    <DocumentsCollection
-      purposes={purposes}
-      effectivePurpose={effectivePurpose}
-      search={search}
-      onSearchChange={list.setSearch}
-      onPurposeChange={list.setValues("purpose")}
-      onReset={list.reset}
-    />
-  );
-}
-
-function DocumentsCollection({
-  purposes,
-  effectivePurpose,
-  search,
-  onSearchChange,
-  onPurposeChange,
-  onReset,
-}: {
-  purposes: Array<(typeof PURPOSES)[number]>;
-  effectivePurpose: (typeof PURPOSES)[number] | undefined;
-  search: string;
-  onSearchChange: (value: string) => void;
-  onPurposeChange: (values: string[]) => void;
-  onReset: () => void;
-}) {
   const { t } = useTranslation(["files", "common"]);
-  const { on: spanning } = useOverviewMode();
   const runSpaces = useAdmittingSpaces("runs");
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
-  const query = useDebouncedValue(search);
+  const query = useDebouncedValue(list.search);
 
   const filesQuery = useFilesPaged({ search: query, purpose: effectivePurpose, spanning });
   const { data, isLoading, error, hasNextPage } = filesQuery;
@@ -117,8 +87,8 @@ function DocumentsCollection({
         toolbar={({ columns }) => (
           <ListToolbar
             search={{
-              value: search,
-              onChange: onSearchChange,
+              value: list.search,
+              onChange: list.setSearch,
               placeholder: searchPlaceholder,
             }}
             filters={[
@@ -126,21 +96,21 @@ function DocumentsCollection({
                 id: "purpose",
                 label: t("column.purpose"),
                 values: purposes,
-                onChange: onPurposeChange,
+                onChange: list.setValues("purpose"),
                 options: [
                   { value: "agent_output", label: t("filter.agent_output") },
                   { value: "user_upload", label: t("filter.user_upload") },
                 ],
               },
             ]}
-            onReset={onReset}
+            onReset={list.reset}
             columns={view === "table" ? columns : undefined}
             actions={<ListViewTabs view={view} onChange={setView} />}
           />
         )}
         empty={
           filtering
-            ? { message: t("page.noMatch"), compact: true, onReset }
+            ? { message: t("page.noMatch"), compact: true, onReset: list.reset }
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
         showRunLink={showRunLink}

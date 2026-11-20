@@ -7,7 +7,7 @@ import { authStore } from "../stores/auth-store";
 import { useIntegrationNames } from "./use-integrations";
 import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
-import { agentConnectionsTabVisible } from "../lib/route-access";
+import { agentConnectionsTabVisible } from "../lib/agent-settings-sections";
 import { packageDetailPath } from "../lib/package-paths";
 import { agentSettingsHref } from "../lib/settings-section-href";
 import {

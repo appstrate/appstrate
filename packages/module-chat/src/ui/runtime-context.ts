@@ -25,11 +25,11 @@
  *    call site (all props required) can never reach anyway.
  *
  * `uploadFile` is NOT in the bag: its only consumer is the composer's attachment
- * adapter, which `ChatPage` builds itself and passes down as a prop — a context
- * hop for a value that never leaves the file would be pure ceremony.
+ * adapter, which the conversation builds from the prop `ChatPage` passes down — a
+ * context hop for a value that never leaves the file would be pure ceremony.
  */
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, type ComponentType, type ReactNode } from "react";
 import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 
 export type GetHeaders = () => Record<string, string>;
@@ -60,6 +60,15 @@ export interface ChatTransport {
  * names the spaces a conversation touched, and the space of a tool call, through it.
  */
 export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
+
+/** The host's space picker, opened from an entry in a menu. */
+export type SpaceChoiceMenu = ComponentType<{
+  label: string;
+  spaceIds: readonly string[];
+  onPick: (spaceId: string) => void;
+  trigger: ReactNode;
+  testId?: string;
+}>;
 
 const ChatTransportContext = createContext<ChatTransport | null>(null);
 
@@ -112,8 +121,15 @@ export function useSelectConversation(): SelectConversation | null {
  * `spaceId` names the file's space when known (the space of the call of the conversation that
  * produced it): the host reads it there, and reads in the working space when it is the same one.
  * The download and the image hook below take it the same way.
+ *
+ * `{ local }` is a file picked in the composer and not yet sent: the host shows the browser's own
+ * copy in the same panel. The composer offers it only for a `localPreviewKind`
+ * (`@appstrate/core/mime`), the kinds such a copy can be shown as.
  */
-export type OpenFile = (file: { id: string; name: string; spaceId?: string }) => void;
+export type OpenFile = (file: OpenFileTarget) => void;
+
+/** What {@link OpenFile} presents: a stored file, or a picked one not yet sent. */
+export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
 
 /**
  * The host's authenticated file download (typed API client + user-facing
@@ -125,22 +141,21 @@ export type DownloadFile = (id: string, name: string, spaceId?: string) => void;
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
  * URL for an `<img src>`, `undefined` while loading, `null` when there is none (callers fall
- * back to the chip). A HOOK is injected — not a fetcher — so the shell keeps
+ * back to the file type's icon). A HOOK is injected — not a fetcher — so the shell keeps
  * ownership of the request, its scoping headers and the object-URL lifecycle.
  *
  * Call it like any hook: unconditionally, at the top of a component (see
- * `FileImageThumbnail`, which exists precisely so the call site is stable).
+ * `StoredImageMedia` in `file-attachment.tsx`, which exists precisely so the call site is stable).
  */
 export type UseFileImageSrc = (id: string, spaceId?: string) => string | null | undefined;
 
 /**
- * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
- * returning the `upload://upl_x` URI the server materializes into a durable
- * file. Same function the shell hands to its own `<SchemaForm>` uploader —
- * the module adds only its staged-image preview cache on top (`upload.ts`).
- * Travels as a `ChatPage` prop, not through context (see the file header).
+ * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink) into `spaceId`,
+ * returning the `upload://upl_x` URI the server materializes into a durable file there. The
+ * module adds only its staged-image preview cache on top (`upload.ts`). Travels as a `ChatPage`
+ * prop, not through context (see the file header).
  */
-export type UploadFile = (file: File, signal?: AbortSignal) => Promise<string>;
+export type UploadFile = (file: File, spaceId: string, signal?: AbortSignal) => Promise<string>;
 
 /**
  * The host's i18next `t`, scoped to the chat namespace. The seam exists so the
@@ -175,18 +190,17 @@ export interface ChatHost {
    */
   canIn: ChatCanIn;
   /**
-   * The spaces the chat acts in (the host's acting set). The skills picker lists them, and a new
-   * conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it is
-   * one of them.
+   * The spaces the chat acts in (the host's acting set), `null` until the host's listing has
+   * answered: what needs it then waits, and gives no reason. The skills picker lists them, and a
+   * new conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it
+   * is one of them.
    */
-  actingSpaceIds: readonly string[];
+  actingSpaceIds: readonly string[] | null;
   /**
-   * The host's working space, where an upload lands, `null` when it has none. Distinct from
-   * `ChatTransport.spaceId`, the list filter, which is `null` in « Tous les espaces » while the
-   * working space stays the one entered. A limited conversation takes a file only while this is
-   * its origin space.
+   * Where a file attached from the computer goes: the caller's personal space (« Mon espace »),
+   * or why there is none yet (the listing is loading or failed, or a role preview holds none).
    */
-  workingSpaceId: string | null;
+  attachTarget: AttachTarget;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
@@ -208,6 +222,8 @@ export interface ChatHost {
    */
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
+  /** Display name from the current organization’s catalog. */
+  modelLabel?: string | null;
   firstName?: string | null;
   /** Names spaces. */
   renderSpaces: RenderSpaces;
@@ -221,14 +237,22 @@ export interface ChatHost {
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
    */
   useSpaceLabelOf: () => (spaceId: string | null | undefined) => string | undefined;
+  /** The host's menu of spaces, the one every « … in which space? » entry of the app opens. */
+  SpaceChoiceMenu: SpaceChoiceMenu;
 }
+
+/** Why nothing can be attached: still loading, the listing failed, or a role preview (no personal space for good). */
+export type AttachUnavailable = "loading" | "error" | "preview";
+
+/** See `ChatHost.attachTarget`. */
+export type AttachTarget = { spaceId: string } | { unavailable: AttachUnavailable };
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */
 export function actsIn(
-  actingSpaceIds: readonly string[],
+  actingSpaceIds: readonly string[] | null,
   spaceId: string | null | undefined,
 ): boolean {
-  return !!spaceId && actingSpaceIds.includes(spaceId);
+  return !!spaceId && !!actingSpaceIds?.includes(spaceId);
 }
 
 /**

@@ -15,7 +15,7 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     can: () => true,
     canIn: () => true,
     actingSpaceIds: [],
-    workingSpaceId: null,
+    attachTarget: { unavailable: "loading" },
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
@@ -23,6 +23,7 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     renderSpaces: (spaceIds) => spaceIds.join(", "),
     linkInSpace: (path) => path,
     useSpaceLabelOf: () => () => undefined,
+    SpaceChoiceMenu: () => null,
     ...overrides,
   };
 }
@@ -34,7 +35,8 @@ export function conversationScope(overrides: Partial<ConversationScope> = {}): C
     restricted: false,
     generating: false,
     pending: false,
-    setRestricted: () => {},
+    limitTo: () => {},
+    lift: () => {},
     ...overrides,
   };
 }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The lists spanning the spaces of one organization — runs, schedules, files
- * and the package indexes: read-only. Each is its single-space list with one
- * grant per space it admits.
+ * The reads spanning the spaces of one organization — runs, schedules, files,
+ * the package indexes, an agent's memory and the caller's notifications, and
+ * one run or notification found in whichever space holds it: read-only. Each
+ * is its single-space twin with one grant per space it admits.
  */
 
 import { Hono, type Context } from "hono";
@@ -18,14 +19,24 @@ import type { AppEnv } from "../types/index.ts";
 import { requireOrgPathMembership } from "../middleware/org-path-context.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAnyCeiling } from "../middleware/require-permission.ts";
-import { readableSpacesAcross } from "../lib/reachable-spaces.ts";
+import { reachAcrossSpaces, readableSpacesAcross } from "../lib/reachable-spaces.ts";
 import type { Permission, SpaceGrant } from "../lib/permissions.ts";
 import { parseEmptyQuery } from "../lib/list-query.ts";
-import { respondRunList } from "./runs.ts";
+import type { SpacesScope } from "../lib/scope.ts";
+import { respondRun, respondRunList } from "./runs.ts";
 import { respondScheduleList } from "./schedules.ts";
 import { respondFileList } from "./files.ts";
-import { respondAgentIndex } from "./agents.ts";
+import { respondAgentIndex, respondAgentPersistence } from "./agents.ts";
+import { packagePlacementsInSpaces } from "../services/space-packages.ts";
+import { agentNotFound } from "../middleware/guards.ts";
+import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { respondPackageIndex } from "./packages.ts";
+import {
+  NOTIFICATION_FEED_CEILING,
+  respondNotification,
+  respondNotificationList,
+  respondUnreadNotificationCount,
+} from "./notifications.ts";
 
 /**
  * The package indexes served across spaces besides the agents' own, each with
@@ -60,6 +71,25 @@ function readAcrossSpaces(
   ] as const;
 }
 
+/**
+ * The handlers of the caller's own feed across the spaces of `:orgId`: its space
+ * route asks no role grant, so every space the caller holds a role in admits it;
+ * {@link NOTIFICATION_FEED_CEILING} caps a delegated credential.
+ */
+function readOwnAcrossSpaces(
+  respond: (c: Context<AppEnv>, reach: SpacesScope) => Promise<Response>,
+) {
+  return [
+    requireOrgPathMembership,
+    requireAnyCeiling(NOTIFICATION_FEED_CEILING),
+    async (c: Context<AppEnv>) => {
+      const orgId = c.req.param("orgId")!;
+      const spaces = await reachAcrossSpaces(c, orgId);
+      return respond(c, { orgId, spaceIds: spaces.map((space) => space.id) });
+    },
+  ] as const;
+}
+
 /** An index whose single-space twin reads no query: the org route still refuses one. */
 const withEmptyQuery =
   (list: (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) => Promise<Response>) =>
@@ -72,12 +102,40 @@ export function createCrossSpaceReadsRouter() {
   const router = new Hono<AppEnv>();
 
   router.get("/:orgId/runs", ...readAcrossSpaces(RUNS_READ_PERMISSIONS, respondRunList));
+  router.get("/:orgId/runs/:id", ...readAcrossSpaces(RUNS_READ_PERMISSIONS, respondRun));
   router.get("/:orgId/schedules", ...readAcrossSpaces(["schedules:read"], respondScheduleList));
   router.get("/:orgId/files", rateLimit(120), ...readAcrossSpaces(["files:read"], respondFileList));
   router.get(
     "/:orgId/agents",
     ...readAcrossSpaces(packageSightPermissions("agent"), withEmptyQuery(respondAgentIndex)),
   );
+  // One agent's memory in every space that reads it where the caller reads persistence.
+  router.get(
+    `/:orgId/agents/${SCOPED_PACKAGE_ROUTE}/persistence`,
+    ...readAcrossSpaces(["persistence:read"], async (c, orgId, grants) => {
+      const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const placements = await packagePlacementsInSpaces(
+        orgId,
+        packageId,
+        grants.map((g) => g.spaceId),
+        "agent",
+      );
+      if (!placements.length) throw agentNotFound(packageId);
+      const ids = new Set(placements.map((row) => row.id));
+      return respondAgentPersistence(
+        c,
+        packageId,
+        grants.filter((g) => ids.has(g.spaceId)),
+      );
+    }),
+  );
+
+  router.get("/:orgId/notifications", ...readOwnAcrossSpaces(respondNotificationList));
+  router.get(
+    "/:orgId/notifications/unread-count",
+    ...readOwnAcrossSpaces(respondUnreadNotificationCount),
+  );
+  router.get("/:orgId/notifications/:id", ...readOwnAcrossSpaces(respondNotification));
 
   for (const { type, segment } of INDEXED_PACKAGE_TYPES) {
     router.get(

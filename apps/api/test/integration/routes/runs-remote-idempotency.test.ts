@@ -10,18 +10,17 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import {
   authHeaders,
   createTestContext,
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
-import { packageDistTags, runs } from "@appstrate/db/schema";
+import { runs } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -48,17 +47,7 @@ async function seedPublishedAgent(ctx: TestContext) {
     draftManifest: manifest,
     draftContent: "Prompt.",
   });
-  const versionRow = await seedPackageVersion({
-    packageId: PACKAGE_ID,
-    version: VERSION,
-    integrity: "sha256-test",
-    artifactSize: 1024,
-    manifest,
-  });
-  await db
-    .insert(packageDistTags)
-    .values({ packageId: PACKAGE_ID, tag: "latest", versionId: versionRow.id });
-  await uploadPackageZip(PACKAGE_ID, VERSION, buildMinimalZip(manifest, "Prompt."));
+  await seedPublishedVersion(PACKAGE_ID, VERSION);
   await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, PACKAGE_ID);
 }
 

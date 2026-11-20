@@ -18,7 +18,7 @@ import { RunModal } from "../components/run-modal";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { DetailBar } from "../components/detail-bar";
 import { PackageIcon } from "../components/package-icon";
-import { ResourceErrorState } from "../components/page-states";
+import { UnreadableDetail } from "../components/unreadable-detail";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
 import { useMarkRunRead } from "../hooks/use-run-reads";
 import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
@@ -242,7 +242,16 @@ function RunDetailBody() {
 
   if (isQueryInFlight(runQuery)) return <RunDetailSkeleton agentName={agent?.display_name} />;
 
-  if (error || !run) return <ResourceErrorState error={error} />;
+  if (error || !run) {
+    return (
+      <UnreadableDetail
+        kind="run"
+        id={runId ?? ""}
+        error={error}
+        pending={<RunDetailSkeleton agentName={agent?.display_name} />}
+      />
+    );
+  }
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;

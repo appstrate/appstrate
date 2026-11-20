@@ -23,7 +23,11 @@
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
-import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
+import {
+  parseSkillUri,
+  parseSkillUriPackage,
+  SKILL_DEFINITION_META_KEY,
+} from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
   RESOURCE_BLOB_MAX_BYTES,
@@ -34,6 +38,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
+import { fileTypeFromBuffer } from "file-type";
 import { dispatchSpace, stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
   mergeConnectOffers,
@@ -44,6 +49,9 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
+import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
+import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
@@ -52,7 +60,12 @@ const LIST_SKILLS_TOOL = "list_skills";
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
-  content: Array<{ type: "text"; text: string }>;
+  content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  >;
+  isError?: true;
+  /** Local receipts replacing live file contents on SSE and in replay. */
+  persistedContent?: Array<{ type: "text"; text: string }>;
   details: unknown;
   /**
    * Typed connect offers for the UI cards — one per connect URL the payload
@@ -124,6 +137,14 @@ export function mcpResultToPi(
     if (c.type === "image") {
       return { type: "text" as const, text: `[image ${String(c.mimeType ?? "")}]` };
     }
+    if (
+      c.type === "resource" &&
+      c.resource &&
+      typeof c.resource === "object" &&
+      "blob" in c.resource
+    ) {
+      return { type: "text" as const, text: "[binary resource omitted]" };
+    }
     return { type: "text" as const, text: JSON.stringify(scope(c).redacted) };
   });
   let offers = mergeConnectOffers(blockOffers);
@@ -147,6 +168,65 @@ export function mcpResultToPi(
     ...(offers.length > 0 ? { connectOffers: offers } : {}),
     ...(isRelayedResult(result) ? { relayed: true as const } : {}),
   };
+}
+
+type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
+
+async function liveRelayedImage(
+  block: Extract<RemoteToolResult["content"][number], { type: "image" }>,
+  modelSeesImages: boolean,
+): Promise<PiToolResult["content"][number]> {
+  const mimeType = normalizeMime(block.mimeType);
+  if (!isRasterImageMime(mimeType)) return { type: "text", text: "Unsupported image format." };
+  if (!modelSeesImages) return { type: "text", text: "The current model cannot read images." };
+  if (Buffer.byteLength(block.data, "base64") > RESOURCE_BLOB_MAX_BYTES) {
+    return { type: "text", text: RESOURCE_OVERSIZED_NOTE };
+  }
+  // MCP validates base64. The integration supplies the MIME type, so verify it against the bytes.
+  const detected = await fileTypeFromBuffer(Buffer.from(block.data, "base64")).catch(
+    () => undefined,
+  );
+  if (detected?.mime !== mimeType) {
+    return {
+      type: "text",
+      text: "Invalid image data or image format does not match its declared MIME type.",
+    };
+  }
+  return { type: "image", mimeType, data: block.data };
+}
+
+/** Only the inline image data reaches the model. A remote URI never triggers a read. */
+async function relayedToolResult(
+  result: RemoteToolResult,
+  scope: OfferScope,
+  modelSeesImages: boolean,
+): Promise<PiToolResult> {
+  const blocks = result.content.map((block) => {
+    const audience = block.annotations?.audience;
+    if (audience && !audience.includes("assistant")) {
+      return {
+        type: "text" as const,
+        text: "Tool content omitted from model input by its audience annotation.",
+      };
+    }
+    return block;
+  });
+  const projected = mcpResultToPi({ ...result, content: blocks }, scope);
+  if (result.isError) projected.isError = true;
+  if (!blocks.some((block) => block.type === "image")) return projected;
+  const content = [...projected.content];
+  for (const [index, block] of blocks.entries()) {
+    if (block.type === "image") content[index] = await liveRelayedImage(block, modelSeesImages);
+  }
+  const persistedContent = content.map((block) =>
+    block.type === "text"
+      ? block
+      : {
+          type: "text" as const,
+          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, supplied for this turn]`,
+        },
+  );
+  return { ...projected, content, persistedContent };
 }
 
 interface PlatformMcpTools {
@@ -186,15 +266,18 @@ export interface PiTurnBudget {
  * conversation touched.
  */
 export interface TurnSpaces {
-  spaces: readonly NamedSpace[];
+  /** The turn's spaces, each with the caller's effective permissions there. */
+  spaces: readonly (NamedSpace & { permissions: readonly string[] })[];
   /**
-   * Record `spaceId` (one of `spaces`: callers refuse the others first) on the session BEFORE
-   * the call naming it is dispatched. Throws, and the call is not made, when the space cannot
-   * be recorded.
+   * Record `spaceId` (one of `spaces`) on the session. Throws when it cannot be recorded, and
+   * the call fails.
    */
   touch(spaceId: string): Promise<void>;
-  /** The space a `skill://` or `appfile://` URI belongs to, when it names one. */
-  spaceOfUri(uri: string): Promise<string | undefined>;
+  /**
+   * The space of the file `uri` names. A missing file names none, nor does one the conversation
+   * holds: it is reached through its container, not a space.
+   */
+  fileSpace(uri: string): Promise<string | undefined>;
 }
 
 type BuildPlatformMcpToolsOptions = {
@@ -234,6 +317,8 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
+  modelSeesImages?: boolean;
+  pdfInput?: TurnPdfInput;
 };
 
 /**
@@ -373,11 +458,11 @@ export async function buildPlatformMcpTools(
           turnBudget: opts.turnBudget,
           ...(opts.inlineRunModel ? { inlineRunModel: opts.inlineRunModel } : {}),
         })
-      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization),
+      : makeForwardExtension(tool, getClient, opts),
   );
   const extensionFactories = [
     ...toolFactories,
-    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization),
+    makeReadResourceExtension(getClient, opts),
     ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
   ];
 
@@ -409,14 +494,27 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/**
+ * Refuse a space a call names outside the turn's, or record it before the call is dispatched
+ * there: the space is never defaulted.
+ */
+async function enterNamedSpace(
+  organization: TurnSpaces,
+  spaceId: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  const refusal = spaceIdRefusal(organization.spaces, spaceId);
+  if (refusal) return { ...refusal };
+  await organization.touch(spaceId as string);
+  return undefined;
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
   getClient: () => Promise<AppstrateMcpClient>,
-  signal: AbortSignal,
-  turnBudget: PiTurnBudget,
-  organization: TurnSpaces,
+  opts: BuildPlatformMcpToolsOptions,
 ): ExtensionFactory {
+  const { signal, turnBudget, organization } = opts;
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -426,21 +524,22 @@ function makeForwardExtension(
       parameters: unsafeSchema<Record<string, unknown>>(
         (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
       ),
-      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+      async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
-        // The call names its space: refused like `run_and_wait`'s when it is outside the turn's
-        // spaces, else recorded before it is made.
         const spaceId = dispatchSpace(args);
         if (spaceId !== undefined) {
-          const refusal = spaceIdRefusal(organization.spaces, spaceId);
+          const refusal = await enterNamedSpace(organization, spaceId);
           if (refusal) {
+            // Rendered as the platform renders its own refusals (`refusalResult`).
             return withTurnBudgetNote(
-              toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
+              mcpResultToPi(
+                { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] },
+                offerScopeOf(toolName, { arguments: args }),
+              ),
               turnBudget,
             );
           }
-          await organization.touch(spaceId);
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
@@ -451,7 +550,45 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        return withTurnBudgetNote(mcpResultToPi(result as never, scope), turnBudget);
+        if (toolName === "call_integration_tool" && isRelayedResult(result)) {
+          return withTurnBudgetNote(
+            await relayedToolResult(result, scope, opts.modelSeesImages === true),
+            turnBudget,
+          );
+        }
+        // Only platform file reads may interpret embedded resources as governed files.
+        const arg = args.arguments;
+        if (
+          toolName === "read_file" ||
+          (toolName === "call_integration_tool" &&
+            arg &&
+            typeof arg === "object" &&
+            "read_as_file" in arg &&
+            arg.read_as_file === true)
+        ) {
+          const resources = result.content.flatMap((block) =>
+            block.type === "resource" ? [block.resource] : [],
+          );
+          if (resources.length) {
+            const meta = mcpResultToPi(
+              { ...result, content: result.content.filter((block) => block.type !== "resource") },
+              scope,
+            );
+            const file = await liveResources(resources, opts, toolCallId);
+            return withTurnBudgetNote(
+              {
+                ...meta,
+                content: [...meta.content, ...file.content],
+                persistedContent: [
+                  ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                  ...file.receipts,
+                ],
+              },
+              turnBudget,
+            );
+          }
+        }
+        return withTurnBudgetNote(mcpResultToPi(result, scope), turnBudget);
       },
     });
   };
@@ -460,24 +597,20 @@ function makeForwardExtension(
 /**
  * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
  * only server it reaches — how the model reads a skill's `SKILL.md` or one of
- * its files by its `skill://` URI (SEP-2640). Each content is returned whole
- * within the platform's inline bounds ({@link inlineResourceContent}): its
- * text, or a binary file's base64 in `blob`. A refusal reaches the model as the
- * server's error, or, for a resource of a space outside the turn's, as the forward tool's
- * structured refusal.
+ * its files by its `skill://` URI. The same live projection serves embedded resources
+ * from `read_file` and governed connector reads.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
-  signal: AbortSignal,
-  turnBudget: PiTurnBudget,
-  organization: TurnSpaces,
+  opts: BuildPlatformMcpToolsOptions,
 ): ExtensionFactory {
+  const { signal, turnBudget, organization } = opts;
   return (pi: ExtensionAPI) => {
     pi.registerTool({
       name: READ_RESOURCE_TOOL,
       label: READ_RESOURCE_TOOL,
       description:
-        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns each content whole: its text up to 1 MiB, or a binary file's base64 in `blob` up to 700 KiB. A larger content returns its size and a note instead.",
+        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns bounded text, images or PDFs for the current model. Other formats return a description.",
       parameters: unsafeSchema<{ uri: string }>({
         type: "object",
         properties: {
@@ -490,36 +623,39 @@ function makeReadResourceExtension(
         required: ["uri"],
         additionalProperties: false,
       }),
-      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+      async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const uri = (params as { uri?: unknown } | null)?.uri;
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
-        // A resource of a space the conversation reads from touches it; one of a space outside the
-        // turn's is refused like a call naming it (the forward tool's structured refusal), unread
-        // and unrecorded.
-        const resourceSpace = await organization.spaceOfUri(uri);
-        if (resourceSpace) {
-          const refusal = spaceIdRefusal(organization.spaces, resourceSpace);
+        const skillSpace = parseSkillUri(uri)?.spaceId;
+        if (skillSpace) {
+          const refusal = await enterNamedSpace(organization, skillSpace);
           if (refusal) {
             return withTurnBudgetNote(
-              toPiToolResult(
-                { ...refusal },
-                offerScopeOf(READ_RESOURCE_TOOL, { arguments: params }),
-              ),
+              toPiToolResult(refusal, offerScopeOf(READ_RESOURCE_TOOL, { arguments: params })),
               turnBudget,
             );
           }
-          await organization.touch(resourceSpace);
         }
+        // The file's space is read before the read: a file deleted in between would otherwise be
+        // served with its space unrecorded. The platform reads it in its own space when the
+        // bearer may enter it and refuses any other as missing, so only a read it served records
+        // that space, before its content leaves; a refused one records, and reveals, nothing.
+        const fileSpace = isFileUri(uri) ? await organization.fileSpace(uri) : undefined;
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
-        const content = result.contents.map((c) => ({
-          type: "text" as const,
-          text: inlineResourceContent(c),
-        }));
-        return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
+        if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
+          await organization.touch(fileSpace);
+        }
+        const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
+        // Keep the text of skills in the replay so their procedures still apply on later turns.
+        const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
+        return withTurnBudgetNote(
+          { content, details: { uri }, ...(keepSkill ? {} : { persistedContent: receipts }) },
+          turnBudget,
+        );
       },
     });
   };
@@ -585,31 +721,45 @@ function makeListSkillsExtension(
   };
 }
 
-/**
- * One `resources/read` content as `read_resource` returns it: the text, or
- * `{ uri, mimeType, blob }`, within the bounds the platform's file reads
- * apply; above them, `{ uri, mimeType, size, note }` (`size` in bytes).
- */
-function inlineResourceContent(
-  content: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"][number],
-): string {
-  if ("text" in content && typeof content.text === "string") {
-    const size = Buffer.byteLength(content.text, "utf8");
-    if (size <= RESOURCE_TEXT_MAX_BYTES) return content.text;
-    return JSON.stringify({
-      uri: content.uri,
-      mimeType: content.mimeType,
-      size,
-      note: RESOURCE_OVERSIZED_NOTE,
-    });
+/** One projection for both MCP resource reads and embedded resources from governed tool calls. */
+async function liveResources(
+  resources: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"],
+  opts: Pick<BuildPlatformMcpToolsOptions, "modelSeesImages" | "pdfInput">,
+  toolCallId: string,
+) {
+  const content: PiToolResult["content"] = [];
+  const receipts: NonNullable<PiToolResult["persistedContent"]> = [];
+  for (const resource of resources) {
+    const mimeType = normalizeMime(resource.mimeType) || "application/octet-stream";
+    const text = "text" in resource ? resource.text : undefined;
+    const blob = "blob" in resource ? resource.blob : "";
+    const size = text !== undefined ? Buffer.byteLength(text) : Buffer.byteLength(blob, "base64");
+    let note = "File read for this turn.";
+    if (size > (text !== undefined ? RESOURCE_TEXT_MAX_BYTES : RESOURCE_BLOB_MAX_BYTES)) {
+      note = RESOURCE_OVERSIZED_NOTE;
+    } else if (text !== undefined) {
+      content.push({ type: "text", text });
+    } else if (mimeType === "application/pdf" && opts.pdfInput) {
+      const name = resource._meta?.[FILE_NAME_META_KEY];
+      const pdf = opts.pdfInput.add(
+        { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
+        toolCallId,
+      );
+      note = pdf.note;
+      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
+    } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
+      content.push({ type: "image", mimeType, data: blob });
+    } else {
+      note = "This file format cannot be read by the current model.";
+    }
+    const receipt = {
+      type: "text" as const,
+      text: JSON.stringify({ uri: resource.uri, mimeType, size, note }),
+    };
+    receipts.push(receipt);
+    if (text === undefined || note === RESOURCE_OVERSIZED_NOTE) content.push(receipt);
   }
-  const blob = "blob" in content && typeof content.blob === "string" ? content.blob : "";
-  const size = Buffer.from(blob, "base64").byteLength;
-  return JSON.stringify(
-    size <= RESOURCE_BLOB_MAX_BYTES
-      ? { uri: content.uri, mimeType: content.mimeType, blob }
-      : { uri: content.uri, mimeType: content.mimeType, size, note: RESOURCE_OVERSIZED_NOTE },
-  );
+  return { content, receipts };
 }
 
 /**
@@ -623,25 +773,6 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
   if (!properties || !("wait" in properties)) return schema;
   const { wait: _wait, ...rest } = properties;
   return { ...schema, properties: rest };
-}
-
-/**
- * The space a `run_and_wait` names, with the other arguments, after
- * recording it on the session; or the refusal the server gives any space-acting tool
- * (`spaceIdRefusal`): the space is never defaulted.
- */
-async function namedSpace(
-  params: unknown,
-  organization: TurnSpaces,
-): Promise<
-  { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
-> {
-  const { space_id: named, ...args } = (params as Record<string, unknown> | null) ?? {};
-  const refusal = spaceIdRefusal(organization.spaces, named);
-  if (refusal) return { refusal: { ...refusal } };
-  const spaceId = named as string;
-  await organization.touch(spaceId);
-  return { spaceId, args };
 }
 
 /**
@@ -674,14 +805,12 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
-        // The space the call names, taken out of the arguments (the shared launch refuses an
-        // argument it does not declare) and recorded before anything is launched.
-        const target = await namedSpace(params, ctx.organization);
-        if ("refusal" in target) {
-          return withTurnBudgetNote(
-            toPiToolResult(target.refusal, runAndWaitScope),
-            ctx.turnBudget,
-          );
+        // Taken out of the arguments (the shared launch refuses one it does not declare) and
+        // recorded before anything is launched.
+        const { space_id: spaceId, ...args } = (params as Record<string, unknown> | null) ?? {};
+        const refusal = await enterNamedSpace(ctx.organization, spaceId);
+        if (refusal) {
+          return withTurnBudgetNote(toPiToolResult(refusal, runAndWaitScope), ctx.turnBudget);
         }
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
@@ -689,9 +818,9 @@ function makeRunAndWaitExtension(
         // The run's wait budget descends from the TURN's deadline (never the
         // 30-minute client default), and a launch with no room left is refused
         // here — before any run row exists.
-        for await (const step of runAndWaitStepsWithinTurnBudget(target.args, {
+        for await (const step of runAndWaitStepsWithinTurnBudget(args, {
           origin: ctx.origin,
-          headers: { ...ctx.headers, "x-space-id": target.spaceId },
+          headers: { ...ctx.headers, "x-space-id": spaceId as string },
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
           // The chat holds the connect capability itself — the link goes to a

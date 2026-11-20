@@ -18,7 +18,8 @@ import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { DetailBar } from "../components/detail-bar";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { ResourceErrorState, EmptyState } from "../components/page-states";
+import { EmptyState } from "../components/page-states";
+import { UnreadableDetail } from "../components/unreadable-detail";
 import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
 import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
@@ -73,7 +74,15 @@ export function ScheduleDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
-  if (error || !schedule) return <ResourceErrorState error={error} />;
+  if (error || !schedule)
+    return (
+      <UnreadableDetail
+        kind="schedule"
+        id={id ?? ""}
+        error={error}
+        pending={<ScheduleDetailSkeleton />}
+      />
+    );
   const tabs: DetailTab<ScheduleTab>[] = [
     { value: "overview", label: t("detail.overview.summary"), icon: LayoutGrid },
     { value: "runs", label: t("common:nav.runs"), icon: Play },

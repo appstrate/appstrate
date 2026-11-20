@@ -99,6 +99,7 @@ import {
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
+  packageDetailSpaces,
   holdsHomeAuthority,
   requireAgentRead,
   resolvePackageHome,
@@ -106,7 +107,6 @@ import {
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../lib/view-as.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
-import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
@@ -510,8 +510,6 @@ interface PackageRouteConfig<T extends PackageType = PackageType> {
   path: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[T];
   /** Storage entry for the content field: primary text or the portable manifest. */
   storageFileName: string;
-  /** If true, version create/restore require no running runs (agents). */
-  requireMutableForVersionOps?: boolean;
   /**
    * If true, this type's content file is mandatory: create refuses a body
    * without a non-blank `content` (through
@@ -544,7 +542,6 @@ const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
     path: "agents",
     storageFileName: "prompt.md",
     requireContent: true,
-    requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
@@ -793,11 +790,15 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
-  const spec = await resolveFileExplorerVersion(
-    c,
-    { id: item.id, source: item.source },
-    opts.version?.trim() || undefined,
-  );
+  const [spec, packageSpaces] = await Promise.all([
+    resolveFileExplorerVersion(
+      c,
+      { id: item.id, source: item.source },
+      opts.version?.trim() || undefined,
+    ),
+    // Every readable placement, including its activation state.
+    packageDetailSpaces(orgId, item.id, rcfg.cfg.type, accessible),
+  ]);
   // The answer comes back in the version-SPEC vocabulary, where the stored tree
   // has two spellings — an omitted selector and the literal `draft` — and
   // `resolvePackageFileValidator` treats them as one. So must this: `draft` is
@@ -821,6 +822,8 @@ async function buildPackageDetailDto(
     ...published,
     definition,
     ...homeWireForCaller({ type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
+    // Every space the caller reaches where the package is active, as its index row's `space_ids`.
+    ...packageSpaces,
     version_count: versionCount,
     // Authoring metadata, never projected: it compares the DRAFT against the
     // latest version, and that answer does not change with the definition the
@@ -1051,31 +1054,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
   };
 }
 
-/**
- * Reject (409) when an agent package has runs in progress. No-op for package
- * types that don't gate version/delete ops on running runs (skills, where
- * `requireMutableForVersionOps` is unset). Shared by the delete / create-version
- * / restore-version / delete-version handlers so the conflict message + the
- * `(orgId, spaceId)` scoping stay identical across all four.
- */
-async function assertNoRunningRuns(
-  c: Context<AppEnv>,
-  rcfg: PackageRouteConfig,
-  itemId: string,
-): Promise<void> {
-  if (!rcfg.requireMutableForVersionOps) return;
-  const running = await getRunningRunsForPackage(
-    { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
-    itemId,
-  );
-  if (running > 0) {
-    throw conflict(
-      "agent_in_use",
-      `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}`,
-    );
-  }
-}
-
 function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
@@ -1086,8 +1064,6 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
         `${rcfg.cfg.labelSingular} '${itemId}' is a system package and cannot be deleted`,
       );
     }
-
-    await assertNoRunningRuns(c, rcfg, itemId);
 
     const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
     if (!result.ok) {
@@ -1190,8 +1166,6 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId);
-
     await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Parse optional version override from request body. The body itself is
@@ -1277,8 +1251,6 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     if (isSystemPackage(itemId)) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
-
-    await assertNoRunningRuns(c, rcfg, itemId);
 
     const versionSpec = c.req.param("version")!;
     const detail = await getVersionDetail(itemId, versionSpec);
@@ -1369,10 +1341,11 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     // Verify org ownership before deletion
     await loadOrgItemOr404(rcfg, orgId, itemId);
 
-    await assertNoRunningRuns(c, rcfg, itemId);
-
     const versionSpec = c.req.param("version")!;
-    const deleted = await deletePackageVersion(itemId, versionSpec);
+    const deleted = await deletePackageVersion(
+      { id: itemId, orgId, type: rcfg.cfg.type },
+      versionSpec,
+    );
     if (!deleted) {
       throw notFound(`Version '${versionSpec}' not found`);
     }
@@ -1689,8 +1662,8 @@ const requireAnyPackageWrite = requireAnyPermission(PACKAGE_WRITE_PERMISSIONS);
 /** The skills of the space the request entered, as the platform serves them. */
 function requestServedSkills(c: Context<AppEnv>) {
   return buildServedSkills(
-    servedSkillsContext(c, [
-      { orgId: c.get("orgId"), spaceId: c.get("space")!.id, permissions: c.get("permissions")! },
+    servedSkillsContext(c, c.get("orgId"), [
+      { spaceId: c.get("space")!.id, permissions: c.get("permissions")! },
     ]),
   );
 }

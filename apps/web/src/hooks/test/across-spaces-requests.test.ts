@@ -28,7 +28,7 @@ afterEach(() => get.mockRestore());
 describe("fetchSchedules", () => {
   it("asks the current space unless it spans spaces", async () => {
     await fetchSchedules(null);
-    expect(get.mock.calls).toEqual([["/api/schedules"]]);
+    expect(get.mock.calls).toEqual([["/api/schedules", { params: {} }]]);
   });
 
   it("asks the org route, naming no space", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "16.0.0",
+  "version": "17.0.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -47,6 +47,7 @@
     "./etag": "./src/etag.ts",
     "./pagination-link": "./src/pagination-link.ts",
     "./list-query": "./src/list-query.ts",
+    "./error-cause": "./src/error-cause.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
@@ -111,7 +112,7 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^0.13.0",
-    "@appstrate/afps-shared": "^0.13.0",
+    "@appstrate/afps-shared": "^0.14.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",

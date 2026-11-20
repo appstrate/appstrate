@@ -11,7 +11,7 @@
  *     formData={…}
  *     onChange={…}
  *     onSubmit={…}
- *     upload={uploadClient}
+ *     upload={upload}
  *   >
  *     {/* host-owned controls submit through the forwarded ref *\/}
  *   </SchemaForm>

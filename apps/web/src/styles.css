@@ -11,6 +11,38 @@
 @source "../../../packages/module-chat/src";
 
 @custom-variant dark (&:is(.dark *));
+/* Only a wide screen with a precise, hovering pointer gets dense chat controls. */
+@custom-variant desktop-pointer {
+  @media (width >= 48rem) and (pointer: fine) and (hover: hover) {
+    @slot;
+  }
+}
+
+/* One field stays mounted as the tools expand. In short landscape viewports Send
+   shares the editable line that Safari pans into view above its accessory bar. */
+@utility chat-composer-grid {
+  @apply grid items-center gap-x-2 gap-y-1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "input input input" "tools model send";
+
+  @media (width < 48rem) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    &:has([data-composer-chip]) {
+      grid-template-areas: "input input input" "tools tools tools" ". model send";
+    }
+  }
+  @media (pointer: coarse) and (orientation: landscape) and (max-height: 32rem) {
+    &,
+    &:has([data-composer-chip]) {
+      grid-template-areas: "input input send" "tools model model";
+    }
+  }
+  @media (width < 48rem) {
+    &[data-rest] {
+      grid-template-areas: "tools input send";
+    }
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -229,7 +261,7 @@
     @apply bg-canvas text-foreground;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     line-height: 1.6;
-    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   /* Base form element styling */

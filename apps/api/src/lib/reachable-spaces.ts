@@ -33,34 +33,68 @@ export interface ReachableSpace {
 
 /**
  * The spaces where the caller holds a role (persona overlay included): the reach of every read
- * spanning spaces and of `packageAccessSpaces`. A request pinned to a space (its credential or
- * `dispatchSpacePin`) reaches that space only; a credential bound to a SET of spaces
- * (`credentialSpaceIds`) reaches those alone. A read crossing into another organization names
- * `orgRole`.
+ * spanning spaces, of a file named by id (`requestFileAccess`) and of `packageAccessSpaces`. A
+ * request pinned to a space (its credential, the space-pinned MCP endpoint, a dispatch acting in
+ * one space) reaches that space only. A credential bound to a SET of spaces (`credentialSpaceIds`)
+ * acts per request in ONE of them: the one the request entered, none when it entered none, so a
+ * read by id answers the same through REST and every MCP door. A read crossing into another
+ * organization names `orgRole`.
  */
 export function callerReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
   orgRole: OrgRole | undefined = callerOrgRole(c, orgId),
 ): Promise<ReachableSpace[]> {
+  const pin = requestPin(c);
+  if (pin !== undefined || c.get("credentialSpaceIds") === undefined) {
+    return reachPinnedTo(c, orgId, orgRole, pin);
+  }
+  const entered = c.get("space")?.id;
+  return entered ? reachPinnedTo(c, orgId, orgRole, entered) : Promise.resolve([]);
+}
+
+/**
+ * The spaces a request may still enter: a credential bound to a set reaches all of it here. Read
+ * by the MCP admission, which picks the space a request enters and builds from this list the
+ * spaces its tools may name (`mcpOrgSpaces.reachable`). The same list serves the connection's
+ * `skills/list`, its `resources/read` of a `skill://` URI and its agent launch prompts, each read
+ * in the space it names with the caller's set there: a skill or a prompt is not a file named by
+ * id, and the chat records the space of a skill read through `resources/read` before the read, while a skill injected into the prompt records none.
+ */
+export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<ReachableSpace[]> {
+  return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));
+}
+
+/** The space the endpoint or the dispatch confines this request to. */
+function requestPin(c: Context<AppEnv>): string | undefined {
+  return c.get("endpointSpaceId") ?? dispatchSpacePin(c);
+}
+
+function reachPinnedTo(
+  c: Context<AppEnv>,
+  orgId: string,
+  orgRole: OrgRole | undefined,
+  pin: string | undefined,
+): Promise<ReachableSpace[]> {
   // Memoized per request, so a list spanning spaces and the package reach it
-  // also reads (`packageAccessSpaces`) resolve it once. Keyed on the org AND
-  // the role: one request can ask about two organizations.
+  // also reads (`packageAccessSpaces`) resolve it once. Keyed on the org, the
+  // role (one request can ask about two organizations) and the pin.
   const cache = c.get("reachableSpacesCache") ?? new Map<string, Promise<ReachableSpace[]>>();
   if (!c.get("reachableSpacesCache")) c.set("reachableSpacesCache", cache);
-  const key = `${orgId}:${orgRole}`;
+  const key = `${orgId}:${orgRole}:${pin ?? ""}`;
   const cached = cache.get(key);
   if (cached) return cached;
-  const pending = resolveReachableSpaces(c, orgId, orgRole);
+  const pending = resolveReachableSpaces(c, orgId, orgRole, pin);
   cache.set(key, pending);
   return pending;
 }
 
-/** The read itself — {@link callerReachableSpaces} is the memo in front of it. */
+/** The read itself — {@link reachPinnedTo} is the memo in front of it. */
 async function resolveReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
   orgRole: OrgRole | undefined,
+  pin: string | undefined,
 ): Promise<ReachableSpace[]> {
   if (!orgRole) return [];
   const entries = await listSpacesForPrincipal(
@@ -70,9 +104,8 @@ async function resolveReachableSpaces(
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
   );
-  const dispatchPin = dispatchSpacePin(c);
   return entries.flatMap(({ space, role }) =>
-    role && credentialAdmitsSpace(c, space.id) && (!dispatchPin || space.id === dispatchPin)
+    role && credentialAdmitsSpace(c, space.id) && (!pin || space.id === pin)
       ? [
           {
             id: space.id,
@@ -111,10 +144,26 @@ export async function reachAcrossSpaces(
   c: Context<AppEnv>,
   orgId: string,
 ): Promise<ReachableSpace[]> {
+  refuseEndUserAcrossSpaces(c);
+  return callerReachableSpaces(c, orgId);
+}
+
+/**
+ * {@link enterableSpaces} for a route that serves the organization as a whole: what a module
+ * builds a caller's surface from (a credential bound to a set gets all of it, flagged confined).
+ */
+export async function enterableAcrossSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
+  refuseEndUserAcrossSpaces(c);
+  return enterableSpaces(c, orgId);
+}
+
+function refuseEndUserAcrossSpaces(c: Context<AppEnv>): void {
   if (c.get("principalKind") === "end_user") {
     throw forbidden("An end-user cannot list across spaces");
   }
-  return callerReachableSpaces(c, orgId);
 }
 
 /**

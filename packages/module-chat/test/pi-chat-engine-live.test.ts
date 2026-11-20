@@ -25,23 +25,25 @@
 
 import { describe, it, expect, afterAll, afterEach, mock, spyOn } from "bun:test";
 import type { UIMessage } from "ai";
+import {
+  CHAT_FINAL_STEP_SYSTEM_PROMPT,
+  CHAT_TOOL_STEP_BUDGET,
+} from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
 import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
-import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
+import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { logger } from "../src/logger.ts";
 import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const ANSWER = "Bonjour le monde";
 
-/** The turn's one space; nothing here records a touched space. */
-const LIVE_ORGANIZATION: TurnSpaces = {
-  spaces: [{ id: "spc_live", name: "Live", role: "admin" }],
-  touch: async () => {},
-  spaceOfUri: async () => undefined,
-};
+const LIVE_ORGANIZATION = inertTurnSpaces([
+  { id: "spc_live", name: "Live", role: "admin", permissions: [] },
+]);
 /** Distinct from the preset id, so a label defaulted to the id is caught. */
 const LIVE_MODEL_LABEL = "Live Preset (display)";
 
@@ -77,6 +79,8 @@ let mcpInitGate: Promise<void> | null = null;
 interface StubSurface {
   instructions?: string;
   tools: unknown[];
+  /** Drive one actual provider tool call on the Responses wire and answer it via MCP. */
+  call?: { name: string; arguments: Record<string, unknown>; steps: number; result: unknown };
 }
 const EMPTY_SURFACE: StubSurface = { tools: [] };
 let mcpSurface: StubSurface = EMPTY_SURFACE;
@@ -106,6 +110,13 @@ async function mcpResponse(req: Request): Promise<Response> {
     );
   }
   if (msg.method === "tools/list") return json({ tools: mcpSurface.tools });
+  if (msg.method === "tools/call" && mcpSurface.call) {
+    return json(
+      capture.bodies.length === mcpSurface.call.steps
+        ? mcpSurface.call.result
+        : { content: [{ type: "text", text: "Document not ready yet." }] },
+    );
+  }
   return json({});
 }
 
@@ -154,6 +165,44 @@ const server = Bun.serve({
   port: 0,
   async fetch(req) {
     const path = new URL(req.url).pathname;
+    if (path.endsWith("/responses")) {
+      capture.authHeaders.push(req.headers.get("authorization") ?? "");
+      capture.bodies.push(await req.text());
+      const step = capture.bodies.length;
+      const call = mcpSurface.call && step <= mcpSurface.call.steps ? mcpSurface.call : undefined;
+      const item = call && {
+        type: "function_call",
+        id: `fc_connector_${step}`,
+        call_id: `call_connector_${step}`,
+        name: call.name,
+        arguments: JSON.stringify(call.arguments),
+      };
+      const events = [
+        ...(item
+          ? [
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { ...item, arguments: "" },
+              },
+              {
+                type: "response.function_call_arguments.delta",
+                item_id: item.id,
+                output_index: 0,
+                delta: item.arguments,
+              },
+              { type: "response.output_item.done", output_index: 0, item },
+            ]
+          : []),
+        {
+          type: "response.completed",
+          response: { id: "resp_1", status: "completed", output: item ? [item] : [] },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
@@ -235,6 +284,8 @@ async function runTurn(
   turn: {
     model?: OrgModel;
     generation?: PiChatInput["generation"];
+    messages?: UIMessage[];
+    readAttachment?: PiChatInput["readAttachment"];
     surfaceKey?: string;
     requestId?: string;
   } = {},
@@ -262,7 +313,8 @@ async function runTurn(
       userId: "user_live",
       chatSessionId: null,
       ...(turn.requestId ? { requestId: turn.requestId } : {}),
-      messages: userTurn("dis bonjour"),
+      messages: turn.messages ?? userTurn("dis bonjour"),
+      readAttachment: turn.readAttachment,
       system: "You are a helpful assistant.",
       generation: turn.generation ?? {},
       platformMcp: {
@@ -330,6 +382,134 @@ describe("runPiChat against a stub provider", () => {
     const reacquired = acquirePiChatSlot();
     expect(reacquired).not.toBeNull();
     reacquired?.release();
+  }, 30_000);
+
+  it("sends a current PDF inside the Responses user input through the existing bearer", async () => {
+    capture.bodies.length = 0;
+    capture.authHeaders.length = 0;
+    const bytes = new TextEncoder().encode("%PDF-1.7\nA native document");
+    const messages = userTurn("Read this document");
+    messages[0]!.parts.push({
+      type: "file",
+      filename: "contract.pdf",
+      mediaType: "application/pdf",
+      url: "appfile://file_live_pdf",
+    });
+    const readAttachment = mock(async () => ({ mime: "application/pdf", bytes }));
+    const { chunks, usage } = await runTurn(() => "pdf-bearer", undefined, undefined, {
+      model: { ...orgModel(), apiShape: "openai-responses", input: ["text", "image"] },
+      messages,
+      readAttachment,
+    });
+    expect(readAttachment).toHaveBeenCalledTimes(1);
+    expect(capture.authHeaders).toEqual(["Bearer pdf-bearer"]);
+    const body = JSON.parse(capture.bodies[0]!);
+    const data = Buffer.from(bytes).toString("base64");
+    expect(
+      body.input.findLast((item: { role?: string }) => item.role === "user").content,
+    ).toContainEqual({
+      type: "input_file",
+      filename: "contract.pdf",
+      file_data: `data:application/pdf;base64,${data}`,
+    });
+    expect(JSON.stringify(chunks)).not.toContain(data);
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    expect(usage).toEqual([]);
+  }, 30_000);
+
+  it.each([1, CHAT_TOOL_STEP_BUDGET])(
+    "sends a connector PDF received on tool step %i in the next provider request, with only its receipt on SSE",
+    async (steps) => {
+      capture.bodies.length = 0;
+      const name = "call_integration_tool";
+      const data = btoa("%PDF-1.7 connector-only file");
+      const args = {
+        tool: "crm__api_call",
+        arguments: {
+          read_as_file: true,
+          requests: [{ method: "GET", target: "https://example.test/contract" }],
+        },
+      };
+      mcpSurface = {
+        tools: [
+          {
+            name,
+            inputSchema: {
+              type: "object",
+              properties: { tool: { type: "string" }, arguments: { type: "object" } },
+            },
+          },
+        ],
+        call: {
+          name,
+          arguments: args,
+          steps,
+          result: {
+            content: [
+              { type: "text", text: '{"results":[{"status":200}]}' },
+              {
+                type: "resource",
+                resource: { uri: "urn:uuid:document", mimeType: "application/pdf", blob: data },
+              },
+            ],
+          },
+        },
+      };
+      const { chunks } = await runTurn(() => "tool-read", undefined, undefined, {
+        model: { ...orgModel(), apiShape: "openai-responses", input: ["text", "image"] },
+      });
+      expect(capture.bodies).toHaveLength(steps + 1);
+      expect(capture.bodies.slice(0, steps).some((body) => body.includes(data))).toBe(false);
+      const last = JSON.parse(capture.bodies.at(-1)!);
+      if (steps === CHAT_TOOL_STEP_BUDGET) {
+        expect(last.input.at(-1)).toMatchObject({
+          role: "user",
+          content: [{ type: "input_text", text: CHAT_FINAL_STEP_SYSTEM_PROMPT }],
+        });
+      }
+      const output = last.input.find(
+        (item: { type?: string; call_id?: string }) =>
+          item.type === "function_call_output" && item.call_id === `call_connector_${steps}`,
+      );
+      expect(output.output).toContainEqual({
+        type: "input_file",
+        filename: "document.pdf",
+        file_data: `data:application/pdf;base64,${data}`,
+      });
+      expect(chunks.find((chunk) => chunk.type === "tool-input-available")?.input).toEqual(args);
+      const receipt = chunks.findLast((chunk) => chunk.type === "tool-output-available");
+      expect(JSON.stringify(receipt?.output)).toContain("application/pdf");
+      expect(JSON.stringify(chunks)).not.toContain(data);
+    },
+    30_000,
+  );
+
+  it("sends real image pixels to a vision model and only the pointer to a text model", async () => {
+    const messages = userTurn("Read this image");
+    messages[0]!.parts.push({
+      type: "file",
+      filename: "pixel.png",
+      mediaType: "image/png",
+      url: "appfile://file_live_image",
+    });
+    const bytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const readAttachment = mock(async () => ({ mime: "image/png", bytes }));
+    for (const vision of [true, false]) {
+      capture.bodies.length = 0;
+      const { chunks } = await runTurn(() => "image-bearer", undefined, undefined, {
+        model: { ...orgModel(), input: vision ? ["text", "image"] : ["text"] },
+        messages,
+        readAttachment,
+      });
+      const body = capture.bodies[0]!;
+      expect(body).toContain("appfile://file_live_image");
+      expect(body.includes("data:image/png;base64,")).toBe(vision);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(false);
+    }
+    expect(readAttachment).toHaveBeenCalledTimes(1);
   }, 30_000);
 
   it("sends an alias's public level as its backing's nearest", async () => {

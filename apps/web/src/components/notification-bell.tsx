@@ -14,10 +14,15 @@ import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { EmptyState, ErrorState } from "./page-states";
 import { useUnreadCount, useMarkAllRead, useNotifications } from "../hooks/use-notifications";
-import { useCanReach } from "../hooks/use-can-reach";
+import { useCanReachInSpace } from "../hooks/use-can-reach";
 import { useAgents } from "../hooks/use-packages";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaces } from "../hooks/use-spaces";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import { notificationRow, type NotificationItem } from "../lib/notification-row";
+import { notificationHref, notificationRow, type NotificationItem } from "../lib/notification-row";
+import { spacesHeld } from "../lib/space-lists";
+import { SpaceNameOf } from "./space-name";
 
 /**
  * The bell's list, exported for the rendering tests: a Radix popover mounts
@@ -29,6 +34,8 @@ export function NotificationContent({
   notifications,
   agentName,
   canReach,
+  currentSpaceId,
+  spanning = false,
   onItemClick,
   markAllRead,
   loading = false,
@@ -41,7 +48,12 @@ export function NotificationContent({
   notifications: NotificationItem[];
   /** A listed agent's display name, from its package id. */
   agentName: (packageId: string) => string | undefined;
-  canReach: (target: string) => boolean;
+  /** Whether a row's page opens, judged in the row's space (`useCanReachInSpace`). */
+  canReach: (target: string, spaceId: string | undefined) => boolean;
+  /** The working space: a row of another one enters its space on the way. */
+  currentSpaceId: string | null;
+  /** « Tous les espaces »: each row names its space. */
+  spanning?: boolean;
   /** A row was followed; the page it opens marks the notification read. */
   onItemClick: () => void;
   markAllRead: () => void;
@@ -87,6 +99,8 @@ export function NotificationContent({
               <div className="flex flex-1 flex-col gap-2">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-24" />
+                {/* A row in « Tous les espaces » names its space on a third line. */}
+                {spanning && <Skeleton className="h-4 w-20" />}
               </div>
             </div>
           ))}
@@ -96,12 +110,12 @@ export function NotificationContent({
       ) : notifications.length === 0 ? (
         <EmptyState compact icon={Bell} message={t("notifications.empty")} />
       ) : (
-        <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
+        <div className="max-h-[60dvh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
             const { title, status, message, meta, target } = notificationRow(
               notification,
               agentName,
-              canReach,
+              (href) => canReach(href, notification.spaceId),
               t,
             );
             const body = (
@@ -118,18 +132,19 @@ export function NotificationContent({
                     </p>
                   )}
                   <p className="text-muted-foreground text-xs">{meta}</p>
+                  {spanning && (
+                    <SpaceNameOf
+                      spaceId={notification.spaceId}
+                      className="text-muted-foreground mt-1 text-xs"
+                    />
+                  )}
                 </div>
               </>
             );
-            // A failed run opens its run; every other kind its own page. That page reads it.
-            const to =
-              notification.type === "run_failed" && target
-                ? target
-                : `/notifications/${notification.id}`;
             return (
               <Link
                 key={notification.id}
-                to={to}
+                to={notificationHref(notification, target, currentSpaceId)}
                 onClick={onItemClick}
                 className="hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors"
               >
@@ -152,10 +167,17 @@ export function NotificationContent({
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
+  // « Tous les espaces »: every space the caller holds a role in, as the org routes read them.
+  const { on: spanning } = useOverviewMode();
+  const currentSpaceId = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
+  const [open, setOpen] = useState(false);
+  // Only the badge's count is read on every page; the rows and the agent names they show are
+  // read while the list is open.
   // `isLoading`, not `isPending`: the read is off for a role that sees no agent,
   // and a disabled query stays pending forever.
-  const { data: agents, isLoading: agentsLoading } = useAgents();
-  const { data: count } = useUnreadCount();
+  const { data: agents, isLoading: agentsLoading } = useAgents({ spanning, enabled: open });
+  const { data: count } = useUnreadCount({ spanning });
   const {
     data: notifications,
     isPending: notificationsPending,
@@ -163,11 +185,10 @@ export function NotificationBell() {
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
-  } = useNotifications({ unread: true, limit: 50 });
+  } = useNotifications({ unread: true, limit: 50, spanning, enabled: open });
   const markAllRead = useMarkAllRead();
-  const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
-  const canReach = useCanReach();
+  const canReach = useCanReachInSpace();
   const unread = count ?? 0;
   const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
 
@@ -192,8 +213,12 @@ export function NotificationBell() {
     notifications: notifications ?? [],
     agentName: (packageId: string) => agentNames.get(packageId),
     canReach,
+    currentSpaceId,
+    spanning,
     onItemClick: () => setOpen(false),
-    markAllRead: () => markAllRead.mutate({}),
+    // The spaces the list reads, every one of them.
+    markAllRead: () =>
+      markAllRead.mutate(spanning ? spacesHeld(spaces).map((space) => space.id) : null),
     // Rows wait for the agent names: a title never shows the raw package id first.
     loading: notificationsPending || agentsLoading,
     failed: notificationsFailed && notifications === undefined,

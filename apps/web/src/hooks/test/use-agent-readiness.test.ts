@@ -83,6 +83,8 @@ function agent(over: Partial<AgentDetail> = {}): AgentDetail {
     home_shareable: false,
     effective_timeout_seconds: 300,
     active: true,
+    space_ids: ["spc_1"],
+    read_space_ids: ["spc_1"],
     ...over,
   };
 }
@@ -182,5 +184,32 @@ describe("AGENT_RUN_BLOCKERS", () => {
     for (const locale of [agentsFr, agentsEn] as Record<string, string>[]) {
       for (const key of AGENT_RUN_BLOCKERS) expect(locale[key]).toBeString();
     }
+  });
+});
+
+describe("the verdict in « Tous les espaces » (`spanning`)", () => {
+  // The page reads the agent in a working space it does not name; the run's space is chosen at
+  // launch. Only what holds in every space blocks.
+  const spanning = { spanning: true };
+
+  it("ignores the hidden space's switch and skills", () => {
+    const off = agent({ active: false });
+    expect(agentLaunchRefusal(off, spanning)).toBeNull();
+    const missingSkill = agent({
+      manifest: { name: "@acme/worker", dependencies: { skills: { "@acme/skill": "^1.0.0" } } },
+    });
+    expect(agentRunBlocker(missingSkill, agentModelBlocker([DEFAULT_OK], null))).toBe(
+      "detail.titleMissingSkill",
+    );
+    expect(agentRunBlocker(missingSkill, agentModelBlocker([DEFAULT_OK], null), spanning)).toBe(
+      null,
+    );
+    expect(agentRunBlocker(off, agentModelBlocker([DEFAULT_OK], null), spanning)).toBeNull();
+  });
+
+  it("still blocks what no space cures: the reader's publication and the prompt", () => {
+    const unpublished = agent({ definition: "draft", home_writable: false, active: false });
+    expect(agentLaunchRefusal(unpublished, spanning)).toBe("detail.titleNeverPublished");
+    expect(agentRunBlocker(agent({ prompt: "" }), null, spanning)).toBe("detail.titleEmptyPrompt");
   });
 });

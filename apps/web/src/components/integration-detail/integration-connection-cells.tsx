@@ -35,7 +35,8 @@ import {
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentOrgId } from "../../hooks/use-org";
-import { useOrgSpaces } from "../../hooks/use-spaces";
+import { useOrgSpaces, useSpaceLabelOf } from "../../hooks/use-spaces";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packageDetailPath } from "../../lib/package-paths";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
@@ -169,6 +170,8 @@ export function SharingCell({
   const orgId = useCurrentOrgId();
   const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockText } = useLockText(connection, packageId, isAdmin, lockKey);
+  const { on } = useOverviewMode();
+  const labelOf = useSpaceLabelOf();
   // Only the owner carries either list.
   const { data: orgSpaces } = useOrgSpaces(canShare ? orgId : null);
   const shareTargets = useMemo(() => {
@@ -206,6 +209,7 @@ export function SharingCell({
         onUnshare={(targetSpaceId) =>
           unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
         }
+        spaceNameOf={on ? labelOf : undefined}
       />
     </div>
   );

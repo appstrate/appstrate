@@ -258,7 +258,7 @@ describe("runCheck — column drift (#1349)", () => {
         ["runs", "id", true],
         ["ee_usage_records", "credits", true],
       ],
-      moduleTables: { ee_usage_records: "packages/module-ee" },
+      moduleTables: { ee_usage_records: "packages/module-billing" },
     });
 
     expect(exitCode).toBe(0);
@@ -306,13 +306,13 @@ describe("runCheck — undeclared indexes never fail the run", () => {
         ["idx_runs_schedule_id", "runs"],
         ["idx_ee_usage_records_org_id", "ee_usage_records"],
       ],
-      moduleTables: { ee_usage_records: "packages/module-ee" },
+      moduleTables: { ee_usage_records: "packages/module-billing" },
     });
 
     expect(exitCode).toBe(0);
     expect(lines.join("\n")).not.toContain("idx_ee_usage_records_org_id");
     expect(lines.join("\n")).toContain("Skipped 1 index(es) on 1 table(s) owned by");
-    expect(lines.join("\n")).toContain("packages/module-ee");
+    expect(lines.join("\n")).toContain("packages/module-billing");
   });
 
   it("REPORTS an index on a table NO module owns, naming the table", async () => {
@@ -324,7 +324,7 @@ describe("runCheck — undeclared indexes never fail the run", () => {
         ["idx_runs_schedule_id", "runs"],
         ["idx_dropped_thing_org", "dropped_thing"],
       ],
-      moduleTables: { ee_usage_records: "packages/module-ee" },
+      moduleTables: { ee_usage_records: "packages/module-billing" },
     });
 
     expect(exitCode).toBe(0);

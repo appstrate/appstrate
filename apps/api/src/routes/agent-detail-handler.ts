@@ -36,6 +36,7 @@ import {
   homeWireForCaller,
   homeWritableForPackages,
   packageAccessSpaces,
+  packageDetailSpaces,
 } from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 
@@ -209,7 +210,7 @@ export async function buildAgentDetailDto(
   // `runs:read-all` the last run and the in-flight count are the caller's own
   // runs, not a colleague's.
   const visibility = runVisibilityFilter(c);
-  const [lastRun, runningCount, active] = await Promise.all([
+  const [lastRun, runningCount, active, packageSpaces] = await Promise.all([
     getLastRun(scope, agent.id, visibility),
     getRunningRunsForPackage(scope, agent.id, visibility),
     // The space's switch, answered by the page that carries it. Reading an
@@ -217,6 +218,8 @@ export async function buildAgentDetailDto(
     // caller opens to put a switched-off agent back on — so the verdict travels
     // in the payload instead of turning the read into a 404.
     isPackageActiveHere(scope, agent.id),
+    // Every readable placement and the active subset where a launch is possible.
+    packageDetailSpaces(orgId, agent.id, "agent", accessible),
   ]);
 
   const parsed = parseScopedName(m.name);
@@ -288,6 +291,7 @@ export async function buildAgentDetailDto(
     // second endpoint to learn it. Unconditional, including on a summary read:
     // a launcher needs it most.
     active,
+    ...packageSpaces,
     // Which space's `agents:write` governs this agent, and whether THIS caller
     // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted
     // UNCONDITIONALLY, for the same reason as the timeout above: a summary read

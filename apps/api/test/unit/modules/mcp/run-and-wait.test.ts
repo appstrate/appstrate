@@ -150,6 +150,7 @@ function makeRunAndWait(opts: {
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
     requestId: "req_test",

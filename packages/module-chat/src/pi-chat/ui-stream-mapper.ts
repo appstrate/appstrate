@@ -312,7 +312,7 @@ export class PiChatUiStreamMapper {
         {
           type: "tool-output-error",
           toolCallId: ev.toolCallId,
-          errorText: stringifyToolResult(ev.result),
+          errorText: stringifyToolResult(persistedToolOutput(ev.result)),
         },
       ];
     }
@@ -446,8 +446,8 @@ function persistedToolOutput(result: unknown): unknown {
   if (result == null) return null;
   if (typeof result !== "object" || Array.isArray(result)) return result;
   if (!("details" in result)) return result;
-  const { details: _details, ...rest } = result as Record<string, unknown>;
-  return rest;
+  const { details: _details, persistedContent, ...rest } = result as Record<string, unknown>;
+  return Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest;
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */

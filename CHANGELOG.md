@@ -6,7 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.70] - 2026-11-19
+
+The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.
+
+## [1.0.0-beta.69] - 2026-11-18
+
+### Client upgrade from beta.68
+
+Chat now belongs to the organization. Substitute the organization ID in these routes, keeping the same HTTP verb and session ID. Existing conversations migrate with `restricted=false`. Clients that need to limit a conversation to one accessible origin space can set `restricted: true` on the session. Supply `spaceId` when assigning an origin to a session that has none.
+
+| Operation                       | beta.68                                      | beta.69                                                   |
+| ------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| POST turn                       | `/api/chat`                                  | `/api/orgs/{orgId}/chat`                                  |
+| GET, POST sessions              | `/api/chat/sessions`                         | `/api/orgs/{orgId}/chat/sessions`                         |
+| GET, PATCH, DELETE session      | `/api/chat/sessions/{id}`                    | `/api/orgs/{orgId}/chat/sessions/{id}`                    |
+| PUT read, POST stop, GET stream | `/api/chat/sessions/{id}/{read,stop,stream}` | `/api/orgs/{orgId}/chat/sessions/{id}/{read,stop,stream}` |
+| GET enforced skills             | `/api/chat/enforced-skills`                  | Removed. Remove this request when opening a conversation. |
+
+The run, schedule, notification, file and agent-persistence list handlers validate their query parameters, including the corresponding organization-wide reads. Undeclared keys now return HTTP 400. Send only the parameters declared for that operation in the assembled OpenAPI spec. For example, filter the file gallery with `runId` and schedules with `packageId`.
+
+If an active skill archive becomes unavailable, the served skill catalogue returns an error. Retry the sync after restoring the archive. A successful listing still removes genuinely withdrawn skills from managed CLI directories.
+
 ### Operators
+
+Follow the [beta.68 to beta.69 maintenance procedure](docs/deployment/BETA_69.md) for the ordering of package publication, database and object backups, signatures and schema migrations.
 
 - **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
   `0103` creates `run_reads` and renames the stored run notifications to
@@ -51,6 +75,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
+
+- **Breaking: `@appstrate/module-ee` is now `@appstrate/module-billing`,
+  under Apache-2.0** (#1645). The billing module (Stripe billing, credit
+  quotas, usage metering, billing managers) leaves the commercial licence and
+  `packages/module-ee/` moves to `packages/module-billing/`, so the whole
+  repository and the published image are Apache-2.0. **A deployment that sets
+  `MODULES` with `@appstrate/module-ee` must replace it with
+  `@appstrate/module-billing` before upgrading**: the old specifier no longer
+  resolves, and the platform refuses to boot with
+  `Module "@appstrate/module-ee" could not be loaded`. Nothing maps the old
+  name to the new one. The module's id in logs changes from `ee` to `billing`
+  (`Module loaded {"id":"billing"}`). **The four `EE_RECONCILIATION_*`
+  variables are now `BILLING_RECONCILIATION_*`** (`_INTERVAL_SECONDS`,
+  `_BATCH_SIZE`, `_REPLAY_WINDOW`, `_MAX_GAP_SECONDS`): nothing reads the old
+  spelling, so a value left under it is silently ignored and the setting falls
+  back to its default. Rename them in the same window as `MODULES`. **The billing operation ids
+  and schema names drop their `Ee` prefix** (`getEeBillingAccount` →
+  `getBillingAccount`, `EeBillingPlan` → `BillingPlan`: nine operation ids and seven
+  schemas):
+  a client that calls an operation by id, an MCP `invoke_operation` included,
+  must use the new id; paths and payloads are unchanged. Nothing else changes
+  for a deployment: the `ee_*` tables, the `drizzle.ee_migrations` journal, the
+  `STRIPE_*` variables and the `/api/billing/*` routes keep their names, and no
+  migration runs. `verify:license-boundary` is now `verify:license-headers`:
+  every source file must declare `Apache-2.0`.
 
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
@@ -157,6 +206,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING: a file named by id is read in its own space, under `files:read` there** (#2287).
+  The space may differ from the request's; the credential decides which spaces it reaches (a
+  session every space where you hold a role, an API key or a token issued for one space that
+  space alone). A refusal is indistinguishable from a missing file (`404`).
+  - Run inputs (`input`, `context_files`, `rerun_from`): an `appfile://` needs `files:read` in
+    its space, the run's own included, so a custom role, API key or OAuth client holding
+    `agents:run` without `files:read` gets a `404` where it used to launch. A run may take a
+    file of another space it reaches, your personal space included. Each consumed file is
+    audited as `file.consumed`. Only a run of the file's own space keeps it from deletion; a
+    rerun of a run whose input was deleted answers `404`.
+  - MCP file tools (`read_file`, `resources/read`, `validate_package_file`,
+    `import_package_file`): a file you cannot read there answers `not_found`, no longer
+    `not_granted`. `invoke_operation` answers as the REST route does.
+  - REST by id and lists: `GET /api/files/{id}`, `/content`, `DELETE` and `POST …/keep` act on
+    the file in its own space, `files:delete` judged there, so the capabilities a read returns
+    are what delete and keep do, from any `X-Space-Id`. Reading by id needs `files:read` in
+    the file's space (a credential whose scopes omit it still gets `403` on `GET`); `DELETE`
+    and `keep` need what they always did, `files:delete` there or being the file's creator.
+    A run's file list (`GET /api/files?runId=`) follows the run-container rule of a read by
+    id (its launcher, or `runs:read-all`; `runs:read` is not asked): anyone else is listed
+    nothing of the run (inputs, launch uploads, outputs), and a reader its inputs each under
+    the same rule.
+  - The chat's MCP credential acts in one space per request for reads too: a file named by id
+    (`read_file`, `invoke_operation getFile`, a run input of `run_and_wait`, `GET /api/files/{id}`)
+    is read in the space the call names, never in another space the conversation acts in; its
+    own uploads are read from any of them. Sessions and MCP tokens keep reading a file in any
+    space where you hold a role. Its package tools (`import_package_file`,
+    `validate_package_file`) authorise and place packages in that one space too: a bundle
+    naming a package homed in another space of the conversation answers that package
+    `not found`, as a credential pinned to the entered space does.
+  - Space-pinned MCP endpoint (`/api/mcp/o/{org}/s/{space}`): every tool of the request, its
+    dispatched operations included, reaches that space only (file reads, package authorisation
+    and placement), so a package homed in another space is out of reach there.
+
+- **Chat attachments are stored in your personal space** (#2287). A file dropped or attached in
+  the chat goes to « Mon espace » from every screen, private to you, and adds no space to the
+  conversation: a conversation limited to one space stays limited and still reads its
+  attachments. They are deleted with the conversation, except one a run of the same space
+  consumed: that run keeps it, detached from the conversation.
+
 - **The chat no longer lists your connected integrations and runnable agents in
   its system prompt.** It used to read them from `GET /api/me/context` on every
   turn; the assistant now reads them with the MCP `get_me` tool, for the space
@@ -174,9 +263,8 @@ entry_point, mcp_config, tools? }` and ships the server payload (`server/**`)
   in its own archive, next to `manifest.json`. `mcp_config.env` holds literal
   values merged into the runner env; the auth's `delivery.env` wins on
   conflict.
-  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (a
-    manifest that still carries it is refused on every write path, naming the
-    key), `delivery.env.*.user_config_key`, `source.server.{name, version,
+  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (the
+    engine ignores this key. Use `dependencies.integrations` to declare the integration), `delivery.env.*.user_config_key`, `source.server.{name, version,
 vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
     permissions, the `createMcpServerPackage` chat operation,
     `@appstrate/core/mcp-server-bundle` and the `afps bundle` CLI command.
@@ -200,9 +288,8 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   - System packages `@appstrate/ssh` and `@appstrate/github-git` 1.1.0 carry
     their servers; the `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp`
     packages are removed.
-  - The `package_type` Postgres enum keeps its `mcp-server` label for now
-    (Postgres cannot drop a value in place); application code never produces
-    it.
+  - Drizzle migration `0106` rebuilds the PostgreSQL `package_type` enum and removes
+    its `mcp-server` label. Run operator script `0054` before applying the DDL.
 
 - **The integrations page lists every integration in one list with a Source
   column and filter** (API, remote MCP, local MCP). On an instance running
