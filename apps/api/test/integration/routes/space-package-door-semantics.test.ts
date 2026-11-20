@@ -26,7 +26,16 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageShare,
+  seedPublishedVersion,
+  seedSpace,
+} from "../../helpers/seed.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 import { isPackageActiveHere } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
@@ -228,5 +237,133 @@ describe("the two audit entries are symmetric", () => {
 
     // Six calls, two entries: the trail reads as the two acts that happened.
     await assertDbCount(auditEvents, eq(auditEvents.resourceId, OFFERED), 2);
+  });
+});
+
+describe("activating an agent names its integrations left off, and activates none", () => {
+  // The door activates one package (activating an integration opens its
+  // credentials to the space), so what the agent is now on WITHOUT is told in
+  // `warnings[]`, in the launch warnings' vocabulary.
+  const AGENT = "@doors/agent";
+  const REQUIRED_OFF = "@doors/required-off";
+  const OPTIONAL_OFF = "@doors/optional-off";
+  const ON = "@doors/on";
+
+  const integration = (id: string) =>
+    localIntegrationManifest({
+      name: id,
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+          delivery: httpHeaderDelivery({
+            name: "Authorization",
+            prefix: "Bearer ",
+            field: "api_key",
+          }),
+        },
+      },
+      tools_policy: { search: {} },
+    });
+
+  const agentDeclaring = (integrations: Record<string, boolean>) => ({
+    name: AGENT,
+    version: "0.1.0",
+    type: "agent",
+    schema_version: "0.2",
+    dependencies: {
+      integrations: Object.fromEntries(Object.keys(integrations).map((id) => [id, "^1.0.0"])),
+    },
+    integrations_configuration: Object.fromEntries(
+      Object.entries(integrations).map(([id, required]) => [id, { tools: ["search"], required }]),
+    ),
+  });
+
+  type Body = { warnings: { field: string; code: string; title: string; required: boolean }[] };
+
+  beforeEach(async () => {
+    for (const id of [REQUIRED_OFF, OPTIONAL_OFF, ON]) {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "integration",
+        homeSpaceId: ctx.defaultSpaceId,
+        draftManifest: integration(id),
+      });
+    }
+    expect((await activate(ON)).status).toBe(201);
+  });
+
+  it("names each inactive one with its `required` flag, and leaves them off", async () => {
+    await seedPackage({
+      id: AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: agentDeclaring({ [REQUIRED_OFF]: true, [OPTIONAL_OFF]: false, [ON]: true }),
+    });
+    const res = await activate(AGENT);
+    expect(res.status, await res.clone().text()).toBe(201);
+    const { warnings } = (await res.json()) as Body;
+    expect(warnings).toHaveLength(2);
+    expect(warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: `integrations.${REQUIRED_OFF}`,
+          code: "integration_not_active",
+          title: "Integration Not Active",
+          required: true,
+        }),
+        expect.objectContaining({
+          field: `integrations.${OPTIONAL_OFF}`,
+          code: "integration_not_active",
+          required: false,
+        }),
+      ]),
+    );
+    // Nothing was activated in its place, and a repeat says the same.
+    expect(await placementRow(REQUIRED_OFF)).toBeNull();
+    expect(await placementRow(OPTIONAL_OFF)).toBeNull();
+    const repeat = await activate(AGENT);
+    expect(repeat.status).toBe(200);
+    expect(((await repeat.json()) as Body).warnings).toHaveLength(2);
+  });
+
+  it("judges the version a selector-less launch runs, not the draft", async () => {
+    await seedPackage({
+      id: AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: agentDeclaring({ [ON]: true }),
+    });
+    await seedPublishedVersion(AGENT, "0.1.0", {
+      manifest: agentDeclaring({ [REQUIRED_OFF]: true }),
+    });
+    const res = await activate(AGENT);
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(((await res.json()) as Body).warnings).toEqual([
+      expect.objectContaining({ field: `integrations.${REQUIRED_OFF}`, required: true }),
+    ]);
+  });
+
+  it("answers `[]` when every declared integration is active", async () => {
+    await seedPackage({
+      id: AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: agentDeclaring({ [ON]: true }),
+    });
+    const res = await activate(AGENT);
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(((await res.json()) as Body).warnings).toEqual([]);
+  });
+
+  it("answers `[]` on an integration's own activation", async () => {
+    const res = await activate(REQUIRED_OFF);
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(((await res.json()) as Body).warnings).toEqual([]);
   });
 });

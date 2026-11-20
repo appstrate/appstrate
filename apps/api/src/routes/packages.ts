@@ -23,6 +23,7 @@ import { assertImportedType, readExpectedImportType } from "../lib/import-type.t
 import {
   activatePackage,
   activatePackageWithin,
+  activationWarnings,
   assertHasPublishedVersion,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
@@ -2155,7 +2156,9 @@ export function createPackagesRouter() {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
       throw internalError();
     }
-    return c.json({ object: "package_share", ...view }, 201);
+    // `warnings` only where the row is ON: a placement left off switches nothing on.
+    const warnings = view.enabled ? await activationWarnings(spaceId, packageId) : [];
+    return c.json({ object: "package_share", ...view, warnings }, 201);
   });
 
   router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {

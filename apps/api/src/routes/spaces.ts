@@ -58,6 +58,7 @@ import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   activatePackage,
+  activationWarnings,
   deactivatePackage,
   listSpacePackages,
   getSpacePackage,
@@ -843,8 +844,15 @@ export function createSpacesRouter() {
     // 201 says this call turned the package on; 200 says it was already on.
     // The body is the row the TRANSACTION wrote, not a re-read: a second SELECT
     // would describe whatever state the table is in when it lands, which under
-    // concurrency is somebody else's act.
-    return c.json({ object: "space_package", ...activation.placement }, turnedOn ? 201 : 200);
+    // concurrency is somebody else's act. `warnings`: what the agent is now on without.
+    return c.json(
+      {
+        object: "space_package",
+        ...activation.placement,
+        warnings: await activationWarnings(spaceId, data.packageId),
+      },
+      turnedOn ? 201 : 200,
+    );
   });
 
   // GET /api/spaces/:id/packages/:packageId — one placement, in detail

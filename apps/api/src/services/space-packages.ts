@@ -20,7 +20,13 @@ import {
   packageVersions,
   spaces,
 } from "@appstrate/db/schema";
-import { conflict, forbidden, notFound, parseBody } from "../lib/errors.ts";
+import {
+  conflict,
+  forbidden,
+  notFound,
+  parseBody,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -31,7 +37,12 @@ import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
-import { inactiveRequiredIntegrationIds } from "./integration-connection-resolver.ts";
+import {
+  inactiveDeclaredIntegrations,
+  inactiveRequiredIntegrationIds,
+  integrationNotActiveMessage,
+  translateResolutionError,
+} from "./integration-connection-resolver.ts";
 import { selectorlessLaunchManifests } from "./agent-version-resolver.ts";
 import {
   activeHereSql,
@@ -246,6 +257,50 @@ export async function activatePackageWithin(
   }
   // A concurrent call placed it first: switch that row on, like any other.
   return switchOn(false, false);
+}
+
+/** One `warnings[]` item of an activation: a declared integration not active where the agent is now on. */
+export type ActivationWarning = ResolutionFieldError & { required: boolean };
+
+/**
+ * What switching agent `packageId` on in `spaceId` leaves the run gate to refuse
+ * (`required`) or start without: its declared integrations not active there, in
+ * the definition a selector-less launch runs, as `integration_not_active` items.
+ * `[]` for any other package type. Activates nothing — activating an integration
+ * opens its credentials to the space, and "the agent alone" is a legitimate choice.
+ */
+export async function activationWarnings(
+  spaceId: string,
+  packageId: string,
+): Promise<ActivationWarning[]> {
+  const [row] = await db
+    .select({
+      type: packages.type,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      latestVersionId: packageDistTags.versionId,
+    })
+    .from(packages)
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (row?.type !== "agent") return [];
+  const [inactive] = await inactiveDeclaredIntegrations(
+    await selectorlessLaunchManifests([row]),
+    spaceId,
+  );
+  return inactive!.map(({ integrationId, required }) => ({
+    ...translateResolutionError({
+      integrationId,
+      code: "integration_not_active",
+      message: `${integrationNotActiveMessage(integrationId, spaceId)}; ${
+        required
+          ? "a launch of this agent here is refused until then."
+          : "the run proceeds without it."
+      }`,
+    }),
+    required,
+  }));
 }
 
 /** 404 unless the deployment default switches the package on with no row. */

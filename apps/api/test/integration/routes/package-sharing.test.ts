@@ -71,6 +71,10 @@ import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { runs } from "@appstrate/db/schema";
 import { seedSchedule } from "../../helpers/seed.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -1742,6 +1746,80 @@ describe("who switches a placement on (R3)", () => {
       enabled: false,
       sharedBy: author.userId,
     });
+  });
+});
+
+describe("a share landing ON names the agent's integrations left off there", () => {
+  // The share door, like the activation door, activates one package: an agent
+  // landing ON in Team without the integration it requires is told so.
+  const SVC = "@shares/svc";
+
+  type Body = { enabled: boolean; warnings: { field: string; code: string; required: boolean }[] };
+
+  beforeEach(async () => {
+    await seedPackage({
+      id: SVC,
+      orgId: ctx.orgId,
+      type: "integration",
+      homeSpaceId: homeId,
+      draftManifest: localIntegrationManifest({
+        name: SVC,
+        auths: {
+          primary: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key"],
+            delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+          },
+        },
+        tools_policy: { search: {} },
+      }),
+    });
+    // The version a share runs outside the home requires it.
+    await seedPublishedVersion(AGENT, "0.2.0", {
+      manifest: {
+        name: AGENT,
+        version: "0.2.0",
+        type: "agent",
+        schema_version: "0.2",
+        dependencies: { integrations: { [SVC]: "^1.0.0" } },
+        integrations_configuration: { [SVC]: { tools: ["search"], required: true } },
+      },
+      content: "Do the thing.",
+    });
+  });
+
+  const sharerWith = async (preset: "builder" | "operator") => {
+    const sharer = await principal({ orgRole: "member", space: { id: homeId, preset: "builder" } });
+    await seedSpaceMember({ spaceId: teamId, userId: sharer.userId, presetRole: preset });
+    return sharer;
+  };
+
+  it("carries one `integration_not_active` item when the row lands ON", async () => {
+    const sharer = await sharerWith("builder");
+    const res = await shareWithSpace(sharer.headers(homeId), AGENT, teamId);
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as Body;
+    expect(body.enabled).toBe(true);
+    expect(body.warnings).toEqual([
+      expect.objectContaining({
+        field: `integrations.${SVC}`,
+        code: "integration_not_active",
+        required: true,
+      }),
+    ]);
+    // Activated nothing else.
+    expect(await activeIn(teamId, SVC)).toBe(false);
+  });
+
+  it("carries `[]` when the row lands OFF — nothing was switched on", async () => {
+    // The members who switch it on meet the same item at the activation door.
+    const sharer = await sharerWith("operator");
+    const res = await shareWithSpace(sharer.headers(homeId), AGENT, teamId);
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as Body;
+    expect(body.enabled).toBe(false);
+    expect(body.warnings).toEqual([]);
   });
 });
 
