@@ -3,7 +3,7 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { APPEARANCE_PROPERTIES } from "../schemas.ts";
+import { APPEARANCE_PROPERTIES, INACTIVE_REQUIRED_INTEGRATIONS } from "../schemas.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
@@ -920,7 +920,8 @@ export const mePaths = {
                   agents: {
                     type: "array",
                     description:
-                      "Agents the caller can run in the current space (capped). Only " +
+                      "Agents ACTIVE in the current space (capped), each with the required " +
+                      "integrations that keep it from launching here. Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
                       "When `agents_truncated` is true, the full list is reachable via the " +
                       "`listAgents` operation.",
@@ -931,6 +932,7 @@ export const mePaths = {
                         "display_name",
                         "description",
                         "takes_input",
+                        "inactive_required_integrations",
                         "published",
                         "home_writable",
                         "source",
@@ -947,6 +949,7 @@ export const mePaths = {
                           description:
                             "Whether the agent declares an input schema with properties.",
                         },
+                        inactive_required_integrations: INACTIVE_REQUIRED_INTEGRATIONS,
                         published: {
                           type: "boolean",
                           description:
@@ -1067,6 +1070,7 @@ export const mePaths = {
                     display_name: "Inbox Triage",
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
+                    inactive_required_integrations: [],
                     published: true,
                     home_writable: false,
                     source: "system",

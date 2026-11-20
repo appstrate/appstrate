@@ -273,10 +273,20 @@ export async function respondAgentPersistence(
   });
 }
 
-/** The agent index over `grants`: `GET /api/agents` and `GET /api/orgs/{orgId}/agents`. */
-export async function respondAgentIndex(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+/**
+ * The agent index over `grants`: `GET /api/agents` (`launchSpaceId`: its space) and
+ * `GET /api/orgs/{orgId}/agents`.
+ */
+export async function respondAgentIndex(
+  c: Context<AppEnv>,
+  orgId: string,
+  grants: SpaceGrant[],
+  launchSpaceId?: string,
+) {
   return c.json(
-    listResponse(await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c))),
+    listResponse(
+      await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c), launchSpaceId),
+    ),
   );
 }
 
@@ -284,9 +294,10 @@ export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/agents — the agents index of the current space (`listAgentIndex`)
-  router.get("/", requireAgentRead, (c) =>
-    respondAgentIndex(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
-  );
+  router.get("/", requireAgentRead, (c) => {
+    const scope = getSpaceScope(c);
+    return respondAgentIndex(c, scope.orgId, [callerSpaceGrant(c)], scope.spaceId);
+  });
 
   // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
   // input defaults + field locks (admin-only).

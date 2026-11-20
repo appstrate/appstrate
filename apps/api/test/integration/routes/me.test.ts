@@ -24,6 +24,7 @@ import {
 import {
   seedApiKey,
   seedPackage,
+  seedPublishedVersion,
   seedSpacePackage,
   seedSpace,
   seedSpaceMember,
@@ -470,6 +471,83 @@ describe("Me API (/api/me)", () => {
       // No `latest` dist-tag was seeded → draft-only agent → must run with version=draft.
       expect(triage?.published).toBe(false);
       expect(body.agents_truncated).toBe(false);
+    });
+
+    it("names each listed agent's required integrations not active in the space", async () => {
+      const integration = (name: string) =>
+        localIntegrationManifest({
+          name,
+          auths: {
+            api: {
+              type: "api_key",
+              authorizedUris: ["https://api.example.com/**"],
+              delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+            },
+          },
+          tools_policy: { search: {} },
+        });
+      // Homed here with no row: placed, not active. `@ctx/svc-on` is switched on.
+      for (const id of ["@ctx/svc-off", "@ctx/svc-optional", "@ctx/svc-on"]) {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          homeSpaceId: ctx.defaultSpaceId,
+          draftManifest: integration(id),
+        });
+      }
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/svc-on");
+      const agent = async (id: string, integrations: Record<string, boolean>) => {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          homeSpaceId: ctx.defaultSpaceId,
+          draftManifest: {
+            name: id,
+            version: "0.1.0",
+            type: "agent",
+            schema_version: "0.2",
+            dependencies: {
+              integrations: Object.fromEntries(Object.keys(integrations).map((i) => [i, "^1.0.0"])),
+            },
+            integrations_configuration: Object.fromEntries(
+              Object.entries(integrations).map(([i, required]) => [
+                i,
+                { tools: ["search"], required },
+              ]),
+            ),
+          },
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      await agent("@ctx/blocked", {
+        "@ctx/svc-off": true,
+        "@ctx/svc-optional": false,
+        "@ctx/svc-on": true,
+      });
+      await agent("@ctx/ready", { "@ctx/svc-on": true });
+      // Its draft is ready, but its published version — what a selector-less launch runs — is not.
+      await agent("@ctx/published-blocked", { "@ctx/svc-on": true });
+      await seedPublishedVersion("@ctx/published-blocked", "1.0.0", {
+        manifest: {
+          name: "@ctx/published-blocked",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          dependencies: { integrations: { "@ctx/svc-off": "^1.0.0" } },
+          integrations_configuration: { "@ctx/svc-off": { tools: ["search"], required: true } },
+        },
+      });
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        agents: { packageId: string; inactive_required_integrations: string[] }[];
+      };
+      const byId = new Map(body.agents.map((a) => [a.packageId, a.inactive_required_integrations]));
+      expect(byId.get("@ctx/blocked")).toEqual(["@ctx/svc-off"]);
+      expect(byId.get("@ctx/ready")).toEqual([]);
+      expect(byId.get("@ctx/published-blocked")).toEqual(["@ctx/svc-off"]);
     });
 
     it("lists installed skills (enabled only) with attachable id and version", async () => {

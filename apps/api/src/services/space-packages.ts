@@ -31,6 +31,8 @@ import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import { inactiveRequiredIntegrationIds } from "./integration-connection-resolver.ts";
+import { selectorlessLaunchManifests } from "./agent-version-resolver.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -582,8 +584,8 @@ interface HintOptions {
 /**
  * List the packages of one `type` an actor in this space could use, as a
  * bounded hint for the get_me caller context. "Could use" is
- * {@link activePackagesFilter}, the run gate's own predicate: a system package,
- * or a placement row that says `enabled`. The list is capped (`limit`) so a
+ * {@link activePackagesFilter}, the activation half of the run gate: a system
+ * package, or a placement row that says `enabled`. The list is capped (`limit`) so a
  * large catalog doesn't bloat the payload — the long tail stays reachable
  * via `search`.
  *
@@ -605,7 +607,13 @@ async function listActivePackageHints<T extends PackageHint>(
   type: PackageType,
   project: (base: PackageHint, manifest: Record<string, unknown>) => T,
   opts?: HintOptions,
-): Promise<{ items: T[]; truncated: boolean; total: number }> {
+): Promise<{
+  items: T[];
+  /** Each item's row, same order: what {@link selectorlessLaunchManifests} reads. */
+  rows: { source: string | null; draftManifest: unknown; latestVersionId: number | null }[];
+  truncated: boolean;
+  total: number;
+}> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
   const rows = await db
     .select({
@@ -645,13 +653,15 @@ async function listActivePackageHints<T extends PackageHint>(
     return project(base, manifest);
   });
 
-  return { items, truncated: total > items.length, total };
+  return { items, rows, truncated: total > items.length, total };
 }
 
 /** One entry in the runnable-agent hint exposed via get_me. */
 interface RunnableAgent extends PackageHint {
   /** Whether the agent declares an input schema with at least one property. */
   takes_input: boolean;
+  /** Required integrations not active here, in the selector-less launch's definition. */
+  inactive_required_integrations: string[];
 }
 
 interface RunnableAgentsResult {
@@ -663,15 +673,17 @@ interface RunnableAgentsResult {
 }
 
 /**
- * Runnable-agent hint for the caller context. "Runnable" is a hint only — the
- * caller gates on the `agents:run` permission and the run route re-checks RBAC
- * at invoke time. See {@link listActivePackageHints}.
+ * The agents ACTIVE in the space, as a hint for the caller context. Active is not
+ * launchable: `inactive_required_integrations` names what the run gate refuses
+ * on, and connections are judged at launch only. The caller gates on the
+ * `agents:run` permission and the run route re-checks RBAC at invoke time. See
+ * {@link listActivePackageHints}.
  */
 export async function listRunnableAgents(
   scope: SpaceScope,
   opts?: HintOptions,
 ): Promise<RunnableAgentsResult> {
-  const { items, truncated, total } = await listActivePackageHints(
+  const { items, rows, truncated, total } = await listActivePackageHints(
     scope,
     "agent",
     (base, manifest) => {
@@ -680,7 +692,15 @@ export async function listRunnableAgents(
     },
     opts,
   );
-  return { agents: items, truncated, total };
+  const inactive = await inactiveRequiredIntegrationIds(
+    await selectorlessLaunchManifests(rows),
+    scope.spaceId,
+  );
+  const agents = items.map((item, i) => ({
+    ...item,
+    inactive_required_integrations: inactive[i]!,
+  }));
+  return { agents, truncated, total };
 }
 
 /** One entry in the active-skill hint exposed via get_me. */

@@ -242,6 +242,14 @@ const INDEX_SPACE_IDS = {
     "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
 };
 
+/** An agent's required integrations not active in the space (`AgentListItem`, `GET /api/me/context`). */
+export const INACTIVE_REQUIRED_INTEGRATIONS = {
+  type: "array",
+  items: { type: "string" },
+  description:
+    "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ.",
+};
+
 const ORG_PACKAGE_ITEM_SCHEMA = {
   type: "object",
   // Always emitted by the listOrgItems mapper. `created_by_name` stays
@@ -994,6 +1002,8 @@ export const schemas = {
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
     // There is no `active`: the listing IS the active set, so the field could
     // only ever say `true` — `AgentDetail.active` is where the switch is read.
+    // `inactive_required_integrations` is emitted by the single-space index only:
+    // an organization row spans spaces, each with its own activations.
     required: [
       "id",
       "icon",
@@ -1038,6 +1048,12 @@ export const schemas = {
         type: "string",
         description: "Package type from manifest",
         enum: [...packageTypeValues],
+      },
+      inactive_required_integrations: {
+        ...INACTIVE_REQUIRED_INTEGRATIONS,
+        description:
+          INACTIVE_REQUIRED_INTEGRATIONS.description +
+          " Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces.",
       },
       running_runs: { type: "integer" },
       unread_count: {

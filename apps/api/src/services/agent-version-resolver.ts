@@ -50,6 +50,7 @@
 import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
+  getVersionManifests,
   getVersionRow,
   readVersionArchive,
   requirePublishedPrompt,
@@ -57,6 +58,7 @@ import {
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 // Both keywords are reserved names (`isProtectedTag` in
 // `@appstrate/core/dist-tags`): they resolve here BEFORE any dist-tag lookup,
@@ -192,4 +194,29 @@ export async function resolveAgentRunManifest(
     agent: { ...agent, manifest: row.manifest as unknown as AgentManifest },
     overrideVersionLabel: row.version,
   };
+}
+
+/**
+ * Per row (input order), the manifest a launch WITHOUT a version selector judges — the omitted
+ * branch of {@link selectRunVersion}: a system agent's own definition, else the `latest` published
+ * version's manifest. An unpublished agent's selector-less launch is refused
+ * `no_published_version`, so `version=draft` is its only launch and its draft is judged. One
+ * query for every row; `latestVersionId` is the row's `latest` dist-tag target.
+ */
+export async function selectorlessLaunchManifests(
+  rows: readonly {
+    source: string | null;
+    draftManifest: unknown;
+    latestVersionId: number | null;
+  }[],
+): Promise<Record<string, unknown>[]> {
+  const versionIdOf = (row: (typeof rows)[number]) =>
+    row.source === "system" ? null : row.latestVersionId;
+  const manifests = await getVersionManifests(
+    rows.map(versionIdOf).filter((id): id is number => id != null),
+  );
+  return rows.map((row) => {
+    const versionId = versionIdOf(row);
+    return asRecord(versionId == null ? row.draftManifest : manifests.get(versionId));
+  });
 }

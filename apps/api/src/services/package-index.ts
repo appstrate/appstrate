@@ -21,6 +21,8 @@ import {
   type PackageAccessSpace,
 } from "../lib/package-access.ts";
 import { isPublished, listActivePackages } from "./space-packages.ts";
+import { inactiveRequiredIntegrationIds } from "./integration-connection-resolver.ts";
+import { selectorlessLaunchManifests } from "./agent-version-resolver.ts";
 import { getRunningRunCounts } from "./state/runs.ts";
 import { getUnreadRunCountsByAgent } from "./state/run-reads.ts";
 import { listOrgItems } from "./package-items/crud.ts";
@@ -38,6 +40,7 @@ export async function listAgentIndex(
   grants: readonly SpaceGrant[],
   actor: Actor,
   reach: Promise<PackageAccessSpace[]>,
+  launchSpaceId?: string,
 ) {
   const permissions = new Map(grants.map((g) => [g.spaceId, g.permissions]));
   const [rows, runningCounts, unreadCounts, accessible] = await Promise.all([
@@ -46,8 +49,12 @@ export async function listAgentIndex(
     getUnreadRunCountsByAgent(orgId, grants, actor),
     reach,
   ]);
+  // Single-space index only: an organization row spans spaces, each with its own activations.
+  const inactive = launchSpaceId
+    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), launchSpaceId)
+    : null;
 
-  return rows.map((row) => {
+  return rows.map((row, i) => {
     const summaryOnly = !row.spaceIds.some((spaceId) =>
       readsAgentContent(permissions.get(spaceId)!),
     );
@@ -93,6 +100,7 @@ export async function listAgentIndex(
       // `published` is whether omitting the version selector at launch resolves.
       published: isPublished(row),
       type: row.type,
+      ...(inactive ? { inactive_required_integrations: inactive[i]! } : {}),
     };
   });
 }

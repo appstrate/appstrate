@@ -950,6 +950,45 @@ async function requirementsOf(
   return requirements.filter((r): r is IntegrationRequirement => r !== null);
 }
 
+/** A declared integration not active in the space, with the agent's `required` flag. */
+export interface InactiveDeclaredIntegration {
+  integrationId: string;
+  required: boolean;
+}
+
+/**
+ * Per manifest (input order), the declared integrations not active in `spaceId` — the input of
+ * the run gate's `integration_not_active` (an error when `required`). One activation read for
+ * every manifest; `manifestCache` loads each integration manifest once.
+ */
+export async function inactiveDeclaredIntegrations(
+  agentManifests: readonly Record<string, unknown>[],
+  spaceId: string,
+  manifestCache: IntegrationManifestCache = new Map(),
+): Promise<InactiveDeclaredIntegration[][]> {
+  const perAgent = await Promise.all(
+    agentManifests.map((manifest) => requirementsOf(manifest, manifestCache)),
+  );
+  const ids = [...new Set(perAgent.flat().map((req) => req.integrationId))];
+  const activeIds = await listActiveIntegrationIds(ids, spaceId);
+  return perAgent.map((reqs) =>
+    reqs
+      .filter((req) => !activeIds.has(req.integrationId))
+      .map(({ integrationId, required }) => ({ integrationId, required })),
+  );
+}
+
+/** Per manifest, the ids of {@link inactiveDeclaredIntegrations} the agent declares `required`. */
+export async function inactiveRequiredIntegrationIds(
+  agentManifests: readonly Record<string, unknown>[],
+  spaceId: string,
+): Promise<string[][]> {
+  const inactive = await inactiveDeclaredIntegrations(agentManifests, spaceId);
+  return inactive.map((list) =>
+    list.filter((entry) => entry.required).map((entry) => entry.integrationId),
+  );
+}
+
 /**
  * The integrations a run of `agentManifest` resolves a set for, whoever runs it and whatever the
  * layers hold: those it declares whose manifest loads and that are not inert.
