@@ -491,11 +491,38 @@ describe("MCP server instructions — org-wide space choice", () => {
     expect(launchOnly).not.toContain("prefer the run_and_wait tool");
   });
 
-  it("offers the no-link connection remedy alongside only team spaces allowed to launch", () => {
+  it("checks eligible teams before delivering an existing OAuth offer in chat and external MCP", () => {
     const operator = orgSpace("spc_default", "Default", "operator", false, OPERATOR);
-    const text = orgWideInstructionsFor([mine, team, operator]);
-    expect(text).toContain("team spaces with launch permission: spc_team.");
-    expect(text).toContain("name that space alongside connecting one's own");
+    for (const cards of [true, false]) {
+      const text = orgWideInstructionsFor([mine, team, operator], cards);
+      const offer = text.slice(text.indexOf("When it HAS one"), text.indexOf("On a later turn"));
+      expect(offer).toContain("do not start another connect flow");
+      expect(offer).not.toContain("do NOT call any other tool");
+      expect(offer).toContain(
+        cards ? "do NOT paste the link" : "Give the caller that `connect_url`",
+      );
+      expect(text).toContain("with or without a `connect_url`");
+      expect(text).toContain("team spaces with launch permission: spc_team.");
+      expect(text).toContain("name that space alongside connecting one's own");
+    }
+  });
+
+  it("offers direct calls in proxy-enabled teams even when they cannot launch an agent", () => {
+    const proxy = orgSpace("spc_proxy", "Proxy", "custom", false, [
+      "mcp:read",
+      "mcp:invoke",
+      "credential-proxy:call",
+      "credential-proxy:call-own",
+    ]);
+    expect(proxy.surface.proxies).toBe(true);
+    expect(proxy.surface.runs).toBe(false);
+    expect(team.surface.proxies).toBe(false);
+    const text = spaceContext(orgWideInstructionsFor([mine, proxy, team]));
+    expect(text).toContain("team spaces allowing `call_integration_tool`: spc_proxy.");
+    expect(text).toContain("ONLY spaces with launch permission are: spc_mine, spc_team.");
+    expect(text).not.toContain("Options, both to state: running in a named team space");
+    const withoutProxy = spaceContext(orgWideInstructionsFor([mine, team]));
+    expect(withoutProxy).not.toContain("team spaces allowing `call_integration_tool`");
   });
 
   it("names the personal space for a new package to a caller who may create a skill but no agent", () => {
@@ -533,7 +560,7 @@ describe("MCP server instructions — org-wide space choice", () => {
     // (b) the connection is not reachable there: connect one's own, or a team space.
     expect(text).toContain("(b) The connection needed is missing or not reachable there");
     expect(text).toContain("never reaches a personal space");
-    expect(text).toContain("Options, both to state: running in a named team space");
+    expect(text).toContain("Options, both to state: using it in a named team space");
     expect(text).toContain("connecting one's own");
     expect(text).toContain("Offer another space only when your role there allows the act");
     expect(text).toContain("Never suggest sharing a member's account");

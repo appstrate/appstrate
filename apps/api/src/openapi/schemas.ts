@@ -132,7 +132,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_deletable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete.",
+      "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete.",
   },
   home_shareable: {
     type: "boolean",
@@ -591,7 +591,7 @@ export const schemas = {
   ActiveInSpaces: {
     type: "array",
     description:
-      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+      "Other spaces within this credential's reach where the caller holds the permissions required by the refused operation, in space-list order. The specific error describes any additional activation checks. Empty for a credential pinned to this space and for an end-user. Ask the user before acting in another space.",
     items: {
       type: "object",
       required: ["id", "name"],
@@ -606,7 +606,7 @@ export const schemas = {
   },
   AgentNotActiveInSpaceProblem: {
     description:
-      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation.",
+      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives require an active placement for the agent and its required integrations at the requested version (the latest publication when omitted), including its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation.",
     allOf: [
       { $ref: "#/components/schemas/ProblemDetail" },
       {
@@ -621,7 +621,7 @@ export const schemas = {
   },
   InlineRunNotAllowedProblem: {
     description:
-      "`inline_run_not_allowed_in_space`: the caller's role in this space does not allow composing an inline run (it needs `agents:write` and `agents:run` here). `active_in_spaces` lists the caller's other spaces, within the credential's reach, where they hold both.",
+      "`inline_run_not_allowed_in_space`: the caller's role in this space does not allow composing an inline run (it needs `agents:write` and `agents:run` here). `active_in_spaces` lists the caller's other spaces, within the credential's reach, where they hold both. This permission check does not evaluate integration activation or connections.",
     allOf: [
       { $ref: "#/components/schemas/ProblemDetail" },
       {
