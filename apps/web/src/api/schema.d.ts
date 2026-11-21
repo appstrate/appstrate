@@ -577,7 +577,7 @@ export interface paths {
         put?: never;
         /**
          * End one of the caller's access grants
-         * @description End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are revoked, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.
+         * @description End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are deleted, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.
          */
         post: operations["revokeMyAccessGrant"];
         delete?: never;
@@ -3317,7 +3317,7 @@ export interface paths {
         put?: never;
         /**
          * Leave an organization
-         * @description The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.
+         * @description The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here revoked, the OAuth tokens bound to this organization deleted, their MCP grants on the organization's endpoints (organization and spaces) ended, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and deleted tokens stay gone). An MCP-bound JWT access token is refused from its next request; only a JWT of an org-level OAuth client stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.
          */
         post: operations["leaveOrganization"];
         delete?: never;
@@ -3362,7 +3362,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a member
-         * @description Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Other members' schedules naming a connection the member shared are disabled too (`connection_unshared`); `getMemberDepartureImpact` lists, before the removal, every team-space schedule it would stop.
+         * @description Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here revoked, the OAuth tokens bound to this organization deleted, their MCP grants on the organization's endpoints (organization and spaces) ended, and their personal space enters the 30-day offboarding window. An MCP-bound JWT access token is refused from its next request; only a JWT of an org-level OAuth client stays valid until it expires, and the per-request membership check refuses it meanwhile. Other members' schedules naming a connection the member shared are disabled too (`connection_unshared`); `getMemberDepartureImpact` lists, before the removal, every team-space schedule it would stop.
          */
         delete: operations["removeMember"];
         options?: never;
@@ -10495,12 +10495,36 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Revocation succeeded (even on unknown token, per RFC 7009). */
+            /** @description Revoked, or the token was invalid: unknown, expired or already revoked (RFC 7009 §2.2). The two answers are identical. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `invalid_request` — a missing token or malformed client authentication. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
+            };
+            /** @description `invalid_client` — missing or invalid client credentials. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };

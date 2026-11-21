@@ -15,18 +15,21 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import { db } from "@appstrate/db/client";
 import {
-  oauthAccessToken,
   oauthClient,
-  oauthConsent,
   oauthGrantState,
   oauthRefreshToken,
   organizations,
   spaces,
   verification,
 } from "@appstrate/db/schema";
-import { and, arrayContains, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { parseMcpResourceUri, type McpResourceBinding } from "../../../lib/audiences.ts";
 import { logger } from "../../../lib/logger.ts";
+import {
+  endMcpGrants,
+  lockOAuthGrantsOfUser,
+  withdrawResource,
+} from "../../../services/oauth-token-revocation.ts";
 
 /** Lifetime of the access tokens `/oauth2/token` mints (`auth/plugins.ts`). */
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
@@ -124,6 +127,22 @@ export async function authorizationCodeIssuedAt(code: string): Promise<Date | un
   return row?.createdAt;
 }
 
+/** A managed client can select a non-MCP audience and still receive a refresh token covering MCP. */
+export async function findMcpRefreshTokenOwner(token: string) {
+  const [row] = await db
+    .select({
+      userId: oauthRefreshToken.userId,
+      clientId: oauthRefreshToken.clientId,
+      resources: oauthRefreshToken.resources,
+    })
+    .from(oauthRefreshToken)
+    .where(eq(oauthRefreshToken.token, hashOAuthToken(token)))
+    .limit(1);
+  if (row?.userId && row.resources?.some((resource) => parseMcpResourceUri(resource))) {
+    return { userId: row.userId, clientId: row.clientId };
+  }
+}
+
 /**
  * Called once `/oauth2/token` has minted an MCP-bound token, before the
  * response leaves. `authorizedAt` is when the authority the request presented
@@ -134,47 +153,64 @@ export async function authorizationCodeIssuedAt(code: string): Promise<Date | un
  * refresh that read its token before the revocation deleted it. The refused
  * response's refresh token loses the resource.
  *
- * The upsert takes the grant's row lock, which `revokeMcpGrant` holds for its
- * whole transaction, so the watermark it returns is that of any revocation
- * running at the same time.
+ * Issuance and revocation serialize on the same per-user transaction lock.
  */
 export async function admitMcpTokenIssuance(params: {
   userId: string;
   clientId: string;
-  binding: McpResourceBinding & { resource: string };
+  binding: (McpResourceBinding & { resource: string }) | undefined;
   authorizedAt: Date;
   refreshToken: string | undefined;
 }): Promise<boolean> {
   const { userId, clientId, binding, authorizedAt, refreshToken } = params;
-  const revokedSince = sql`${oauthGrantState.tokensValidAfter} >= ${authorizedAt.toISOString()}::timestamptz`;
-  const [state] = await db
-    .insert(oauthGrantState)
-    .values({
-      userId,
-      clientId,
-      resource: binding.resource,
-      orgId: binding.orgId,
-      spaceId: binding.spaceId ?? null,
-      lastIssuedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
-      // A refused issuance is not one: the last issuance stays as it was.
-      set: {
-        lastIssuedAt: sql`case when ${revokedSince} then ${oauthGrantState.lastIssuedAt} else excluded.last_issued_at end`,
-      },
-    })
-    .returning({ tokensValidAfter: oauthGrantState.tokensValidAfter });
-  if (!state?.tokensValidAfter || state.tokensValidAfter < authorizedAt) return true;
-  if (refreshToken) {
-    await withdrawResource(
-      db,
-      oauthRefreshToken,
-      eq(oauthRefreshToken.token, hashOAuthToken(refreshToken)),
-      binding.resource,
-    );
-  }
-  return false;
+  return db.transaction(async (tx) => {
+    await lockOAuthGrantsOfUser(tx, userId);
+    if (refreshToken) {
+      // The JWT selects one endpoint, but this refresh token inherits all resources of the code.
+      const ownToken = and(
+        eq(oauthRefreshToken.userId, userId),
+        eq(oauthRefreshToken.clientId, clientId),
+        eq(oauthRefreshToken.token, hashOAuthToken(refreshToken)),
+      );
+      const withdrawn = await tx
+        .select({ resource: oauthGrantState.resource })
+        .from(oauthGrantState)
+        .innerJoin(
+          oauthRefreshToken,
+          and(ownToken, sql`${oauthGrantState.resource} = ANY(${oauthRefreshToken.resources})`),
+        )
+        .where(
+          and(
+            eq(oauthGrantState.userId, userId),
+            eq(oauthGrantState.clientId, clientId),
+            gte(oauthGrantState.tokensValidAfter, authorizedAt),
+          ),
+        );
+      for (const { resource } of withdrawn)
+        await withdrawResource(tx, oauthRefreshToken, ownToken, resource);
+    }
+    if (!binding) return true;
+    const revokedSince = sql`${oauthGrantState.tokensValidAfter} >= ${authorizedAt.toISOString()}::timestamptz`;
+    const [state] = await tx
+      .insert(oauthGrantState)
+      .values({
+        userId,
+        clientId,
+        resource: binding.resource,
+        orgId: binding.orgId,
+        spaceId: binding.spaceId ?? null,
+        lastIssuedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
+        // A refused issuance is not one: the last issuance stays as it was.
+        set: {
+          lastIssuedAt: sql`case when ${revokedSince} then ${oauthGrantState.lastIssuedAt} else excluded.last_issued_at end`,
+        },
+      })
+      .returning({ tokensValidAfter: oauthGrantState.tokensValidAfter });
+    return !state?.tokensValidAfter || state.tokensValidAfter < authorizedAt;
+  });
 }
 
 // ─── Listing ─────────────────────────────────────────────────────────────────
@@ -428,79 +464,7 @@ function hostOf(url: string): string | null {
 
 // ─── Revocation ──────────────────────────────────────────────────────────────
 
-type ResourceBoundTable = typeof oauthRefreshToken | typeof oauthAccessToken | typeof oauthConsent;
-type Executor = Pick<typeof db, "delete" | "update">;
-
-/**
- * Take `resource` off the rows `where` selects. One authorization may cover
- * several MCP endpoints (the client asked for several at `/oauth2/authorize`,
- * and each token request then picks one): a row left with no resource is
- * deleted, one covering others keeps them.
- *
- * Rows are deleted, never marked revoked: Better Auth treats a revoked refresh
- * token presented again as a stolen one and invalidates every refresh token of
- * the (client, user) pair, which would end the client's other grants too.
- */
-async function withdrawResource(
-  executor: Executor,
-  table: ResourceBoundTable,
-  where: SQL | undefined,
-  resource: string,
-): Promise<void> {
-  const covering = and(where, arrayContains(table.resources, [resource]));
-  const remaining = sql`array_remove(${table.resources}, ${resource})`;
-  await executor.delete(table).where(and(covering, sql`cardinality(${remaining}) = 0`));
-  await executor
-    .update(table as typeof oauthRefreshToken)
-    .set({ resources: remaining })
-    .where(covering);
-}
-
-/**
- * End a grant: withdraw its resource from its tokens and from the user's
- * consent to the client (reconnecting shows the consent screen again), and
- * raise its watermark so an access token already issued is refused on its next
- * request. Access-token rows of a deleted refresh token go with it
- * (`refresh_id` cascade).
- *
- * The grant's row is locked first and its watermark set last, after the
- * deletes: a token request that read a code or refresh token before them began
- * before the watermark, and `admitMcpTokenIssuance` refuses its response.
- */
+/** Ends the grant in its own transaction. */
 export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
-  const { userId, clientId, resource } = grant;
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(oauthGrantState)
-      .values({
-        userId,
-        clientId,
-        resource,
-        orgId: grant.orgId,
-        spaceId: grant.spaceId,
-        tokensValidAfter: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
-        set: { tokensValidAfter: new Date() },
-      });
-    for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {
-      await withdrawResource(
-        tx,
-        table,
-        and(eq(table.userId, userId), eq(table.clientId, clientId)),
-        resource,
-      );
-    }
-    await tx
-      .update(oauthGrantState)
-      .set({ tokensValidAfter: new Date() })
-      .where(
-        and(
-          eq(oauthGrantState.userId, userId),
-          eq(oauthGrantState.clientId, clientId),
-          eq(oauthGrantState.resource, resource),
-        ),
-      );
-  });
+  await db.transaction((tx) => endMcpGrants(tx, grant.userId, [grant]));
 }
