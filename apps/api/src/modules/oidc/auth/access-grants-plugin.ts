@@ -39,6 +39,7 @@ import {
 import {
   admitMcpTokenIssuance,
   authorizationCodeIssuedAt,
+  findMcpRefreshTokenOwner,
   hashOAuthToken,
   type McpGrant,
 } from "../services/mcp-grants.ts";
@@ -110,23 +111,29 @@ async function admitIssuedTokens(ctx: TokenHookCtx): Promise<void> {
   if (typeof returned?.access_token !== "string") return;
   const claims = await verifyEndUserAccessToken(returned.access_token);
   const binding = claims ? mcpBindingFromAudiences(claims.audiences) : undefined;
-  if (!claims?.clientId || !binding) return;
+  const refreshToken =
+    typeof returned.refresh_token === "string" ? returned.refresh_token : undefined;
+  const owner =
+    binding && claims?.clientId
+      ? { userId: claims.authUserId, clientId: claims.clientId }
+      : refreshToken
+        ? await findMcpRefreshTokenOwner(refreshToken)
+        : undefined;
+  if (!owner) return;
   // An issuance with no instant to judge it by is refused, never let through.
   const authorizedAt = ctx.request ? authorizedAtByRequest.get(ctx.request) : undefined;
   const admitted =
     authorizedAt !== undefined &&
     (await admitMcpTokenIssuance({
-      userId: claims.authUserId,
-      clientId: claims.clientId,
+      ...owner,
       binding,
       authorizedAt,
-      refreshToken: typeof returned.refresh_token === "string" ? returned.refresh_token : undefined,
+      refreshToken,
     }));
   if (!admitted) {
     logger.info("oidc: token issuance refused — the MCP grant was revoked since", {
       module: "oidc",
-      userId: claims.authUserId,
-      clientId: claims.clientId,
+      ...owner,
     });
     throw new APIError("BAD_REQUEST", {
       error: "invalid_grant",
@@ -136,6 +143,12 @@ async function admitIssuedTokens(ctx: TokenHookCtx): Promise<void> {
 }
 
 const isRevokeEndpoint = (ctx: { path?: string }) => ctx.path === "/oauth2/revoke";
+
+// RFC 7009 allows ignoring the hint. The pinned provider otherwise searches only the hinted type.
+async function searchAllTokenTypes(ctx: TokenHookCtx) {
+  const body = ctx.body as { token_type_hint?: string } | undefined;
+  if (body?.token_type_hint) return { context: { body: { ...body, token_type_hint: "" } } };
+}
 
 /**
  * Settle a `/oauth2/revoke` call after Better Auth answered it.
@@ -156,10 +169,13 @@ async function settleRevocation(ctx: TokenHookCtx): Promise<Response | void> {
   if (token.length === 0) return;
   const returned = (ctx.context as { returned?: unknown }).returned;
   if (returned instanceof Error) {
+    // With no hint, this is the provider's final lookup miss after authenticating the client.
+    // Its request parser also uses invalid_request for malformed client authentication.
     if (
       isAPIError(returned) &&
       returned.statusCode === 400 &&
-      (returned.body as { error?: unknown } | undefined)?.error === "invalid_request"
+      returned.body?.error === "invalid_request" &&
+      returned.body?.error_description === "token not found"
     ) {
       // A `Response` is the one value whose status survives the dispatch
       // (`toResponse` passes it through); this is the success answer's shape.
@@ -189,7 +205,10 @@ export function accessGrantsPlugin() {
   return {
     id: "appstrate-access-grants",
     hooks: {
-      before: [{ matcher: isTokenEndpoint, handler: createAuthMiddleware(captureAuthorizedAt) }],
+      before: [
+        { matcher: isTokenEndpoint, handler: createAuthMiddleware(captureAuthorizedAt) },
+        { matcher: isRevokeEndpoint, handler: createAuthMiddleware(searchAllTokenTypes) },
+      ],
       after: [
         { matcher: isTokenEndpoint, handler: createAuthMiddleware(admitIssuedTokens) },
         { matcher: isRevokeEndpoint, handler: createAuthMiddleware(settleRevocation) },

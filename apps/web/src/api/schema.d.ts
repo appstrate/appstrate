@@ -10458,7 +10458,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `invalid_request` — the `token` parameter is missing. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`. */
+            /** @description `invalid_request` — a missing token or malformed client authentication. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`. */
             400: {
                 headers: {
                     [name: string]: unknown;

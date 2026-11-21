@@ -89,7 +89,7 @@ export async function revokeAllAccessGrantsForUser(
 ): Promise<{ revokedCount: number; mcpGrants: McpGrant[] }> {
   const { revokedCount } = await revokeAllFamiliesForUser(userId, "user_revoked_all");
   const mcpGrants = await listMcpGrantsForUser(userId);
-  if (mcpGrants.length > 0) await db.transaction((tx) => endMcpGrants(tx, mcpGrants));
+  if (mcpGrants.length > 0) await db.transaction((tx) => endMcpGrants(tx, userId, mcpGrants));
   return { revokedCount: revokedCount + mcpGrants.length, mcpGrants };
 }
 

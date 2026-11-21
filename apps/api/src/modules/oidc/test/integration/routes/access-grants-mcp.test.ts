@@ -17,10 +17,19 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { and, eq, like } from "drizzle-orm";
-import { auditEvents, oauthRefreshToken, oauthResource } from "@appstrate/db/schema";
+import { and, eq, like, sql } from "drizzle-orm";
+import {
+  auditEvents,
+  oauthGrantState,
+  oauthClient,
+  oauthRefreshToken,
+  oauthResource,
+} from "@appstrate/db/schema";
+import { toRows } from "@appstrate/db/client";
+import { lockOAuthGrantsOfUser } from "../../../../../services/oauth-token-revocation.ts";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
+import { describeRequiresPostgres } from "../../../../../../test/helpers/tier.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
   createTestContext,
@@ -39,6 +48,7 @@ import { MCP_ACCEPT } from "../../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../../../../../lib/audiences.ts";
 import { overrideJwks } from "../../../services/enduser-token.ts";
+import { hashOAuthToken } from "../../../services/mcp-grants.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
   authorizationCodeFlow,
@@ -218,6 +228,36 @@ describe("MCP access grants", () => {
         expect(res.status).toBe(400);
         expect(((await res.json()) as { error?: string }).error).toBe("invalid_request");
       }
+    });
+
+    it("preserves a malformed client authentication error with a token in the request", async () => {
+      const response = await app.request("/api/auth/oauth2/revoke", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: "Basic " + btoa("client:secret"),
+        },
+        body: new URLSearchParams({ token: "unknown", client_secret: "secret" }).toString(),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_request" });
+    });
+
+    it("locates a valid refresh token even with an inaccurate hint", async () => {
+      const clientId = await registerClient();
+      const { token } = await connect(ctx.cookie, clientId);
+      const res = await revokeWith({
+        client_id: clientId,
+        token: String(token.refresh_token),
+        token_type_hint: "access_token",
+      });
+      expect(res.status).toBe(200);
+      expect(
+        await db
+          .select({ id: oauthRefreshToken.id })
+          .from(oauthRefreshToken)
+          .where(eq(oauthRefreshToken.clientId, clientId)),
+      ).toHaveLength(0);
     });
 
     it("answers 400 unsupported_token_type for a JWT access token (§2.2.1)", async () => {
@@ -741,8 +781,115 @@ describe("MCP access grants", () => {
       await expectOnlyBSurvives(m);
     });
 
+    it("also narrows a managed client's refresh token when the access token selects the platform", async () => {
+      const member = await memberContext(ctx, "member");
+      const clientId = crypto.randomUUID();
+      const platform = new URL(orgResource).origin;
+      await db.insert(oauthClient).values({
+        id: crypto.randomUUID(),
+        clientId,
+        name: "Managed client",
+        level: "instance",
+        redirectUris: [REDIRECT_URI],
+        scopes: SCOPE.split(" "),
+        grantTypes: ["authorization_code", "refresh_token"],
+        responseTypes: ["code"],
+        tokenEndpointAuthMethod: "none",
+        requirePKCE: true,
+      });
+      const input = {
+        cookie: member.cookie,
+        clientId,
+        redirectUri: REDIRECT_URI,
+        scope: SCOPE,
+        resource: [platform, orgResource],
+      };
+      const pending = await authorizeCode(app, input);
+      expect((await removeMember(member.user.id)).status).toBe(204);
+      const res = await exchangeCode(app, { ...input, ...pending });
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select({ resources: oauthRefreshToken.resources })
+        .from(oauthRefreshToken)
+        .where(eq(oauthRefreshToken.clientId, clientId));
+      expect(row?.resources).toEqual([platform]);
+    });
+
+    it("ends a historical grant after the public origin changes", async () => {
+      const member = await memberContext(ctx, "member");
+      const clientId = await registerClient();
+      const historical = `https://old.example.test/api/mcp/o/${ctx.orgId}`;
+      await db.insert(oauthGrantState).values({
+        userId: member.user.id,
+        clientId,
+        resource: historical,
+        orgId: ctx.orgId,
+      });
+      expect((await removeMember(member.user.id)).status).toBe(204);
+      const [state] = await db
+        .select()
+        .from(oauthGrantState)
+        .where(eq(oauthGrantState.resource, historical));
+      expect(state?.tokensValidAfter).toBeInstanceOf(Date);
+    });
+
+    describeRequiresPostgres("concurrent account and org changes", () => {
+      it("completes a password change and member removal for the same account", async () => {
+        const m = await memberWithGrantsOnTwoOrgs();
+        const { pending, queued } = await db.transaction(async (tx) => {
+          await lockOAuthGrantsOfUser(tx, m.member.user.id);
+          const pending = Promise.all([
+            app.request("/api/auth/change-password", {
+              method: "POST",
+              headers: { Cookie: m.member.cookie, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                currentPassword: "TestPassword123!",
+                newPassword: "NewPassword456!",
+              }),
+            }),
+            removeMember(m.member.user.id),
+          ]);
+          // Hold the common lock until PostgreSQL confirms both requests reached it.
+          const deadline = Date.now() + 5000;
+          while (Date.now() < deadline) {
+            const [row] = toRows<{ waiting: number }>(
+              await tx.execute(sql`
+              SELECT count(DISTINCT pid)::int AS waiting FROM pg_locks
+              WHERE locktype = 'advisory' AND NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))`),
+            );
+            if (row?.waiting === 2) return { pending, queued: true };
+            await Bun.sleep(10);
+          }
+          return { pending, queued: false };
+        });
+        const [changed, removed] = await pending;
+        expect(queued).toBe(true);
+        expect([changed.status, removed.status]).toEqual([200, 204]);
+        expect(
+          await db
+            .select({ id: oauthRefreshToken.id })
+            .from(oauthRefreshToken)
+            .where(eq(oauthRefreshToken.userId, m.member.user.id)),
+        ).toHaveLength(0);
+        const grants = await db
+          .select()
+          .from(oauthGrantState)
+          .where(eq(oauthGrantState.userId, m.member.user.id));
+        expect(grants.length).toBeGreaterThan(1);
+        expect(grants.every((grant) => grant.tokensValidAfter !== null)).toBe(true);
+      });
+    });
+
     it("a member re-invited after removal gets none of the old tokens back", async () => {
       const m = await memberWithGrantsOnTwoOrgs();
+      const input = {
+        cookie: m.member.cookie,
+        clientId: m.clientId,
+        redirectUri: REDIRECT_URI,
+        scope: SCOPE,
+        resource: [m.otherResource, orgResource],
+      };
+      const pending = await authorizeCode(app, input);
       expect((await removeMember(m.member.user.id)).status).toBe(204);
       const invitation = await seedInvitation({
         orgId: ctx.orgId,
@@ -754,6 +901,17 @@ describe("MCP access grants", () => {
         headers: { Cookie: m.member.cookie },
       });
       expect(accepted.status).toBe(200);
+
+      // Exchange the pending authorization for B. Its refresh token should carry only B.
+      const exchanged = await exchangeCode(app, { ...input, ...pending });
+      expect(exchanged.status).toBe(200);
+      const issued = (await exchanged.json()) as { refresh_token: string };
+      const [stored] = await db
+        .select({ resources: oauthRefreshToken.resources })
+        .from(oauthRefreshToken)
+        .where(eq(oauthRefreshToken.token, hashOAuthToken(issued.refresh_token)));
+      expect(stored?.resources).toEqual([m.otherResource]);
+      await expectRefreshWorks(m.clientId, issued.refresh_token, m.otherResource, m.otherPath);
 
       // Membership is back: the old tokens stay refused by themselves.
       await expectInvalidGrant(await refresh(m.clientId, m.currentA, orgResource));

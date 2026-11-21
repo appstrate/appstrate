@@ -22,10 +22,14 @@ import {
   spaces,
   verification,
 } from "@appstrate/db/schema";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { parseMcpResourceUri, type McpResourceBinding } from "../../../lib/audiences.ts";
 import { logger } from "../../../lib/logger.ts";
-import { endMcpGrants, withdrawResource } from "../../../services/oauth-token-revocation.ts";
+import {
+  endMcpGrants,
+  lockOAuthGrantsOfUser,
+  withdrawResource,
+} from "../../../services/oauth-token-revocation.ts";
 
 /** Lifetime of the access tokens `/oauth2/token` mints (`auth/plugins.ts`). */
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
@@ -123,6 +127,22 @@ export async function authorizationCodeIssuedAt(code: string): Promise<Date | un
   return row?.createdAt;
 }
 
+/** A managed client can select a non-MCP audience and still receive a refresh token covering MCP. */
+export async function findMcpRefreshTokenOwner(token: string) {
+  const [row] = await db
+    .select({
+      userId: oauthRefreshToken.userId,
+      clientId: oauthRefreshToken.clientId,
+      resources: oauthRefreshToken.resources,
+    })
+    .from(oauthRefreshToken)
+    .where(eq(oauthRefreshToken.token, hashOAuthToken(token)))
+    .limit(1);
+  if (row?.userId && row.resources?.some((resource) => parseMcpResourceUri(resource))) {
+    return { userId: row.userId, clientId: row.clientId };
+  }
+}
+
 /**
  * Called once `/oauth2/token` has minted an MCP-bound token, before the
  * response leaves. `authorizedAt` is when the authority the request presented
@@ -133,47 +153,64 @@ export async function authorizationCodeIssuedAt(code: string): Promise<Date | un
  * refresh that read its token before the revocation deleted it. The refused
  * response's refresh token loses the resource.
  *
- * The upsert takes the grant's row lock, which `endMcpGrants` holds for its
- * whole transaction, so the watermark it returns is that of any revocation
- * running at the same time.
+ * Issuance and revocation serialize on the same per-user transaction lock.
  */
 export async function admitMcpTokenIssuance(params: {
   userId: string;
   clientId: string;
-  binding: McpResourceBinding & { resource: string };
+  binding: (McpResourceBinding & { resource: string }) | undefined;
   authorizedAt: Date;
   refreshToken: string | undefined;
 }): Promise<boolean> {
   const { userId, clientId, binding, authorizedAt, refreshToken } = params;
-  const revokedSince = sql`${oauthGrantState.tokensValidAfter} >= ${authorizedAt.toISOString()}::timestamptz`;
-  const [state] = await db
-    .insert(oauthGrantState)
-    .values({
-      userId,
-      clientId,
-      resource: binding.resource,
-      orgId: binding.orgId,
-      spaceId: binding.spaceId ?? null,
-      lastIssuedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
-      // A refused issuance is not one: the last issuance stays as it was.
-      set: {
-        lastIssuedAt: sql`case when ${revokedSince} then ${oauthGrantState.lastIssuedAt} else excluded.last_issued_at end`,
-      },
-    })
-    .returning({ tokensValidAfter: oauthGrantState.tokensValidAfter });
-  if (!state?.tokensValidAfter || state.tokensValidAfter < authorizedAt) return true;
-  if (refreshToken) {
-    await withdrawResource(
-      db,
-      oauthRefreshToken,
-      eq(oauthRefreshToken.token, hashOAuthToken(refreshToken)),
-      binding.resource,
-    );
-  }
-  return false;
+  return db.transaction(async (tx) => {
+    await lockOAuthGrantsOfUser(tx, userId);
+    if (refreshToken) {
+      // The JWT selects one endpoint, but this refresh token inherits all resources of the code.
+      const ownToken = and(
+        eq(oauthRefreshToken.userId, userId),
+        eq(oauthRefreshToken.clientId, clientId),
+        eq(oauthRefreshToken.token, hashOAuthToken(refreshToken)),
+      );
+      const withdrawn = await tx
+        .select({ resource: oauthGrantState.resource })
+        .from(oauthGrantState)
+        .innerJoin(
+          oauthRefreshToken,
+          and(ownToken, sql`${oauthGrantState.resource} = ANY(${oauthRefreshToken.resources})`),
+        )
+        .where(
+          and(
+            eq(oauthGrantState.userId, userId),
+            eq(oauthGrantState.clientId, clientId),
+            gte(oauthGrantState.tokensValidAfter, authorizedAt),
+          ),
+        );
+      for (const { resource } of withdrawn)
+        await withdrawResource(tx, oauthRefreshToken, ownToken, resource);
+    }
+    if (!binding) return true;
+    const revokedSince = sql`${oauthGrantState.tokensValidAfter} >= ${authorizedAt.toISOString()}::timestamptz`;
+    const [state] = await tx
+      .insert(oauthGrantState)
+      .values({
+        userId,
+        clientId,
+        resource: binding.resource,
+        orgId: binding.orgId,
+        spaceId: binding.spaceId ?? null,
+        lastIssuedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
+        // A refused issuance is not one: the last issuance stays as it was.
+        set: {
+          lastIssuedAt: sql`case when ${revokedSince} then ${oauthGrantState.lastIssuedAt} else excluded.last_issued_at end`,
+        },
+      })
+      .returning({ tokensValidAfter: oauthGrantState.tokensValidAfter });
+    return !state?.tokensValidAfter || state.tokensValidAfter < authorizedAt;
+  });
 }
 
 // ─── Listing ─────────────────────────────────────────────────────────────────
@@ -429,5 +466,5 @@ function hostOf(url: string): string | null {
 
 /** Ends the grant in its own transaction. */
 export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
-  await db.transaction((tx) => endMcpGrants(tx, [grant]));
+  await db.transaction((tx) => endMcpGrants(tx, grant.userId, [grant]));
 }

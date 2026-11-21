@@ -14,17 +14,14 @@
 import {
   oauthAccessToken,
   oauthConsent,
+  oauthClient,
   oauthGrantState,
   oauthRefreshToken,
   spaces,
 } from "@appstrate/db/schema";
-import { and, arrayContains, arrayOverlaps, eq, sql, type SQL } from "drizzle-orm";
-import {
-  getMcpOrgResourceUri,
-  getMcpSpaceResourceUri,
-  parseMcpResourceUri,
-} from "../lib/audiences.ts";
-import { inTransaction, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
+import { and, arrayContains, arrayOverlaps, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../lib/audiences.ts";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 
 type TokenTable = typeof oauthRefreshToken | typeof oauthAccessToken;
 type ResourceBoundTable = TokenTable | typeof oauthConsent;
@@ -59,81 +56,24 @@ export async function withdrawResource(
     .where(covering);
 }
 
-/** An MCP grant's key: (user, OAuth client, MCP resource URI). */
+/** Issuance and administrative revocations take this lock before touching grant or token rows. */
+export async function lockOAuthGrantsOfUser(tx: Tx, userId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`oauth-grants:${userId}`})::bigint)`,
+  );
+}
+
 interface McpGrantKey {
-  userId: string;
   clientId: string;
   resource: string;
+  orgId: string;
+  spaceId: string | null;
 }
 
-async function raiseWatermarks(tx: Tx, grants: McpGrantKey[]): Promise<void> {
-  for (const { userId, clientId, resource } of grants) {
-    const binding = parseMcpResourceUri(resource);
-    // Skipping would withdraw a resource with no watermark left to refuse its tokens.
-    if (!binding) throw new Error(`Not an MCP resource URI: ${resource}`);
-    const now = new Date();
-    await tx
-      .insert(oauthGrantState)
-      .values({
-        userId,
-        clientId,
-        resource,
-        orgId: binding.orgId,
-        spaceId: binding.spaceId ?? null,
-        tokensValidAfter: now,
-      })
-      .onConflictDoUpdate({
-        target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
-        set: { tokensValidAfter: now },
-      });
-  }
-}
-
-/**
- * Refuse every MCP access token `userId` holds, from its next request: raise
- * the watermark of each of the user's grants, leaving tokens, consents and the
- * grants themselves to the caller. Tokens issued after it are accepted.
- */
-export async function raiseMcpWatermarksOfUser(executor: DbOrTx, userId: string): Promise<void> {
-  await inTransaction(executor, async (tx) => {
-    // Same lock order as `endMcpGrants`, so two writers cannot deadlock. Ids and URIs
-    // are ASCII, where `COLLATE "C"` and its code-unit sort agree.
-    await tx
-      .select({ userId: oauthGrantState.userId })
-      .from(oauthGrantState)
-      .where(eq(oauthGrantState.userId, userId))
-      .orderBy(
-        sql`${oauthGrantState.clientId} COLLATE "C"`,
-        sql`${oauthGrantState.resource} COLLATE "C"`,
-      )
-      .for("update");
-    await tx
-      .update(oauthGrantState)
-      .set({ tokensValidAfter: new Date() })
-      .where(eq(oauthGrantState.userId, userId));
-  });
-}
-
-/**
- * End MCP grants: withdraw each one's resource from its tokens and from the
- * user's consent to the client (reconnecting shows the consent screen again),
- * and raise its watermark so an access token already issued is refused on its
- * next request.
- *
- * Each grant's row is locked first and its watermark set last, after the
- * deletes: a token request that read a code or refresh token before them began
- * before the watermark, and `admitMcpTokenIssuance` (OIDC module) refuses its
- * response.
- */
-export async function endMcpGrants(tx: Tx, unordered: McpGrantKey[]): Promise<void> {
-  // Fixed (client, resource) order: the lock order `raiseMcpWatermarksOfUser` uses too.
-  const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-  const grants = [...unordered].sort(
-    (a, b) => byCodeUnit(a.clientId, b.clientId) || byCodeUnit(a.resource, b.resource),
-  );
-  // Creates and locks each grant's row.
-  await raiseWatermarks(tx, grants);
-  for (const { userId, clientId, resource } of grants) {
+/** Caller holds the user's grant lock. Set the watermark after the resource withdrawals. */
+async function withdrawMcpGrants(tx: Tx, userId: string, grants: McpGrantKey[]): Promise<void> {
+  if (!grants.length) return;
+  for (const { clientId, resource } of grants) {
     for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {
       await withdrawResource(
         tx,
@@ -143,8 +83,28 @@ export async function endMcpGrants(tx: Tx, unordered: McpGrantKey[]): Promise<vo
       );
     }
   }
-  // Refuses a token request that read a token before the deletes.
-  await raiseWatermarks(tx, grants);
+  const now = new Date();
+  await tx
+    .insert(oauthGrantState)
+    .values(
+      grants.map(({ clientId, resource, orgId, spaceId }) => ({
+        userId,
+        clientId,
+        resource,
+        orgId,
+        spaceId,
+        tokensValidAfter: now,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
+      set: { tokensValidAfter: now },
+    });
+}
+
+export async function endMcpGrants(tx: Tx, userId: string, grants: McpGrantKey[]): Promise<void> {
+  await lockOAuthGrantsOfUser(tx, userId);
+  await withdrawMcpGrants(tx, userId, grants);
 }
 
 /**
@@ -153,32 +113,47 @@ export async function endMcpGrants(tx: Tx, unordered: McpGrantKey[]): Promise<vo
  * consents and its recorded issuances. Grants on another org's endpoints are
  * untouched, even when one authorization covers both.
  */
-export async function endMcpGrantsInOrg(tx: Tx, orgId: string, userId: string): Promise<void> {
+export async function endOAuthAccessInOrg(tx: Tx, orgId: string, userId: string): Promise<void> {
+  await lockOAuthGrantsOfUser(tx, userId);
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
-  const orgResources = new Set([
-    getMcpOrgResourceUri(orgId),
-    ...orgSpaces.map((s) => getMcpSpaceResourceUri(orgId, s.id)),
-  ]);
+  const orgResources = new Map<string, string | null>([[getMcpOrgResourceUri(orgId), null]]);
+  for (const space of orgSpaces)
+    orgResources.set(getMcpSpaceResourceUri(orgId, space.id), space.id);
   const grants = new Map<string, McpGrantKey>();
-  const add = (clientId: string, resource: string) =>
-    grants.set(`${clientId}\u0000${resource}`, { userId, clientId, resource });
+  const add = (clientId: string, resource: string, spaceId: string | null) =>
+    grants.set(`${clientId}\u0000${resource}`, { orgId, spaceId, clientId, resource });
 
   for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {
     const rows = await tx
       .select({ clientId: table.clientId, resources: table.resources })
       .from(table)
-      .where(and(eq(table.userId, userId), arrayOverlaps(table.resources, [...orgResources])));
+      .where(
+        and(eq(table.userId, userId), arrayOverlaps(table.resources, [...orgResources.keys()])),
+      );
     for (const row of rows) {
       for (const resource of row.resources ?? []) {
-        if (orgResources.has(resource)) add(row.clientId, resource);
+        const spaceId = orgResources.get(resource);
+        if (spaceId !== undefined) add(row.clientId, resource, spaceId);
       }
     }
   }
   const states = await tx
-    .select({ clientId: oauthGrantState.clientId, resource: oauthGrantState.resource })
+    .select({
+      clientId: oauthGrantState.clientId,
+      resource: oauthGrantState.resource,
+      spaceId: oauthGrantState.spaceId,
+    })
     .from(oauthGrantState)
     .where(and(eq(oauthGrantState.userId, userId), eq(oauthGrantState.orgId, orgId)));
-  for (const state of states) add(state.clientId, state.resource);
+  for (const state of states) add(state.clientId, state.resource, state.spaceId);
 
-  await endMcpGrants(tx, [...grants.values()]);
+  // Org-owned clients can re-provision membership on refresh through allowSignup.
+  const orgClientIds = tx
+    .select({ clientId: oauthClient.clientId })
+    .from(oauthClient)
+    .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
+  await deleteOAuthTokens(tx, (table) =>
+    and(eq(table.userId, userId), inArray(table.clientId, orgClientIds)),
+  );
+  await withdrawMcpGrants(tx, userId, [...grants.values()]);
 }

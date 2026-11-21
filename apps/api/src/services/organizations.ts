@@ -19,7 +19,6 @@ import {
   files,
   uploads,
   apiKeys,
-  oauthClient,
   modelProviderCredentials,
   modelProviderPairings,
   spaces,
@@ -59,7 +58,7 @@ import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
-import { deleteOAuthTokens, endMcpGrantsInOrg } from "./oauth-token-revocation.ts";
+import { endOAuthAccessInOrg } from "./oauth-token-revocation.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface OrgResult {
@@ -574,14 +573,7 @@ async function removeMemberInTx(
   // cover another org's. Deleted, never marked revoked: see
   // `oauth-token-revocation.ts`. A JWT lives until its TTL, stopped by the
   // per-request membership check and the grant's watermark.
-  const orgClientIds = tx
-    .select({ clientId: oauthClient.clientId })
-    .from(oauthClient)
-    .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
-  await deleteOAuthTokens(tx, (table) =>
-    and(eq(table.userId, userId), inArray(table.clientId, orgClientIds)),
-  );
-  await endMcpGrantsInOrg(tx, orgId, userId);
+  await endOAuthAccessInOrg(tx, orgId, userId);
 
   // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
