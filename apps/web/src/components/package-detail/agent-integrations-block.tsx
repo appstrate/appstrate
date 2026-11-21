@@ -343,7 +343,7 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
 function buildReuseInfo(
   connections: IntegrationCandidate[],
   agentCount: number,
-  t: (k: string, opts?: Record<string, unknown>) => string,
+  t: (key: string, values: { account: string; count: number }) => string,
 ): string {
   const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {

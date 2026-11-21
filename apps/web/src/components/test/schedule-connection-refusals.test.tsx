@@ -17,7 +17,7 @@ import { ScheduleConnectionRefusals } from "../schedule-connection-refusals.tsx"
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-const t = (key: string, opts?: Record<string, unknown>) =>
+const t = (key: string, opts: Record<string, unknown> = {}) =>
   i18n.t(`agents:schedule.connectionOverrides.${key}`, opts);
 
 const CANDIDATE = {

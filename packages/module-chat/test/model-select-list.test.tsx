@@ -8,12 +8,16 @@
  * disabled) is pinned alongside, so the chat's option cannot leak into it.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ModelPickerList } from "@appstrate/ui/components/model-picker";
 import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-groups";
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
+
+import { ModelSelect } from "../src/ui/model-select.tsx";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { testHost } from "./test-host.ts";
 
 const unpaid = {
   id: "unpaid",
@@ -49,6 +53,25 @@ function disabledByLabel(html: string): Record<string, boolean> {
 }
 
 describe("composer model list", () => {
+  it("uses settings translations for picker labels and interpolates the translated reasoning level", () => {
+    const t = mock((key: string) => key);
+    renderToStaticMarkup(
+      <ChatHostProvider value={testHost({ t })}>
+        <ModelSelect
+          models={[{ ...live, apiShape: null }]}
+          selectedId={live.id}
+          onSelect={() => {}}
+          generation={{}}
+          onGenerationChange={() => {}}
+        />
+      </ChatHostProvider>,
+    );
+    expect(t).toHaveBeenCalledWith("settings:modelPicker.search", undefined);
+    expect(t).toHaveBeenCalledWith("settings:models.generation.reasoningHint", {
+      level: "settings:models.generation.levels.medium",
+    });
+  });
+
   it("keeps a model nothing pays for pickable, with its reason, and disables a dead one", () => {
     const html = renderToStaticMarkup(
       <ModelPickerList
