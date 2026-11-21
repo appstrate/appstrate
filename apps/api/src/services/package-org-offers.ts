@@ -13,10 +13,10 @@
 import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgPackageOffers, schedules, spacePackages, spaces } from "@appstrate/db/schema";
-import { forbidden } from "../lib/errors.ts";
+import { forbidden, invalidRequest } from "../lib/errors.ts";
 import { assertHasPublishedVersion, loadPlaceablePackage } from "./space-packages.ts";
 import type { PlacementAuthority } from "./space-packages.ts";
-import { isActiveWithoutRow } from "./package-activation.ts";
+import { isActiveEverywhereByDefault } from "./package-activation.ts";
 import { disableArmedSchedules, withdrawPlacement } from "./package-placement.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 
@@ -52,6 +52,11 @@ export async function offerPackageToOrg(params: {
   return db.transaction(async (tx) => {
     const pkg = await loadOfferablePackage(tx, orgId, packageId, authorizeHome);
     if (pkg.offeredToOrg) return { created: false };
+    if (isActiveEverywhereByDefault(pkg)) {
+      throw invalidRequest(
+        `'${packageId}' is already active in every space by the deployment's default: an offer would change nothing.`,
+      );
+    }
     if (pkg.homeSpaceId !== null) await assertHasPublishedVersion(pkg.id, tx);
     const inserted = await tx
       .insert(orgPackageOffers)
@@ -70,8 +75,8 @@ export async function offerPackageToOrg(params: {
  * through `withdrawPlacement`), and spaces of the organization holding no row
  * of their own, other than its home (still
  * placed, now merely inactive: its schedules fail visibly like any deactivated
- * package's), and none at all when the deployment's default still activates
- * it.
+ * package's), and none at all when the deployment's default alone still
+ * activates it in every space.
  *
  * @returns the disabled schedule ids, whose jobs the caller removes once committed.
  */
@@ -88,7 +93,7 @@ export async function withdrawOrgOffer(params: {
       .where(and(eq(orgPackageOffers.orgId, orgId), eq(orgPackageOffers.packageId, packageId)))
       .returning({ packageId: orgPackageOffers.packageId });
     if (removed.length === 0) return { removed: false, disabledScheduleIds: [] };
-    if (isActiveWithoutRow({ ...pkg, offeredToOrg: false })) {
+    if (isActiveEverywhereByDefault(pkg)) {
       return { removed: true, disabledScheduleIds: [] };
     }
     // Rows that decided about the offer go with it, schedules off like any withdrawal.

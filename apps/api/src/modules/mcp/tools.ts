@@ -2273,7 +2273,9 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "and the integrations the caller already has connected: one entry per integration with a " +
       "connection the caller may bind in that space, its own or shared into the space, each " +
       "listing those `connections` (`id`, `label`, `account_id`, `owned_by_actor`, " +
-      "`needs_reconnection`). `active: false` means the integration is switched off in that " +
+      "`needs_reconnection`). `via` says why the integration is placed in that space " +
+      "(`home`, `shared`, `system`, `organization`), `null` when the caller holds a connection but " +
+      "the integration is not placed there. `active: false` means the integration is switched off in that " +
       "space: a run there cannot use it until it is activated (`activatePackage`) or offered to " +
       "the organization (in the organization catalog, or with `offerPackageToOrg` from an unconfined user credential). An entry flagged `needs_reconnection` has no " +
       "healthy connection: its owner must reconnect it before use. " +

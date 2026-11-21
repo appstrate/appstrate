@@ -79,8 +79,14 @@ export type IntegrationWizardStep = "notRemote" | "inactive" | "connect" | "tool
 export type ProxyConnectionStatus =
   paths["/api/integrations/{packageId}"]["get"]["responses"][200]["content"]["application/json"]["proxy_connection"]["status"];
 
-/** `must_choose` gets its choice at the tools step; `not_required` (AFPS §7.2) has nothing to connect. */
-function connectionProceeds(status: ProxyConnectionStatus): boolean {
+/**
+ * `must_choose` gets its choice at the tools step; `not_required` (AFPS §7.2) has nothing to
+ * connect. A never-published integration (`not_published`) hides the connection's own verdict,
+ * which the proxy cannot judge before the first publish, so the step reads whether an account
+ * exists; the tools step then publishes.
+ */
+function connectionProceeds(status: ProxyConnectionStatus, connected: boolean): boolean {
+  if (status === "not_published") return connected;
   return status === "ready" || status === "must_choose" || status === "not_required";
 }
 
@@ -133,6 +139,8 @@ interface IntegrationWizardFacts {
   active: boolean;
   published: boolean;
   connection: ProxyConnectionStatus;
+  /** An account exists on some auth, or the integration declares none. */
+  connected: boolean;
   /** The manifest the detail reads (the published version, else the draft) declares tools. */
   toolsDeclared: boolean;
 }
@@ -144,7 +152,7 @@ interface IntegrationWizardFacts {
 export function integrationWizardStep(facts: IntegrationWizardFacts): IntegrationWizardStep {
   if (!facts.remote) return "notRemote";
   if (!facts.active) return "inactive";
-  if (!connectionProceeds(facts.connection)) return "connect";
+  if (!connectionProceeds(facts.connection, facts.connected)) return "connect";
   return facts.published && facts.toolsDeclared ? "ready" : "tools";
 }
 

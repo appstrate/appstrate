@@ -236,6 +236,61 @@ async function resolvePublishedManifest(
     : { ok: false, reason: "not_found" };
 }
 
+/**
+ * The published (`latest`, unpinned) manifest of each of `ids` that has one, in a constant number
+ * of queries. {@link resolvePublishedManifest}'s selection, batched: an id with no usable version
+ * (unresolvable `latest`, another type, an unparsable manifest) is absent from `manifests`.
+ * `unpublished` holds the ids with no published version at all (`no_published_version`): the
+ * only ones whose draft stands in for a published manifest, as the sheet does.
+ */
+export async function readPublishedIntegrationManifests(
+  ids: readonly string[],
+  orgId: string,
+  executor: DbOrTx = db,
+): Promise<{ manifests: Map<string, IntegrationManifest>; unpublished: Set<string> }> {
+  const system = getSystemPackages();
+  const manifests = new Map<string, IntegrationManifest>();
+  const unpublished = new Set<string>();
+  const local: string[] = [];
+  for (const id of new Set(ids)) {
+    const sys = system.get(id);
+    if (!sys) {
+      local.push(id);
+      continue;
+    }
+    const parsed = parseIntegrationManifest(sys.manifest);
+    if (parsed.ok) manifests.set(id, parsed.manifest);
+  }
+  if (local.length === 0) return { manifests, unpublished };
+
+  const selectVersion = await integrationVersionCatalog(local, orgId, executor);
+  const packageOfVersion = new Map<number, string>();
+  for (const id of local) {
+    const selected = selectVersion(id);
+    if (selected.ok) packageOfVersion.set(selected.id, id);
+    else if (selected.reason === "no_published_version") unpublished.add(id);
+  }
+  if (packageOfVersion.size === 0) return { manifests, unpublished };
+
+  const rows = await executor
+    .select({ id: packageVersions.id, manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .innerJoin(
+      packages,
+      and(
+        eq(packages.id, packageVersions.packageId),
+        eq(packages.type, "integration"),
+        orgOrSystemFilter(orgId),
+      ),
+    )
+    .where(inArray(packageVersions.id, [...packageOfVersion.keys()]));
+  for (const row of rows) {
+    const parsed = parseIntegrationManifest(row.manifest);
+    if (parsed.ok) manifests.set(packageOfVersion.get(row.id)!, parsed.manifest);
+  }
+  return { manifests, unpublished };
+}
+
 /** Load version metadata once for all requested packages. Only selected manifests need loading. */
 async function integrationVersionCatalog(ids: string[], orgId: string, executor: DbOrTx = db) {
   const [versions, tags] = await Promise.all([

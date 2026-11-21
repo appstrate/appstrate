@@ -1539,7 +1539,7 @@ export interface paths {
         };
         /**
          * Get integration detail + per-auth status
-         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.
+         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and whether this caller may offer it).
          */
         get: operations["getIntegration"];
         put?: never;
@@ -4188,7 +4188,7 @@ export interface paths {
         get?: never;
         /**
          * Offer a package to the organization
-         * @description Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).
+         * @description Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).
          */
         put: operations["offerPackageToOrg"];
         post?: never;
@@ -5182,7 +5182,7 @@ export interface paths {
         post?: never;
         /**
          * Deactivate a package in this space
-         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.
+         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).
          */
         delete: operations["deactivatePackage"];
         options?: never;
@@ -6593,13 +6593,15 @@ export interface components {
             offered_to_org: boolean;
             /** @description Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home. Creating an offer also requires a published version for a homed package. The route stays the authority; this is its verdict served in advance. */
             org_offerable: boolean;
-            /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
+            /** @description Active in every space by the deployment's default alone (a system-source package the deployment switches on; an organization-published integration named in `SYSTEM_INTEGRATIONS` is not): an offer would change nothing, so `PUT …/org-offer` refuses to create one (400) while an existing offer can still be withdrawn. */
+            active_by_default: boolean;
+            /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance. */
             activation: {
                 spaceId: string;
                 /** @enum {string} */
                 activate: "allowed" | "not_shareable" | "forbidden";
                 /** @enum {string} */
-                deactivate: "allowed" | "not_shareable" | "forbidden";
+                deactivate: "allowed" | "not_shareable" | "forbidden" | "runtime_bound";
             }[];
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
@@ -7045,6 +7047,30 @@ export interface components {
              * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
              */
             deleting_at: string | null;
+        };
+        /** @description What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation. */
+        PackageAvailability: {
+            /**
+             * @description WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.
+             * @enum {string}
+             */
+            via: "home" | "shared" | "system" | "organization";
+            /**
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.
+             * @enum {string}
+             */
+            state: "active" | "inactive" | "none";
+            /** @description Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`. */
+            shared_by: {
+                user_id: string;
+                name: string;
+            } | null;
+            /** @description Offered to the organization (`offered_to_org` of the library entry). */
+            offered_to_org: boolean;
+            /** @description Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry). */
+            org_offerable: boolean;
+            /** @description Active in every space by the deployment's default (`active_by_default` of the library entry). */
+            active_by_default: boolean;
         };
         PackageFileDeleteEntry: {
             /**
@@ -12514,13 +12540,13 @@ export interface operations {
                             /** @description Integration package id: the `X-Integration-Id` of a call. */
                             integration_package_id: string;
                             display_name: string;
-                            /** @description What a call naming no connection gets for this caller, as the integration detail's `proxy_connection` states it, judged against the latest published version: one of `none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable` (`proxy_closed` never: a closed space refuses the listing itself). */
+                            /** @description What a call naming no connection gets for this caller, as the integration detail's `proxy_connection` states it, judged against the latest published version: one of `none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable` (`proxy_closed` never: a closed space refuses the listing itself; nor `not_published`: only integrations with a published version are listed). */
                             proxy_connection: {
                                 /**
-                                 * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
+                                 * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections. `not_published` — the integration has no published version, so the proxy answers `404` to any call outside a run whatever the connections (publish one); it outranks every other status.
                                  * @enum {string}
                                  */
-                                status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
+                                status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required" | "not_published";
                                 /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                                 imposed: boolean;
                             };
@@ -14204,6 +14230,7 @@ export interface operations {
                         manifest: {
                             [key: string]: unknown;
                         };
+                        availability: components["schemas"]["PackageAvailability"];
                         auths: {
                             auth_key: string;
                             /**
@@ -14298,15 +14325,17 @@ export interface operations {
                         block_user_connections: boolean;
                         /** Format: uri */
                         platform_redirect_uri: string;
-                        /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
+                        /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. A ready verdict identifies the selected account when it is listed in this response. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
                         proxy_connection: {
                             /**
-                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
+                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections. `not_published` — the integration has no published version, so the proxy answers `404` to any call outside a run whatever the connections (publish one); it outranks every other status.
                              * @enum {string}
                              */
-                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required" | "not_published";
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
+                            /** @description Selected connection from auths[].connections when the unnamed call is ready. */
+                            connection_id?: string;
                         };
                     };
                 };
@@ -15849,6 +15878,7 @@ export interface operations {
                         manifest: {
                             [key: string]: unknown;
                         };
+                        availability: components["schemas"]["PackageAvailability"];
                         auths: {
                             auth_key: string;
                             /**
@@ -15943,15 +15973,17 @@ export interface operations {
                         block_user_connections: boolean;
                         /** Format: uri */
                         platform_redirect_uri: string;
-                        /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
+                        /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. A ready verdict identifies the selected account when it is listed in this response. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
                         proxy_connection: {
                             /**
-                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
+                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections. `not_published` — the integration has no published version, so the proxy answers `404` to any call outside a run whatever the connections (publish one); it outranks every other status.
                              * @enum {string}
                              */
-                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required" | "not_published";
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
+                            /** @description Selected connection from auths[].connections when the unnamed call is ready. */
+                            connection_id?: string;
                         };
                     };
                 };
@@ -16010,6 +16042,7 @@ export interface operations {
                      *             "home_shareable": true,
                      *             "offered_to_org": false,
                      *             "org_offerable": true,
+                     *             "active_by_default": false,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -16055,6 +16088,7 @@ export interface operations {
                      *             "home_shareable": false,
                      *             "offered_to_org": false,
                      *             "org_offerable": false,
+                     *             "active_by_default": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -17600,6 +17634,7 @@ export interface operations {
                      *           "name": "Gmail",
                      *           "source": "own",
                      *           "active": true,
+                     *           "via": "system",
                      *           "connections": [
                      *             {
                      *               "id": "conn_1",
@@ -17615,6 +17650,7 @@ export interface operations {
                      *           "name": "ClickUp",
                      *           "source": "shared",
                      *           "active": true,
+                     *           "via": "organization",
                      *           "connections": [
                      *             {
                      *               "id": "conn_2",
@@ -17705,6 +17741,11 @@ export interface operations {
                             source: "own" | "shared" | "both";
                             /** @description Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent. */
                             active: boolean;
+                            /**
+                             * @description Why the integration is placed in this space (`PackagePlacement.via`, one definition for the library, the integration sheet and this list); `null` when it is not placed here: the caller holds a connection usable here, but the integration itself does not reach this space.
+                             * @enum {string|null}
+                             */
+                            via: "home" | "shared" | "system" | "organization" | null;
                             /** @description The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`. */
                             connections: {
                                 id: string;
@@ -24664,6 +24705,7 @@ export interface operations {
                     "application/json": components["schemas"]["PackageOrgOffer"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -28010,6 +28052,7 @@ export interface operations {
                      *             "home_shareable": true,
                      *             "offered_to_org": false,
                      *             "org_offerable": true,
+                     *             "active_by_default": false,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -28055,6 +28098,7 @@ export interface operations {
                      *             "home_shareable": false,
                      *             "offered_to_org": false,
                      *             "org_offerable": false,
+                     *             "active_by_default": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -28442,6 +28486,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

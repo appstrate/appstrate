@@ -23,7 +23,12 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgOffer, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { activeHereSql, isActiveHere } from "../../../src/services/package-activation.ts";
+import {
+  activeHereSql,
+  isActiveHere,
+  placementVia,
+} from "../../../src/services/package-activation.ts";
+import { placementReadFilter, placementRowJoin } from "../../../src/services/package-placement.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -66,6 +71,17 @@ async function sqlSaysActive(spaceId: string, packageId: string): Promise<boolea
   return hit!.active;
 }
 
+/** `placementReadFilter`, asked about ONE package in ONE space — the SQL twin of `placementVia`. */
+async function sqlSaysPlaced(spaceId: string, packageId: string): Promise<boolean> {
+  const [hit] = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+    .where(and(eq(packages.id, packageId), placementReadFilter(spaceId)))
+    .limit(1);
+  return hit !== undefined;
+}
+
 beforeEach(async () => {
   await truncateAll();
   ctx = await createTestContext();
@@ -100,6 +116,13 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
             const fromSql = await sqlSaysActive(ctx.defaultSpaceId, id);
             const fromTs = isActiveHere({ id, type, source, offeredToOrg: offered }, row);
             expect(fromTs).toBe(fromSql);
+
+            // Placement agrees too: `placementVia` names a provenance exactly where
+            // `placementReadFilter` places the package.
+            const homeSpaceId = source === "system" ? null : elsewhere;
+            const pkg = { id, type, source, homeSpaceId, offeredToOrg: offered };
+            const via = placementVia(pkg, ctx.defaultSpaceId, row && { placedByOffer: false });
+            expect(via !== null).toBe(await sqlSaysPlaced(ctx.defaultSpaceId, id));
 
             // And the rule itself: the row wins, and the default or the offer
             // only decide where the space has said nothing.

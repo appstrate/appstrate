@@ -50,7 +50,7 @@ describe("connectionLockHintKey", () => {
     );
   });
 
-  it("tells anyone who may not change the access rules whom to ask", () => {
+  it("tells anyone who may not change the default connection whom to ask", () => {
     expect(connectionLockHintKey("admin_pin", false)).toBe(
       "integration.connection.lock.adminPinAsk",
     );

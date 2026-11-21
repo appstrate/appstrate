@@ -199,6 +199,39 @@ function SpaceLineBlocks() {
   );
 }
 
+/** An integration's « Connexion utilisée par défaut », under its connections table: a group heading, the default's row, then the exceptions (sub-heading, table, add button). */
+function DefaultConnectionBlocks({ canConfigure }: { canConfigure: boolean }) {
+  return (
+    <div className="mt-8 flex flex-col gap-6">
+      <header>
+        <SkeletonLine className="w-48 text-base font-semibold" />
+        <div className="mt-1 max-w-2xl">
+          <SkeletonLine className="w-full text-sm leading-relaxed" />
+        </div>
+      </header>
+      <SkeletonLine className="w-64 text-sm" />
+      {canConfigure && (
+        <>
+          <SettingsSkeleton rows={1} />
+          {/* The exceptions: their sub-heading, the table's card, then « Ajouter ». */}
+          <div>
+            <header className="mb-3">
+              <SkeletonLine className="w-44 text-sm font-semibold" />
+              <div className="mt-1 max-w-2xl">
+                <SkeletonLine className="w-full text-sm leading-relaxed" />
+              </div>
+            </header>
+            <div className="mb-4">
+              <TableBlocks framed />
+            </div>
+            <Skeleton className="h-8 w-32" />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** A list tab (runs, connections, usage): its toolbar over the table's own card. */
 function ListTabBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
@@ -264,7 +297,14 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
  * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
  * in the tab panel's card.
  */
-function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
+function RailPanelBlocks({
+  spaceLine = false,
+  rows,
+}: {
+  spaceLine?: boolean;
+  /** The open section's rows, when it has fewer than `SettingsSkeleton`'s default. */
+  rows?: number;
+}) {
   return (
     <Card className="@container/split overflow-hidden">
       <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
@@ -288,7 +328,7 @@ function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
                 <SkeletonLine className="w-1/3 text-sm leading-relaxed" />
               </div>
             </header>
-            <SettingsSkeleton />
+            <SettingsSkeleton rows={rows} />
           </div>
         </div>
       </div>
@@ -371,6 +411,17 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
   const spaceLine = useOpensWithSpaceLine(type, tab);
+  const { can } = usePermissions();
+  const search = new URLSearchParams(useLocation().search);
+  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
+  // « Création de connexions » is one setting; the other sections hold several.
+  const opensAccess =
+    type === "integration" &&
+    resolveIntegrationSettingsSection(search.get("integrationSettings"), {
+      canConfigure: configuresIntegration,
+      isOwned: true,
+      hasDefinition: true,
+    }) === "access";
   return (
     <DetailPageSkeleton
       title={title}
@@ -382,9 +433,14 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       spaces
       panel={
         tab === "settings" ? (
-          <RailPanelBlocks spaceLine={spaceLine} />
+          <RailPanelBlocks spaceLine={spaceLine} rows={opensAccess ? 1 : undefined} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
+        ) : type === "integration" && tab === "connections" ? (
+          <>
+            <ListTabBlocks spaceLine={spaceLine} />
+            <DefaultConnectionBlocks canConfigure={can("integrations:configure")} />
+          </>
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
           <ListTabBlocks spaceLine={spaceLine} />
         ) : type === "agent" ? (

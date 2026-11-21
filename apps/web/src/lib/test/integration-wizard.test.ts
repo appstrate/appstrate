@@ -106,6 +106,7 @@ describe("integrationWizardStep", () => {
       active: true,
       published: true,
       connection: "ready" as const,
+      connected: true,
       toolsDeclared: false,
     };
     expect(integrationWizardStep({ ...facts, remote: false })).toBe("notRemote");
@@ -120,6 +121,7 @@ describe("integrationWizardStep", () => {
       active: true,
       published: false,
       connection: "none" as const,
+      connected: true,
       toolsDeclared: false,
     };
     expect(integrationWizardStep(draft)).toBe("connect");
@@ -136,9 +138,33 @@ describe("integrationWizardStep", () => {
       active: true,
       published: true,
       connection: "none" as const,
+      connected: true,
       toolsDeclared: true,
     };
     expect(integrationWizardStep(facts)).toBe("connect");
+  });
+});
+
+describe("integrationWizardStep — never published", () => {
+  const facts = {
+    remote: true,
+    active: true,
+    published: false,
+    connection: "not_published" as const,
+    connected: false,
+    toolsDeclared: false,
+  };
+
+  it("reads whether an account exists, since the verdict hides it", () => {
+    expect(integrationWizardStep(facts)).toBe("connect");
+    expect(integrationWizardStep({ ...facts, connected: true })).toBe("tools");
+  });
+
+  it("offers to connect, with no blocker", () => {
+    expect(connectBlocker({ status: "not_published", imposed: false })).toEqual({
+      blocker: "none",
+      offerConnect: true,
+    });
   });
 });
 
@@ -148,6 +174,7 @@ describe("integrationWizardStep — governed connection", () => {
     active: true,
     published: true,
     connection: "ready" as const,
+    connected: true,
     toolsDeclared: true,
   };
 
@@ -234,6 +261,7 @@ describe("integrationWizardStep — activation", () => {
       active: false,
       published: true,
       connection: "ready" as const,
+      connected: true,
       toolsDeclared: true,
     };
     expect(integrationWizardStep(ready)).toBe("inactive");

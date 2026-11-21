@@ -81,6 +81,36 @@ const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
  * are present on every read.
  */
 /**
+ * The `via` / `state` / `shared_by` group of a placement, on `PackagePlacement`
+ * (one cell of the library map) and `PackageAvailability` (the same cell, read
+ * for the current space). ONE definition, like `PACKAGE_HOME_PROPERTIES`.
+ */
+const PACKAGE_PLACEMENT_STATE_PROPERTIES = {
+  via: {
+    type: "string",
+    enum: ["home", "shared", "system", "organization"],
+    description:
+      "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.",
+  },
+  state: {
+    type: "string",
+    enum: ["active", "inactive", "none"],
+    description:
+      "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
+  },
+  shared_by: {
+    type: ["object", "null"],
+    description:
+      'Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
+    required: ["user_id", "name"],
+    properties: {
+      user_id: { type: "string" },
+      name: { type: "string" },
+    },
+  },
+} as const;
+
+/**
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
  * group, on every shape that carries a package's home (`AgentDetail`,
  * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`,
@@ -3169,6 +3199,7 @@ export const schemas = {
         "home_shareable",
         "offered_to_org",
         "org_offerable",
+        "active_by_default",
         "placements",
         "activation",
       ],
@@ -3201,17 +3232,25 @@ export const schemas = {
           description:
             "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home. Creating an offer also requires a published version for a homed package. The route stays the authority; this is its verdict served in advance.",
         },
+        active_by_default: {
+          type: "boolean",
+          description:
+            "Active in every space by the deployment's default alone (a system-source package the deployment switches on; an organization-published integration named in `SYSTEM_INTEGRATIONS` is not): an offer would change nothing, so `PUT …/org-offer` refuses to create one (400) while an existing offer can still be withdrawn.",
+        },
         activation: {
           type: "array",
           description:
-            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
             required: ["spaceId", "activate", "deactivate"],
             properties: {
               spaceId: { type: "string" },
               activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
-              deactivate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              deactivate: {
+                type: "string",
+                enum: ["allowed", "not_shareable", "forbidden", "runtime_bound"],
+              },
             },
           },
         },
@@ -3226,6 +3265,29 @@ export const schemas = {
       },
     },
   },
+  PackageAvailability: {
+    type: "object",
+    description:
+      "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation.",
+    required: ["via", "state", "shared_by", "offered_to_org", "org_offerable", "active_by_default"],
+    properties: {
+      ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
+      offered_to_org: {
+        type: "boolean",
+        description: "Offered to the organization (`offered_to_org` of the library entry).",
+      },
+      org_offerable: {
+        type: "boolean",
+        description:
+          "Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry).",
+      },
+      active_by_default: {
+        type: "boolean",
+        description:
+          "Active in every space by the deployment's default (`active_by_default` of the library entry).",
+      },
+    },
+  },
   PackagePlacement: {
     type: "object",
     description:
@@ -3236,28 +3298,7 @@ export const schemas = {
         type: "string",
         description: "Space id (`spc_…`) — always one the caller reads.",
       },
-      via: {
-        type: "string",
-        enum: ["home", "shared", "system", "organization"],
-        description:
-          "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.",
-      },
-      state: {
-        type: "string",
-        enum: ["active", "inactive", "none"],
-        description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
-      },
-      shared_by: {
-        type: ["object", "null"],
-        description:
-          'Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
-        required: ["user_id", "name"],
-        properties: {
-          user_id: { type: "string" },
-          name: { type: "string" },
-        },
-      },
+      ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
     },
   },
   ShareTarget: {

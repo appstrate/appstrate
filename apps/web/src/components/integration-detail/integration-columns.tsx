@@ -28,7 +28,6 @@ import { isConnectionOwnedBy } from "../integration-connect/connection-ownership
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
 import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
 import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
-import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
 import {
@@ -307,12 +306,6 @@ export function useConnectionColumns({
       width: 84,
       align: "end",
       cell: (c) => <CellDate value={c.expiresAt} granularity="date" />,
-    },
-    {
-      id: "usage",
-      header: t("integration.connection.col.usage"),
-      width: 184,
-      cell: (c) => <ConnectionScopeBadge scope={c.scope} testId={`connection-scope-${c.id}`} />,
     },
     {
       id: "shared",

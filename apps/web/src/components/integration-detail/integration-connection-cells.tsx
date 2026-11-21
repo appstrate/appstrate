@@ -13,8 +13,8 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
-import { Bot, Pencil, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bot, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { InlineEditableLabel } from "../inline-editable-label";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
@@ -39,7 +39,6 @@ import { useOrgSpaces, useSpaceLabelOf } from "../../hooks/use-spaces";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packageDetailPath } from "../../lib/package-paths";
-import { integrationSettingsHref } from "../../lib/settings-section-href";
 import { TableRowActions } from "../table-row-actions";
 
 /** The agents an admin pin binds this connection to; the queries only run for an admin-pin-locked row. */
@@ -248,7 +247,6 @@ export function ConnectionActionsCell({
     lockKey,
   );
   const canReach = useCanReach();
-  const location = useLocation();
   const canReconnect =
     isOwn && connection.needs_reconnection && canConnect && canRenew && authType === "oauth2";
   return (
@@ -302,14 +300,6 @@ export function ConnectionActionsCell({
               </Link>
             </DropdownMenuItem>
           ))}
-        {isOwn && lockHint && isAdmin && (
-          <DropdownMenuItem asChild>
-            <Link to={integrationSettingsHref(location.pathname, "access")}>
-              <ShieldCheck />
-              {t("integration.connection.lock.openAccessRules")}
-            </Link>
-          </DropdownMenuItem>
-        )}
       </TableRowActions>
       <ConnectionDeleteConfirm
         connectionId={connection.id}

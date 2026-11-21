@@ -2,15 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import { OptionSelect } from "@/components/app-ui/option-select";
-import { SettingsHeading } from "../settings/settings-heading";
 import { SaveFeedback } from "../settings/save-feedback";
 import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
-import { OrgDefaultSection } from "./org-default-section";
-import { PinManagementSection } from "./pin-management-section";
 
 /**
- * Who may create connections, the space default and the per-agent exceptions:
- * cross-cutting, not tied to one auth, and admin only.
+ * Who may create connections: cross-cutting, not tied to one auth, and admin only. The account
+ * runs use by default and the per-agent exceptions live in the Connexions tab.
  */
 export function AccessRulesSection({
   packageId,
@@ -19,15 +16,9 @@ export function AccessRulesSection({
   packageId: string;
   blockUserConnections: boolean;
 }) {
-  const { t } = useTranslation("settings");
   return (
-    <div className="flex flex-col gap-8" data-testid="access-rules-section">
-      <section>
-        <SettingsHeading level="group" title={t("integration.admin.accounts.title")} />
-        <BlockUserConnectionsToggle packageId={packageId} initialBlocked={blockUserConnections} />
-        <OrgDefaultSection packageId={packageId} />
-      </section>
-      <PinManagementSection packageId={packageId} />
+    <div data-testid="access-rules-section">
+      <BlockUserConnectionsToggle packageId={packageId} initialBlocked={blockUserConnections} />
     </div>
   );
 }
@@ -48,7 +39,7 @@ function BlockUserConnectionsToggle({
       ? updateSettings.variables.body.block_user_connections
       : initialBlocked;
   return (
-    <div className="grid gap-6 pb-8 md:grid-cols-2" data-testid="block-user-connections-section">
+    <div className="grid gap-6 md:grid-cols-2" data-testid="block-user-connections-section">
       <div className="min-w-0">
         <p id="account-creation-label" className="mb-3 text-sm font-medium">
           {t("integration.admin.creation.title")}

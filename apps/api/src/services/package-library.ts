@@ -16,18 +16,18 @@ import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts
 import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
-import { isActiveHere, isActiveWithoutRow } from "./package-activation.ts";
+import {
+  isActiveEverywhereByDefault,
+  isActiveHere,
+  placementVia,
+  type PlacementVia,
+} from "./package-activation.ts";
+import { notFound } from "../lib/errors.ts";
+import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
 import { listOrgOffers } from "./package-placement.ts";
-
-/**
- * How a package reaches a space: `system`, its home, a row outside it
- * (`shared`), or an offer to the organization with no row of the space's own
- * (`organization`). A system integration activated solely by the offer also reports `organization` (§6.8).
- */
-type PlacementVia = "home" | "shared" | "system" | "organization";
 
 /** Whether the space RUNS what it was placed. */
 type PlacementState = "active" | "inactive" | "none";
@@ -45,9 +45,11 @@ interface Placement {
  * Whether the caller may switch a package on/off in one space, as the
  * `…/packages` routes judge it: `not_shareable` = not placed there and no
  * `<type>:share` in its home; `forbidden` = the `activate`/`deactivate` grant is
- * missing (a personal space's owner needs none).
+ * missing (a personal space's owner needs none); `runtime_bound` = a deactivate
+ * of a system integration serving the run's own tools, which stays active
+ * everywhere whatever the role.
  */
-type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
+type ActivationVerdict = "allowed" | "not_shareable" | "forbidden" | "runtime_bound";
 
 /** The two verdicts of one (package, space) pair, for every space the library lists. */
 interface ActivationCell {
@@ -70,6 +72,8 @@ interface LibraryPackage {
   offered_to_org: boolean;
   /** Whether THIS caller may offer it or withdraw the offer (`PUT|DELETE …/org-offer`). */
   org_offerable: boolean;
+  /** Active in every space by the deployment's default: an offer would change nothing. */
+  active_by_default: boolean;
   placements: Placement[];
   activation: ActivationCell[];
 }
@@ -83,20 +87,34 @@ interface LibraryPackage {
  * still listed when the caller could place it (`<type>:share` in its home), but
  * never into a personal destination.
  */
-export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
+export function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
+  return readPackageLibrary(c, spaceId);
+}
+
+type IntegrationDetailSelection = { integrationId: string; permission: "read" | "configure" };
+
+async function readPackageLibrary(
+  c: Context<AppEnv>,
+  spaceId?: string,
+  detail?: IntegrationDetailSelection,
+) {
   const orgId = c.get("orgId");
+  const packageIds = detail ? [detail.integrationId] : undefined;
 
   const accessible = await packageAccessSpaces(c);
   // The caller's own personal space takes no activation grant: ownership authorizes
   // (`coarseSpacePackageGate`, `routes/spaces.ts`).
   const personalOwnerId = callerPersonalOwnerId(c);
+  const runtimeBound = new Set(listRuntimeBoundSystemIntegrationIds());
   const activationVerdict = (
     type: PackageType,
     space: (typeof accessible)[number],
     placed: boolean,
     shareable: boolean,
     next: boolean,
+    packageId: string,
   ): ActivationVerdict => {
+    if (!next && type === "integration" && runtimeBound.has(packageId)) return "runtime_bound";
     if (!placed && !shareable) return "not_shareable";
     const ownSpace = space.ownerUserId !== null && space.ownerUserId === personalOwnerId;
     if (ownSpace) return "allowed";
@@ -137,7 +155,11 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
             (space) =>
               (!target?.ownerUserId || space.id === target.id) &&
               visibleIds.has(space.id) &&
-              space.permissions.has(packagePermission(type, "read")),
+              space.permissions.has(
+                detail && type === "integration"
+                  ? `integrations:${detail.permission}`
+                  : packagePermission(type, "read"),
+              ),
           )
           .map((space) => space.id),
       ),
@@ -176,10 +198,16 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ),
     )
     .leftJoin(user, eq(user.id, organizationMembers.userId))
-    .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .where(
+      and(
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        detail ? eq(packages.id, detail.integrationId) : undefined,
+      ),
+    )
     .orderBy(packages.id);
 
-  const offeredIds = await listOrgOffers(orgId);
+  const offeredIds = await listOrgOffers(orgId, packageIds);
 
   /** packageId → spaceId → the row's switches, for the rows the caller's spaces hold. */
   const placementRows = new Map<
@@ -240,20 +268,11 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const rowsBySpace = placementRows.get(row.id);
 
     const offered = offeredIds.has(row.id);
-    const activatedByOffer = offered && !isActiveWithoutRow({ ...row, offeredToOrg: false });
+    const activeByDefault = isActiveEverywhereByDefault({ id: row.id, type, source: row.source });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
-      const via: PlacementVia | null =
-        row.source === "system" && (placementRow || !activatedByOffer)
-          ? "system"
-          : row.homeSpaceId === space
-            ? "home"
-            : placementRow && !placementRow.placedByOffer
-              ? "shared"
-              : offered
-                ? "organization"
-                : null;
+      const via = placementVia({ ...row, offeredToOrg: offered }, space, placementRow);
       if (via === null) continue;
       placements.push({
         space_id: space,
@@ -275,13 +294,21 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const placedIn = new Set(placements.map((placement) => placement.space_id));
     const activation = visibleSpaces.map((space): ActivationCell => ({
       spaceId: space.id,
-      activate: activationVerdict(type, space, placedIn.has(space.id), home.home_shareable, true),
+      activate: activationVerdict(
+        type,
+        space,
+        placedIn.has(space.id),
+        home.home_shareable,
+        true,
+        row.id,
+      ),
       deactivate: activationVerdict(
         type,
         space,
         placedIn.has(space.id),
         home.home_shareable,
         false,
+        row.id,
       ),
     }));
 
@@ -296,10 +323,14 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ...home,
       offered_to_org: offered,
       // The offer door's verdict (`assertPackageOfferAccess`): the role and ceiling, the home's
-      // `share` (`home_shareable`) and, when creating an offer for a homed package, a published version.
+      // `share` (`home_shareable`) and, when creating an offer for a homed package, a published
+      // version; a system package already active by default takes no new offer.
       org_offerable:
         callerMayOffer(c, type) &&
-        (row.source === "system" || (home.home_shareable && (offered || published.has(row.id)))),
+        (row.source === "system"
+          ? offered || !activeByDefault
+          : home.home_shareable && (offered || published.has(row.id))),
+      active_by_default: activeByDefault,
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
       placements,
@@ -328,4 +359,26 @@ function placementState(
 ): PlacementState {
   const row = enabled === undefined ? undefined : { enabled };
   return isActiveHere(pkg, row) ? "active" : row ? "inactive" : "none";
+}
+
+/** A single integration's library cell under the permission required by the calling route. */
+export async function integrationAvailabilityIn(
+  c: Context<AppEnv>,
+  packageId: string,
+  spaceId: string,
+  permission: IntegrationDetailSelection["permission"],
+) {
+  const library = await readPackageLibrary(c, spaceId, { integrationId: packageId, permission });
+  const entry = library.packages.integration?.[0];
+  const placement = entry?.placements.find((p) => p.space_id === spaceId);
+  if (!entry || !placement) {
+    throw notFound(`Package '${packageId}' not found in this organization`);
+  }
+  const { space_id: _space, ...here } = placement;
+  return {
+    ...here,
+    offered_to_org: entry.offered_to_org,
+    org_offerable: entry.org_offerable,
+    active_by_default: entry.active_by_default,
+  };
 }

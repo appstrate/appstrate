@@ -4,7 +4,8 @@
  * "Is this package ACTIVE in this space?" — THE definition, stated twice and
  * nowhere else: once as a SQL expression for the queries that filter or project
  * it, once as a pure in-memory predicate for the callers that already hold the
- * rows.
+ * rows. Where a placement comes FROM ({@link placementVia}) is stated here too,
+ * once.
  *
  *   activeHere = the placement row's `enabled`, when there IS a row
  *              = the deployment's default OR an offer to the space's
@@ -13,7 +14,8 @@
  * The ROW ALWAYS WINS. That is why a system package can be switched off per
  * space like any other: an explicit `false` is an operator decision the
  * platform must not overrule, and the row survives every run, so the opt-out
- * is sticky. A row is a placement of its own (`placementReadFilter`,
+ * is sticky. The one exception is a runtime-bound system integration: it
+ * serves the run's own tools, so `deactivatePackage` refuses it. A row is a placement of its own (`placementReadFilter`,
  * `services/package-placement.ts`), so no placement conjunct is needed: a
  * package placed outside its home with `enabled = false` is placed and off.
  *
@@ -57,15 +59,35 @@ function activeWithoutRowIntegrationIds(): ReadonlySet<string> {
 }
 
 /**
+ * Is the package active in a space with no row and no offer: the deployment's
+ * default alone? An offer to it would change nothing.
+ */
+export function isActiveByDefault(pkg: Omit<ActivatablePackage, "offeredToOrg">): boolean {
+  if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
+  return pkg.source === "system";
+}
+
+/**
+ * Does the deployment alone make the package run in EVERY space: shipped by the
+ * platform (`source = 'system'`, placed everywhere) AND active by default? An
+ * integration the organization published and `SYSTEM_INTEGRATIONS` names is
+ * active-without-row by {@link isActiveByDefault} but placed only where it is
+ * homed or shared, so an offer still changes something for it.
+ */
+export function isActiveEverywhereByDefault(
+  pkg: Omit<ActivatablePackage, "offeredToOrg">,
+): boolean {
+  return pkg.source === "system" && isActiveByDefault(pkg);
+}
+
+/**
  * Is the package active in a space that holds NO placement row for it?
  *
  * The deployment's default or the organization's offer: the half of the rule
  * that looks at the package rather than at the space's decision.
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
-  if (pkg.offeredToOrg) return true;
-  if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
-  return pkg.source === "system";
+  return pkg.offeredToOrg || isActiveByDefault(pkg);
 }
 
 /**
@@ -77,6 +99,36 @@ export function isActiveHere(
   row: { enabled: boolean } | null | undefined,
 ): boolean {
   return row ? row.enabled : isActiveWithoutRow(pkg);
+}
+
+/**
+ * How a package reaches a space: `system`, its home, a row outside it
+ * (`shared`), or an offer to the organization with no row of the space's own
+ * (`organization`). A system integration activated solely by the offer also
+ * reports `organization` (§6.8).
+ */
+export type PlacementVia = "home" | "shared" | "system" | "organization";
+
+/**
+ * Where a package's presence in a space comes from, or `null` when it is not
+ * placed there. `row` is the space's placement row, or `undefined` when it has
+ * none; `pkg.offeredToOrg` is the offer to that space's organization. A row an
+ * offer no longer explains (withdrawn) is a row outside the home: `shared`, as
+ * `placementReadFilter` reads it. A system package reports `system` unless the
+ * offer is what activates it and the space holds no row, or only an offer row.
+ */
+export function placementVia(
+  pkg: ActivatablePackage & { homeSpaceId: string | null },
+  spaceId: string,
+  row: { placedByOffer: boolean } | null | undefined,
+): PlacementVia | null {
+  const activatedByOffer = pkg.offeredToOrg && !isActiveByDefault(pkg);
+  // A system package the offer alone activates is `organization`, with no row or only an offer row.
+  const offerDecides = activatedByOffer && (!row || row.placedByOffer);
+  if (pkg.source === "system" && !offerDecides) return "system";
+  if (pkg.homeSpaceId === spaceId) return "home";
+  if (row && (!row.placedByOffer || !pkg.offeredToOrg)) return "shared";
+  return pkg.offeredToOrg ? "organization" : null;
 }
 
 /**

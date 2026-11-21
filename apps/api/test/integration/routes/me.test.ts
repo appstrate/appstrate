@@ -59,6 +59,9 @@ const app = getTestApp();
  * Space-scoped in `spaceId`, or org-scoped (connected from `originSpaceId`) when `spaceId` is
  * null. `sharedWithSpace` shares it into `spaceId` (or its origin).
  */
+// Each seeded connection is a second older than the next: "oldest first" never ties.
+let seededConnections = 0;
+
 async function seedConnectionFor(opts: {
   orgId: string;
   spaceId: string | null;
@@ -75,6 +78,14 @@ async function seedConnectionFor(opts: {
     orgId: opts.orgId,
     type: "integration",
     source: "local",
+    // The connection's auth must be declared, or the context drops the connection.
+    draftManifest: {
+      name: opts.integrationId,
+      version: "0.1.0",
+      type: "integration",
+      description: "Test agent",
+      auths: { google: {} },
+    },
   }).catch(() => undefined); // already seeded by an earlier connection of the integration
   const [row] = await db
     .insert(integrationConnections)
@@ -89,6 +100,7 @@ async function seedConnectionFor(opts: {
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
       label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
+      createdAt: new Date(Date.now() - 3_600_000 + 1000 * seededConnections++),
       ...(opts.identityClaims ? { identityClaims: opts.identityClaims } : {}),
     })
     .returning({ id: integrationConnections.id });
