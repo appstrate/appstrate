@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `projectActiveInSpaces` in `@appstrate/core/mcp-spaces` filters launch alternatives by the spaces
+  where the tool can repeat the operation. `ACTIVE_IN_SPACES_HINT` is the optional instruction
+  accompanying those alternatives. `ACTIVE_SPACES_META_KEY` identifies the disclosed space IDs
+  in MCP result metadata so a chat can record them before showing the result.
 - **`AppstrateTurnContext`, `AppstrateTurnMetadata.context`** (`@appstrate/core/chat-turn-metadata`,
   #2318): the context of a chat turn's last settled model call (`tokens`), the window the engine
   ran against (`window`), its compaction threshold (`compactAt`) and whether the engine
