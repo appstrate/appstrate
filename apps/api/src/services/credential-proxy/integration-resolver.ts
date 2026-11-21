@@ -324,7 +324,9 @@ export function publishedManifests(
   orgId: string,
   integrationIds: readonly string[],
 ): Promise<Map<string, IntegrationManifest>> {
-  return readPublishedIntegrationManifests(integrationIds, orgId);
+  return readPublishedIntegrationManifests(integrationIds, orgId).then(
+    ({ manifests }) => manifests,
+  );
 }
 
 /**

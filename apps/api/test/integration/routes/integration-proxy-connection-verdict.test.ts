@@ -15,7 +15,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import {
@@ -207,7 +207,7 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
     expect(await verdict(caller)).toEqual({ status: "not_permitted", imposed: false });
   });
 
-  it("judges a never-published integration on its draft, the manifest the detail serves", async () => {
+  it("answers not_published for a never-published integration, with or without a connection, then ready once published", async () => {
     const draftOnly = "@verdict/draft";
     await seedPackage({
       id: draftOnly,
@@ -237,8 +237,10 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
       getTestApp().request(`/api/integrations/${id}`, { headers: authHeaders(ctx) });
     const read = async () =>
       ((await (await res(draftOnly)).json()) as { proxy_connection: unknown }).proxy_connection;
-    expect(await read()).toEqual({ status: "none", imposed: false });
+    expect(await read()).toEqual({ status: "not_published", imposed: false });
     const id = await seedProxyConnection(ctx, draftOnly, "draft_auth", { api_key: "sk" });
+    expect(await read()).toEqual({ status: "not_published", imposed: false });
+    await seedPublishedVersion(draftOnly, "1.0.0");
     expect(await read()).toEqual({ status: "ready", imposed: false, connection_id: id });
   });
 

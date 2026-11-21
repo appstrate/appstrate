@@ -16,7 +16,7 @@ import { orgPackageOffers, schedules, spacePackages, spaces } from "@appstrate/d
 import { forbidden, invalidRequest } from "../lib/errors.ts";
 import { assertHasPublishedVersion, loadPlaceablePackage } from "./space-packages.ts";
 import type { PlacementAuthority } from "./space-packages.ts";
-import { isActiveByDefault, isActiveEverywhereByDefault } from "./package-activation.ts";
+import { isActiveEverywhereByDefault } from "./package-activation.ts";
 import { disableArmedSchedules, withdrawPlacement } from "./package-placement.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 
@@ -75,8 +75,8 @@ export async function offerPackageToOrg(params: {
  * through `withdrawPlacement`), and spaces of the organization holding no row
  * of their own, other than its home (still
  * placed, now merely inactive: its schedules fail visibly like any deactivated
- * package's), and none at all when the deployment's default still activates
- * it.
+ * package's), and none at all when the deployment's default alone still
+ * activates it in every space.
  *
  * @returns the disabled schedule ids, whose jobs the caller removes once committed.
  */
@@ -93,7 +93,7 @@ export async function withdrawOrgOffer(params: {
       .where(and(eq(orgPackageOffers.orgId, orgId), eq(orgPackageOffers.packageId, packageId)))
       .returning({ packageId: orgPackageOffers.packageId });
     if (removed.length === 0) return { removed: false, disabledScheduleIds: [] };
-    if (isActiveByDefault(pkg)) {
+    if (isActiveEverywhereByDefault(pkg)) {
       return { removed: true, disabledScheduleIds: [] };
     }
     // Rows that decided about the offer go with it, schedules off like any withdrawal.

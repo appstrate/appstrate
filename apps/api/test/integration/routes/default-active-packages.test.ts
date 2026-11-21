@@ -13,7 +13,16 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPublishedVersion, seedSpace } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPublishedVersion,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -176,5 +185,41 @@ describe("an organization-published integration named in SYSTEM_INTEGRATIONS", (
 
     const seen = await libraryEntry(ORG_LISTED, second.id);
     expect(seen.placements).toMatchObject([{ space_id: second.id, via: "organization" }]);
+  });
+  it("withdrawing the offer removes the rows it placed, and the integration leaves that space", async () => {
+    await seedPackage({
+      id: ORG_LISTED,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: localIntegrationManifest({
+        name: ORG_LISTED,
+        displayName: "Probe",
+        auths: {
+          primary: {
+            type: "api_key",
+            authorizedUris: ["https://example.test/**"],
+            delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+          },
+        },
+      }) as unknown as Record<string, unknown>,
+    });
+    await seedPublishedVersion(ORG_LISTED, "1.0.0");
+    const second = await seedSpace({ orgId: ctx.orgId, name: "Second" });
+    const inSecond = authHeaders({ ...ctx, defaultSpaceId: second.id });
+    expect((await offer(ORG_LISTED)).status).toBe(200);
+    await seedSpacePackage(second.id, ORG_LISTED, { enabled: true, placedByOffer: true });
+    const detail = () => app.request(`/api/integrations/${ORG_LISTED}`, { headers: inSecond });
+    const before = await detail();
+    expect(before.status, await before.text()).toBe(200);
+
+    const res = await app.request(`/api/packages/${ORG_LISTED}/org-offer`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(res.status, await res.clone().text()).toBe(204);
+
+    expect((await rowsOf(ORG_LISTED)).filter((row) => row.spaceId === second.id)).toHaveLength(0);
+    expect((await detail()).status).toBe(404);
   });
 });

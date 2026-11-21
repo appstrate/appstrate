@@ -29,7 +29,8 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { integrationConnections, packageDistTags } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   httpHeaderDelivery,
@@ -225,5 +226,18 @@ describe("the sheet and the chat agree on an offered integration and its connect
     expect(after.connections).toEqual([]);
     // No connection left: the chat lists no entry for the integration at all.
     expect(afterChat).toBeUndefined();
+  });
+  it("both drop the connection once only a prerelease is published, as no latest resolves", async () => {
+    const headers = authHeaders(olivia);
+    // Never published: the draft answers on both doors.
+    expect((await sheet(headers)).connections.map((c) => c.id)).toEqual([connectionId]);
+    expect((await chat(headers))?.connections.map((c) => c.id)).toEqual([connectionId]);
+
+    // A version exists but carries no `latest` dist-tag: the draft no longer stands in.
+    await seedPublishedVersion(INTEGRATION, "1.0.0-beta.1");
+    await db.delete(packageDistTags).where(eq(packageDistTags.packageId, INTEGRATION));
+    const res = await app.request(`/api/integrations/${INTEGRATION}`, { headers });
+    expect(res.status).toBe(404);
+    expect(await chat(headers)).toBeUndefined();
   });
 });

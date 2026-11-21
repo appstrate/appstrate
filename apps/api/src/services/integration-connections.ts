@@ -2712,8 +2712,10 @@ interface UsableConnection {
  * integration; `source`: own, shared, or both. `active` says whether the integration is switched on
  * in the space, as a run or a proxy call requires: an inactive one binds nothing here, and is listed
  * so the actor can be told its connection exists and why a run does not use it. A connection whose
- * auth the integration no longer declares (published manifest, else draft: the sheet's) binds
- * nowhere and is left out, with an integration left with none.
+ * auth the integration no longer declares binds nowhere and is left out, with an integration left
+ * with none. Declared auths are the published manifest's; the draft's only while the integration
+ * has no published version at all (the sheet's fallback); an integration whose versions exist but
+ * none resolves declares none, as the sheet answers 404 there.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2738,7 +2740,7 @@ export async function listUsableIntegrationsForActor(
   if (rows.length === 0) return [];
 
   const listedIds = [...new Set(rows.map((row) => row.integrationId))];
-  const [pkgRows, published] = await Promise.all([
+  const [pkgRows, { manifests: published, unpublished }] = await Promise.all([
     db
       .select({ id: packages.id, draftManifest: packages.draftManifest })
       .from(packages)
@@ -2748,13 +2750,15 @@ export async function listUsableIntegrationsForActor(
   const draftAuths = new Map(
     pkgRows.map((p) => [p.id, (p.draftManifest as IntegrationManifest | null)?.auths] as const),
   );
-  const declaresAuth = (row: { integrationId: string; authKey: string }) =>
-    Object.hasOwn(
-      published.has(row.integrationId)
-        ? (published.get(row.integrationId)!.auths ?? {})
-        : (draftAuths.get(row.integrationId) ?? {}),
-      row.authKey,
-    );
+  const declaresAuth = (row: { integrationId: string; authKey: string }) => {
+    const manifest = published.get(row.integrationId);
+    const auths = manifest
+      ? manifest.auths
+      : unpublished.has(row.integrationId)
+        ? draftAuths.get(row.integrationId)
+        : undefined;
+    return Object.hasOwn(auths ?? {}, row.authKey);
+  };
 
   const acc = new Map<
     string,
