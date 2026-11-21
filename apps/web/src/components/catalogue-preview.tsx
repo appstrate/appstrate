@@ -408,7 +408,7 @@ export function CataloguePreview({
       <ManifestOverview manifest={(agent ?? other)?.manifest} />
 
       <SettingsGroup title={t("orgSettings.inviteSpacesLabel")} className="mt-8 mb-0">
-        <OrgOfferRow item={item} />
+        <OrgOfferRow item={item} className="mb-3" />
         {mode === "readonly" && (
           <p className="text-sm">
             {placement.activeIn.length > 0

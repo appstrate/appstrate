@@ -59,8 +59,8 @@ import { PackageOwnershipNotice } from "../components/package-detail/package-own
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
-import { OrgDefaultSection } from "../components/integration-detail/org-default-section";
-import { PinManagementSection } from "../components/integration-detail/pin-management-section";
+import { DefaultConnectionSection } from "../components/integration-detail/default-connection-section";
+import { showsDefaultConnection } from "../lib/default-connection";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
 import { spaceLabel } from "../lib/space-label";
@@ -566,29 +566,18 @@ export function IntegrationDetailPage() {
         ) : detail.auths.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
         ) : (
-          <>
-            <ConnectionsTable
-              packageId={packageId}
-              detail={detail}
-              canConfigure={canConfigure}
-              onConfigure={openAuthentication}
-            />
-            {/* What runs use when no one picks a connection: the space's default, then the
-                per-agent exceptions. Set by those who configure the integration. */}
-            {canConfigure && (
-              <section className="mt-8 flex flex-col gap-6" data-testid="default-connection">
-                <SettingsHeading
-                  level="group"
-                  className="mb-0"
-                  title={t("integration.defaultConnection.title")}
-                  description={t("integration.defaultConnection.description")}
-                />
-                <OrgDefaultSection packageId={packageId} />
-                <PinManagementSection packageId={packageId} />
-              </section>
-            )}
-          </>
+          <ConnectionsTable
+            packageId={packageId}
+            detail={detail}
+            canConfigure={canConfigure}
+            onConfigure={openAuthentication}
+          />
         )}
+        {showsDefaultConnection({
+          canConfigure,
+          fromWorkingSpace: connectionsFromWorkingSpace,
+          authCount: detail.auths.length,
+        }) && <DefaultConnectionSection packageId={packageId} />}
       </DetailTabPanel>
 
       {/* Configuration is admin-only; package files stay readable for every member. */}

@@ -54,7 +54,6 @@ function AvailabilityCard({
       {(offered_to_org || org_offerable || catalogue) && (
         <div className="flex flex-col gap-3 border-t p-4">
           <OrgOfferRow
-            className="mb-0"
             item={{
               id: packageId,
               name: detail.manifest.display_name ?? packageId,

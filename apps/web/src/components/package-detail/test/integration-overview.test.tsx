@@ -32,8 +32,6 @@ const AVAILABILITY = {
   shared_by: { user_id: "u_2", name: "Ada" },
   offered_to_org: false,
   org_offerable: false,
-  activate: "allowed",
-  deactivate: "allowed",
 };
 
 const DETAIL = {

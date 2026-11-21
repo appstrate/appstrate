@@ -51,7 +51,7 @@ function OrgOfferSwitchRow({
  */
 export function OrgOfferRow({
   item,
-  className = "mb-3",
+  className,
 }: {
   item: { id: string; name: string; offered_to_org: boolean; org_offerable: boolean };
   className?: string;

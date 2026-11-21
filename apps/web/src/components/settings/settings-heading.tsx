@@ -11,20 +11,13 @@ export function SettingsHeading({
 }: {
   title: ReactNode;
   description?: ReactNode;
-  level?: "page" | "group" | "sub";
+  level?: "page" | "group";
   className?: string;
 }) {
-  const Heading = level === "page" ? "h2" : level === "group" ? "h3" : "h4";
+  const Heading = level === "page" ? "h2" : "h3";
   return (
-    <header
-      className={cn(level === "page" ? "mb-6" : level === "group" ? "mb-4" : "mb-3", className)}
-    >
-      <Heading
-        className={cn(
-          "font-semibold",
-          level === "page" ? "text-xl" : level === "group" ? "text-base" : "text-sm",
-        )}
-      >
+    <header className={cn(level === "page" ? "mb-6" : "mb-4", className)}>
+      <Heading className={cn("font-semibold", level === "page" ? "text-xl" : "text-base")}>
         {title}
       </Heading>
       {description && (

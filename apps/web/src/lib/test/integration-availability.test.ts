@@ -51,12 +51,13 @@ describe("availabilityLabel", () => {
     );
   });
 
-  it("reads plainly inactive when no placement exists", () => {
-    for (const via of ["home", "shared", "system", "organization"] as const) {
-      expect(availabilityLabel({ ...base, via, state: "none" })).toEqual({
-        key: "integrations.badge.inactive",
-        params: {},
-      });
-    }
+  it("reads a placement without a row as not activated, provenance kept", () => {
+    expect(availabilityLabel({ ...base, via: "home", state: "none" })).toEqual({
+      key: "integration.availability.off.home",
+      params: {},
+    });
+    expect(availabilityLabel({ ...base, via: "system", state: "none" }).key).toBe(
+      "integration.availability.off.system",
+    );
   });
 });

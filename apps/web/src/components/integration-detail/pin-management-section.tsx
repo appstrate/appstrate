@@ -34,7 +34,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   return (
     <div className="pb-0" data-testid="pin-management-section">
       <SettingsHeading
-        level="sub"
+        level="group"
         title={t("integration.admin.exceptions.title")}
         description={t("integration.admin.exceptions.help")}
       />

@@ -408,8 +408,15 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const spaceLine = useOpensWithSpaceLine(type, tab);
   const { can } = usePermissions();
   const search = new URLSearchParams(useLocation().search);
+  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
   // « Création de connexions » is one setting; the other sections hold several.
-  const opensAccess = type === "integration" && search.get("integrationSettings") === "access";
+  const opensAccess =
+    type === "integration" &&
+    resolveIntegrationSettingsSection(search.get("integrationSettings"), {
+      canConfigure: configuresIntegration,
+      isOwned: true,
+      hasDefinition: true,
+    }) === "access";
   return (
     <DetailPageSkeleton
       title={title}

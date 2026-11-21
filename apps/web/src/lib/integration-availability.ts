@@ -22,13 +22,13 @@ const OFF = {
 /**
  * The `settings` sentence saying whether the space runs the integration and how it got there
  * (the badge of the page and its « Dans cet espace » row): « Activée · … » or « Non activée · … »
- * with the provenance. A placement that does not exist (`none`) has none to name.
+ * with the provenance, `none` (no row here) reading as not activated.
  */
 export function availabilityLabel({ via, state, shared_by }: Availability): {
   key: string;
   params: { name?: string };
 } {
-  if (state === "none") return { key: "integrations.badge.inactive", params: {} };
+  // `none` is no row of its own here, yet the placement exists (home, system): it reads off.
   const keys = state === "active" ? ON : OFF;
   if (via !== "shared") return { key: keys[via], params: {} };
   return shared_by
