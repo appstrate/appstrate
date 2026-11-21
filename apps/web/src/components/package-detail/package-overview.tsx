@@ -21,6 +21,7 @@ export function PackageOverview({
   type,
   name,
   availability,
+  catalogueVersion,
   content,
   historical,
   agentCount,
@@ -31,6 +32,8 @@ export function PackageOverview({
   type: PackageType;
   name: string;
   availability: PackageAvailability | undefined;
+  /** The version the card's catalogue link opens on, as the actions menu (`catalogueVersionFor`). */
+  catalogueVersion?: string;
   content?: string | null;
   historical: boolean;
   /** The agents the « Utilisé par » tab lists; `undefined` while read, `null` when unknown. */
@@ -50,6 +53,7 @@ export function PackageOverview({
           packageId={packageId}
           name={name}
           availability={availability}
+          catalogueVersion={catalogueVersion}
         />
       )}
       <div className="grid items-start gap-6 lg:grid-cols-2">

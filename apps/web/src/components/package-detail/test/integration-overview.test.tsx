@@ -178,7 +178,7 @@ describe("the integration overview", () => {
       const html = renderOverview([]);
       expect(html).toContain(t("packages.availability.title"));
       expect(statValue(html, t("packages.availability.here"))).toBe(
-        t("packages.availability.sharedBy", { name: "Ada", context: "integration" }),
+        t("packages.availability.sharedBy_integration", { name: "Ada" }),
       );
     });
 

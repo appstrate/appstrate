@@ -23,14 +23,17 @@ export function AvailabilityCard({
   packageId,
   name,
   availability,
+  catalogueVersion,
 }: {
   type: PackageType;
   packageId: string;
   name: string;
   availability: PackageAvailability;
+  /** The version the catalogue sheet opens on, as the page's actions menu (`catalogueVersionFor`). */
+  catalogueVersion?: string;
 }) {
   const { t } = useTranslation("settings");
-  const catalogue = useCatalogueEntry(type, packageId);
+  const catalogue = useCatalogueEntry(type, packageId, catalogueVersion);
   const { key, params } = availabilityLabel(availability, type);
   const { offered_to_org, org_offerable, active_by_default } = availability;
   return (

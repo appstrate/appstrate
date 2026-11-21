@@ -474,6 +474,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
                   type={type}
                   name={displayName}
                   availability={pkgDetail.availability}
+                  catalogueVersion={catalogueVersion}
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
                   historical={isHistoricalVersion}
                   agentCount={!tabReads.usedBy || usedBy.isError ? null : usedBy.data?.length}

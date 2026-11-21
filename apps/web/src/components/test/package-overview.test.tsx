@@ -47,8 +47,8 @@ function render(
     {
       overview,
       queryClient: memberSpaceClient([
-        testSpace("spc_a", ["skills:read"], "Studio"),
-        testSpace("spc_b", ["skills:read"], "Coffre"),
+        testSpace("spc_a", ["skills:read", "spaces:read"], "Studio"),
+        testSpace("spc_b", ["skills:read", "spaces:read"], "Coffre"),
       ]),
       initialEntries: ["/skills/@acme/rapprochement"],
     },
@@ -111,6 +111,12 @@ describe("package overview", () => {
       const html = render({ availability: { ...AVAILABILITY, active_by_default: true } });
       expect(html).toContain(t("catalogue.orgOffer.defaultActive"));
       expect(html).not.toContain(t("catalogue.orgOffer.label"));
+    });
+    it("opens the catalogue on the version the page reads, as the actions menu does", () => {
+      const html = render({ historical: true, catalogueVersion: "1.2.0" });
+      expect(html).toContain(t("catalogue.openInCatalogueVersion", { version: "1.2.0" }));
+      expect(html).toContain("version=1.2.0");
+      expect(render()).toContain(t("catalogue.openInCatalogue"));
     });
     it("draws the offer row only when the offer stands or the reader may change it", () => {
       expect(render()).not.toContain(t("catalogue.orgOffer.label"));

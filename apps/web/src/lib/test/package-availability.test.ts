@@ -62,10 +62,10 @@ describe("availabilityLabel", () => {
     );
   });
 
-  it("asks the feminine variant for an integration, the same key otherwise", () => {
+  it("names the feminine variant for an integration", () => {
     expect(availabilityLabel({ ...base, via: "home", state: "active" }, "integration")).toEqual({
-      key: "packages.availability.home",
-      params: { context: "integration" },
+      key: "packages.availability.home_integration",
+      params: {},
     });
     expect(
       availabilityLabel(
@@ -73,8 +73,8 @@ describe("availabilityLabel", () => {
         "integration",
       ),
     ).toEqual({
-      key: "packages.availability.off.sharedBy",
-      params: { name: "Ada", context: "integration" },
+      key: "packages.availability.off.sharedBy_integration",
+      params: { name: "Ada" },
     });
   });
 
