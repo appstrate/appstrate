@@ -26,6 +26,7 @@ Object.defineProperty(globalThis, "document", {
   configurable: true,
   value: {
     documentElement: { classList: { add() {}, remove() {} } },
+    querySelector: () => null,
     head: { appendChild() {} },
     createElement: () => ({ appendChild() {} }),
     createTextNode: () => ({}),
