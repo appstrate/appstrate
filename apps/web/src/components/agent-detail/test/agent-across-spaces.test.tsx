@@ -223,6 +223,7 @@ describe("the overview's figures", () => {
     // working space's (3rd). The figure leads with how soon, which moves with the clock: the date
     // it ends on is the one that names the schedule.
     const nextRun = figure(html, t("schedule.paramNextRun"));
+    expect(nextRun).toMatch(/^(dans|maintenant) /);
     expect(nextRun).toEndWith(formatDateField("2026-12-01T09:00:00Z", "datetime", "UTC"));
     expect(nextRun).not.toEndWith(formatDateField("2026-12-02T09:00:00Z", "datetime", "UTC"));
   });

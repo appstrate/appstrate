@@ -13,7 +13,6 @@ import { AlertDescription } from "@appstrate/ui/components/alert";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { ManifestFacts } from "../components/package-manifest/manifest-fact";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { DetailBar } from "../components/detail-bar";
@@ -39,8 +38,8 @@ import {
   scheduleSettingsHref,
   type ScheduleSettingsSection,
 } from "../lib/schedule-options";
-import { formatDateField, formatScheduledAt } from "../lib/format-date";
-import { useNowTick } from "../hooks/use-now-tick";
+import { formatDateField } from "../lib/format-date";
+import { ScheduledAt } from "../components/scheduled-at";
 import { parseCron } from "../lib/cron-frequency";
 import { describeFrequency } from "../lib/frequency-summary";
 import {
@@ -207,7 +206,6 @@ function ScheduleParams({
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
   const nextRunAt = scheduleNextRunAt(schedule);
-  const now = useNowTick();
   const agentDisplayName = schedule.agent_name;
   const input = schedule.input;
   const navigate = useNavigate();
@@ -265,28 +263,24 @@ function ScheduleParams({
         icon={CalendarClock}
         headerAction={open("recurrence")}
       >
-        <ManifestFacts
-          facts={[
-            {
-              labelKey: "schedule.settings.recurrence",
-              value:
-                describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
-            },
-            { labelKey: "schedule.timezone", value: schedule.timezone },
-            {
-              labelKey: "schedule.paramNextRun",
-              value: nextRunAt
-                ? formatScheduledAt(nextRunAt, schedule.timezone, now)
-                : t("schedule.noNextRun"),
-            },
-            {
-              labelKey: "schedule.paramLastRun",
-              value: schedule.last_run_at
-                ? formatDateField(schedule.last_run_at, "datetime", schedule.timezone)
-                : t("schedule.notRunYet"),
-            },
-          ]}
-        />
+        <FactGrid>
+          <Fact label={t("schedule.settings.recurrence")}>
+            {describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression}
+          </Fact>
+          <Fact label={t("schedule.timezone")}>{schedule.timezone}</Fact>
+          <Fact label={t("schedule.paramNextRun")}>
+            {nextRunAt ? (
+              <ScheduledAt at={nextRunAt} timeZone={schedule.timezone} />
+            ) : (
+              t("schedule.noNextRun")
+            )}
+          </Fact>
+          <Fact label={t("schedule.paramLastRun")}>
+            {schedule.last_run_at
+              ? formatDateField(schedule.last_run_at, "datetime", schedule.timezone)
+              : t("schedule.notRunYet")}
+          </Fact>
+        </FactGrid>
       </DetailSectionCard>
       <DetailSectionCard
         title={t("detail.configuration.inputsShort")}

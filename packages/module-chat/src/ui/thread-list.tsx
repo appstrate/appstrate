@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
+import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -128,22 +129,6 @@ const AGE_KEY = {
 function relativeTime(iso: string, now: number, t: ChatTranslate): string {
   const age = relativeAge(iso, now);
   return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
-}
-
-/**
- * Re-render clock for the relative-time labels. Freshness of the list DATA is
- * event-driven (SSE + safety-net refetch), but React Query's structural sharing
- * keeps `data` referentially stable when the payload is unchanged — no
- * re-render, so a label computed at render time would freeze (the "now" label
- * forever on a quiet list). 30s granularity matches the coarsest visible unit.
- */
-function useNowTick(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
 }
 
 /**

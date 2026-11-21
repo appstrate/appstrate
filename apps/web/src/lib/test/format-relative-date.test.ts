@@ -20,31 +20,30 @@ const plain = (text: string) => text.replace(/\s/g, " ");
 
 describe("formatRelativeDate", () => {
   it("reads under a minute as now, in both directions", () => {
-    expect(plain(formatRelativeDate(at(59_000), NOW))).toBe("maintenant");
-    expect(plain(formatRelativeDate(at(-59_000), NOW))).toBe("maintenant");
+    expect(plain(formatRelativeDate(NOW + 59_000, NOW))).toBe("maintenant");
+    expect(plain(formatRelativeDate(NOW - 59_000, NOW))).toBe("maintenant");
   });
 
   it("truncates toward zero, so a run is never announced later than it is", () => {
-    expect(plain(formatRelativeDate(at(119 * MIN), NOW))).toBe("dans 1 h");
-    expect(plain(formatRelativeDate(at(59 * MIN), NOW))).toBe("dans 59 min");
-    expect(plain(formatRelativeDate(at(-90 * MIN), NOW))).toBe("il y a 1 h");
+    expect(plain(formatRelativeDate(NOW + 119 * MIN, NOW))).toBe("dans 1 h");
+    expect(plain(formatRelativeDate(NOW + 59 * MIN, NOW))).toBe("dans 59 min");
+    expect(plain(formatRelativeDate(NOW - 90 * MIN, NOW))).toBe("il y a 1 h");
   });
 
   it("counts days as 24-hour spans, never as « demain »", () => {
-    expect(plain(formatRelativeDate(at(25 * HOUR), NOW))).toBe("dans 1 j");
-    expect(plain(formatRelativeDate(at(29 * DAY), NOW))).toBe("dans 29 j");
-    expect(plain(formatRelativeDate(at(45 * DAY), NOW))).toBe("dans 1 m.");
-    expect(plain(formatRelativeDate(at(400 * DAY), NOW))).toBe("dans 1 a");
+    expect(plain(formatRelativeDate(NOW + 25 * HOUR, NOW))).toBe("dans 1 j");
+    expect(plain(formatRelativeDate(NOW + 29 * DAY, NOW))).toBe("dans 29 j");
+    expect(plain(formatRelativeDate(NOW + 45 * DAY, NOW))).toBe("dans 1 m.");
+    expect(plain(formatRelativeDate(NOW + 400 * DAY, NOW))).toBe("dans 1 a");
   });
 
   it("speaks the interface language", async () => {
     await i18n.changeLanguage("en");
-    expect(plain(formatRelativeDate(at(3 * HOUR), NOW))).toBe("in 3 hr.");
-    await i18n.changeLanguage("fr");
-  });
-
-  it("answers a dash for an unparseable date", () => {
-    expect(plain(formatRelativeDate("not a date", NOW))).toBe("—");
+    try {
+      expect(plain(formatRelativeDate(NOW + 3 * HOUR, NOW))).toBe("in 3 hr.");
+    } finally {
+      await i18n.changeLanguage("fr");
+    }
   });
 });
 

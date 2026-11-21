@@ -25,9 +25,10 @@ function snapshot(): number {
 }
 
 /**
- * The current time for a relative label (« dans 3 min »), re-read every 10 s
- * so the label moves while nothing else re-renders the component. Every
- * mounted label shares one interval, stopped when the last one unmounts.
+ * The current time for a relative label (« dans 3 min ») or a date grouping,
+ * to within 20 s: the clock is floored to 10 s and re-read every 10 s, so the
+ * label moves while nothing else re-renders the component. Every caller shares
+ * one interval, stopped when the last one unmounts.
  */
 export function useNowTick(): number {
   return useSyncExternalStore(subscribe, snapshot, snapshot);

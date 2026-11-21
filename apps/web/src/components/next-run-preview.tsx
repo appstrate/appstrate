@@ -11,7 +11,7 @@ interface NextRunPreviewProps {
   runNumber: number | null;
   agentName?: string;
   schedule_name: string;
-  next_run_at: string | Date;
+  next_run_at: string;
   /** The schedule's zone, named next to the time. */
   timezone: string;
   className?: string;
