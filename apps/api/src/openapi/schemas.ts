@@ -1408,6 +1408,11 @@ export const schemas = {
         description:
           "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted.",
       },
+      availability: {
+        $ref: "#/components/schemas/PackageAvailability",
+        description:
+          "The library's projection for the space this detail was read from (`PackageAvailability`): why the agent is placed here, whether the space runs it, and whether this caller may offer it to the organization. Emitted by `GET` alone; a summary read (`agents:run` without `agents:read`) omits it, as does the resource a write echoes.",
+      },
       read_space_ids: readablePackageSpaceIds,
       space_ids: {
         type: "array",
@@ -2183,6 +2188,11 @@ export const schemas = {
       "definition",
     ],
     properties: {
+      availability: {
+        $ref: "#/components/schemas/PackageAvailability",
+        description:
+          "The library's projection for the space this detail was read from (`PackageAvailability`): why the package is placed here, whether the space runs it, and whether this caller may offer it to the organization. Emitted by `GET` alone; the resource a write echoes omits it.",
+      },
       id: { type: "string" },
       orgId: {
         type: ["string", "null"],
@@ -3268,7 +3278,7 @@ export const schemas = {
   PackageAvailability: {
     type: "object",
     description:
-      "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation.",
+      "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation, carried by the detail of every package type (`getIntegration`, `getAgentPackage`, `getSkill`, `getIntegrationPackage`).",
     required: ["via", "state", "shared_by", "offered_to_org", "org_offerable", "active_by_default"],
     properties: {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,

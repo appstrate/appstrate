@@ -105,7 +105,7 @@ import {
   reachOutsideRunIfPermitted,
 } from "../services/credential-proxy/access.ts";
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
-import { integrationAvailabilityIn } from "../services/package-library.ts";
+import { packageAvailabilityIn } from "../services/package-library.ts";
 import { getActor } from "../lib/actor.ts";
 import {
   assertConnectionBelongsToActor,
@@ -832,7 +832,7 @@ async function integrationDetail(
       ...spaceListCaller(c),
       reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
     ),
-    integrationAvailabilityIn(c, packageId, scope.spaceId, permission),
+    packageAvailabilityIn(c, packageId, scope.spaceId, `integrations:${permission}`),
   ]);
   return {
     ...withRunToolDescriptions(status),

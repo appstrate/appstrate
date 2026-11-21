@@ -673,7 +673,7 @@ const integrationDetailSchema = {
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
-    // The library's projection for the current space (`integrationAvailabilityIn`).
+    // The library's projection for the current space (`packageAvailabilityIn`).
     availability: { $ref: "#/components/schemas/PackageAvailability" },
     auths: { type: "array", items: authStatusSchema },
     // Effective agent-facing tool catalog. Resolved server-side from the
