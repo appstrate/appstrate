@@ -16,7 +16,7 @@ import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts
 import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
-import { isActiveHere } from "./package-activation.ts";
+import { isActiveHere, isActiveWithoutRow } from "./package-activation.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
@@ -25,7 +25,7 @@ import { listOrgOffers } from "./package-placement.ts";
 /**
  * How a package reaches a space: `system`, its home, a row outside it
  * (`shared`), or an offer to the organization with no row of the space's own
- * (`organization`), in that precedence (RBAC spec §6.9, §6.10).
+ * (`organization`). A system integration activated solely by the offer also reports `organization` (§6.8).
  */
 type PlacementVia = "home" | "shared" | "system" | "organization";
 
@@ -240,11 +240,12 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const rowsBySpace = placementRows.get(row.id);
 
     const offered = offeredIds.has(row.id);
+    const activatedByOffer = offered && !isActiveWithoutRow({ ...row, offeredToOrg: false });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
       const via: PlacementVia | null =
-        row.source === "system"
+        row.source === "system" && (placementRow || !activatedByOffer)
           ? "system"
           : row.homeSpaceId === space
             ? "home"
@@ -295,10 +296,10 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ...home,
       offered_to_org: offered,
       // The offer door's verdict (`assertPackageOfferAccess`): the role and ceiling, the home's
-      // `share` (`home_shareable`) and, for a homed package, a published version.
+      // `share` (`home_shareable`) and, when creating an offer for a homed package, a published version.
       org_offerable:
         callerMayOffer(c, type) &&
-        (row.source === "system" || (home.home_shareable && published.has(row.id))),
+        (row.source === "system" || (home.home_shareable && (offered || published.has(row.id)))),
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
       placements,

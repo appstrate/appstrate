@@ -169,7 +169,7 @@ export function renderAgentPrompt(view: AgentLaunchView, request?: string): stri
       `- ${code("agent_not_active_in_space")}, or a \`409\` whose \`errors\` hold ` +
         `${code("integration_not_active")}: a configuration to repair. Offer its remedy here ` +
         "(activate with `activatePackage` when your role allows; an organization owner or " +
-        "admin can instead offer it to the whole organization with `offerPackageToOrg`, " +
+        "admin can offer it in the organization catalog, or use `offerPackageToOrg` with an unconfined credential, " +
         "activating it in every space without a " +
         "row of its own), or a space of its `active_in_spaces`; act only once the user " +
         "agrees, never silently.",

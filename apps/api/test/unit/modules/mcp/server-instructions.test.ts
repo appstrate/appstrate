@@ -180,7 +180,10 @@ describe("MCP server instructions — connect bullet", () => {
   it("tells the model an `active: false` entry is a connection whose integration is off in that space", () => {
     const text = instructionsFor(permissions);
     expect(text).toContain("an entry with `active: false` is a connection the user holds");
-    expect(text).toContain("`activatePackage`, or `offerPackageToOrg` for an owner or admin");
+    expect(text).toContain("from chat, direct them to the package in the organization catalog");
+    expect(text).toContain(
+      "`offerPackageToOrg` for an owner or admin with an unconfined credential",
+    );
     expect(text).toContain(
       "never move it to another space where the integration is active without asking first",
     );

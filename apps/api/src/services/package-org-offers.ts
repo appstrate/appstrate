@@ -51,6 +51,7 @@ export async function offerPackageToOrg(params: {
   const { orgId, packageId, offeredBy, authorizeHome } = params;
   return db.transaction(async (tx) => {
     const pkg = await loadOfferablePackage(tx, orgId, packageId, authorizeHome);
+    if (pkg.offeredToOrg) return { created: false };
     if (pkg.homeSpaceId !== null) await assertHasPublishedVersion(pkg.id, tx);
     const inserted = await tx
       .insert(orgPackageOffers)

@@ -28,7 +28,7 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getPackageDisplayName, orgOrSystemFilter } from "../lib/package-helpers.ts";
-import { getSpacePackageSettings } from "./space-packages.ts";
+import { assertScheduleAgentActive, getSpacePackageSettings } from "./space-packages.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -1028,6 +1028,7 @@ export async function createSchedule(
       })
       .returning();
   const [row] = await db.transaction(async (tx) => {
+    await assertScheduleAgentActive(tx, scope, packageId);
     await assertScheduleGovernanceUnchanged(
       tx,
       scope.spaceId,
@@ -1150,6 +1151,7 @@ export async function updateSchedule(
   const [row] = !enabled
     ? await update(db)
     : await db.transaction(async (tx) => {
+        if (!expected.enabled) await assertScheduleAgentActive(tx, scope, expected.packageId);
         await assertScheduleGovernanceUnchanged(
           tx,
           scope.spaceId,

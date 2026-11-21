@@ -37,6 +37,8 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { isPackageActiveHere, updateSpacePackage } from "../../../src/services/space-packages.ts";
+import { createSchedule } from "../../../src/services/scheduler.ts";
+import { readScheduleGovernance } from "../../../src/services/schedule-connections.ts";
 import { sharePackage } from "../../../src/services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../../../src/services/package-placement.ts";
 import { emptyAndDeletePersonalSpace } from "../../../src/services/spaces.ts";
@@ -197,6 +199,21 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
     expect(audits).toHaveLength(1);
   });
 
+  it("keeps an existing offer withdrawable when its last published version is deleted", async () => {
+    const headers = admin.headers(teamId);
+    expect((await offer(headers, AGENT)).status).toBe(200);
+    const deleted = await app.request(`/api/packages/agents/${AGENT}/versions/0.1.0`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(deleted.status, await deleted.clone().text()).toBe(204);
+    expect((await libraryPlacement(admin, AGENT, "agent", teamId))?.org_offerable).toBe(true);
+    expect((await offer(headers, AGENT)).status).toBe(200);
+    expect((await withdraw(headers, AGENT)).status).toBe(204);
+    expect((await libraryPlacement(admin, AGENT, "agent", teamId))?.org_offerable).toBe(false);
+    await expectProblem(await offer(headers, AGENT), 409, { code: "package_has_no_version" });
+  });
+
   it("refuses a plain member, whatever the package", async () => {
     const res = await offer(member.headers(), AGENT);
     expect(res.status).toBe(403);
@@ -239,15 +256,20 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
 describe("an offered package is placed and active where no row says otherwise", () => {
   it("activates a catalog integration in a member's personal space, and lists it with a reachable connection", async () => {
     await seedOrgConnection(member.userId, CATALOG_SSH);
-    expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).not.toBe(
-      true,
-    );
+    expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).toBe(false);
 
     expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(200);
 
     const entry = await contextEntry(member, member.personalSpaceId, CATALOG_SSH);
     expect(entry?.active).toBe(true);
     expect(entry?.connections).toHaveLength(1);
+    const library = await libraryPlacement(
+      member,
+      CATALOG_SSH,
+      "integration",
+      member.personalSpaceId,
+    );
+    expect(library?.placements).toMatchObject([{ via: "organization", state: "active" }]);
   });
 
   it("keeps a space that holds an enabled=false row off", async () => {
@@ -255,6 +277,13 @@ describe("an offered package is placed and active where no row says otherwise", 
     await seedSpacePackage(member.personalSpaceId, CATALOG_SSH, { enabled: false });
     expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(200);
     expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).toBe(false);
+    const library = await libraryPlacement(
+      member,
+      CATALOG_SSH,
+      "integration",
+      member.personalSpaceId,
+    );
+    expect(library?.placements).toMatchObject([{ via: "system", state: "inactive" }]);
   });
 
   it("shows via organization in a space library, active, and the offer flags to an admin", async () => {
@@ -281,6 +310,19 @@ describe("an offered package is placed and active where no row says otherwise", 
 });
 
 describe("withdrawing the offer", () => {
+  it("rejects a schedule whose offer was withdrawn after the create preflight", async () => {
+    const scope = { orgId: ctx.orgId, spaceId: member.personalSpaceId };
+    const actor = { type: "user" as const, id: member.userId };
+    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(200);
+    expect(await isPackageActiveHere(scope, AGENT)).toBe(true);
+    const judgedGovernance = await readScheduleGovernance(scope.spaceId, AGENT, member.userId);
+    expect((await withdraw(admin.headers(teamId), AGENT)).status).toBe(204);
+    await expect(
+      createSchedule(scope, AGENT, actor, { cronExpression: "0 * * * *", judgedGovernance }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+
   it("disables schedules only in spaces without a row of their own", async () => {
     expect((await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(200);
     // Active by the offer alone.
@@ -317,6 +359,22 @@ describe("withdrawing the offer", () => {
     expect((await read(viaRow.id)).enabled).toBe(true);
     expect((await read(atHome.id)).enabled).toBe(true);
 
+    const resume = () =>
+      app.request(`/api/schedules/${viaOffer.id}`, {
+        method: "PATCH",
+        headers: { ...member.headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+    expect((await resume()).status).toBe(404);
+    expect(await read(viaOffer.id)).toMatchObject({
+      enabled: false,
+      disabledReason: "package_removed",
+    });
+    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(200);
+    const resumed = await resume();
+    expect(resumed.status, await resumed.clone().text()).toBe(200);
+    expect(await read(viaOffer.id)).toMatchObject({ enabled: true, disabledReason: null });
+
     const audits = await db
       .select()
       .from(auditEvents)
@@ -349,6 +407,29 @@ const configure = (spaceId: string, packageId: string) =>
   });
 
 describe("a row created under the offer is a decision about the offer, not a placement", () => {
+  it("configures an offered agent through the space API before a local settings row exists", async () => {
+    const headers = { ...member.headers(), "Content-Type": "application/json" };
+    const patch = (modelId: string | null) =>
+      app.request(`/api/spaces/${member.personalSpaceId}/packages/${AGENT}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ modelId }),
+      });
+    expect((await offer(admin.headers(teamId), AGENT)).status).toBe(200);
+    const invalid = await expectProblem(await patch("unknown-model"), 404);
+    expect(invalid.detail).toContain("Model 'unknown-model'");
+    expect(await rowIn(member.personalSpaceId, AGENT)).toBeUndefined();
+    const saved = await patch(null);
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    expect(await rowIn(member.personalSpaceId, AGENT)).toMatchObject({
+      enabled: true,
+      placedByOffer: true,
+    });
+    expect((await withdraw(admin.headers(teamId), AGENT)).status).toBe(204);
+    expect((await patch(null)).status).toBe(404);
+    expect(await rowIn(member.personalSpaceId, AGENT)).toBeUndefined();
+  });
+
   it("configuring in a space under the offer, then withdrawing, leaves nothing placed or active there", async () => {
     await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
     await configure(member.personalSpaceId, AGENT);

@@ -109,6 +109,17 @@ function placedWithoutRow(
   return pkg.source === "system" || pkg.homeSpaceId === spaceId || pkg.offeredToOrg;
 }
 
+/** The agent and its local decision stay locked until the schedule insert or re-arm commits. */
+export async function assertScheduleAgentActive(tx: Tx, scope: SpaceScope, packageId: string) {
+  const pkg = await loadPlaceablePackage(tx, scope, packageId);
+  const placement = await currentPlacement(tx, packageId, scope.spaceId);
+  if (!isActiveHere(pkg, placement)) {
+    throw notFound(
+      `Agent '${packageId}' is unavailable for scheduling in this space. Activate it before enabling a schedule.`,
+    );
+  }
+}
+
 /**
  * Does a row this door creates in `spaceId` exist only because of the offer? A
  * row outside the home of an organization package is placed by nothing else
@@ -984,10 +995,9 @@ export async function getResolvedRunConfig(
  * values. Never `enabled` (activation doors own it). The org check shares the
  * write's transaction.
  *
- *   - `requirePlacement: true`: the row must already exist, else 404.
+ *   - `requirePlacement: true`: a local row or an organization offer must already exist.
  *   - default: update the row; with none, create it only where the package is
- *     placed without one (home, system), with the default's `enabled`;
- *     elsewhere 404 (outside the home only {@link placePackage} creates).
+ *     placed without one (home, system or organization offer), preserving the default activation.
  */
 export async function updateSpacePackage(
   scope: SpaceScope,
@@ -1022,20 +1032,6 @@ export async function updateSpacePackage(
     // `FOR SHARE`: the home read below decides whether a row may be created.
     const pkg = await loadPlaceablePackage(tx, scope, packageId);
 
-    if (opts?.requirePlacement) {
-      const updated = await tx
-        .update(spacePackages)
-        .set(set)
-        .where(
-          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
-        )
-        .returning({ packageId: spacePackages.packageId });
-      if (updated.length === 0) {
-        throw notFound(`Package '${packageId}' is not placed in this space`);
-      }
-      return;
-    }
-
     const existing = await currentPlacement(tx, packageId, scope.spaceId);
     if (existing) {
       await tx
@@ -1046,8 +1042,8 @@ export async function updateSpacePackage(
         );
       return;
     }
-    // Configuring never activates: `enabled` keeps the default's verdict.
-    if (!placedWithoutRow(pkg, scope.spaceId)) {
+    // The public settings door accepts a local row or a current organization offer.
+    if (opts?.requirePlacement ? !pkg.offeredToOrg : !placedWithoutRow(pkg, scope.spaceId)) {
       throw notFound(`Package '${packageId}' is not placed in this space`);
     }
     await tx

@@ -2275,7 +2275,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "listing those `connections` (`id`, `label`, `account_id`, `owned_by_actor`, " +
       "`needs_reconnection`). `active: false` means the integration is switched off in that " +
       "space: a run there cannot use it until it is activated (`activatePackage`) or offered to " +
-      "the organization (`offerPackageToOrg`). An entry flagged `needs_reconnection` has no " +
+      "the organization (in the organization catalog, or with `offerPackageToOrg` from an unconfined user credential). An entry flagged `needs_reconnection` has no " +
       "healthy connection: its owner must reconnect it before use. " +
       (surface.proxies
         ? "The integration tools you can call with them are listed by `search` (`integration_tool` " +
