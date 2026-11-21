@@ -372,7 +372,7 @@
   "status.pending": "en attente",
   "status.timeout": "timeout",
   "status.cancelled": "annulé",
-  "packageSpaces.sharedWith": "Partagé avec {{names}}",
+  "packageSpaces.alsoActiveIn": "Actif aussi dans {{names}}",
   "packageSpaces.availableIn": "Disponible dans {{names}}",
   "packageSpaces.hiddenHome": "Espace non visible",
   "packageSpaces.sharedFrom": "Partagé depuis {{space}}",
