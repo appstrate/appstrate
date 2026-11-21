@@ -105,6 +105,7 @@ import {
   reachOutsideRunIfPermitted,
 } from "../services/credential-proxy/access.ts";
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
+import { packageAvailabilityIn } from "../services/package-library.ts";
 import { getActor } from "../lib/actor.ts";
 import {
   assertConnectionBelongsToActor,
@@ -1108,13 +1109,16 @@ export function createIntegrationsRouter() {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(
-      scope,
-      packageId,
-      ...spaceListCaller(c),
-      reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
-    );
-    return c.json(withRunToolDescriptions(status));
+    const [status, availability] = await Promise.all([
+      getIntegrationAuthStatuses(
+        scope,
+        packageId,
+        ...spaceListCaller(c),
+        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
+      ),
+      packageAvailabilityIn(c, packageId, scope.spaceId),
+    ]);
+    return c.json({ ...withRunToolDescriptions(status), availability });
   });
 
   // ─── OAuth client registration (admin) ─────

@@ -7672,7 +7672,7 @@
         "operationId": "getIntegration",
         "tags": ["Integrations"],
         "summary": "Get integration detail + per-auth status",
-        "description": "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
+        "description": "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and what this caller may do).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7714,7 +7714,8 @@
                     "active",
                     "block_user_connections",
                     "platform_redirect_uri",
-                    "proxy_connection"
+                    "proxy_connection",
+                    "availability"
                   ],
                   "properties": {
                     "manifest": {
@@ -8010,6 +8011,9 @@
                           "description": "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's."
                         }
                       }
+                    },
+                    "availability": {
+                      "$ref": "#/components/schemas/PackageAvailability"
                     }
                   }
                 }
@@ -39311,12 +39315,10 @@
                     "type": "string"
                   },
                   "activate": {
-                    "type": "string",
-                    "enum": ["allowed", "not_shareable", "forbidden"]
+                    "$ref": "#/components/schemas/ActivationVerdict"
                   },
                   "deactivate": {
-                    "type": "string",
-                    "enum": ["allowed", "not_shareable", "forbidden"]
+                    "$ref": "#/components/schemas/ActivationVerdict"
                   }
                 }
               }
@@ -39328,6 +39330,63 @@
                 "$ref": "#/components/schemas/PackagePlacement"
               }
             }
+          }
+        }
+      },
+      "ActivationVerdict": {
+        "type": "string",
+        "enum": ["allowed", "not_shareable", "forbidden"],
+        "description": "Whether the caller may switch a package on or off in a space: `allowed`; `not_shareable` — it is not placed there and its home grants no `<type>:share`; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space. The routes stay the authority."
+      },
+      "PackageAvailability": {
+        "type": "object",
+        "description": "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`), the package's offer fields and this caller's activation verdicts. A projection of `GET /api/spaces/{id}/library`, never a second computation.",
+        "required": [
+          "via",
+          "state",
+          "shared_by",
+          "offered_to_org",
+          "org_offerable",
+          "activate",
+          "deactivate"
+        ],
+        "properties": {
+          "via": {
+            "type": "string",
+            "enum": ["home", "shared", "system", "organization"],
+            "description": "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["active", "inactive", "none"],
+            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it."
+          },
+          "shared_by": {
+            "type": ["object", "null"],
+            "description": "Who placed it here — on `via: \"shared\"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.",
+            "required": ["user_id", "name"],
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "offered_to_org": {
+            "type": "boolean",
+            "description": "Offered to the organization (`offered_to_org` of the library entry)."
+          },
+          "org_offerable": {
+            "type": "boolean",
+            "description": "Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry)."
+          },
+          "activate": {
+            "$ref": "#/components/schemas/ActivationVerdict"
+          },
+          "deactivate": {
+            "$ref": "#/components/schemas/ActivationVerdict"
           }
         }
       },

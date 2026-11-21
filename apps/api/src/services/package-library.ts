@@ -17,6 +17,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere, placementVia, type PlacementVia } from "./package-activation.ts";
+import { notFound } from "../lib/errors.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
@@ -76,8 +77,16 @@ interface LibraryPackage {
  * still listed when the caller could place it (`<type>:share` in its home), but
  * never into a personal destination.
  */
-export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
+export async function getPackageLibrary(
+  c: Context<AppEnv>,
+  spaceId?: string,
+  options: {
+    /** Narrow the catalogue to these packages; the offers and published reads follow. */
+    packageIds?: readonly string[];
+  } = {},
+) {
   const orgId = c.get("orgId");
+  const { packageIds } = options;
 
   const accessible = await packageAccessSpaces(c);
   // The caller's own personal space takes no activation grant: ownership authorizes
@@ -169,10 +178,16 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ),
     )
     .leftJoin(user, eq(user.id, organizationMembers.userId))
-    .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .where(
+      and(
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        packageIds ? inArray(packages.id, [...packageIds]) : undefined,
+      ),
+    )
     .orderBy(packages.id);
 
-  const offeredIds = await listOrgOffers(orgId);
+  const offeredIds = await listOrgOffers(orgId, packageIds);
 
   /** packageId → spaceId → the row's switches, for the rows the caller's spaces hold. */
   const placementRows = new Map<
@@ -311,4 +326,34 @@ function placementState(
 ): PlacementState {
   const row = enabled === undefined ? undefined : { enabled };
   return isActiveHere(pkg, row) ? "active" : row ? "inactive" : "none";
+}
+
+/**
+ * What the library says about ONE package in ONE space — a projection of
+ * {@link getPackageLibrary}, never a second computation. A package the library
+ * does not place there for this caller is a 404, like the detail route's own
+ * placement check.
+ */
+export async function packageAvailabilityIn(
+  c: Context<AppEnv>,
+  packageId: string,
+  spaceId: string,
+) {
+  const library = await getPackageLibrary(c, spaceId, { packageIds: [packageId] });
+  const entry = Object.values(library.packages)
+    .flat()
+    .find((candidate) => candidate.id === packageId);
+  const placement = entry?.placements.find((p) => p.space_id === spaceId);
+  const cell = entry?.activation.find((a) => a.spaceId === spaceId);
+  if (!entry || !placement || !cell) {
+    throw notFound(`Package '${packageId}' not found in this organization`);
+  }
+  const { space_id: _space, ...here } = placement;
+  return {
+    ...here,
+    offered_to_org: entry.offered_to_org,
+    org_offerable: entry.org_offerable,
+    activate: cell.activate,
+    deactivate: cell.deactivate,
+  };
 }

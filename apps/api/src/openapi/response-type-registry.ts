@@ -315,6 +315,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",
   PackagePlacement:
     "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
+  PackageAvailability:
+    "integration detail sub-object; the SPA reads it through the generated spec type of getIntegration",
+  ActivationVerdict:
+    "enum shared by LibraryPackageList.activation and PackageAvailability; read through their generated spec types",
   PackageShare:
     "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   PackageOrgOffer:

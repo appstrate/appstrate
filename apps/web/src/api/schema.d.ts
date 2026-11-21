@@ -1539,7 +1539,7 @@ export interface paths {
         };
         /**
          * Get integration detail + per-auth status
-         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.
+         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and what this caller may do).
          */
         get: operations["getIntegration"];
         put?: never;
@@ -5844,6 +5844,11 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /**
+         * @description Whether the caller may switch a package on or off in a space: `allowed`; `not_shareable` — it is not placed there and its home grants no `<type>:share`; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space. The routes stay the authority.
+         * @enum {string}
+         */
+        ActivationVerdict: "allowed" | "not_shareable" | "forbidden";
         /** @description A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item). */
         ActivationWarning: components["schemas"]["ResolutionFieldError"] & {
             /** @enum {string} */
@@ -6596,10 +6601,8 @@ export interface components {
             /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
             activation: {
                 spaceId: string;
-                /** @enum {string} */
-                activate: "allowed" | "not_shareable" | "forbidden";
-                /** @enum {string} */
-                deactivate: "allowed" | "not_shareable" | "forbidden";
+                activate: components["schemas"]["ActivationVerdict"];
+                deactivate: components["schemas"]["ActivationVerdict"];
             }[];
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
@@ -7045,6 +7048,30 @@ export interface components {
              * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
              */
             deleting_at: string | null;
+        };
+        /** @description What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`), the package's offer fields and this caller's activation verdicts. A projection of `GET /api/spaces/{id}/library`, never a second computation. */
+        PackageAvailability: {
+            /**
+             * @description WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.
+             * @enum {string}
+             */
+            via: "home" | "shared" | "system" | "organization";
+            /**
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.
+             * @enum {string}
+             */
+            state: "active" | "inactive" | "none";
+            /** @description Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`. */
+            shared_by: {
+                user_id: string;
+                name: string;
+            } | null;
+            /** @description Offered to the organization (`offered_to_org` of the library entry). */
+            offered_to_org: boolean;
+            /** @description Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry). */
+            org_offerable: boolean;
+            activate: components["schemas"]["ActivationVerdict"];
+            deactivate: components["schemas"]["ActivationVerdict"];
         };
         PackageFileDeleteEntry: {
             /**
@@ -14308,6 +14335,7 @@ export interface operations {
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
                         };
+                        availability: components["schemas"]["PackageAvailability"];
                     };
                 };
             };

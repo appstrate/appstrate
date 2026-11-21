@@ -1390,7 +1390,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get integration detail + per-auth status",
       description:
-        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
+        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and what this caller may do).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1400,7 +1400,18 @@ export const integrationsPaths = {
         "200": {
           description: "Integration detail",
           headers: STD_RESPONSE_HEADERS,
-          content: { "application/json": { schema: integrationDetailSchema } },
+          content: {
+            "application/json": {
+              schema: {
+                ...integrationDetailSchema,
+                required: [...integrationDetailSchema.required, "availability"],
+                properties: {
+                  ...integrationDetailSchema.properties,
+                  availability: { $ref: "#/components/schemas/PackageAvailability" },
+                },
+              },
+            },
+          },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

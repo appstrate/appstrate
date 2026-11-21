@@ -173,6 +173,7 @@ const SNAKE_TWIN_EXCEPTIONS = new Set([
   // The enumerated counter-exception of the placement / share family.
   "#/components/schemas/PackagePlacement/properties/space_id",
   "#/components/schemas/PackagePlacement/properties/shared_by/properties/user_id",
+  "#/components/schemas/PackageAvailability/properties/shared_by/properties/user_id",
   "#/components/schemas/PackageShare/properties/shared_by/properties/user_id",
   // Internal sidecar↔platform wire, documented snake_case end to end.
   "#/components/schemas/IntegrationCredentialsResponse/properties/auths/items/properties/expires_at",
