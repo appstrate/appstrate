@@ -67,6 +67,7 @@ const CELLS: Array<[string, Pkg, Row, PlacementVia | null]> = [
   ["homed elsewhere, offer row, offered", local({ offeredToOrg: true }), OFFER_ROW, "organization"],
   ["homed elsewhere, offered, no row", local({ offeredToOrg: true }), undefined, "organization"],
   ["homed elsewhere, share row, offered", local({ offeredToOrg: true }), SHARE, "shared"],
+  ["homed elsewhere, offer row, offer withdrawn", local(), OFFER_ROW, "shared"],
   ["homed elsewhere, not placed", local(), undefined, null],
 ];
 

@@ -1672,13 +1672,16 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap.
-      const detail = await getIntegrationAuthStatuses(
-        scope,
-        packageId,
-        ...spaceListCaller(c),
-        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
-      );
-      return c.json(withRunToolDescriptions(detail));
+      const [detail, availability] = await Promise.all([
+        getIntegrationAuthStatuses(
+          scope,
+          packageId,
+          ...spaceListCaller(c),
+          reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
+        ),
+        packageAvailabilityIn(c, packageId, scope.spaceId),
+      ]);
+      return c.json({ ...withRunToolDescriptions(detail), availability });
     },
   );
 

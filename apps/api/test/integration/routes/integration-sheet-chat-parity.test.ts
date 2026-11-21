@@ -20,7 +20,13 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedOrgOffer, seedPackage, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
+import {
+  seedOrgOffer,
+  seedPackage,
+  seedSpace,
+  seedSpaceMember,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -73,6 +79,7 @@ async function chat(headers: Record<string, string>) {
     connections: Array<{
       integration_package_id: string;
       active: boolean;
+      via: string | null;
       connections: ContextConnection[];
     }>;
   };
@@ -143,6 +150,7 @@ describe("the sheet and the chat agree on an offered integration and its connect
     expect(fromSheet.availability).toMatchObject({ via: "organization", state: "active" });
     expect(fromSheet.active).toBe(true);
     expect(fromChat?.active).toBe(fromSheet.active);
+    expect(fromChat?.via).toBe(fromSheet.availability.via);
 
     expect(fromSheet.connections.map((c) => c.id)).toEqual([connectionId]);
     expect(fromChat?.connections.map((c) => c.id)).toEqual(fromSheet.connections.map((c) => c.id));
@@ -175,9 +183,25 @@ describe("the sheet and the chat agree on an offered integration and its connect
 
     expect(fromSheet.connections.map((c) => c.id)).toEqual([connectionId]);
     expect(fromChat?.active).toBe(fromSheet.active);
+    expect(fromChat?.via).toBe(fromSheet.availability.via);
     expect(fromChat?.connections.map((c) => c.id)).toEqual(fromSheet.connections.map((c) => c.id));
     expect(fromChat?.connections[0]?.owned_by_actor).toBe(false);
     expect(fromSheet.connections[0]!.owner_id).not.toBe(colleague.id);
     expect(fromSheet.connections[0]!.owner_id).toBe(olivia.user.id);
+  });
+
+  it("both say inactive when the space switched it off, and the chat still lists the connection", async () => {
+    await seedSpacePackage(olivia.defaultSpaceId, INTEGRATION, {
+      enabled: false,
+      placedByOffer: true,
+    });
+    const headers = authHeaders(olivia);
+    const [fromSheet, fromChat] = [await sheet(headers), await chat(headers)];
+
+    expect(fromSheet.availability).toMatchObject({ via: "organization", state: "inactive" });
+    expect(fromSheet.active).toBe(false);
+    expect(fromChat?.active).toBe(false);
+    expect(fromChat?.via).toBe(fromSheet.availability.via);
+    expect(fromChat?.connections.map((c) => c.id)).toEqual([connectionId]);
   });
 });

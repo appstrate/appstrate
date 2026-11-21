@@ -344,8 +344,7 @@ export async function packageAvailabilityIn(
     .flat()
     .find((candidate) => candidate.id === packageId);
   const placement = entry?.placements.find((p) => p.space_id === spaceId);
-  const cell = entry?.activation.find((a) => a.spaceId === spaceId);
-  if (!entry || !placement || !cell) {
+  if (!entry || !placement) {
     throw notFound(`Package '${packageId}' not found in this organization`);
   }
   const { space_id: _space, ...here } = placement;
@@ -353,7 +352,5 @@ export async function packageAvailabilityIn(
     ...here,
     offered_to_org: entry.offered_to_org,
     org_offerable: entry.org_offerable,
-    activate: cell.activate,
-    deactivate: cell.deactivate,
   };
 }

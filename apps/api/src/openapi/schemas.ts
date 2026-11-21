@@ -3265,16 +3265,8 @@ export const schemas = {
   PackageAvailability: {
     type: "object",
     description:
-      "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`), the package's offer fields and this caller's activation verdicts. A projection of `GET /api/spaces/{id}/library`, never a second computation.",
-    required: [
-      "via",
-      "state",
-      "shared_by",
-      "offered_to_org",
-      "org_offerable",
-      "activate",
-      "deactivate",
-    ],
+      "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation.",
+    required: ["via", "state", "shared_by", "offered_to_org", "org_offerable"],
     properties: {
       ...PACKAGE_PLACEMENT_STATE_PROPERTIES,
       offered_to_org: {
@@ -3286,8 +3278,6 @@ export const schemas = {
         description:
           "Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry).",
       },
-      activate: { $ref: "#/components/schemas/ActivationVerdict" },
-      deactivate: { $ref: "#/components/schemas/ActivationVerdict" },
     },
   },
   PackagePlacement: {

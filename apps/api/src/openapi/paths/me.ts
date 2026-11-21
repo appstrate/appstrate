@@ -896,6 +896,7 @@ export const mePaths = {
                         "name",
                         "source",
                         "active",
+                        "via",
                         "connections",
                       ],
                       properties: {
@@ -906,6 +907,12 @@ export const mePaths = {
                           type: "boolean",
                           description:
                             "Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent.",
+                        },
+                        via: {
+                          type: ["string", "null"],
+                          enum: ["home", "shared", "system", "organization", null],
+                          description:
+                            "Why the integration is placed in this space (`PackagePlacement.via`, one definition for the library, the integration sheet and this list); `null` when it is not placed here: the caller holds a connection usable here, but the integration itself does not reach this space.",
                         },
                         connections: {
                           type: "array",
@@ -1095,6 +1102,7 @@ export const mePaths = {
                     name: "Gmail",
                     source: "own",
                     active: true,
+                    via: "system",
                     connections: [
                       {
                         id: "conn_1",
@@ -1110,6 +1118,7 @@ export const mePaths = {
                     name: "ClickUp",
                     source: "shared",
                     active: true,
+                    via: "organization",
                     connections: [
                       {
                         id: "conn_2",

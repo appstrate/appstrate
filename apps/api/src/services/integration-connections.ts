@@ -49,7 +49,7 @@ import {
   listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
-import { isActiveHere } from "./package-activation.ts";
+import { isActiveHere, placementVia, type PlacementVia } from "./package-activation.ts";
 import {
   listOfferedToSpaceOrg,
   placementReadFilter,
@@ -2657,6 +2657,8 @@ interface UsableIntegration {
   version?: string;
   /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
   default_tools?: readonly string[] | "*";
+  /** Why it is placed in the space (`placementVia`); `null` when it is not placed there. */
+  via: PlacementVia | null;
   /** Present (true) when none of the actor's usable connections of it is healthy. */
   needs_reconnection?: true;
   /** The connections the actor may bind there, oldest first: a label resolves to an id here. */
@@ -2726,12 +2728,41 @@ export async function listUsableIntegrationsForActor(
   }
 
   // Sorted on purpose: an unordered SELECT may permute it between identical calls.
-  const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
   const ids = [...acc.keys()].sort();
   const pkgRows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
+      draftManifest: packages.draftManifest,
+    })
     .from(packages)
     .where(inArray(packages.id, ids));
+  // `active` and `via` are read off the same rows: the space's placement rows and the org's offers.
+  const placementRows = new Map(
+    (
+      await db
+        .select({
+          packageId: spacePackages.packageId,
+          enabled: spacePackages.enabled,
+          placedByOffer: spacePackages.placedByOffer,
+        })
+        .from(spacePackages)
+        .where(and(eq(spacePackages.spaceId, scope.spaceId), inArray(spacePackages.packageId, ids)))
+    ).map((r) => [r.packageId, r]),
+  );
+  const offered = await listOfferedToSpaceOrg(scope.spaceId, ids);
+  const placementOf = new Map(
+    pkgRows.map((p) => {
+      const pkg = { ...p, offeredToOrg: offered.has(p.id) };
+      const row = placementRows.get(p.id);
+      return [
+        p.id,
+        { active: isActiveHere(pkg, row), via: placementVia(pkg, scope.spaceId, row) },
+      ] as const;
+    }),
+  );
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
   // The integration's own version, off the selected draft manifest: a caller pinning a
   // `dependencies.integrations` range needs no guess.
@@ -2749,12 +2780,13 @@ export async function listUsableIntegrationsForActor(
   return ids.map((integrationId) => {
     const { own, shared, healthy, connections } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
-    const isActive = active.has(integrationId);
+    const isActive = placementOf.get(integrationId)?.active ?? false;
     return {
       integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
       active: isActive,
+      via: placementOf.get(integrationId)?.via ?? null,
       // What a run would bind: nothing of an inactive integration.
       ...(isActive
         ? {

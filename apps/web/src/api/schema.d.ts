@@ -1539,7 +1539,7 @@ export interface paths {
         };
         /**
          * Get integration detail + per-auth status
-         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and what this caller may do).
+         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and whether this caller may offer it).
          */
         get: operations["getIntegration"];
         put?: never;
@@ -7049,7 +7049,7 @@ export interface components {
              */
             deleting_at: string | null;
         };
-        /** @description What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`), the package's offer fields and this caller's activation verdicts. A projection of `GET /api/spaces/{id}/library`, never a second computation. */
+        /** @description What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation. */
         PackageAvailability: {
             /**
              * @description WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.
@@ -7070,8 +7070,6 @@ export interface components {
             offered_to_org: boolean;
             /** @description Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry). */
             org_offerable: boolean;
-            activate: components["schemas"]["ActivationVerdict"];
-            deactivate: components["schemas"]["ActivationVerdict"];
         };
         PackageFileDeleteEntry: {
             /**
@@ -14231,6 +14229,7 @@ export interface operations {
                         manifest: {
                             [key: string]: unknown;
                         };
+                        availability: components["schemas"]["PackageAvailability"];
                         auths: {
                             auth_key: string;
                             /**
@@ -14335,7 +14334,6 @@ export interface operations {
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
                         };
-                        availability: components["schemas"]["PackageAvailability"];
                     };
                 };
             };
@@ -15877,6 +15875,7 @@ export interface operations {
                         manifest: {
                             [key: string]: unknown;
                         };
+                        availability: components["schemas"]["PackageAvailability"];
                         auths: {
                             auth_key: string;
                             /**
@@ -17628,6 +17627,7 @@ export interface operations {
                      *           "name": "Gmail",
                      *           "source": "own",
                      *           "active": true,
+                     *           "via": "system",
                      *           "connections": [
                      *             {
                      *               "id": "conn_1",
@@ -17643,6 +17643,7 @@ export interface operations {
                      *           "name": "ClickUp",
                      *           "source": "shared",
                      *           "active": true,
+                     *           "via": "organization",
                      *           "connections": [
                      *             {
                      *               "id": "conn_2",
@@ -17733,6 +17734,11 @@ export interface operations {
                             source: "own" | "shared" | "both";
                             /** @description Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent. */
                             active: boolean;
+                            /**
+                             * @description Why the integration is placed in this space (`PackagePlacement.via`, one definition for the library, the integration sheet and this list); `null` when it is not placed here: the caller holds a connection usable here, but the integration itself does not reach this space.
+                             * @enum {string|null}
+                             */
+                            via: "home" | "shared" | "system" | "organization" | null;
                             /** @description The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`. */
                             connections: {
                                 id: string;
