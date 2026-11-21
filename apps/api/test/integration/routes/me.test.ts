@@ -18,6 +18,7 @@ import {
   createTestUser,
   createTestContext,
   createTestOrg,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -52,6 +53,8 @@ import {
   organizations,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 
 const app = getTestApp();
 
@@ -273,6 +276,42 @@ describe("Me API (/api/me)", () => {
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
       expect(byId.has("@ctx/other-space")).toBe(false);
+    });
+
+    it("keeps a team-shared organization connection in its owner's personal context alone", async () => {
+      const colleague = await memberContext(ctx, "member");
+      const integrationId = "@ctx/shared-account";
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId,
+        userId: ctx.user.id,
+      });
+      await db
+        .update(integrationConnections)
+        .set({ shareAllSpaces: true })
+        .where(eq(integrationConnections.id, id));
+
+      for (const person of [ctx, colleague]) {
+        const space = await ensurePersonalSpaceFor(ctx.orgId, person.user.id);
+        const res = await app.request("/api/me/context", {
+          headers: authHeaders(person, { "X-Space-Id": space.id }),
+        });
+        expect(res.status).toBe(200);
+        const { connections } = (await res.json()) as {
+          connections: {
+            integration_package_id: string;
+            connections: { id: string; owned_by_actor: boolean }[];
+          }[];
+        };
+        const account = connections.find((c) => c.integration_package_id === integrationId);
+        if (person === ctx)
+          expect(account?.connections).toContainEqual(
+            expect.objectContaining({ id, owned_by_actor: true }),
+          );
+        else expect(account).toBeUndefined();
+      }
     });
 
     it("flags needs_reconnection only when no usable connection of the integration is healthy", async () => {

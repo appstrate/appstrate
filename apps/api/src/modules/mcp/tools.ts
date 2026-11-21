@@ -2281,7 +2281,8 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
         : "") +
       ". `connections` holds one entry per " +
       "integration with a connection the caller may bind in THIS space, its own or shared into it " +
-      "(a connection shared with team spaces is absent from a personal space), each listing those " +
+      "(team-space sharing grants colleagues access only in team spaces; the owner can still use an " +
+      "organization-scoped connection in their personal space when own connections are allowed), each listing those " +
       "`connections` (`id`, `label`, `account_id`, `owned_by_actor`, `needs_reconnection`). On the " +
       "integration entry, not on a connection: `active` (`false`: the integration is switched off " +
       "in this space, so a run there cannot use it until it is activated — `activatePackage`, or " +

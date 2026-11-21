@@ -1335,7 +1335,7 @@
   "orgSettings.personalModelCredentialsDesc": "Désactivé, les clés perso et les abonnements perso ne servent plus aucun modèle : les modèles qui en dépendent deviennent inutilisables, les autres restent payés par l'organisation.",
   "orgSettings.personalSpacesTitle": "Espaces personnels",
   "orgSettings.personalSpaceRoleTitle": "Création d'agents dans les espaces personnels",
-  "orgSettings.personalSpaceRoleDesc": "Désactivé, les membres ne peuvent plus créer, modifier, publier ni partager d'agents, de skills ou d'intégrations dans leur espace personnel, ni lancer un agent composé à la volée, ni renommer l'espace. Ils peuvent toujours lancer ce qui y est publié et actif, activer ce qui leur est proposé, gérer leurs connexions et supprimer ce qu'ils ont déjà. Les propriétaires et administrateurs ne sont pas concernés.",
+  "orgSettings.personalSpaceRoleDesc": "Désactivé, les membres ne peuvent plus créer, modifier, publier ni partager d'agents, de skills ou d'intégrations dans leur espace personnel, ni lancer un agent composé à la volée, ni renommer l'espace. Ils peuvent lancer les agents publiés et actifs, activer les paquets proposés, gérer leurs connexions et supprimer leurs ressources. Un brouillon partagé reste exécutable si le membre peut le modifier dans son espace d’origine. Les planifications déjà autorisées sur un brouillon continuent. Les propriétaires et administrateurs ne sont pas concernés.",
   "orgSettings.distributionTitle": "Distribution",
   "orgSettings.departure.title": "Planifications désactivées par ce retrait",
   "orgSettings.departure.none": "Aucune planification d’un espace d’équipe ne sera désactivée par ce retrait.",

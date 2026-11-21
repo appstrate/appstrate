@@ -12,7 +12,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { schedules } from "@appstrate/db/schema";
+import { runs, schedules } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -38,6 +38,8 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 
 const app = getTestApp();
 
@@ -169,6 +171,29 @@ describe("personal_space_role: operator", () => {
     await seedSpacePackage(personalId, agentId);
   });
 
+  it("continues firing a personal draft schedule authorized before the cap", async () => {
+    const response = await app.request(`/api/agents/${agentId}/schedules`, {
+      method: "POST",
+      headers: { ...headersFor(member, personalId), ...json },
+      body: JSON.stringify({ cron_expression: "0 9 * * *", version_override: "draft" }),
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    await setCap(owner, "operator");
+
+    await triggerScheduledRun(id);
+    await waitForRunPipelineSettled();
+    const fired = await db.select().from(runs).where(eq(runs.scheduleId, id));
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      packageId: agentId,
+      spaceId: personalId,
+      versionRef: "draft",
+    });
+    // A preflight refusal also creates a run row, but it never resolves a model.
+    expect(fired[0]!.modelId).toBeTruthy();
+  });
+
   describe("under the cap", () => {
     beforeEach(async () => {
       await setCap(owner, "operator");
@@ -239,6 +264,24 @@ describe("personal_space_role: operator", () => {
         headers: headersFor(member, personalId),
       });
       expect(removed.status, await removed.clone().text()).toBe(204);
+    });
+
+    it("can launch a shared draft when the member can edit it in its team home", async () => {
+      const shared = `@${owner.org.slug}/team-draft`;
+      await seedAgent({ id: shared, orgId: owner.orgId, homeSpaceId: builderSpaceId });
+      await seedSpacePackage(personalId, shared);
+      const response = await app.request(`/api/agents/${shared}/run?version=draft`, {
+        method: "POST",
+        headers: { ...headersFor(member, personalId), ...json },
+        body: JSON.stringify({ input: {} }),
+      });
+      expect(response.status, await response.clone().text()).toBe(201);
+      expect(await response.json()).toMatchObject({
+        packageId: shared,
+        spaceId: personalId,
+        version_ref: "draft",
+      });
+      await waitForRunPipelineSettled();
     });
 
     it("still activates and deactivates a package in the member's own space", async () => {

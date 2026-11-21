@@ -76,6 +76,19 @@ describe("MCP server instructions — connect bullet", () => {
     }
   });
 
+  it("handles an inactive integration before any connect flow and asks before starting or widening a connection", () => {
+    for (const rendersCards of [true, false]) {
+      const bullet = connectBullet(rendersCards);
+      const inactive = bullet.indexOf("On `integration_not_active`, offer activation and wait");
+      const kickoff = bullet.indexOf('operation_id: "initiateIntegrationConnect"');
+      expect(inactive).toBeGreaterThan(-1);
+      expect(bullet.slice(inactive, kickoff)).toContain("Never start a connection for this code");
+      expect(bullet.slice(inactive, kickoff)).toContain("Only after they choose it");
+      expect(bullet).toContain("Only after the user chooses it, create it");
+      expect(bullet).not.toContain("MUST start the connect flow yourself");
+    }
+  });
+
   it("binds the fallback kickoff's `scopes` to the item's `required_scopes`", () => {
     // Without the relay the consent re-grants the same insufficient set, and
     // `connection_id` is what keeps a reconnect on the existing row.
@@ -439,7 +452,7 @@ describe("MCP server instructions — org-wide space choice", () => {
 
   it("sends an inline run and a new package to the personal space where the role allows it", () => {
     const text = spaceContext(orgWideInstructionsFor([mine, team]));
-    expect(text).toContain('an inline run (`run_and_wait` with `kind: "inline"`)');
+    expect(text).toContain("an inline run (including a launch without waiting)");
     expect(text).toContain("a new package (agent, skill, integration)");
     expect(text).toContain("your personal space (the one marked `your personal space`)");
     expect(text).toContain("your reply names it");
@@ -454,6 +467,28 @@ describe("MCP server instructions — org-wide space choice", () => {
     expect(text).toContain("Send it there first, whatever your role there");
     expect(text).toContain("never a reason to start in another space");
     expect(text).toContain("403 `inline_run_not_allowed_in_space`");
+  });
+
+  it("uses the personal-space rule for runInline when no space grants the inline shortcut", () => {
+    const capped = orgSpace("spc_mine", "Mine", "operator", true, OPERATOR);
+    const team = orgSpace("spc_team", "Team", "custom", false, [
+      "mcp:read",
+      "mcp:invoke",
+      "agents:write",
+      "agents:run",
+    ]);
+    expect([capped, team].some((s) => s.surface.composes)).toBe(false);
+    const instructions = orgWideInstructionsFor([capped, team]);
+    expect(instructions).toContain("runInline [spc_team]");
+    expect(spaceContext(instructions)).toContain("3. For an inline run");
+    expect(spaceContext(instructions)).toContain(
+      "ONLY spaces with launch permission are: spc_team.",
+    );
+    expect(instructions).toContain("`runAgent`/`runInline`");
+    // No other space supplies the read half of run_and_wait on this connection.
+    const launchOnly = orgWideInstructionsFor([team]);
+    expect(launchOnly).toContain("To launch an inline run without waiting");
+    expect(launchOnly).not.toContain("prefer the run_and_wait tool");
   });
 
   it("names the personal space for a new package to a caller who may create a skill but no agent", () => {
