@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Translate } from "@appstrate/ui/components/ui-labels";
+
 import type { components } from "../api/client";
 
 /** A CLI session or an MCP client grant, as the caller's own list returns it. */
@@ -15,7 +17,7 @@ export const ACCESS_GRANT_PATHS = [
   "/api/orgs/{orgId}/access-grants",
 ] as const;
 
-type Translate = (key: string, options?: Record<string, unknown>) => string;
+type GrantTranslate = Translate<Record<string, unknown>>;
 
 export type UaCategory = "cli" | "github-action" | "unknown";
 
@@ -32,7 +34,7 @@ export function categorizeUserAgent(ua: string | null): UaCategory {
 /** What a reader calls the grant: the CLI's device, or the MCP client's declared name. */
 export function grantLabel(
   grant: Pick<AccessGrant, "kind" | "device_name" | "user_agent" | "client_name">,
-  t: Translate,
+  t: GrantTranslate,
 ): string {
   if (grant.kind === "mcp") return grant.client_name || t("accessGrants.unnamedClient");
   if (grant.device_name) return grant.device_name;
@@ -47,14 +49,14 @@ export function grantLabel(
  * named with its org: space names repeat across orgs (every org has a
  * « Default »).
  */
-export function grantTargetLabel(target: GrantTarget, t: Translate): string {
+export function grantTargetLabel(target: GrantTarget, t: GrantTranslate): string {
   return target.spaceId
     ? t("accessGrants.targetSpace", { name: target.space_name, org: target.org_name })
     : t("accessGrants.targetOrg", { name: target.org_name });
 }
 
 /** The same target inside a sentence: « l’organisation Acme », « l’espace Ops d’Acme ». */
-export function grantTargetPhrase(target: GrantTarget, t: Translate): string {
+export function grantTargetPhrase(target: GrantTarget, t: GrantTranslate): string {
   return target.spaceId
     ? t("accessGrants.targetSpacePhrase", { name: target.space_name, org: target.org_name })
     : t("accessGrants.targetOrgPhrase", { name: target.org_name });
@@ -69,7 +71,7 @@ export function grantTargetPhrase(target: GrantTarget, t: Translate): string {
  */
 export function grantOriginLabel(
   grant: Pick<AccessGrant, "client_origin" | "client_registration">,
-  t: Translate,
+  t: GrantTranslate,
 ): string {
   if (grant.client_registration === "dynamic") {
     return grant.client_origin

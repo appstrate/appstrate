@@ -61,7 +61,7 @@ const MANIFEST = {
   auths: { primary: { type: "custom" } },
 } as unknown as IntegrationManifestView;
 
-const t = (key: string, opts?: Record<string, unknown>) =>
+const t = (key: string, opts: Record<string, unknown> = {}) =>
   i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
 
 function candidate(id: string, label: string): Candidate {
