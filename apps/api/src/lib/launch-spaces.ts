@@ -71,10 +71,7 @@ export function launchSpacesLookup(
     )
       return [];
     const orgId = c.get("orgId");
-    const here = c.get("spaceId");
-    const candidates = (await credentialReachableSpaces(c, orgId)).filter(
-      (space) => space.id !== here && required.every((p) => space.permissions.has(p)),
-    );
+    const candidates = await otherSpacesHolding(c, required);
     if (candidates.length === 0) return [];
     const packageIds = [
       ...(isInlineShadowPackageId(packageId) ? [] : [packageId]),
@@ -85,8 +82,24 @@ export function launchSpacesLookup(
       packageIds,
       candidates.map((space) => space.id),
     );
-    return candidates.filter((space) => active.has(space.id)).map(({ id, name }) => ({ id, name }));
+    return candidates.filter((space) => active.has(space.id));
   };
+}
+
+/**
+ * Other spaces within the credential's reach where the caller holds every `required`
+ * permission. No agent is involved, so nothing is judged for activation: the lookup above
+ * cannot serve an inline run, which has no placed package to look for.
+ */
+export async function otherSpacesHolding(
+  c: Context<AppEnv>,
+  required: readonly Permission[],
+): Promise<LaunchSpace[]> {
+  if (c.get("principalKind") === "end_user") return [];
+  const here = c.get("spaceId");
+  return (await credentialReachableSpaces(c, c.get("orgId")))
+    .filter((space) => space.id !== here && required.every((p) => space.permissions.has(p)))
+    .map(({ id, name }) => ({ id, name }));
 }
 
 /** The activation alternatives of a run or schedule for the exact version it requested. */

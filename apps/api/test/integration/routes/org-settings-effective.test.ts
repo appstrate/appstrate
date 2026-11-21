@@ -62,4 +62,29 @@ describe("organization settings — effective values", () => {
     expect(row!.orgSettings).toHaveProperty("dashboard_sso_enabled", true);
     expect(row!.orgSettings).not.toHaveProperty("personal_model_credentials");
   });
+
+  it("reads personal_space_role as admin on an org that never set it", async () => {
+    const res = await app.request(settingsUrl(ctx), { headers: { Cookie: ctx.cookie } });
+    expect(((await res.json()) as { personal_space_role: string }).personal_space_role).toBe(
+      "admin",
+    );
+  });
+
+  it("stores personal_space_role operator and refuses any other value", async () => {
+    expect((await patchSettings(ctx, { personal_space_role: "operator" })).status).toBe(200);
+    const res = await app.request(settingsUrl(ctx), { headers: { Cookie: ctx.cookie } });
+    expect(((await res.json()) as { personal_space_role: string }).personal_space_role).toBe(
+      "operator",
+    );
+    expect((await patchSettings(ctx, { personal_space_role: "builder" })).status).toBe(400);
+  });
+
+  it("a PATCH of another key does not write the personal_space_role default into storage", async () => {
+    expect((await patchSettings(ctx, { dashboard_sso_enabled: true })).status).toBe(200);
+    const [row] = await db
+      .select({ orgSettings: organizations.orgSettings })
+      .from(organizations)
+      .where(eq(organizations.id, ctx.orgId));
+    expect(row!.orgSettings).not.toHaveProperty("personal_space_role");
+  });
 });

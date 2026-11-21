@@ -201,6 +201,16 @@ describe("credential proxy closed in the space", () => {
 describe("buildMcpTools declarations", () => {
   const names = (permissions: string[]): string[] => [...makeTools(permissions).byName.keys()];
 
+  it("describes team-space sharing separately from an owner's own connection", () => {
+    const description = makeTools(["mcp:read"]).byName.get("get_me")!.descriptor.description;
+    expect(description).toContain(
+      "team-space sharing grants colleagues access only in team spaces",
+    );
+    expect(description).toContain(
+      "the owner can still use an organization-scoped connection in their personal space",
+    );
+  });
+
   it("shows a read-only caller neither invoke, run nor files", () => {
     const declared = names(["mcp:read"]);
     expect(declared).not.toContain("invoke_operation");

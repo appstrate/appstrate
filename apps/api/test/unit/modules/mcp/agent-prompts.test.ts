@@ -72,7 +72,11 @@ const space = (id: string, name: string, runs = true): PromptSpace => ({
   surface: { runs },
 });
 
-function provider(spaces: PromptSpace[], agentsBySpace: Record<string, FakeAgent[]>) {
+function provider(
+  spaces: PromptSpace[],
+  agentsBySpace: Record<string, FakeAgent[]>,
+  namesSpace = true,
+) {
   const fake = fakeDispatch(agentsBySpace);
   return {
     prompts: buildAgentPromptProvider({
@@ -83,6 +87,7 @@ function provider(spaces: PromptSpace[], agentsBySpace: Record<string, FakeAgent
         return fake.dispatch(request);
       },
       spaces,
+      namesSpace,
     }),
     requests: fake.requests,
   };
@@ -151,6 +156,15 @@ describe("agent prompts — prompts/list", () => {
     expect(names).toEqual(["run-writer", "run-beta-team-writer", "run-other-writer"]);
     expect(await textOf(prompts, "run-beta-team-writer")).toContain('"space_id":"spc_b"');
     expect(await textOf(prompts, "run-other-writer")).toContain('"scope":"@other"');
+  });
+
+  it("names no space_id on a connection pinned to one space, whose tools refuse it", async () => {
+    const { prompts } = provider(
+      [space("spc_a", "Alpha")],
+      { spc_a: [{ id: "@acme/writer", version: "1.0.0" }] },
+      false,
+    );
+    expect(await textOf(prompts, "run-writer")).not.toContain("space_id");
   });
 
   it("names only published agents: an unpublished namesake in an earlier space claims nothing", async () => {

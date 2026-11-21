@@ -42,6 +42,8 @@ export interface AgentPromptContext {
   /** A dispatch run in one of `spaces`. */
   dispatchIn: (spaceId: string) => Dispatch;
   spaces: readonly PromptSpace[];
+  /** Whether the connection's tools take `space_id`: `false` when pinned to one space. */
+  namesSpace: boolean;
 }
 
 /** A published agent of a space, with the prompt name it gets. */
@@ -121,7 +123,7 @@ async function resolveAgent(
   }
   return {
     packageId: agent.packageId,
-    spaceId: agent.spaceId,
+    ...(ctx.namesSpace ? { spaceId: agent.spaceId } : {}),
     version: body.version,
     title:
       typeof body.display_name === "string" && body.display_name.trim()

@@ -9,7 +9,13 @@
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizationMembers, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import {
+  organizationMembers,
+  organizations,
+  spaceMembers,
+  spaceRoles,
+  spaces,
+} from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { assertSpaceId } from "./ids.ts";
 import {
@@ -17,6 +23,9 @@ import {
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
   membershipOn,
+  PERSONAL_SPACE_ROLE_COLUMN,
+  toPersonalSpaceRole,
+  type PersonalSpaceRole,
   type SpaceMemberRow,
 } from "./space-role.ts";
 
@@ -75,6 +84,8 @@ export interface SpaceAccessSnapshot {
   member: SpaceMemberRow | null;
   /** `null` when `userId` is not a member of the organization. */
   orgRole: OrgRole | null;
+  /** The org's `personal_space_role`, from the same statement (RBAC spec §4.4). */
+  personalSpaceRole: PersonalSpaceRole;
 }
 
 /**
@@ -104,8 +115,10 @@ export async function loadSpaceAccessForIds(
       space: SPACE_CONTEXT_COLUMNS,
       ...MEMBERSHIP_COLUMNS,
       orgRole: organizationMembers.role,
+      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
     })
     .from(spaces)
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
     .leftJoin(spaceMembers, membershipOn(userId))
     .leftJoin(spaceRoles, customRoleOn)
     .leftJoin(
@@ -120,5 +133,6 @@ export async function loadSpaceAccessForIds(
     space: row.space,
     member: memberFromJoin(row),
     orgRole: row.orgRole,
+    personalSpaceRole: toPersonalSpaceRole(row.storedPersonalSpaceRole),
   }));
 }

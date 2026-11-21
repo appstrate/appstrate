@@ -34,6 +34,7 @@ function inDefaultSpace(role: Parameters<typeof orgPermissions>[0]): ReadonlySet
     { id: "spc_test", visibility: "open", defaultRole: "operator", ownerUserId: null },
     null,
     "usr_test",
+    "admin",
   );
   return effectivePermissions({
     orgPermissions: orgPermissions(role),
@@ -132,6 +133,7 @@ describe("effective permissions in an open space", () => {
       { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "viewer" } },
       "usr_test",
+      "admin",
     );
     const perms = effectivePermissions({
       orgPermissions: orgPermissions("guest"),
@@ -282,6 +284,7 @@ describe("the `runner` preset", () => {
       { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "runner" } },
       "usr_test",
+      "admin",
     );
     const effective = effectivePermissions({
       orgPermissions: orgPermissions("member"),

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`personal_space_role`** org setting (`orgSettingsSchema`, `admin` | `operator`, read as `admin` when
+  absent): `operator` caps the role an org member holds in their own personal space.
 - **`AuthResolution.spaceIdsRestricted`** (`@appstrate/core/module`, #2336): whether `spaceIds` is a
   restriction the person chose (default `true`). `false` marks the set as the spaces the person acts
   in, so the credential acts on connections as the person while staying confined everywhere else.

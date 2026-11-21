@@ -1873,7 +1873,7 @@ describe("handleChatStream", () => {
       const rowOf = async (sessionId: string) =>
         (await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)))[0]!;
 
-      it("is the default of a request naming no space, in the prompt, and is stored as the origin of a new conversation", async () => {
+      it("is named in the prompt as a fact, and is stored as the origin of a new conversation", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, {
@@ -1884,9 +1884,7 @@ describe("handleChatStream", () => {
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
 
-        expect(calls[0]!.system).toContain(
-          `This conversation's space is Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
-        );
+        expect(calls[0]!.system).toContain(`This conversation was opened in Beta (\`${spaceB}\`).`);
         // The default pins nothing: the turn acts on the organization endpoint.
         expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: spaceB, restricted: false });
@@ -1894,7 +1892,7 @@ describe("handleChatStream", () => {
         expect(await touchedBy(sessionId)).toEqual([]);
       });
 
-      it("defaults the overview to the organization's default space, storing no origin", async () => {
+      it("names no space in the overview, even with an organization default, storing no origin", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, {
@@ -1905,22 +1903,19 @@ describe("handleChatStream", () => {
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
-        expect(calls[0]!.system).toContain(
-          `When the user names no space, pass \`${spaceB}\` (Beta, the organization's default space) as the \`space_id\``,
-        );
+        expect(calls[0]!.system).not.toContain("This conversation was opened in");
+        expect(calls[0]!.system).not.toContain("default space");
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
       });
 
-      it("has no default from the overview without a personal or default space: nothing stored, the assistant asks", async () => {
+      it("names no space from the overview: nothing stored", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, { reachable: reach });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
-        expect(calls[0]!.system).toContain(
-          "Ask the user which space when the request does not say",
-        );
+        expect(calls[0]!.system).not.toContain("This conversation was opened in");
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
         expect(await touchedBy(sessionId)).toEqual([]);
       });
@@ -1948,7 +1943,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
         // The stable origin is the default, and the body's space touched and limited nothing.
         expect(calls[0]!.system).toContain(
-          `This conversation's space is Alpha (\`${ctx.defaultSpaceId}\`)`,
+          `This conversation was opened in Alpha (\`${ctx.defaultSpaceId}\`)`,
         );
         expect([...(await tokenSpaceIds(calls[0]!))!].sort()).toEqual(
           [ctx.defaultSpaceId, spaceB].sort(),
@@ -2085,7 +2080,7 @@ describe("handleChatStream", () => {
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         expect(calls[0]!.system).toContain(
-          `This conversation is limited to Beta (\`${spaceB}\`): pass \`${spaceB}\` as the \`space_id\` of every call`,
+          `This conversation was opened in Beta (\`${spaceB}\`) and is limited to it`,
         );
       });
 

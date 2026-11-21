@@ -3147,7 +3147,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The default space of a request that names none (never a pin) is the conversation's origin space; without one, the caller's personal space, else the organization's default space, when the turn acts there; the assistant asks only when none of them is. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the assistant asks. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -4168,7 +4168,7 @@ export interface paths {
         get: operations["getPackageHome"];
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing and renaming it. Deletion requires `<type>:delete` in the home. To move it, the caller must hold the type's `write` in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it. Organization administrators cannot enter another member's personal space (RBAC §3.6). `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
          */
         put: operations["movePackageHome"];
         post?: never;
@@ -4671,7 +4671,7 @@ export interface paths {
          *
          *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.
          *
-         *     **Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
+         *     **Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. A caller missing either half is refused an `inline` source with `403 inline_run_not_allowed_in_space` (carrying `active_in_spaces`), the same refusal as `POST /api/runs/inline`; a `registry` source asks `agents:run` alone and keeps the plain `403 forbidden`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["createRemoteRun"];
         delete?: never;
@@ -5855,7 +5855,7 @@ export interface components {
             /** @description Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it. */
             warnings: components["schemas"]["ActivationWarning"][];
         };
-        /** @description Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement. */
+        /** @description Other spaces within this credential's reach where the caller holds the permissions required by the refused operation, in space-list order. The specific error describes any additional activation checks. Empty for a credential pinned to this space and for an end-user. Ask the user before acting in another space. */
         ActiveInSpaces: {
             /** @description Space id (`spc_…`). */
             id: string;
@@ -5961,7 +5961,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6183,7 +6183,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** @description `agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation. */
+        /** @description `agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives require an active placement for the agent and its required integrations at the requested version (the latest publication when omitted), including its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation. */
         AgentNotActiveInSpaceProblem: components["schemas"]["ProblemDetail"] & {
             /** @enum {string} */
             code?: "agent_not_active_in_space";
@@ -6322,7 +6322,7 @@ export interface components {
             skill_mode: "auto" | "manual" | "strict";
             /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
-            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the default space of a request naming none, and the space a limited conversation is confined to. */
+            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It is the space of an act that names none (other than an inline run, a new package or a direct integration tool call, which go to the caller's personal space first), and the space a limited conversation is confined to. */
             spaceId: string | null;
             /** @description Whether the conversation is limited to its origin space: its tools act there alone. Always false without an origin space. */
             restricted: boolean;
@@ -6406,6 +6406,12 @@ export interface components {
             label: string;
             value: string;
             note?: string;
+        };
+        /** @description `inline_run_not_allowed_in_space`: the caller's role in this space does not allow composing an inline run (it needs `agents:write` and `agents:run` here). `active_in_spaces` lists the caller's other spaces, within the credential's reach, where they hold both. This permission check does not evaluate integration activation or connections. */
+        InlineRunNotAllowedProblem: components["schemas"]["ProblemDetail"] & {
+            /** @enum {string} */
+            code?: "inline_run_not_allowed_in_space";
+            active_in_spaces: components["schemas"]["ActiveInSpaces"];
         };
         /** @description Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The bound set is floor ∪ selection, floor first in its own order, then the selection's additions in theirs, deduplicated. Governed — an admin pin, else an enforced org default — the governing set is the floor, bound whole, and the selection is the launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override), else the member pin when additions are open, else nothing; no soft org default and no fallback contributes. Additions are open only under an admin pin that allows them with no enforced org default (`additional_connections_allowed`); open, the selection is drawn from the connections the actor can reach, closed, an override naming a connection outside the floor is `override_outranked`. Ungoverned there is no floor, and the first layer with a set is the selection: launch override → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick). More than 20 connections in all is `connection_set_too_large`; then a health and scope check on every bound connection. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. Per-connection provenance, read off the fields: under governance the floor is `admin_pinned_connection_ids` when an admin pin exists, else `org_default_connection_ids` (enforced); every other id of `resolved_connection_ids` is an addition — here the member pin's (`member_pinned_connection_ids`); a run's launch override, when it carries one, supplies them instead. Ungoverned, the whole set comes from `source`. */
         IntegrationAgentResolution: {
@@ -6530,7 +6536,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6587,7 +6593,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6940,7 +6946,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6986,7 +6992,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -7028,6 +7034,11 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
+            /**
+             * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
+             * @enum {string}
+             */
+            personal_space_role: "admin" | "operator";
         };
         Organization: {
             id: string;
@@ -7141,7 +7152,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -22441,7 +22452,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "api_version": "2026-03-21",
-                     *       "personal_model_credentials": true
+                     *       "personal_model_credentials": true,
+                     *       "personal_space_role": "admin"
                      *     }
                      */
                     "application/json": components["schemas"]["OrgSettings"];
@@ -22471,6 +22483,11 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
+                    /**
+                     * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
+                     * @enum {string}
+                     */
+                    personal_space_role?: "admin" | "operator";
                 };
             };
         };
@@ -25971,7 +25988,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             409: components["responses"]["RunAdmissionConflict"];
             /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
@@ -26079,7 +26105,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
@@ -26232,8 +26267,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when a `kind: "inline"` source is posted by a caller who cannot compose here (`agents:write` or `agents:run` missing; `active_in_spaces` names the spaces where they can). Otherwise insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             /** @description `idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above). */
             409: {

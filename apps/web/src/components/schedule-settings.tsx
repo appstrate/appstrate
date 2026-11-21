@@ -42,6 +42,7 @@ import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
+import { scheduleMenuActions } from "../lib/schedule-governance";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
@@ -114,25 +115,34 @@ export function ScheduleActionsMenu({
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
   const toggle = useUpdateSchedule();
+  const governs = useCanWriteSchedule(schedule);
+  const offered = scheduleMenuActions({
+    write: can("schedules:write"),
+    delete: can("schedules:delete"),
+    governs,
+  });
   // A write names no connection it does not mean to, but waits on what the fires run.
   const { ready } = useFiredFacts(schedule.packageId, firedVersion(schedule.version_override));
+  if (!offered.toggle && !offered.delete) return null;
   return (
     <PageActionsMenu>
-      <DropdownMenuItem
-        onSelect={() =>
-          toggle.mutate(
-            { id: schedule.id, enabled: !schedule.enabled },
-            { onError: (err) => toastScheduleConnectionChoice(err) },
-          )
-        }
-        disabled={toggle.isPending || !ready}
-      >
-        {schedule.enabled ? <Pause /> : <Play />}
-        {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-      </DropdownMenuItem>
-      {can("schedules:delete") && (
+      {offered.toggle && (
+        <DropdownMenuItem
+          onSelect={() =>
+            toggle.mutate(
+              { id: schedule.id, enabled: !schedule.enabled },
+              { onError: (err) => toastScheduleConnectionChoice(err) },
+            )
+          }
+          disabled={toggle.isPending || !ready}
+        >
+          {schedule.enabled ? <Pause /> : <Play />}
+          {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+        </DropdownMenuItem>
+      )}
+      {offered.delete && (
         <>
-          <DropdownMenuSeparator />
+          {offered.toggle && <DropdownMenuSeparator />}
           <DropdownMenuItem
             onSelect={onDelete}
             disabled={deletePending}

@@ -12,26 +12,31 @@ import { useOrg } from "../../hooks/use-org";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
 import { fieldWriteState } from "../../lib/field-write-state";
-
-type OrgToggleField =
-  "personal_model_credentials" | "dashboard_sso_enabled" | "restrict_package_copy";
+import {
+  toggleBody,
+  type OrgToggleField,
+  type ToggleValues,
+} from "../../lib/org-setting-toggle-body";
 
 /**
- * A boolean organization setting as a self-saving switch row (`org:settings`). A skeleton stands
- * in until the settings load, so a click can never send a value read off a default; a refusal is
- * said once, by the global mutation toast.
+ * An organization setting as a self-saving switch row (`org:settings`): a boolean, or a two-valued
+ * setting when `values` names what ON and OFF store. A skeleton stands in until the settings load,
+ * so a click can never send a value read off a default; a refusal is said once, by the global
+ * mutation toast.
  */
 export function OrgSettingToggle({
   id,
   label,
   description,
   field,
+  values,
   onSuccess,
 }: {
   id: string;
   label: ReactNode;
   description: ReactNode;
   field: OrgToggleField;
+  values?: ToggleValues;
   onSuccess?: () => void;
 }) {
   const { t } = useTranslation("settings");
@@ -57,13 +62,13 @@ export function OrgSettingToggle({
         <DisabledReasonTooltip reason={mayWrite ? null : t("orgSettings.cannotChange")}>
           <Switch
             id={id}
-            checked={orgSettings?.[field] ?? false}
+            checked={values ? orgSettings?.[field] === values.on : orgSettings?.[field] === true}
             disabled={!mayWrite || !orgSettings || update.isPending}
             onCheckedChange={(checked) =>
               update.mutate(
                 {
                   params: { path: { orgId: currentOrg.id } },
-                  body: { [field]: checked === true },
+                  body: toggleBody(field, checked === true, values),
                 },
                 { onSuccess },
               )

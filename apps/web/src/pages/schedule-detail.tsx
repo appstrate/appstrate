@@ -115,7 +115,7 @@ export function ScheduleDetailPage() {
                   <PageActionsMenu disabled />
                 </DisabledReasonTooltip>
               )}
-              {can("schedules:write") && mayWrite && (
+              {mayWrite && (
                 <ScheduleActionsMenu
                   schedule={schedule}
                   onDelete={() => setConfirmOpen(true)}

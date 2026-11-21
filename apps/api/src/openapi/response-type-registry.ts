@@ -276,8 +276,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
   AgentNotActiveInSpaceProblem:
     "ProblemDetail narrowed to `agent_not_active_in_space`; RFC 9457 envelope, never read through a shared-type",
+  InlineRunNotAllowedProblem:
+    "ProblemDetail narrowed to `inline_run_not_allowed_in_space`; RFC 9457 envelope, never read through a shared-type",
   ActiveInSpaces:
-    "`active_in_spaces` extension of two launch refusals, built by lib/launch-spaces.ts; never read through a shared-type",
+    "`active_in_spaces` extension of the launch and inline-run refusals, built by lib/launch-spaces.ts; never read through a shared-type",
   LaunchWarnings:
     "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
   ActivationWarnings:

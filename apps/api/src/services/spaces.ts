@@ -39,7 +39,9 @@ import {
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
   membershipOn,
+  PERSONAL_SPACE_ROLE_COLUMN,
   resolveSpaceRole,
+  toPersonalSpaceRole,
   type SpaceMemberRow,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
@@ -82,9 +84,15 @@ export async function listSpacesForPrincipal(
     overlay ? null : userId,
   );
   const out: Array<{ space: SpaceRow; role: SpaceRoleRef | null }> = [];
-  for (const { space, ...membership } of rows) {
+  for (const { space, storedPersonalSpaceRole, ...membership } of rows) {
     const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(membership);
-    const role = resolveSpaceRole(orgRole, space, member, personalOwnerId);
+    const role = resolveSpaceRole(
+      orgRole,
+      space,
+      member,
+      personalOwnerId,
+      toPersonalSpaceRole(storedPersonalSpaceRole),
+    );
     if (!isSpaceVisibleTo(orgRole, space, role)) continue;
     out.push({ space, role });
   }
@@ -188,8 +196,13 @@ async function listVisibleSpaces(
   userId: string | null,
 ) {
   return db
-    .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
+    .select({
+      space: spaces,
+      ...MEMBERSHIP_COLUMNS,
+      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
+    })
     .from(spaces)
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
     .leftJoin(spaceMembers, membershipOn(userId))
     .leftJoin(spaceRoles, customRoleOn)
     .where(

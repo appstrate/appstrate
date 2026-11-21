@@ -577,8 +577,8 @@ function buildSearchTool(
       "`limit`; every item carries the `id` describe takes. " +
       (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
-      "role may not invoke are listed apart under `denied`, with the permissions they need in " +
-      "YOUR space: report that to the user instead of trying them." +
+      "role may not invoke are listed apart under `denied`, with the permissions they need: " +
+      "report that to the user instead of trying them." +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
     annotations: discoveryAnnotations("Search", kinds),
     inputSchema: {
@@ -874,7 +874,7 @@ function buildDescribeTool(
       "every referenced component schema inlined" +
       (invokes ? ", to build a valid invoke_operation call (its `id` is the `operation_id`)" : "") +
       "; whether your role clears the route's guards (`granted`) and the permissions it requires " +
-      "in YOUR space (`required_permissions`). `target_space_permissions` are decided in the " +
+      "in the space of the call (`required_permissions`). `target_space_permissions` are decided in the " +
       "space the path names, never here; `ceiling_permissions` apply only through a delegated " +
       "credential (API key, OAuth token), whose scopes must include each. A granted operation " +
       "can still be refused on the record it acts on; that refusal names its reason." +
@@ -1136,7 +1136,8 @@ export async function readResponse(
   let body: unknown = raw;
   let spaceIds: string[] = [];
   const launchProblem =
-    eligibleLaunchSpaces && (response.status === 404 || response.status === 409);
+    eligibleLaunchSpaces &&
+    (response.status === 403 || response.status === 404 || response.status === 409);
   if (contentType.includes("json") && raw && (raw.length <= MAX_RESPONSE_CHARS || launchProblem)) {
     try {
       body = JSON.parse(raw);
@@ -1549,11 +1550,6 @@ function startRunProgress(
   };
 }
 
-/** What a caller composing an inline run tells it about the `log` tool. */
-export const INLINE_LOG_INSTRUCTION =
-  "The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level " +
-  "`prompt` to log meaningful steps whenever that tool is selected.";
-
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller whose surface `composes`; another caller sending one gets the
@@ -1570,8 +1566,10 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
       display_name: {
         type: "string",
         description:
-          "Task-specific human title. When name is omitted, the platform derives " +
-          "@inline/<slug> from this value.",
+          "Concise human title, in the user's language, of the exact action or outcome of THIS " +
+          'run (for example "Analyse des 3 derniers e-mails"): the run card, run lists and run ' +
+          "page show it. Never an id or a generic name such as `one-shot` or `task`. When " +
+          "`name` is omitted the platform derives @inline/<slug> from it.",
       },
       name: {
         type: "string",
@@ -1581,12 +1579,19 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
       },
       dependencies: {
         type: "object",
-        description: "Exact AFPS dependencies override.",
+        description:
+          "Exact AFPS dependencies override. `integrations` maps each `@scope/name` to its " +
+          "version: take both from `get_me` (`integration_package_id`, `version`).",
         additionalProperties: true,
       },
       integrations_configuration: {
         type: "object",
-        description: "Exact AFPS integration configuration override.",
+        description:
+          "Exact AFPS integration configuration override. Per integration, `tools` lists the " +
+          "exact tool names the task needs and no more (`api_call` covers most third-party REST " +
+          "calls; omit it only to take the integration's whole `default_tools`; `getIntegration` " +
+          "returns `default_tools` and the full `tool_catalog`). A declared integration is " +
+          "optional unless `required: true`.",
         additionalProperties: true,
       },
       output: {
@@ -1602,21 +1607,23 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
     description:
       "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
       "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
-      "to report each meaningful step — those lines are what the chat shows live. When the " +
-      "run produces files, require descriptive, task-specific names that remain clear " +
-      `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
+      "to report each meaningful step whenever it is selected — the chat shows only those " +
+      "lines, live.",
   },
   context_files: {
     type: "array",
     items: { type: "string" },
     description:
-      "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
+      "kind:inline ONLY. `appfile://` URIs only (an `upload://` one goes in a declared file " +
+      "field of `input`) — typically straight from a previous run's " +
       "`files` result — mounted read-only into this run's `files/` directory and " +
       "listed in its prompt. This is how you chain runs: to give a run the output of " +
       "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
       "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
       "and date you retype is one you can get wrong — the file itself cannot be. No " +
-      "manifest change is needed; the platform declares the input field for you. For " +
+      "manifest change is needed; the platform declares the input field for you. Naming a " +
+      "URI in `prompt` mounts nothing: a prompt naming a file the input does not mount is " +
+      "refused (400). For " +
       "kind:agent this argument is rejected — a published agent's input schema is a " +
       "versioned contract, so pass the URI through one of its declared file fields instead.",
   },
@@ -1635,17 +1642,16 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "by `manifest`+`prompt`)"
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
-      "`{ id, packageId, status, done:true, result?, error?, warnings }` when the run reaches a " +
-      "terminal status; `error` is the run's own failure. `warnings` (`[]` when none) lists the " +
+      "`{ id, packageId, status, done:true, result?, error?, warnings, files?" +
+      (ctx.orgSpaces ? ", space" : "") +
+      " }` when the run reaches a terminal status; `error` is the run's own failure" +
+      (ctx.orgSpaces ? " and `space` the space it ran in" : "") +
+      ". `warnings` (`[]` when none) lists the " +
       "integrations the run started without, each with the code that state raises as an error " +
       `on a required integration (${WARNING_CODES_PHRASE}; ` +
       "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
       `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
-      (inline
-        ? `${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION} ` +
-          "Never use an id or a generic display name such as `one-shot`. "
-        : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a file when the run ends and returned here as a `resource_link`" +
       (inline
@@ -2266,30 +2272,35 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
   const descriptor: Tool = {
     name: "get_me",
     description:
-      "Return the caller's working context: identity (name, email), role in this organization, " +
-      "the space the request resolved to (every list returned is scoped to it), " +
-      "and the integrations the caller already has connected: one entry per integration with a " +
-      "connection the caller may bind in that space, its own or shared into the space, each " +
-      "listing those `connections` (`id`, `label`, `account_id`, `owned_by_actor`, " +
-      "`needs_reconnection`). `via` says why the integration is placed in that space " +
-      "(`home`, `shared`, `system`, `organization`), `null` when the caller holds a connection but " +
-      "the integration is not placed there. `active: false` means the integration is switched off in that " +
-      "space: a run there cannot use it until it is activated (`activatePackage`) or offered to " +
-      "the organization (in the organization catalog, or with `offerPackageToOrg` from an unconfined user credential). An entry flagged `needs_reconnection` has no " +
-      "healthy connection: its owner must reconnect it before use. " +
+      "Return the caller's working context in the space of the call: `user`, `org` (with the " +
+      "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
+      (ctx.orgSpaces
+        ? ", and `spaces`: your role in each space you reach, which, not the organization role, decides each call"
+        : "") +
+      ". `connections` holds one entry per " +
+      "integration with a connection the caller may bind in THIS space, its own or shared into it " +
+      "(team-space sharing grants colleagues access only in team spaces; the owner can still use an " +
+      "organization-scoped connection in their personal space when own connections are allowed), each listing those " +
+      "`connections` (`id`, `label`, `account_id`, `owned_by_actor`, `needs_reconnection`). On the " +
+      "integration entry, not on a connection: `active` (`false`: the integration is switched off " +
+      "in this space, so a run there cannot use it until it is activated — `activatePackage`, or " +
+      "for an organization owner or admin offered to the organization: from chat, in the " +
+      "organization catalog; otherwise `offerPackageToOrg` with an unconfined user credential. An " +
+      "offer activates the integration, never a connection, and a space's own switched-off row " +
+      "still wins); `via` (`home`, `shared`, `system`, `organization`: why it is placed here, " +
+      "`null` when the caller holds a connection but it is not placed); `version` and " +
+      "`default_tools`, present only when active; `needs_reconnection` (no healthy connection: " +
+      "its owner must reconnect it). " +
       (surface.proxies
-        ? "The integration tools you can call with them are listed by `search` (`integration_tool` " +
-          "kind), with those of active integrations that need no connection; integrations active " +
-          "in the space that need one and lack a usable connection are listed there under " +
-          "`not_ready`. "
+        ? "The tools of these integrations are listed by `search` (`integration_tool` kind), with " +
+          "those of active integrations that need no connection; active ones that need one and " +
+          "lack a usable connection are listed there under `not_ready`. "
         : surface.proxiesClosed
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "Its lists of agents and skills are capped: `search` finds the rest by keyword. Call this " +
-      "first to ground who you are acting for, what the caller's role allows (operations beyond " +
-      "it fail at invoke time), and which integrations to prefer when building or configuring " +
-      "an agent.",
+      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
+      "the rest by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -2344,6 +2355,8 @@ export interface McpSurface {
   composes: boolean;
   /** Creating an agent through `invoke_operation`. */
   authors: boolean;
+  /** May create a package of at least one type (agent, skill or integration). */
+  creates: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
   /** `search`'s and `describe`'s integration tools, and `call_integration_tool`: the credential proxy outside a run. */
@@ -2377,6 +2390,9 @@ export function deriveMcpSurface(
     runs,
     composes: runs && granted("runInline"),
     authors: invokes && granted("createAgent"),
+    creates:
+      invokes &&
+      (granted("createAgent") || granted("createSkill") || granted("createIntegrationPackage")),
     listsFiles: granted("listFiles"),
     // `import_package_file` calls the import service directly: it re-checks
     // each package's `write`, but `mcp:invoke` and the user actor (the import
@@ -2487,15 +2503,11 @@ function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<strin
     type: "string",
     enum: spaces.reachable.map((s) => s.id),
     description: optional
-      ? `The one space to search, by id: ${reached}. Omitted, every space you reach is searched ` +
-        "and each item names the spaces where you reach it (`granted_in`): act on it with one of " +
-        "them, where your role there still decides. Pass it whenever the request or its context " +
-        "designates a space; omit it only when the space is unknown."
-      : `The space this call acts in, by id: ${reached}. ` +
-        "Take it from the user's request, or, when it names none, from the space your context " +
-        "designates for such a request; with neither, a new package goes to the space marked " +
-        "`your personal space`; otherwise, when several could serve, ask the user which one " +
-        "instead of choosing. The server picks no default space.",
+      ? `The one space to search, by id: ${reached}. Pass it when the request or context designates a space, ` +
+        "including when that space has no matches. Omit it for an explicitly cross-space search or when the space is unknown. " +
+        "Each item's `granted_in` names the spaces where you reach it."
+      : `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
+        "server instructions.",
   };
 }
 

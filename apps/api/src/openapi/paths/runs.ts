@@ -3,6 +3,7 @@
 import {
   agentNotActiveContent,
   connectionConflictContent,
+  inlineRunForbiddenContent,
   jsonRpcRequestBody,
   problemContent,
 } from "../responses.ts";
@@ -854,7 +855,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
         "413": {
@@ -999,7 +1005,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -1317,7 +1328,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. A caller missing either half is refused an `inline` source with `403 inline_run_not_allowed_in_space` (carrying `active_in_spaces`), the same refusal as `POST /api/runs/inline`; a `registry` source asks `agents:run` alone and keeps the plain `403 forbidden`." +
         inlineDependencyAuthorization,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1495,9 +1506,10 @@ const canonicalRunsPaths = {
           },
         },
         "403": {
-          $ref: "#/components/responses/Forbidden",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
           description:
-            'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
+            '`inline_run_not_allowed_in_space` when a `kind: "inline"` source is posted by a caller who cannot compose here (`agents:write` or `agents:run` missing; `active_in_spaces` names the spaces where they can). Otherwise insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {

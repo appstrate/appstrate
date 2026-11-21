@@ -547,11 +547,16 @@ export const orgSettingsSchema = z.object({
   restrict_package_copy: z.boolean().optional(),
   // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
   personal_model_credentials: z.boolean().optional(),
+  // Absent = `admin`. `operator` caps the role an org member holds in their own personal space.
+  personal_space_role: z.enum(["admin", "operator"]).optional(),
 });
 
 /** The org settings as served: each defaulted policy read as its effective value; other stored keys kept. */
 export const orgSettingsReadSchema = orgSettingsSchema
-  .extend({ personal_model_credentials: z.boolean().default(true) })
+  .extend({
+    personal_model_credentials: z.boolean().default(true),
+    personal_space_role: z.enum(["admin", "operator"]).default("admin"),
+  })
   .loose();
 
 // ---------------------------------------------------------------------------

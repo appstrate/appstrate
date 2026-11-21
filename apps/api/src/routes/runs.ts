@@ -36,7 +36,7 @@ import {
   assertConnectionOverridesAllowed,
   connectionOverridesSchema,
 } from "../lib/launch-schemas.ts";
-import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent, requireInlineCompose } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
 import { logger } from "../lib/logger.ts";
@@ -707,6 +707,7 @@ export function createRunsRouter() {
     rateLimit(getInlineRunLimits().rate_per_min),
     // Composing: mirror of `canComposeInline` (@appstrate/core/permissions),
     // one guard per grant so a refusal names the one missing.
+    requireInlineCompose(),
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     // The two guards say the caller may compose; every package the posted
@@ -842,6 +843,7 @@ export function createRunsRouter() {
     rateLimit(getInlineRunLimits().rate_per_min),
     // Same guard as the run surface it validates for (`canComposeInline`), and
     // the same per-dependency authority behind it.
+    requireInlineCompose(),
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     async (c) => {
