@@ -4,7 +4,7 @@
 
 import type { ReactNode } from "react";
 import type { PackageType } from "@appstrate/core/validation";
-import type { AgentListItem } from "@appstrate/shared-types";
+import type { AgentListIntegration, AgentListItem } from "@appstrate/shared-types";
 
 export interface CardItem {
   id: string;
@@ -28,6 +28,10 @@ export interface CardItem {
   icon?: ReactNode;
   /** An agent's chosen icon and colour. */
   identity?: { icon?: string | null; color?: string | null };
+  /** The integrations an agent uses that take a connection, drawn as a stack of their logos. */
+  integrations?: AgentListIntegration[];
+  /** The agent's required integrations not active in the space, which refuse its launch (single-space index only). */
+  inactiveIntegrations?: string[];
   /** An integration's logo (its manifest `icon`). */
   logo?: string;
   /** The card's state, top right. */
@@ -50,6 +54,10 @@ export function agentCardItem(agent: AgentListItem): CardItem {
     keywords: agent.keywords,
     unreadCount: agent.unread_count,
     identity: { icon: agent.icon, color: agent.color },
+    // Only those the reader connects: an unauthenticated one (the platform's own tools) asks
+    // nothing of them, and would sit on every agent's stack.
+    integrations: agent.integrations.filter((integration) => integration.authenticated),
+    inactiveIntegrations: agent.inactive_required_integrations,
   };
 }
 

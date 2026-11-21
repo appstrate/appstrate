@@ -286,6 +286,172 @@ describe("Agents API", () => {
     });
   });
 
+  describe("the integrations an agent uses, on the list", () => {
+    type Listed = {
+      id: string;
+      name: string;
+      icon: string | null;
+      required: boolean;
+      authenticated: boolean;
+    };
+
+    async function listedIntegrations(path: string) {
+      const res = await app.request(path, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string; integrations: Listed[] }[] };
+      return new Map(body.data.map((a) => [a.id, a.integrations]));
+    }
+
+    beforeEach(async () => {
+      for (const [id, appearance] of [
+        ["@myorg/svc-a", { display_name: "Service A", icon: "logos:slack-icon" }],
+        ["@myorg/svc-b", { display_name: "Zeta" }],
+        ["@myorg/svc-inert", {}],
+      ] as const) {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          draftManifest: { ...apiKeyIntegrationManifest(id), ...appearance },
+        });
+        // Active here: what a row leaves out of an inactive one is its own case, below.
+        await activatePackage(spaceScope(), id);
+      }
+    });
+
+    it("names each with its logo and required flag, required first, leaving out an inert one", async () => {
+      const manifest = agentDeclaring("@myorg/user", {
+        // By name alone « Service A » would come first: the required one leads.
+        "@myorg/svc-a": false,
+        "@myorg/svc-b": true,
+      });
+      await seedActiveAgent({
+        id: "@myorg/user",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: {
+          ...manifest,
+          dependencies: {
+            integrations: { ...manifest.dependencies.integrations, "@myorg/svc-inert": "^1.0.0" },
+          },
+          // Optional and selecting nothing: a run starts no server for it.
+          integrations_configuration: {
+            ...manifest.integrations_configuration,
+            "@myorg/svc-inert": { tools: [], required: false },
+          },
+        },
+      });
+
+      const byId = await listedIntegrations("/api/agents");
+      expect(byId.get("@myorg/user")).toEqual([
+        { id: "@myorg/svc-b", name: "Zeta", icon: null, required: true, authenticated: true },
+        {
+          id: "@myorg/svc-a",
+          name: "Service A",
+          icon: "logos:slack-icon",
+          required: false,
+          authenticated: true,
+        },
+      ]);
+    });
+
+    it("reads the version a launch without a selector runs, not the draft", async () => {
+      await seedActiveAgent({
+        id: "@myorg/published",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: agentDeclaring("@myorg/published", { "@myorg/svc-b": true }),
+      });
+      await seedPublishedVersion("@myorg/published", "1.0.0", {
+        manifest: agentDeclaring("@myorg/published", { "@myorg/svc-a": true }),
+      });
+
+      const byId = await listedIntegrations("/api/agents");
+      expect(byId.get("@myorg/published")?.map((i) => i.id)).toEqual(["@myorg/svc-a"]);
+    });
+
+    it("says which integrations bind no connection: those declaring no `auths`", async () => {
+      const { auths: _auths, ...open } = apiKeyIntegrationManifest("@myorg/svc-open");
+      await seedPackage({
+        id: "@myorg/svc-open",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: open,
+      });
+      await seedActiveAgent({
+        id: "@myorg/mixed",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: agentDeclaring("@myorg/mixed", {
+          "@myorg/svc-a": true,
+          "@myorg/svc-open": true,
+        }),
+      });
+
+      const byId = await listedIntegrations("/api/agents");
+      expect(
+        byId.get("@myorg/mixed")?.map(({ id, authenticated }) => ({ id, authenticated })),
+      ).toEqual([
+        { id: "@myorg/svc-open", authenticated: false },
+        { id: "@myorg/svc-a", authenticated: true },
+      ]);
+    });
+
+    it("leaves out an optional integration not active in the space, keeps a required one", async () => {
+      for (const id of ["@myorg/svc-off", "@myorg/svc-off-required"]) {
+        // Homed here with no row: placed but not active.
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          draftManifest: apiKeyIntegrationManifest(id),
+        });
+      }
+      await seedActiveAgent({
+        id: "@myorg/partial",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: agentDeclaring("@myorg/partial", {
+          "@myorg/svc-a": false,
+          "@myorg/svc-off": false,
+          "@myorg/svc-off-required": true,
+        }),
+      });
+
+      const res = await app.request("/api/agents", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as {
+        data: { id: string; integrations: Listed[]; inactive_required_integrations: string[] }[];
+      };
+      const row = body.data.find((a) => a.id === "@myorg/partial")!;
+      // A run here starts without the optional one; the required one refuses it.
+      expect(row.integrations.map((i) => i.id)).toEqual([
+        "@myorg/svc-off-required",
+        "@myorg/svc-a",
+      ]);
+      expect(row.inactive_required_integrations).toEqual(["@myorg/svc-off-required"]);
+
+      // The organization index spans spaces, each with its own activations: it leaves none out.
+      const across = await listedIntegrations(`/api/orgs/${ctx.orgId}/agents`);
+      expect(across.get("@myorg/partial")?.map((i) => i.id)).toEqual([
+        "@myorg/svc-off-required",
+        "@myorg/svc-off",
+        "@myorg/svc-a",
+      ]);
+    });
+
+    it("is emitted on the organization index too", async () => {
+      await seedActiveAgent({
+        id: "@myorg/across",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: agentDeclaring("@myorg/across", { "@myorg/svc-a": false }),
+      });
+
+      const byId = await listedIntegrations(`/api/orgs/${ctx.orgId}/agents`);
+      expect(byId.get("@myorg/across")?.map((i) => i.id)).toEqual(["@myorg/svc-a"]);
+    });
+  });
+
   describe("agent identity (icon, color) on the list and the detail", () => {
     /** Seeds an active agent with `extra` merged into its manifest, returns its list item and detail. */
     async function readIdentity(name: string, extra: Record<string, unknown>) {

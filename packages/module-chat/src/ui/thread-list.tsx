@@ -375,10 +375,10 @@ function ConversationRow({
         size="lg"
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
-        // ring themselves in `--space-tile-ring`: the row's background in each of its states.
+        // ring themselves in `--tile-ring`: the row's background in each of its states.
         className={cn(
           canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
-          "[--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]",
+          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">

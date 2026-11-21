@@ -150,6 +150,7 @@ describe("the dashboard", () => {
       id: "@acme/reporter",
       display_name: "Rapporteur",
       source: "local",
+      integrations: [],
     } as unknown as DashboardData["agents"][number];
     const html = asOrgMember(
       READER,
