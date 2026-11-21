@@ -10,7 +10,7 @@
  * flipping the setting restores `admin` on the next request with no other write.
  */
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { schedules } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -23,13 +23,21 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
+  seedAgent,
   seedPackage,
   seedPackageShare,
+  seedPublishedVersion,
   seedSchedule,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
 } from "../../helpers/seed.ts";
+import {
+  createFakeOrchestrator,
+  seedDefaultOrgModel,
+  waitForRunPipelineSettled,
+} from "../../helpers/run-connection-fixtures.ts";
+import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
 const app = getTestApp();
 
@@ -109,9 +117,19 @@ describe("personal_space_role: operator", () => {
   let operatorSpaceId: string;
   let agentId: string;
 
+  beforeAll(() => {
+    _setOrchestratorForTesting(createFakeOrchestrator());
+  });
+
+  afterAll(() => {
+    _setOrchestratorForTesting(null);
+  });
+
   beforeEach(async () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "capped" });
+    // The launch case below reaches a 201, which needs a model on the org.
+    await seedDefaultOrgModel(owner);
     admin = await memberContext(owner, "admin");
     member = await memberContext(owner, "member");
     guest = await memberContext(owner, "guest");
@@ -182,13 +200,45 @@ describe("personal_space_role: operator", () => {
       });
     });
 
-    it("still reaches the launch door past the permission stage", async () => {
-      const res = await app.request(`/api/agents/${agentId}/run`, {
+    // A capped member runs what is PUBLISHED and ACTIVE in their space; a draft is authoring,
+    // which the cap removes (`agents:write`). The rule is kept, and these two cases pin it.
+    it("launches a published agent active in the personal space (201: every guard and the version stage passed)", async () => {
+      const published = `@${owner.org.slug}/published-agent`;
+      await seedAgent({
+        id: published,
+        homeSpaceId: personalId,
+        orgId: owner.orgId,
+        createdBy: member.user.id,
+        draftManifest: { name: published, version: "0.1.0", type: "agent" },
+        draftContent: "Published prompt.",
+      });
+      await seedPublishedVersion(published, "0.1.0");
+      await seedSpacePackage(personalId, published);
+
+      const res = await app.request(`/api/agents/${published}/run`, {
         method: "POST",
         headers: { ...headersFor(member, personalId), ...json },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ input: {} }),
       });
-      expect(res.status, await res.clone().text()).not.toBe(403);
+      expect(res.status, await res.clone().text()).toBe(201);
+      await waitForRunPipelineSettled();
+    });
+
+    it("refuses a never-published agent: 404 no_published_version, 403 draft_not_writable for the draft, deletable", async () => {
+      const launch = (query: string) =>
+        app.request(`/api/agents/${agentId}/run${query}`, {
+          method: "POST",
+          headers: { ...headersFor(member, personalId), ...json },
+          body: JSON.stringify({ input: {} }),
+        });
+      await expectProblem(await launch(""), 404, { code: "no_published_version" });
+      await expectProblem(await launch("?version=draft"), 403, { code: "draft_not_writable" });
+
+      const removed = await app.request(`/api/packages/agents/${agentId}`, {
+        method: "DELETE",
+        headers: headersFor(member, personalId),
+      });
+      expect(removed.status, await removed.clone().text()).toBe(204);
     });
 
     it("still activates and deactivates a package in the member's own space", async () => {

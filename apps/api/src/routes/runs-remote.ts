@@ -30,8 +30,10 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { reportPermissionDenial } from "@appstrate/core/permissions";
-import { inlineRunNotAllowedInSpace } from "../middleware/guards.ts";
+import {
+  assertCanComposeInline,
+  requireInlineComposeForInlineSource,
+} from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   invalidRequest,
@@ -215,11 +217,13 @@ function assertNoPlatformFileRefs(
 export function createRunsRemoteRouter() {
   const router = new Hono<AppEnv>();
 
-  // The mounted guard is `agents:run`; the inline branch asks `agents:write` on
-  // top of it from inside the handler, on the request's own shape.
+  // The mounted guard is `agents:run`; an inline source also needs `agents:write`. The body
+  // names the source, so the in-front middleware gives a caller who cannot compose the inline
+  // refusal, and the handler re-asserts it on the parsed shape.
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
+    requireInlineComposeForInlineSource(),
     requirePermission("agents", "run"),
     idempotency(),
     async (c) => {
@@ -372,10 +376,7 @@ export function createRunsRemoteRouter() {
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
         // mirror of `canComposeInline` (@appstrate/core/permissions).
-        if (!c.get("permissions")?.has("agents:write")) {
-          reportPermissionDenial(c, "agents:write");
-          throw await inlineRunNotAllowedInSpace(c);
-        }
+        await assertCanComposeInline(c);
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);

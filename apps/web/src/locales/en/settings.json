@@ -1334,7 +1334,7 @@
   "orgSettings.personalModelCredentialsDesc": "When off, personal keys and personal subscriptions serve no model: the models that depend on them become unusable, the others stay paid by the organization.",
   "orgSettings.personalSpacesTitle": "Personal spaces",
   "orgSettings.personalSpaceRoleTitle": "Agent authoring in personal spaces",
-  "orgSettings.personalSpaceRoleDesc": "When off, members can no longer create, edit, publish or share agents, skills or integrations in their personal space, run an agent composed on the fly, or rename the space. They can still run what is active there, activate what is offered to them, manage their connections and delete what they already have. Owners and admins are not affected.",
+  "orgSettings.personalSpaceRoleDesc": "When off, members can no longer create, edit, publish or share agents, skills or integrations in their personal space, run an agent composed on the fly, or rename the space. They can still run what is published and active there, activate what is offered to them, manage their connections and delete what they already have. Owners and admins are not affected.",
   "orgSettings.distributionTitle": "Distribution",
   "orgSettings.departure.title": "Schedules this removal disables",
   "orgSettings.departure.none": "No team-space schedule will be disabled by this removal.",

@@ -162,18 +162,50 @@ export function requireActiveAgent(alternatives: (c: Context<AppEnv>) => Promise
  */
 export function requireInlineCompose() {
   return async (c: Context<AppEnv>, next: Next) => {
+    await assertCanComposeInline(c);
+    return next();
+  };
+}
+
+/**
+ * The composing rule, once: throws the inline refusal (reporting the missing permission) when the
+ * caller lacks `agents:write` or `agents:run` in this space. Shared by {@link requireInlineCompose}
+ * and the `/runs/remote` inline branch.
+ */
+export async function assertCanComposeInline(c: Context<AppEnv>): Promise<void> {
+  const held = c.get("permissions");
+  const missing = (["agents:write", "agents:run"] as const).find((p) => !held?.has(p));
+  if (missing) {
+    reportPermissionDenial(c, missing);
+    throw await inlineRunNotAllowedInSpace(c);
+  }
+}
+
+/**
+ * `POST /runs/remote` carries inline vs registry in its body (`source.kind`). Mounted in front of
+ * the route's `requirePermission("agents","run")`, this gives an inline source the same refusal as
+ * the other inline doors when the caller cannot compose; a registry source, a body that does not
+ * parse, or a caller who can compose falls through untouched (the route guard and the body
+ * validation keep their own answers).
+ */
+export function requireInlineComposeForInlineSource() {
+  return async (c: Context<AppEnv>, next: Next) => {
     const held = c.get("permissions");
-    const missing = (["agents:write", "agents:run"] as const).find((p) => !held?.has(p));
-    if (missing) {
-      reportPermissionDenial(c, missing);
-      throw await inlineRunNotAllowedInSpace(c);
+    if (held?.has("agents:write") && held?.has("agents:run")) return next();
+    let kind: unknown;
+    try {
+      const body: unknown = await c.req.json();
+      kind = (body as { source?: { kind?: unknown } } | null)?.source?.kind;
+    } catch {
+      return next();
     }
+    if (kind === "inline") await assertCanComposeInline(c);
     return next();
   };
 }
 
 /** The refusal of an inline run by a caller who cannot compose in this space. */
-export async function inlineRunNotAllowedInSpace(c: Context<AppEnv>): Promise<ApiError> {
+async function inlineRunNotAllowedInSpace(c: Context<AppEnv>): Promise<ApiError> {
   const spaceId = c.get("spaceId");
   const activeInSpaces = await otherSpacesHolding(c, ["agents:write", "agents:run"]);
   return new ApiError({

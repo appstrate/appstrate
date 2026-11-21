@@ -285,7 +285,7 @@ export function buildServerInstructions(
 Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Org & space context
-${orgSpaces ? orgWideSpaceContext(orgSpaces, { inline, authors }) : pinnedSpaceContext}
+${orgSpaces ? orgWideSpaceContext(orgSpaces, { inline, creates: surface.creates || importsPackages }) : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
@@ -320,13 +320,13 @@ const pinnedSpaceContext = `This MCP server is scoped to ONE organization — th
  */
 function orgWideSpaceContext(
   spaces: OrgWideSpaces,
-  acts: { inline: boolean; authors: boolean },
+  acts: { inline: boolean; creates: boolean },
 ): string {
   const personal = spaces.reachable.find((space) => space.personal);
   const personalActs = personal
     ? [
         ...(acts.inline ? ['an inline run (`run_and_wait` with `kind: "inline"`)'] : []),
-        ...(acts.authors ? ["a new package (agent, skill, integration)"] : []),
+        ...(acts.creates ? ["a new package (agent, skill, integration)"] : []),
         ...(spaces.reachable.some((space) => space.surface.proxies)
           ? ["a direct integration tool call (`call_integration_tool`)"]
           : []),
@@ -344,9 +344,9 @@ function orgWideSpaceContext(
   3. ${personalStep}
   4. For any other act: the space your context designates (for the chat, the space the conversation was opened in); with none, ask which space; a space is not designated because the request would work there.
   5. A credential with no personal space (API key, end-user, delegated credential) uses its own space; when several are reachable and nothing designates one, ask.
-- When the space this order gives cannot serve the request, STOP: make no further call that changes anything or acts elsewhere (no activation, no offer, no connect flow, no run in another space). Reply with the reason and the options below, and wait: only the user's answer in a later message chooses one. Naming an integration in the request is not that answer.
+- When the space this order gives cannot serve the request, STOP: make no further call that changes anything or acts elsewhere (no activation, no offer, no connect flow, no run in another space). Reply with the reason and every option below that applies, and wait: only the user's answer in a later message chooses one. Naming an integration in the request is not that answer. Offer another space only when your role there allows the act (the \`space_id\` schema gives your role in each; \`granted_in\` and \`active_in_spaces\` list them).
   (a) The integration is off there (\`active: false\`, \`integration_not_active\`). Options: activating it there (\`activatePackage\`: path \`id\` and \`space_id\` both that space, when your role allows); running in a named space where it is active; for an organization owner or admin, offering it to the organization (from chat, the organization catalog; otherwise \`offerPackageToOrg\` with an unconfined credential), which activates it in every space without a row of its own: a space's own switched-off row still wins, and no connection becomes reachable by it.
-  (b) The connection needed is missing or not reachable there (a colleague's connection shared with team spaces only never reaches a personal space). Options: connecting one's own; running in a named team space where it is reachable. Never suggest sharing a member's account for a need that is only the caller's own.
+  (b) The connection needed is missing or not reachable there (a colleague's connection shared with team spaces only never reaches a personal space). Options, both to state: running in a named team space where it is reachable (\`get_me\` or \`search\` there shows it); connecting one's own. Never suggest sharing a member's account for a need that is only the caller's own.
   (c) Your role there does not allow the act (\`not_granted\`, 403 \`inline_run_not_allowed_in_space\`): ${NO_FALLBACK_HINT}
   To launch an existing agent, use a space where it is active (\`agent_not_active_in_space\`, \`active_in_spaces\`). Activating an agent, or sharing it so that it lands ON, refuses nothing: the response's \`warnings[]\` names each declared integration inactive in that space, and a \`required: true\` one will refuse its launch there — offer to activate it, with the user's agreement.
 - \`search\` may omit \`space_id\`; pass it whenever the space is known. Omitted, it searches every space you reach (\`searched_spaces\`; a chat conversation is attached to each), and each item's \`granted_in\` names the spaces where you reach it: act on it with one of them.
@@ -374,6 +374,7 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     runs: any("runs"),
     composes: any("composes"),
     authors: any("authors"),
+    creates: any("creates"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
     proxies: any("proxies"),

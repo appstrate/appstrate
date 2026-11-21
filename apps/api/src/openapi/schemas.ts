@@ -210,7 +210,7 @@ export const ORG_SETTINGS_PROPERTIES = {
     type: "string",
     enum: ["admin", "operator"],
     description:
-      "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs what is active there, activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.",
+      "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs what is published and active there (an agent never published answers `404 no_published_version`, and its draft `403 draft_not_writable`: a draft is authoring), activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.",
   },
 };
 

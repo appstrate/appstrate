@@ -2356,6 +2356,8 @@ export interface McpSurface {
   composes: boolean;
   /** Creating an agent through `invoke_operation`. */
   authors: boolean;
+  /** May create a package of at least one type (agent, skill or integration). */
+  creates: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
   /** `search`'s and `describe`'s integration tools, and `call_integration_tool`: the credential proxy outside a run. */
@@ -2389,6 +2391,9 @@ export function deriveMcpSurface(
     runs,
     composes: runs && granted("runInline"),
     authors: invokes && granted("createAgent"),
+    creates:
+      invokes &&
+      (granted("createAgent") || granted("createSkill") || granted("createIntegrationPackage")),
     listsFiles: granted("listFiles"),
     // `import_package_file` calls the import service directly: it re-checks
     // each package's `write`, but `mcp:invoke` and the user actor (the import

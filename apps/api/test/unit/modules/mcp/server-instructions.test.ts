@@ -456,6 +456,20 @@ describe("MCP server instructions — org-wide space choice", () => {
     expect(text).toContain("403 `inline_run_not_allowed_in_space`");
   });
 
+  it("names the personal space for a new package to a caller who may create a skill but no agent", () => {
+    // The destination follows the right to create ANY package type: decided on `createAgent`
+    // alone, a skill author's "create a skill" fell to the conversation's team space.
+    const skillAuthor = [...OPERATOR, "skills:write"];
+    const text = spaceContext(
+      orgWideInstructionsFor([
+        orgSpace("spc_mine", "Mine", "operator", true, OPERATOR),
+        orgSpace("spc_team", "Team", "custom", false, skillAuthor),
+      ]),
+    );
+    expect(text).toContain("a new package (agent, skill, integration)");
+    expect(text).toContain("your personal space (the one marked `your personal space`)");
+  });
+
   it("has no personal-space step for a caller with no personal space", () => {
     const text = spaceContext(orgWideInstructionsFor([team]));
     expect(text).toContain("You have no personal space");
@@ -477,7 +491,9 @@ describe("MCP server instructions — org-wide space choice", () => {
     // (b) the connection is not reachable there: connect one's own, or a team space.
     expect(text).toContain("(b) The connection needed is missing or not reachable there");
     expect(text).toContain("never reaches a personal space");
-    expect(text).toContain("connecting one's own; running in a named team space");
+    expect(text).toContain("Options, both to state: running in a named team space");
+    expect(text).toContain("connecting one's own");
+    expect(text).toContain("Offer another space only when your role there allows the act");
     expect(text).toContain("Never suggest sharing a member's account");
     // (c) the role does not allow it: a named space of the refusal, with the user's choice.
     expect(text).toContain("(c) Your role there does not allow the act");

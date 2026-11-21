@@ -21,6 +21,8 @@ const { ScheduleActionsMenu, ScheduleSettings } = await import("../schedule-sett
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
+const schedulesGovernance = await import("../../lib/schedule-governance.ts");
+const { orgStore } = await import("../../stores/org-store.ts");
 
 // Signed out, the session read settled: the state the boot resync leaves without a session.
 authStore.setState({ user: null, profile: null, loading: false });
@@ -118,5 +120,100 @@ describe("ScheduleActionsMenu — the enable/disable write", () => {
       <ScheduleActionsMenu schedule={SCHEDULE} onDelete={() => {}} deletePending={false} />,
     );
     expect(asksFiredDetail(qc)).toBe(true);
+  });
+});
+
+const ORG_ID = "org_1";
+
+/** The menu of `SCHEDULE` as `viewerId` sees it, holding `permissions` in the org. */
+function menuAs(viewerId: string, permissions: string[]): string {
+  const qc = new QueryClient();
+  qc.setQueryData(
+    ["orgs"],
+    [
+      {
+        id: ORG_ID,
+        name: "Acme",
+        slug: "acme",
+        role: "member",
+        permissions,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  );
+  const org = spyOn(orgStore, "getInitialState").mockReturnValue({
+    ...orgStore.getInitialState(),
+    id: ORG_ID,
+  });
+  const auth = spyOn(authStore, "getInitialState").mockReturnValue({
+    ...authStore.getInitialState(),
+    user: { id: viewerId, email: "viewer@acme.test", emailVerified: true },
+  });
+  try {
+    return render(
+      <ScheduleActionsMenu schedule={SCHEDULE} onDelete={() => {}} deletePending={false} />,
+      { queryClient: qc },
+    );
+  } finally {
+    org.mockRestore();
+    auth.mockRestore();
+  }
+}
+
+describe("ScheduleActionsMenu — who gets a menu", () => {
+  it("offers the menu to an owner holding schedules:delete without schedules:write", () => {
+    // The personal-space `operator` cap: delete rights only, so the member can still remove
+    // a schedule that keeps firing. The menu's content is a portal; the trigger is its proof.
+    expect(menuAs("usr_bob", ["schedules:delete", "agents:run"])).toContain(
+      "data-page-actions-trigger",
+    );
+  });
+
+  it("offers no menu to a caller holding neither right", () => {
+    expect(menuAs("usr_bob", ["agents:run"])).toBe("");
+  });
+
+  it("offers no menu for delete alone on a schedule the caller does not govern", () => {
+    expect(menuAs("usr_alice", ["schedules:delete"])).toBe("");
+  });
+
+  it("keeps the menu for a caller holding schedules:write", () => {
+    expect(menuAs("usr_bob", ["schedules:write"])).toContain("data-page-actions-trigger");
+  });
+});
+
+describe("scheduleMenuActions — what the menu would contain", () => {
+  const { scheduleMenuActions } = schedulesGovernance;
+
+  it("delete right alone: Supprimer only, no enable/disable", () => {
+    expect(scheduleMenuActions({ write: false, delete: true, governs: true })).toEqual({
+      toggle: false,
+      delete: true,
+    });
+  });
+
+  it("write right alone: enable/disable only", () => {
+    expect(scheduleMenuActions({ write: true, delete: false, governs: true })).toEqual({
+      toggle: true,
+      delete: false,
+    });
+  });
+
+  it("both rights: both, as before", () => {
+    expect(scheduleMenuActions({ write: true, delete: true, governs: true })).toEqual({
+      toggle: true,
+      delete: true,
+    });
+  });
+
+  it("neither right, or no governance: nothing (the server refuses both)", () => {
+    expect(scheduleMenuActions({ write: false, delete: false, governs: true })).toEqual({
+      toggle: false,
+      delete: false,
+    });
+    expect(scheduleMenuActions({ write: true, delete: true, governs: false })).toEqual({
+      toggle: false,
+      delete: false,
+    });
   });
 });
