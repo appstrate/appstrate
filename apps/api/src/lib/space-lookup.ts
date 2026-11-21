@@ -7,7 +7,7 @@
  * import each other.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
@@ -87,8 +87,19 @@ export async function loadSpaceAccess(
   orgId: string,
   userId: string | null,
 ): Promise<SpaceAccessSnapshot | null> {
-  assertSpaceId(spaceId);
-  const [row] = await db
+  const [row] = await loadSpaceAccessForIds([spaceId], orgId, userId);
+  return row ?? null;
+}
+
+/** The same role snapshot for several spaces, in one statement. */
+export async function loadSpaceAccessForIds(
+  spaceIds: readonly string[],
+  orgId: string,
+  userId: string | null,
+): Promise<SpaceAccessSnapshot[]> {
+  if (spaceIds.length === 0) return [];
+  for (const id of spaceIds) assertSpaceId(id);
+  const rows = await db
     .select({
       space: SPACE_CONTEXT_COLUMNS,
       ...MEMBERSHIP_COLUMNS,
@@ -104,7 +115,10 @@ export async function loadSpaceAccess(
         userId === null ? sql`false` : eq(organizationMembers.userId, userId),
       ),
     )
-    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
-    .limit(1);
-  return row ? { space: row.space, member: memberFromJoin(row), orgRole: row.orgRole } : null;
+    .where(and(inArray(spaces.id, [...spaceIds]), eq(spaces.orgId, orgId)));
+  return rows.map((row) => ({
+    space: row.space,
+    member: memberFromJoin(row),
+    orgRole: row.orgRole,
+  }));
 }

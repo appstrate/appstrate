@@ -53,7 +53,10 @@ export async function listAgentIndex(
   ]);
   // Single-space index only: an organization row spans spaces, each with its own activations.
   const inactive = singleSpaceId
-    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), singleSpaceId)
+    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), {
+        orgId,
+        spaceId: singleSpaceId,
+      })
     : null;
 
   return rows.map((row, i) => {

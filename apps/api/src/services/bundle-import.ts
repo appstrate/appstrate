@@ -619,7 +619,7 @@ export async function importBundle(
   // An agent root now on here: each declared integration it would run without, or be refused on.
   if (rootActive) {
     const rootType = bundleRootType(bundle);
-    for (const w of await activationWarnings(scope.spaceId, rootParsed.packageId, rootType)) {
+    for (const w of await activationWarnings(scope, rootParsed.packageId, rootType)) {
       warnings.push(`${bundle.root}: ${w.message}`);
     }
   }

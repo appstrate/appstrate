@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
+import { integrationIdOfField } from "../lib/connection-choice";
 import { useSpacesOf } from "./use-spaces";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -128,6 +131,7 @@ export function useInvalidatePackageActivation() {
  * switches on; `false` switches off and keeps the row and its settings.
  */
 export function useSetPackageActive() {
+  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   const invalidate = useInvalidatePackageActivation();
   const scope = useOrgOnlyScope();
@@ -161,10 +165,21 @@ export function useSetPackageActive() {
         });
         return;
       }
-      await client.POST("/api/spaces/{id}/packages", {
+      const { data } = await client.POST("/api/spaces/{id}/packages", {
         params: { path: { id: spaceId } },
         body: { packageId },
       });
+      return data?.warnings;
+    },
+    onSuccess: (warnings, { packageId }) => {
+      for (const warning of warnings ?? []) {
+        toast.warning(
+          t(warning.required ? "catalogue.inactiveRequired" : "catalogue.inactiveOptional", {
+            agent: packageId,
+            integration: integrationIdOfField(warning.field),
+          }),
+        );
+      }
     },
     onMutate: async ({ spaceId, packageId, active }) => {
       // The space library holds the working space only.

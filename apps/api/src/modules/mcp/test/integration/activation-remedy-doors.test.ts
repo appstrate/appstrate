@@ -11,12 +11,17 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
+import { ACTIVE_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { db } from "@appstrate/db/client";
 import { spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
-import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  memberHolding,
+  type TestContext,
+} from "../../../../../test/helpers/auth.ts";
 import {
   seedApiKey,
   seedEndUser,
@@ -24,6 +29,8 @@ import {
   seedPackageShare,
   seedPublishedVersion,
   seedSpace,
+  seedSpaceGrant,
+  seedSpaceMember,
   seedSpacePackage,
 } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
@@ -92,12 +99,13 @@ describe("the activation remedy, through every door", () => {
     return loopbackHeaders(ctx, ctx.orgId, { orgRole: "owner", permissions, spaceIds });
   }
 
-  /** `invoke_operation` on `endpoint`: the dispatched route's status and body. */
+  /** An MCP tool's relayed HTTP status and body. */
   async function invoke(
     endpoint: string,
     headers: Record<string, string>,
     args: Record<string, unknown>,
-  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    tool = "invoke_operation",
+  ): Promise<{ status: number; body: Record<string, unknown>; readSpaces?: unknown }> {
     const res = await app.request(endpoint, {
       method: "POST",
       headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
@@ -105,12 +113,17 @@ describe("the activation remedy, through every door", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "invoke_operation", arguments: args },
+        params: { name: tool, arguments: args },
       }),
     });
     const envelope = (await res.json()) as JsonRpcEnvelope;
     const content = (envelope.result?.content as Array<{ text: string }>) ?? [];
-    return JSON.parse(content[0]!.text) as { status: number; body: Record<string, unknown> };
+    const answer = JSON.parse(content[0]!.text) as {
+      status: number;
+      body: Record<string, unknown>;
+    };
+    const meta = envelope.result?._meta as Record<string, unknown> | undefined;
+    return { ...answer, readSpaces: meta?.[ACTIVE_SPACES_META_KEY] };
   }
 
   /** `activatePackage` of `packageId` into Vitrine, the call naming `spaceId`. */
@@ -421,6 +434,85 @@ describe("the activation remedy, through every door", () => {
       const res = await activateInVitrine(endpoint, headers, AGENT, pinned ? undefined : vitrine);
       expect({ door, status: res.status }).toEqual({ door, status: 201 });
       expect(await rowIn(vitrine, AGENT)).toEqual({ enabled: true });
+    }
+  });
+
+  it("offers only spaces where the same MCP tool can repeat the call", async () => {
+    // REST can run in both destinations. Only one admits invoke_operation, and
+    // neither admits run_and_wait: following the run requires a read grant.
+    const caller = await memberHolding(ctx, ["agents:run"]);
+    const invokeOnly = await seedSpace({ orgId: ctx.orgId, name: "Invoke only" });
+    await seedSpaceMember({ spaceId: vitrine, userId: caller.user.id, presetRole: "operator" });
+    await seedSpaceGrant({
+      orgId: ctx.orgId,
+      spaceId: invokeOnly.id,
+      userId: caller.user.id,
+      permissions: ["agents:run", "mcp:read", "mcp:invoke"],
+    });
+    await seedSpacePackage(vitrine, AGENT, { enabled: false });
+    for (const spaceId of [ctx.defaultSpaceId, invokeOnly.id]) {
+      for (const id of [AGENT, INTEGRATION]) await seedSpacePackage(spaceId, id);
+    }
+    const session = { Cookie: caller.cookie, "X-Org-Id": ctx.orgId };
+    const rest = await app.request("/api/agents/@remedy/needy/run", {
+      method: "POST",
+      headers: { ...session, "X-Space-Id": vitrine },
+    });
+    expect(rest.status).toBe(404);
+    const restBody = (await rest.json()) as { code: string; active_in_spaces: { id: string }[] };
+    expect(restBody.code).toBe("agent_not_active_in_space");
+    expect(restBody.active_in_spaces.map(({ id }) => id).sort()).toEqual(
+      [ctx.defaultSpaceId, invokeOnly.id].sort(),
+    );
+
+    const invoked = await invoke(orgEndpoint, session, {
+      operation_id: "runAgent",
+      space_id: vitrine,
+      path_params: { scope: "@remedy", name: "needy" },
+    });
+    expect(invoked.status).toBe(404);
+    expect(invoked.body.active_in_spaces).toEqual([{ id: invokeOnly.id, name: invokeOnly.name }]);
+    expect(invoked.readSpaces).toEqual([invokeOnly.id]);
+
+    const waited = await invoke(
+      orgEndpoint,
+      session,
+      {
+        kind: "agent",
+        scope: "@remedy",
+        name: "needy",
+        space_id: vitrine,
+      },
+      "run_and_wait",
+    );
+    expect(waited.status).toBe(404);
+    expect(waited.body.active_in_spaces).toEqual([]);
+    expect(waited.body.detail).not.toContain("use it in one of active_in_spaces");
+  });
+
+  it("keeps a space-bound draft in its author's space on an integration 409", async () => {
+    for (const id of [ctx.defaultSpaceId, vitrine]) await seedSpacePackage(id, AGENT);
+    await seedSpacePackage(vitrine, INTEGRATION);
+    const headers = chat(
+      [ctx.defaultSpaceId, vitrine],
+      [...TURN_PERMISSIONS, "agents:write", "integrations:write"],
+    );
+    const launch = (version: string, overrides = {}) =>
+      invoke(orgEndpoint, headers, {
+        operation_id: "runAgent",
+        space_id: ctx.defaultSpaceId,
+        path_params: { scope: "@remedy", name: "needy" },
+        query: { version },
+        body: { dependency_overrides: overrides },
+      });
+    for (const [version, overrides, expected] of [
+      ["published", {}, [{ id: vitrine, name: "Vitrine" }]],
+      ["draft", {}, []],
+      ["published", { [INTEGRATION]: "draft" }, []],
+    ] as const) {
+      const result = await launch(version, overrides);
+      expect(result.status).toBe(409);
+      expect(result.body.active_in_spaces).toEqual(expected);
     }
   });
 

@@ -132,7 +132,11 @@ import {
   type McpSkillReader,
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
-import { describeSpace } from "@appstrate/core/mcp-spaces";
+import {
+  ACTIVE_SPACES_META_KEY,
+  describeSpace,
+  projectActiveInSpaces,
+} from "@appstrate/core/mcp-spaces";
 import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
@@ -1092,6 +1096,7 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
 export async function readResponse(
   response: Response,
   extra?: Record<string, unknown>,
+  eligibleLaunchSpaces?: () => readonly { id: string }[],
 ): Promise<CallToolResult> {
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
   const isError = response.status >= 400;
@@ -1130,24 +1135,39 @@ export async function readResponse(
   }
 
   let raw = await response.text();
-  let truncated = false;
-  if (raw.length > MAX_RESPONSE_CHARS) {
-    raw = raw.slice(0, MAX_RESPONSE_CHARS);
-    truncated = true;
-  }
-
   let body: unknown = raw;
-  if (!truncated && contentType.includes("json") && raw) {
+  let spaceIds: string[] = [];
+  const launchProblem =
+    eligibleLaunchSpaces && (response.status === 404 || response.status === 409);
+  if (contentType.includes("json") && raw && (raw.length <= MAX_RESPONSE_CHARS || launchProblem)) {
     try {
       body = JSON.parse(raw);
     } catch {
-      body = raw;
+      // A non-JSON response under a JSON content type stays text.
     }
+    if (launchProblem) {
+      const projected = projectActiveInSpaces(body, eligibleLaunchSpaces);
+      if (projected) {
+        body = projected.body;
+        raw = JSON.stringify(body);
+        spaceIds = projected.ids;
+      }
+    }
+  }
+  const truncated = raw.length > MAX_RESPONSE_CHARS;
+  if (truncated) {
+    // A text prefix cannot carry a reliable list of the spaces it reveals. Keep the
+    // diagnostic and omit all alternatives before slicing, including partial names.
+    if (spaceIds.length) {
+      raw = JSON.stringify(projectActiveInSpaces(body, () => [])!.body);
+      spaceIds = [];
+    }
+    body = raw.slice(0, MAX_RESPONSE_CHARS);
   }
 
   // The version to send back as `if_match` on the next write to this resource.
   const etag = response.headers.get("etag");
-  return jsonResult(
+  const result = jsonResult(
     {
       status: response.status,
       ...(etag ? { etag } : {}),
@@ -1157,6 +1177,8 @@ export async function readResponse(
     },
     isError,
   );
+  if (spaceIds.length) result._meta = { [ACTIVE_SPACES_META_KEY]: spaceIds };
+  return result;
 }
 
 function applyQuery(url: URL, query: Record<string, unknown>): void {
@@ -1410,7 +1432,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         ? notGrantedRefusal(op, ctx)
         : undefined;
     const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : undefined;
-    return readResponse(response, space || denial ? { ...space, ...denial } : undefined);
+    return readResponse(response, space || denial ? { ...space, ...denial } : undefined, () =>
+      (ctx.orgSpaces?.reachable ?? []).filter(
+        (s) => s.surface.invokes && operationGranted(op, s.permissions, ctx.ceiling),
+      ),
+    );
   };
 
   return { descriptor, handler };
@@ -1813,7 +1839,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           ? { method: "POST", status: launchStatus, outcome: "invoked" as const }
           : { outcome: "rejected" as const }),
       });
-      return jsonResult({ ...launched.step.payload, ...space }, true);
+      const payload = launched.step.payload;
+      const projected = projectActiveInSpaces(payload.body, () =>
+        (ctx.orgSpaces?.reachable ?? []).filter((s) =>
+          args.kind === "inline" ? s.surface.composes : s.surface.runs,
+        ),
+      );
+      return jsonResult({ ...payload, ...(projected && { body: projected.body }), ...space }, true);
     }
 
     // Any caller of this handler (an agent run included) may persist what it returns; the

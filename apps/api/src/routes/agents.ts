@@ -24,6 +24,7 @@ import { db } from "@appstrate/db/client";
 import { updateSpacePackage, getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { launchSpacesLookup } from "../lib/launch-spaces.ts";
 import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
 import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
@@ -676,7 +677,15 @@ export function createAgentsRouter() {
     requirePermission("agents", "read"),
     requireAgent(),
     // An export checks no integration activation, so neither does `active_in_spaces`.
-    requireActiveAgent(["agents:read"], { integrations: false }),
+    requireActiveAgent(async (c) => {
+      const agent = c.get("package");
+      const source = c.req.query("source");
+      await assertDraftSelectorAllowed(c, agent.id, source);
+      return launchSpacesLookup(c, ["agents:read"], { integrations: false, version: source })({
+        packageId: agent.id,
+        manifest: agent.manifest,
+      });
+    }),
     async (c) => {
       const scopeParam = c.req.param("scope")!;
       const nameParam = c.req.param("name")!;

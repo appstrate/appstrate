@@ -542,7 +542,7 @@ export const schemas = {
           active_in_spaces: {
             $ref: "#/components/schemas/ActiveInSpaces",
             description:
-              "On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the `version` it names, unlike the selector-less judgment of `agent_not_active_in_space`) are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
+              "On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the version it names, or its default published version) are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
           },
         },
       },
@@ -551,7 +551,7 @@ export const schemas = {
   ActiveInSpaces: {
     type: "array",
     description:
-      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` and `agents:run` to create a schedule) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
     items: {
       type: "object",
       required: ["id", "name"],
@@ -566,7 +566,7 @@ export const schemas = {
   },
   AgentNotActiveInSpaceProblem: {
     description:
-      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). Except on a bundle export, which checks no integration, that list judges the integrations the definition a selector-less launch runs requires (the latest published version, else the draft), whatever `version` the request or the schedule names.",
+      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation.",
     allOf: [
       { $ref: "#/components/schemas/ProblemDetail" },
       {

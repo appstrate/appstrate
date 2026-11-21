@@ -9,12 +9,12 @@ import {
   assertPackageMutationAccess,
   isInlineShadowRunReadable,
 } from "../lib/package-access.ts";
+import { ACTIVE_IN_SPACES_HINT } from "@appstrate/core/mcp-spaces";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { callerPermissions, type Permission } from "../lib/permissions.ts";
-import { selectorlessAgentManifest } from "../services/agent-version-resolver.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
-import { launchSpacesLookup, type LaunchDoor, type LaunchSpace } from "../lib/launch-spaces.ts";
+import type { LaunchSpace } from "../lib/launch-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -128,10 +128,9 @@ export function requireAgentOrInlineRun() {
  * REPORTS what blocks a run, so inactivity belongs in its payload as a blocking
  * error, and a 404 would blank the panel that explains the refusal.
  *
- * `required` and `door`: what the door itself demands, which a space of
- * `active_in_spaces` must meet too.
+ * The refusing route supplies the alternative spaces for its own request.
  */
-export function requireActiveAgent(required: readonly Permission[], door: LaunchDoor = {}) {
+export function requireActiveAgent(alternatives: (c: Context<AppEnv>) => Promise<LaunchSpace[]>) {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const agent = c.get("package");
     const orgId = c.get("orgId");
@@ -143,17 +142,12 @@ export function requireActiveAgent(required: readonly Permission[], door: Launch
     // a state they are no longer entitled to observe.
     if (block === "not_placed") throw agentNotFound(agent.id);
     if (block === "not_active") {
-      // Judged on the definition a selector-less launch runs, as the run gate would; a
-      // non-agent package reached through an agent route has none and keeps its own.
-      const manifest =
-        door.integrations === false
-          ? agent.manifest
-          : ((await selectorlessAgentManifest(agent.id)) ?? agent.manifest);
-      const activeInSpaces = await launchSpacesLookup(
-        c,
-        required,
-        door,
-      )({ packageId: agent.id, manifest });
+      // The activation refusal precedes body, version and draft-authority checks. A
+      // selection the route cannot honor gives no alternatives and keeps the original 404.
+      const activeInSpaces = await alternatives(c).catch((err: unknown) => {
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) return [];
+        throw err;
+      });
       throw agentNotActiveInSpace(agent.id, spaceId, activeInSpaces);
     }
     return next();
@@ -169,7 +163,7 @@ function agentNotActiveInSpace(packageId: string, spaceId: string, activeInSpace
     detail:
       `Agent '${packageId}' is placed in space '${spaceId}' but not active there. ` +
       `Activate it with POST /api/spaces/${spaceId}/packages {"packageId":"${packageId}"}` +
-      (activeInSpaces.length > 0 ? ", or use it in one of active_in_spaces." : "."),
+      (activeInSpaces.length > 0 ? ACTIVE_IN_SPACES_HINT : "."),
     extensions: { active_in_spaces: activeInSpaces },
   });
 }

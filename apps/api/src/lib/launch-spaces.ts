@@ -8,7 +8,18 @@ import { credentialReachableSpaces } from "./reachable-spaces.ts";
 import type { Permission } from "./permissions.ts";
 import { isInlineShadowPackageId } from "../services/inline-run.ts";
 import { requiredIntegrationIds } from "../services/integration-connection-resolver.ts";
-import type { IntegrationManifestCache } from "../services/integration-service.ts";
+import {
+  resolveRunIntegrationVersions,
+  type IntegrationManifestCache,
+} from "../services/integration-service.ts";
+import {
+  resolveAgentRunManifest,
+  VERSION_SELECTOR_DRAFT,
+} from "../services/agent-version-resolver.ts";
+import {
+  assertDependencyDraftOverridesAllowed,
+  assertDraftSelectorAllowed,
+} from "./package-access.ts";
 import { spacesActiveForAll } from "../services/space-packages.ts";
 
 /** A space by id and name, as the refusal names it. */
@@ -25,9 +36,11 @@ interface RefusedLaunch {
 }
 
 /** What the refusing door checks beyond its permissions. */
-export interface LaunchDoor {
+interface LaunchDoor {
   /** Refuses on an inactive required integration: default `true`, `false` for the bundle export. */
   integrations?: boolean;
+  version?: string;
+  dependencyOverrides?: Record<string, string> | null;
 }
 
 /**
@@ -44,10 +57,19 @@ export type LaunchSpacesLookup = (launch: RefusedLaunch) => Promise<LaunchSpace[
 export function launchSpacesLookup(
   c: Context<AppEnv>,
   required: readonly Permission[],
-  { integrations = true }: LaunchDoor = {},
+  { integrations = true, version, dependencyOverrides }: LaunchDoor = {},
 ): LaunchSpacesLookup {
   return async ({ packageId, manifest, manifestCache }) => {
     if (c.get("principalKind") === "end_user") return [];
+    // Draft authority on a space-bound credential is checked in the entered space.
+    // A draft admitted here cannot follow that credential into another space.
+    if (
+      c.get("credentialSpaceIds") !== undefined &&
+      [version, ...Object.values(dependencyOverrides ?? {})].some(
+        (selector) => selector?.trim() === VERSION_SELECTOR_DRAFT,
+      )
+    )
+      return [];
     const orgId = c.get("orgId");
     const here = c.get("spaceId");
     const candidates = (await credentialReachableSpaces(c, orgId)).filter(
@@ -65,4 +87,27 @@ export function launchSpacesLookup(
     );
     return candidates.filter((space) => active.has(space.id)).map(({ id, name }) => ({ id, name }));
   };
+}
+
+/** The activation alternatives of a run or schedule for the exact version it requested. */
+export async function activeSpacesForAgentVersion(
+  c: Context<AppEnv>,
+  required: readonly Permission[],
+  version: string | undefined,
+  dependencyOverrides: Record<string, string> | undefined,
+): Promise<LaunchSpace[]> {
+  const pkg = c.get("package");
+  await assertDraftSelectorAllowed(c, pkg.id, version);
+  const { agent } = await resolveAgentRunManifest(pkg, version);
+  await assertDependencyDraftOverridesAllowed(c, dependencyOverrides, agent.manifest);
+  const manifestCache: IntegrationManifestCache = new Map();
+  const versions = await resolveRunIntegrationVersions({
+    agentManifest: agent.manifest,
+    orgId: c.get("orgId"),
+    dependencyOverrides,
+    manifestCache,
+  });
+  if (!versions.ok) return [];
+  const lookup = launchSpacesLookup(c, required, { version, dependencyOverrides });
+  return lookup({ packageId: pkg.id, manifest: agent.manifest, manifestCache });
 }

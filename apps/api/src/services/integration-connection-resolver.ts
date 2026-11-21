@@ -79,6 +79,7 @@ import type { SpaceScope } from "../lib/scope.ts";
 import {
   fetchIntegrationManifest,
   seedIntegrationManifests,
+  activationManifestCaches,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
 import {
@@ -988,22 +989,18 @@ interface InactiveDeclaredIntegration {
 /**
  * Per manifest (input order), the declared integrations not active in `spaceId` — the input of
  * the run gate's `integration_not_active` (an error when `required`), inert ones skipped as the
- * gate skips them. One manifest read and one activation read for every manifest.
+ * gate skips them. Published dependency pins and activation states are read in batches across the list.
  */
 export async function inactiveDeclaredIntegrations(
   agentManifests: readonly Record<string, unknown>[],
-  spaceId: string,
-  manifestCache: IntegrationManifestCache = new Map(),
+  scope: SpaceScope,
 ): Promise<InactiveDeclaredIntegration[][]> {
-  seedIntegrationManifests(
-    agentManifests.flatMap((manifest) => parseManifestIntegrations(manifest).map((e) => e.id)),
-    manifestCache,
-  );
+  const caches = await activationManifestCaches(agentManifests, scope.orgId);
   const perAgent = await Promise.all(
-    agentManifests.map((manifest) => requirementsOf(manifest, manifestCache)),
+    agentManifests.map((manifest, i) => requirementsOf(manifest, caches[i]!)),
   );
   const ids = [...new Set(perAgent.flat().map((req) => req.integrationId))];
-  const activeIds = await listActiveIntegrationIds(ids, spaceId);
+  const activeIds = await listActiveIntegrationIds(ids, scope.spaceId);
   return perAgent.map((reqs) =>
     reqs
       .filter((req) => !isInert(req) && !activeIds.has(req.integrationId))
@@ -1014,9 +1011,9 @@ export async function inactiveDeclaredIntegrations(
 /** Per manifest, the ids of {@link inactiveDeclaredIntegrations} the agent declares `required`. */
 export async function inactiveRequiredIntegrationIds(
   agentManifests: readonly Record<string, unknown>[],
-  spaceId: string,
+  scope: SpaceScope,
 ): Promise<string[][]> {
-  const inactive = await inactiveDeclaredIntegrations(agentManifests, spaceId);
+  const inactive = await inactiveDeclaredIntegrations(agentManifests, scope);
   return inactive.map((list) =>
     list.filter((entry) => entry.required).map((entry) => entry.integrationId),
   );

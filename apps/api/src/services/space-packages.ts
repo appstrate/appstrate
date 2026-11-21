@@ -271,19 +271,19 @@ export type ActivationWarning = ResolutionFieldError & { required: boolean };
  * `type`); activates nothing, since that opens credentials to the space.
  */
 export async function activationWarnings(
-  spaceId: string,
+  scope: SpaceScope,
   packageId: string,
   type: PackageType,
 ): Promise<ActivationWarning[]> {
   if (type !== "agent") return [];
   const manifest = await selectorlessAgentManifest(packageId);
   if (!manifest) return [];
-  const [inactive] = await inactiveDeclaredIntegrations([manifest], spaceId);
+  const [inactive] = await inactiveDeclaredIntegrations([manifest], scope);
   return inactive!.map(({ integrationId, required }) => ({
     ...translateResolutionError({
       integrationId,
       code: "integration_not_active",
-      message: `${integrationNotActiveMessage(integrationId, spaceId)}; ${
+      message: `${integrationNotActiveMessage(integrationId, scope.spaceId)}; ${
         required
           ? "a launch of this agent here is refused until then."
           : "the run proceeds without it."
@@ -741,7 +741,7 @@ export async function listActiveAgentHints(
   );
   const inactive = await inactiveRequiredIntegrationIds(
     await selectorlessLaunchManifests(rows),
-    scope.spaceId,
+    scope,
   );
   const agents = items.map((item, i) => ({
     ...item,

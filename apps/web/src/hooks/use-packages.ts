@@ -144,6 +144,16 @@ async function fetchPackageDetail(
   return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
 
+/** The catalogue previews what the agent will run when switched on. An unpublished agent exposes its draft. */
+export async function fetchAgentActivationDetail(packageId: string, spaceId: string) {
+  try {
+    return await fetchPackageDetail("agent", packageId, "published", spaceId);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "no_published_version") throw error;
+    return fetchPackageDetail("agent", packageId, undefined, spaceId);
+  }
+}
+
 /** The integration index adds the `source` facts its page splits by. */
 type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem

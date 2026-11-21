@@ -19,6 +19,7 @@ import {
   spaceArgumentRefusal,
   type OrgWideSpaces,
 } from "../../../apps/api/src/modules/mcp/spaces.ts";
+import { ACTIVE_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -26,8 +27,24 @@ import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools
 const ORIGIN = "http://127.0.0.1:1";
 const RUN_ID = "run_org_1";
 const SPACES = [
-  { id: "spc_alpha", name: "Alpha", role: "operator", permissions: ["files:read"] },
-  { id: "spc_beta", name: "Beta", role: "admin", permissions: ["files:read"] },
+  {
+    id: "spc_alpha",
+    name: "Alpha",
+    role: "operator",
+    permissions: ["files:read", "mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+  },
+  {
+    id: "spc_beta",
+    name: "Beta",
+    role: "admin",
+    permissions: ["files:read", "mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+  },
+  {
+    id: "spc_runonly",
+    name: "Run only",
+    role: "custom",
+    permissions: ["mcp:read", "mcp:invoke", "agents:run"],
+  },
 ];
 
 /**
@@ -50,7 +67,12 @@ interface RegisteredTool {
 function transcript(searchKinds?: string[]) {
   const events: string[] = [];
   /** The `searched_spaces` the stub's `search` answers with, when set. */
-  const answers: { searched?: unknown } = {};
+  const answers: {
+    searched?: unknown;
+    launchProblem?: Record<string, unknown>;
+    invokedSpaces?: string[];
+  } = {};
+  const chunks: unknown[] = [];
   const launches: Array<{ spaceHeader: string | null; body: string }> = [];
   const polls: Array<string | null> = [];
   const toolCalls: unknown[] = [];
@@ -130,6 +152,18 @@ function transcript(searchKinds?: string[]) {
       if (msg.method === "tools/call") {
         events.push("tools/call");
         toolCalls.push(msg.params);
+        if (
+          answers.launchProblem &&
+          (msg.params as { name?: string }).name === "invoke_operation"
+        ) {
+          return reply({
+            content: [
+              { type: "text", text: JSON.stringify({ status: 409, body: answers.launchProblem }) },
+            ],
+            isError: true,
+            _meta: { [ACTIVE_SPACES_META_KEY]: answers.invokedSpaces },
+          });
+        }
         if (REFUSED.test(JSON.stringify(msg.params))) {
           return reply({
             content: [{ type: "text", text: JSON.stringify(PLATFORM_REFUSAL) }],
@@ -173,6 +207,7 @@ function transcript(searchKinds?: string[]) {
       events.push("launch");
       const body = await req.text();
       launches.push({ spaceHeader: req.headers.get("x-space-id"), body });
+      if (answers.launchProblem) return Response.json(answers.launchProblem, { status: 409 });
       if (REFUSED.test(body)) {
         return new Response(JSON.stringify({ status: 404, detail: "File not found" }), {
           status: 404,
@@ -190,7 +225,7 @@ function transcript(searchKinds?: string[]) {
   }) as typeof fetch;
 
   const lookups: string[] = [];
-  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups, answers };
+  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups, answers, chunks };
 }
 
 function organizationOf(
@@ -219,7 +254,10 @@ async function tools(transport: ReturnType<typeof transcript>, failingTouch?: st
     url: platformMcpUrl(ORIGIN, "org_1"),
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: organizationOf(transport, failingTouch),
-    writeChunk: () => {},
+    writeChunk: (chunk) => {
+      transport.events.push("chunk");
+      transport.chunks.push(chunk);
+    },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: transport.fetch,
@@ -249,6 +287,70 @@ describe("a forwarded tool", () => {
       expect(refused.accepted).toEqual(SPACES.map((space) => space.id));
       expect(transport.events).toEqual([]);
       expect(transport.toolCalls).toEqual([]);
+    } finally {
+      await built.close();
+    }
+  });
+});
+
+describe("launch alternatives on a conversation", () => {
+  const wanted = { id: "spc_alpha", name: "An active destination" };
+  const problem = { code: "missing_integration_connection", active_in_spaces: [wanted] };
+  for (const name of ["invoke_operation", "run_and_wait"]) {
+    const args =
+      name === "invoke_operation"
+        ? { operation_id: "runAgent", space_id: "spc_beta" }
+        : { kind: "agent", scope: "@acme", name: "demo", space_id: "spc_beta" };
+    it(`records the spaces of the ${name} refusal before showing it`, async () => {
+      const transport = transcript();
+      transport.answers.launchProblem = problem;
+      transport.answers.invokedSpaces = [wanted.id];
+      const { built, tool } = await tools(transport);
+      try {
+        const result = await tool(name).execute("c", args);
+        expect(JSON.parse(text(result)).body.active_in_spaces).toEqual([wanted]);
+        expect(transport.events).toEqual(
+          name === "invoke_operation"
+            ? ["touch spc_beta", "tools/call", "touch spc_alpha"]
+            : ["touch spc_beta", "launch", "touch spc_alpha", "chunk"],
+        );
+      } finally {
+        await built.close();
+      }
+    });
+
+    it(`withholds the ${name} result and every card if a returned space cannot be recorded`, async () => {
+      const transport = transcript();
+      transport.answers.launchProblem = problem;
+      transport.answers.invokedSpaces = [wanted.id];
+      const { built, tool } = await tools(transport, wanted.id);
+      try {
+        const result = await tool(name).execute("c", args);
+        expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+        expect(text(result)).not.toContain(wanted.name);
+        expect(transport.chunks).toEqual([]);
+      } finally {
+        await built.close();
+      }
+    });
+  }
+
+  it("suggests only spaces where the chat's local run_and_wait can also read the run", async () => {
+    const transport = transcript();
+    transport.answers.launchProblem = {
+      ...problem,
+      active_in_spaces: [wanted, { id: "spc_runonly", name: "Run only" }],
+    };
+    const { built, tool } = await tools(transport);
+    try {
+      const result = await tool("run_and_wait").execute("c", {
+        kind: "agent",
+        scope: "@acme",
+        name: "demo",
+        space_id: "spc_beta",
+      });
+      expect(JSON.parse(text(result)).body.active_in_spaces).toEqual([wanted]);
+      expect(JSON.stringify(transport.chunks)).not.toContain("Run only");
     } finally {
       await built.close();
     }

@@ -37,6 +37,7 @@ import {
   apiIntegrationManifest,
   httpHeaderDelivery,
   localIntegrationManifest,
+  remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import { isPackageActiveHere } from "../../../src/services/space-packages.ts";
 
@@ -378,6 +379,39 @@ describe("activating an agent names its integrations left off, and activates non
     const res = await activate(AGENT);
     expect(res.status, await res.clone().text()).toBe(201);
     expect(((await res.json()) as Body).warnings).toEqual([]);
+  });
+
+  it("uses each agent's published integration pin to decide whether an optional dependency is inert", async () => {
+    const service = "@doors/search";
+    const draft = remoteIntegrationManifest({ name: service, tools_policy: { search: {} } });
+    await seedPackage({ id: service, orgId: ctx.orgId, type: "integration", draftManifest: draft });
+    await seedPublishedVersion(service, "1.0.0", {
+      manifest: { ...draft, default_tools: ["search"] },
+    });
+    await seedPublishedVersion(service, "2.0.0", { manifest: { ...draft, version: "2.0.0" } });
+    for (const [agent, pin, expected] of [
+      [
+        AGENT,
+        "^1.0.0",
+        [expect.objectContaining({ field: `integrations.${service}`, required: false })],
+      ],
+      ["@doors/quiet", "latest", []],
+    ] as const) {
+      await seedPackage({
+        id: agent,
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        draftManifest: {
+          ...agentDeclaring({}),
+          name: agent,
+          dependencies: { integrations: { [service]: pin } },
+        },
+      });
+      const res = await activate(agent);
+      expect(res.status, await res.clone().text()).toBe(201);
+      expect(((await res.json()) as Body).warnings).toEqual([...expected]);
+    }
   });
 
   it("tells the import doors the same, after the agent's own warnings", async () => {

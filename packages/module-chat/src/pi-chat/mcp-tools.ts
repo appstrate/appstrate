@@ -20,7 +20,13 @@
  */
 
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
-import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
+import {
+  ACTIVE_SPACES_META_KEY,
+  projectActiveInSpaces,
+  spaceIdRefusal,
+  type NamedSpace,
+} from "@appstrate/core/mcp-spaces";
+import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import {
   parseSkillUri,
@@ -522,16 +528,14 @@ function omitsOptionalSpace(inputSchema: unknown, args: Record<string, unknown>)
 }
 
 /**
- * A call that names no space records the spaces its result says it read (`searched_spaces`),
+ * Record the spaces a platform result says it read (a search or a configuration refusal),
  * before the result is returned. The refusal that withholds the result when a listed space is not
  * the turn's or cannot be recorded; `undefined` when every one is recorded.
  */
-async function enterSearchedSpaces(
+async function recordResultSpaces(
   organization: TurnSpaces,
-  structuredContent: unknown,
+  listed: unknown,
 ): Promise<Record<string, unknown> | undefined> {
-  const listed = (structuredContent as { searched_spaces?: unknown } | null | undefined)
-    ?.searched_spaces;
   if (listed === undefined) return undefined;
   const turnSpaces = new Set(organization.spaces.map((space) => space.id));
   const ids: unknown[] = Array.isArray(listed) ? listed : [null];
@@ -609,10 +613,14 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        if (spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)) {
-          const refusal = await enterSearchedSpaces(organization, result.structuredContent);
-          if (refusal) return refusalToolResult(refusal, scope, turnBudget);
-        }
+        const readSpaces =
+          toolName === "invoke_operation" && result.isError
+            ? result._meta?.[ACTIVE_SPACES_META_KEY]
+            : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
+              ? result.structuredContent?.searched_spaces
+              : undefined;
+        const unrecorded = await recordResultSpaces(organization, readSpaces);
+        if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
             await relayedToolResult(result, scope, opts.modelSeesImages === true),
@@ -905,13 +913,38 @@ function makeRunAndWaitExtension(
           },
         })) {
           finalPayload = step.payload;
+          if (step.isError) {
+            // This tool launches over REST. Restrict its alternatives to the same tool and
+            // record them before any preliminary card, tool result or history can reveal them.
+            const projected = projectActiveInSpaces(step.payload.body, () =>
+              ctx.organization.spaces.filter(({ permissions }) => {
+                const has = (permission: string) => permissions.includes(permission);
+                return (
+                  has("mcp:read") &&
+                  has("mcp:invoke") &&
+                  canRunAgents(has) &&
+                  (args.kind !== "inline" || canComposeInline(has))
+                );
+              }),
+            );
+            if (projected) {
+              const unrecorded = await recordResultSpaces(ctx.organization, projected.ids);
+              if (unrecorded) {
+                return withTurnBudgetNote(
+                  toPiToolResult(unrecorded, runAndWaitScope),
+                  ctx.turnBudget,
+                );
+              }
+              finalPayload = { ...step.payload, body: projected.body };
+            }
+          }
           // Live card: push each step's payload under this tool call id so the
           // UI reflects launch → progress → terminal before execute resolves.
           // `preliminary` (AI SDK): the call is not settled until the result below.
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
-            output: toPiToolResult(step.payload, runAndWaitScope),
+            output: toPiToolResult(finalPayload, runAndWaitScope),
             preliminary: true,
           });
         }

@@ -856,7 +856,7 @@ export function createSpacesRouter() {
         object: "space_package",
         ...activation.placement,
         warnings: await activationWarnings(
-          spaceId,
+          scope,
           data.packageId,
           activation.placement.package_type,
         ),

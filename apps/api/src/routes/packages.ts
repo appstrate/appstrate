@@ -2162,7 +2162,9 @@ export function createPackagesRouter() {
     // `warnings` only where this caller may activate AND the row is ON: a stored ON state
     // set by the recipient must not leak their personal space's integration state (§3.6).
     const warnings =
-      enabled && view.enabled ? await activationWarnings(spaceId, packageId, pkg.type) : [];
+      enabled && view.enabled
+        ? await activationWarnings({ orgId, spaceId }, packageId, pkg.type)
+        : [];
     return c.json({ object: "package_share", ...view, warnings }, 201);
   });
 
@@ -2492,9 +2494,10 @@ export function createPackagesRouter() {
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
       ...collectLoginCriteriaWarnings(manifest),
-      ...(activated ? await activationWarnings(spaceId, packageId, packageType) : []).map(
-        (w) => w.message,
-      ),
+      ...(activated
+        ? await activationWarnings({ orgId, spaceId }, packageId, packageType)
+        : []
+      ).map((w) => w.message),
     ];
     return c.json(
       {
