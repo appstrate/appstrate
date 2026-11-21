@@ -3,26 +3,55 @@
 import type { ComponentProps } from "react";
 import { describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { I18nextProvider } from "react-i18next";
-import { PackageOverview } from "../package-detail/package-overview";
-import { Markdown } from "../markdown-impl";
-import i18n, { i18nReady } from "../../i18n";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 
-await i18nReady;
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+
+const { PackageOverview } = await import("../package-detail/package-overview");
+const { Markdown } = await import("../markdown-impl");
+const { memberSpaceClient, renderInSpace, testSpace } = await import("../../test/space-context.ts");
+const i18nModule = await import("../../i18n");
+const i18n = i18nModule.default;
+
+await i18nModule.i18nReady;
 await i18n.changeLanguage("fr");
+const t = i18n.getFixedT("fr", "settings");
 const noop = () => {};
-function render(props: Partial<ComponentProps<typeof PackageOverview>> = {}) {
-  return renderToStaticMarkup(
-    <I18nextProvider i18n={i18n}>
-      <PackageOverview
-        content="Vérifiez les pièces sources."
-        historical={false}
-        agentCount={2}
-        onOpenFiles={noop}
-        onOpenUsage={noop}
-        {...props}
-      />
-    </I18nextProvider>,
+
+const AVAILABILITY = {
+  via: "home",
+  state: "inactive",
+  shared_by: null,
+  offered_to_org: false,
+  org_offerable: false,
+  active_by_default: false,
+} as const;
+
+function render(
+  props: Partial<ComponentProps<typeof PackageOverview>> = {},
+  { overview = false }: { overview?: boolean } = {},
+) {
+  return renderInSpace(
+    <PackageOverview
+      packageId="@acme/rapprochement"
+      type="skill"
+      name="Rapprochement"
+      availability={AVAILABILITY}
+      content="Vérifiez les pièces sources."
+      historical={false}
+      agentCount={2}
+      onOpenFiles={noop}
+      onOpenUsage={noop}
+      {...props}
+    />,
+    {
+      overview,
+      queryClient: memberSpaceClient([
+        testSpace("spc_a", ["skills:read"], "Studio"),
+        testSpace("spc_b", ["skills:read"], "Coffre"),
+      ]),
+      initialEntries: ["/skills/@acme/rapprochement"],
+    },
   );
 }
 
@@ -65,5 +94,28 @@ describe("package overview", () => {
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("https://");
+  });
+  describe("the availability card", () => {
+    it("says how the working space got the skill, in the masculine", () => {
+      const html = render();
+      expect(html).toContain(t("packages.availability.title"));
+      expect(html).toContain("Non activé · espace d’origine");
+    });
+    it("is hidden in « Tous les espaces », which has no working-space answer", () => {
+      expect(render({}, { overview: true })).not.toContain(t("packages.availability.title"));
+    });
+    it("is absent when the detail carries no availability", () => {
+      expect(render({ availability: undefined })).not.toContain(t("packages.availability.title"));
+    });
+    it("says a package the deployment activates everywhere takes no offer", () => {
+      const html = render({ availability: { ...AVAILABILITY, active_by_default: true } });
+      expect(html).toContain(t("catalogue.orgOffer.defaultActive"));
+      expect(html).not.toContain(t("catalogue.orgOffer.label"));
+    });
+    it("draws the offer row only when the offer stands or the reader may change it", () => {
+      expect(render()).not.toContain(t("catalogue.orgOffer.label"));
+      const html = render({ availability: { ...AVAILABILITY, org_offerable: true } });
+      expect(html).toContain(t("catalogue.orgOffer.label"));
+    });
   });
 });

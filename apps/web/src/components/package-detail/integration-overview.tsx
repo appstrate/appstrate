@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Layers, Plug, Share2, Wrench } from "lucide-react";
+import { Layers, Plug, Wrench } from "lucide-react";
 import { HealthCard, HealthCardItem, HealthAction, HealthIssueBadge } from "../health-card";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { useAgents } from "../../hooks/use-packages";
@@ -13,69 +13,12 @@ import { useCurrentOrgId } from "../../hooks/use-org";
 import { connectionsInSpaces } from "../../lib/connection-count";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { packageDetailPath } from "../../lib/package-paths";
-import { availabilityLabel } from "../../lib/integration-availability";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { DetailSectionCard } from "../detail-section-card";
 import { SkeletonLine } from "../skeleton-line";
 import { OperationalStat } from "../operational-stat";
-import { OrgOfferRow } from "../org-offer-row";
-import { useCatalogueEntry } from "./catalogue-link";
-
-/**
- * Whether the working space runs the integration and how it got there, then what the reader may
- * do about the organization offer and the sharing into other spaces (the catalogue's sheet).
- * Activation itself stays the header's button.
- */
-function AvailabilityCard({
-  packageId,
-  detail,
-}: {
-  packageId: string;
-  detail: IntegrationDetailWire;
-}) {
-  const { t } = useTranslation("settings");
-  const catalogue = useCatalogueEntry("integration", packageId);
-  const { key, params } = availabilityLabel(detail.availability);
-  const { offered_to_org, org_offerable, active_by_default } = detail.availability;
-  return (
-    <DetailSectionCard
-      title={t("integration.availability.title")}
-      icon={Share2}
-      bodyClassName="p-0"
-    >
-      <dl className="divide-y">
-        <OperationalStat
-          label={t("integration.availability.here")}
-          value={t(key, params)}
-          size="sm"
-        />
-      </dl>
-      {(offered_to_org || org_offerable || active_by_default || catalogue) && (
-        <div className="flex flex-col gap-3 border-t p-4">
-          <OrgOfferRow
-            item={{
-              id: packageId,
-              name: detail.manifest.display_name ?? packageId,
-              offered_to_org,
-              org_offerable,
-              active_by_default,
-            }}
-          />
-          {catalogue && (
-            <Link
-              to={catalogue.to}
-              state={catalogue.state}
-              className="text-primary w-fit text-sm font-medium hover:underline"
-            >
-              {catalogue.label}
-            </Link>
-          )}
-        </div>
-      )}
-    </DetailSectionCard>
-  );
-}
+import { AvailabilityCard, AvailabilityCardSkeleton } from "./availability-card";
 
 export function IntegrationOverview({
   packageId,
@@ -170,7 +113,14 @@ export function IntegrationOverview({
   return (
     <div className="flex flex-col gap-6" data-testid="integration-overview">
       {/* The working space's: « Tous les espaces » has none to say. */}
-      {!on && <AvailabilityCard packageId={packageId} detail={detail} />}
+      {!on && (
+        <AvailabilityCard
+          type="integration"
+          packageId={packageId}
+          name={detail.manifest.display_name ?? packageId}
+          availability={detail.availability}
+        />
+      )}
       {issues.length > 0 && (
         <HealthCard
           title={t("integration.health.title")}
@@ -284,21 +234,7 @@ export function IntegrationOverviewSkeleton() {
     <>
       <div className="flex flex-col gap-6">
         {/* Drawn out of « Tous les espaces », where the card exists. */}
-        {!on && (
-          <DetailSectionCard
-            title={t("integration.availability.title")}
-            icon={Share2}
-            bodyClassName="p-0"
-          >
-            <dl className="divide-y">
-              <OperationalStat
-                label={t("integration.availability.here")}
-                value={<SkeletonLine className="w-40 text-sm" />}
-                size="sm"
-              />
-            </dl>
-          </DetailSectionCard>
-        )}
+        {!on && <AvailabilityCardSkeleton />}
         <div className="grid items-start gap-4 lg:grid-cols-3">
           <DetailSectionCard
             title={t("integration.tabs.connections")}

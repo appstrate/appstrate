@@ -41,6 +41,7 @@ import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
 import { isOwnedSource } from "../components/package-detail/owned-source";
 import { PackageOwnershipNotice } from "../components/package-detail/package-ownership";
+import { AvailabilityBadge } from "../components/package-detail/availability-card";
 import { CreateVersionModal } from "../components/create-version-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
@@ -308,6 +309,13 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
     version: versionDetail?.version,
   });
 
+  // The working space's: in « Tous les espaces » the spaces it is active in say it. Absent from a
+  // summary read (`agents:run` without `agents:read`), which the library does not answer.
+  const availability = base?.availability;
+  const availabilityBadge = !overview && availability && (
+    <AvailabilityBadge type={type} availability={availability} />
+  );
+
   const runButton = (
     // The page's one launch verdict, shared with the empty runs list.
     <AgentRunButton
@@ -333,6 +341,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
             draftVerdictPending={draftVerdictPending}
             hasUnarchivedChanges={!!hasArchivableChanges}
             latestPublishedVersion={versionInfo?.latest_published_version}
+            status={availabilityBadge}
             tabs={tabDefs}
             actions={
               <>
@@ -357,6 +366,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
             // For a package the server's flag is authoring state: only whoever can
             // publish the draft has a use for it.
             hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
+            status={availabilityBadge}
             tabs={tabDefs}
             actions={
               <>
@@ -460,6 +470,10 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
             <DetailTabPanel value="overview">
               {pkgDetail && (
                 <PackageOverview
+                  packageId={packageId}
+                  type={type}
+                  name={displayName}
+                  availability={pkgDetail.availability}
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
                   historical={isHistoricalVersion}
                   agentCount={!tabReads.usedBy || usedBy.isError ? null : usedBy.data?.length}

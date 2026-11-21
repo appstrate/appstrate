@@ -176,15 +176,15 @@ describe("the integration overview", () => {
 
     it("says how the working space got the integration", () => {
       const html = renderOverview([]);
-      expect(html).toContain(t("integration.availability.title"));
-      expect(statValue(html, t("integration.availability.here"))).toBe(
-        t("integration.availability.sharedBy", { name: "Ada" }),
+      expect(html).toContain(t("packages.availability.title"));
+      expect(statValue(html, t("packages.availability.here"))).toBe(
+        t("packages.availability.sharedBy", { name: "Ada", context: "integration" }),
       );
     });
 
     it("is hidden in « Tous les espaces », which has no working-space answer", () => {
       const html = renderOverview([], { overview: true, spaceIds: ["spc_a"] });
-      expect(html).not.toContain(t("integration.availability.title"));
+      expect(html).not.toContain(t("packages.availability.title"));
     });
 
     it("draws the offer row only when the offer stands or the reader may change it", () => {
