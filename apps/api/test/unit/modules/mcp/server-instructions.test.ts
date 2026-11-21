@@ -482,13 +482,20 @@ describe("MCP server instructions — org-wide space choice", () => {
     expect(instructions).toContain("runInline [spc_team]");
     expect(spaceContext(instructions)).toContain("3. For an inline run");
     expect(spaceContext(instructions)).toContain(
-      "ONLY spaces with launch permission are: spc_team.",
+      "ONLY spaces with launch permission are: Team (`spc_team`, role custom).",
     );
     expect(instructions).toContain("`runAgent`/`runInline`");
     // No other space supplies the read half of run_and_wait on this connection.
     const launchOnly = orgWideInstructionsFor([team]);
     expect(launchOnly).toContain("To launch an inline run without waiting");
     expect(launchOnly).not.toContain("prefer the run_and_wait tool");
+  });
+
+  it("offers the no-link connection remedy alongside only team spaces allowed to launch", () => {
+    const operator = orgSpace("spc_default", "Default", "operator", false, OPERATOR);
+    const text = orgWideInstructionsFor([mine, team, operator]);
+    expect(text).toContain("team spaces with launch permission: Team (`spc_team`, role builder).");
+    expect(text).toContain("name that space alongside connecting one's own");
   });
 
   it("names the personal space for a new package to a caller who may create a skill but no agent", () => {
