@@ -38,13 +38,15 @@ import {
   type PiCodingAgentSdk,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
+import type { TokenUsage } from "@appstrate/core/token-usage";
+import { addRequestUsage, piTokenCounts } from "@appstrate/runner-pi/pi-model";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
-import type { AgentSessionEvent } from "./pi-events.ts";
+import type { AgentSessionEvent, PiUsage } from "./pi-events.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
@@ -250,8 +252,6 @@ export function runPiChat(input: PiChatInput): Response {
     onFirstModelEvent: () => {
       timings.firstModelEventMs = Date.now() - startedAt;
     },
-    // Bands each call by its tier for the platform to price; a proxy-metered turn needs none.
-    cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
     // Every call records the space it was dispatched in, for the cards that show it later.
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
@@ -342,17 +342,23 @@ export function runPiChat(input: PiChatInput): Response {
       // rates, priced by the platform seam with the shared formula. Called once, from `finally`, so
       // a turn that fails after settled calls or a summary still pays for them; a turn that spent
       // nothing writes nothing.
-      const meterTurn = (): void => {
+      const providerCalls: Promise<PiUsage>[] = [];
+      const meterTurn = async (): Promise<void> => {
         const { metering } = modelBinding;
-        if (metering.kind !== "inline") return;
-        const { usage } = mapper.result();
-        const tokens = [
-          usage.input_tokens ?? 0,
-          usage.output_tokens ?? 0,
-          usage.cache_read_input_tokens ?? 0,
-          usage.cache_creation_input_tokens ?? 0,
-        ];
-        if (tokens.every((count) => count === 0)) return;
+        if (metering.kind !== "inline" || !providerCalls.length) return;
+        // A stopped turn can close before its last provider stream settles. Only the ledger waits.
+        let usage: TokenUsage = {};
+        for (const call of await Promise.allSettled(providerCalls)) {
+          if (call.status === "fulfilled")
+            usage = addRequestUsage(usage, call.value, metering.cost);
+        }
+        const {
+          input: inputTokens,
+          output: outputTokens,
+          cacheRead,
+          cacheWrite,
+        } = piTokenCounts(usage);
+        if (inputTokens + outputTokens + cacheRead + cacheWrite === 0) return;
         input.recordUsage({
           orgId: input.orgId,
           userId: input.userId,
@@ -360,10 +366,10 @@ export function runPiChat(input: PiChatInput): Response {
           presetId: input.presetId,
           modelId: model.id,
           apiShape: model.api as ChatUsageRecord["apiShape"],
-          inputTokens: tokens[0]!,
-          outputTokens: tokens[1]!,
-          cacheReadTokens: tokens[2]!,
-          cacheWriteTokens: tokens[3]!,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens: cacheRead,
+          cacheWriteTokens: cacheWrite,
           ...(usage.tiers ? { tiers: usage.tiers } : {}),
           cost: metering.cost,
           durationMs: Date.now() - startedAt,
@@ -585,6 +591,16 @@ export function runPiChat(input: PiChatInput): Response {
         // OBSERVED — none of these calls takes a signal of its own.
         const runtimeStartedAt = Date.now();
         const modelRuntime = await untilAborted(ModelRuntime.create(piChatModelRuntimeOptions()));
+        if (modelBinding.metering.kind === "inline") {
+          // This runtime belongs to the turn. Observe the normalized provider result before Pi
+          // merges split-summary calls or discards a truncated summary. The stream has one consumer.
+          const streamSimple = modelRuntime.streamSimple.bind(modelRuntime);
+          modelRuntime.streamSimple = (...args) => {
+            const stream = streamSimple(...args);
+            providerCalls.push(stream.result().then((message) => message.usage));
+            return stream;
+          };
+        }
         await untilAborted(
           setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
         );
@@ -824,7 +840,9 @@ export function runPiChat(input: PiChatInput): Response {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
         unsubscribe?.();
-        meterTurn();
+        void meterTurn().catch((err: unknown) => {
+          logger.warn("chat usage metering failed", { err: String(err) });
+        });
         // Files a replay withheld, once per turn and whatever the outcome; the turn records none.
         const withheld = fileRefusal.withheldKinds();
         if (withheld.length) {

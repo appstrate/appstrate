@@ -26,6 +26,7 @@
 import { describe, it, expect, afterAll, afterEach, mock, spyOn } from "bun:test";
 import type { UIMessage } from "ai";
 import {
+  turnMetadataFromMessage,
   CHAT_FINAL_STEP_SYSTEM_PROMPT,
   CHAT_TOOL_STEP_BUDGET,
 } from "@appstrate/core/chat-turn-metadata";
@@ -38,6 +39,7 @@ import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { logger } from "../src/logger.ts";
+import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
@@ -167,7 +169,17 @@ function openAiSse(call?: ConnectorCall): Response {
 }
 
 /** An Anthropic Messages SSE stream: one text or tool_use block, its stop reason + usage. */
+interface AnthropicCompletion {
+  input: number;
+  output: number;
+  cached?: number;
+  truncated?: boolean;
+  text?: string;
+}
+let anthropicCompletion: ((request: number) => AnthropicCompletion) | undefined;
+
 function anthropicSse(call?: ConnectorCall): Response {
+  const completion = anthropicCompletion?.(capture.bodies.length) ?? { input: 12, output: 4 };
   const block = call
     ? [
         {
@@ -183,7 +195,11 @@ function anthropicSse(call?: ConnectorCall): Response {
       ]
     : [
         { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: ANSWER } },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: completion.text ?? ANSWER },
+        },
       ];
   const events = [
     {
@@ -194,15 +210,19 @@ function anthropicSse(call?: ConnectorCall): Response {
         role: "assistant",
         model: "m",
         content: [],
-        usage: { input_tokens: 12, output_tokens: 0 },
+        usage: {
+          input_tokens: completion.input,
+          cache_read_input_tokens: completion.cached ?? 0,
+          output_tokens: 0,
+        },
       },
     },
     ...block,
     { type: "content_block_stop", index: 0 },
     {
       type: "message_delta",
-      delta: { stop_reason: call ? "tool_use" : "end_turn" },
-      usage: { output_tokens: 4 },
+      delta: { stop_reason: completion.truncated ? "max_tokens" : call ? "tool_use" : "end_turn" },
+      usage: { output_tokens: completion.output },
     },
     { type: "message_stop" },
   ];
@@ -378,6 +398,7 @@ afterEach(() => {
   providerPark = null;
   providerRefusal = null;
   providerStreamFailure = null;
+  anthropicCompletion = undefined;
   mcpToolCalls = 0;
   mcpSurface = EMPTY_SURFACE;
 });
@@ -428,6 +449,7 @@ async function runTurn(
     generation?: PiChatInput["generation"];
     messages?: UIMessage[];
     readAttachment?: PiChatInput["readAttachment"];
+    createSession?: PiChatInput["createSession"];
     surfaceKey?: string;
     requestId?: string;
   } = {},
@@ -459,6 +481,7 @@ async function runTurn(
       ...(turn.requestId ? { requestId: turn.requestId } : {}),
       messages: turn.messages ?? userTurn("dis bonjour"),
       readAttachment: turn.readAttachment,
+      createSession: turn.createSession,
       system: "You are a helpful assistant.",
       generation: turn.generation ?? {},
       platformMcp: {
@@ -625,6 +648,136 @@ describe("runPiChat against a stub provider", () => {
       },
     };
   }
+
+  describe("inline subscription usage", () => {
+    function binding(window = 200_000) {
+      return createPiOAuthModelBinding(
+        {
+          modelId: "claude-sonnet-4-5",
+          apiShape: "anthropic-messages",
+          baseUrl: ORIGIN,
+          accessToken: "test-inline",
+          credentialId: "test",
+          input: ["text"],
+          contextWindow: window,
+          maxTokens: 8_192,
+          reasoning: false,
+          cost: {
+            input: 1,
+            output: 1,
+            cacheRead: 1,
+            cacheWrite: 1,
+            tiers: [
+              { inputTokensAbove: 100_000, input: 5, output: 5, cacheRead: 5, cacheWrite: 5 },
+            ],
+          },
+        },
+        { pi_provider: "anthropic", pi_dialect: null },
+      );
+    }
+
+    it.each([{ truncated: false }, { truncated: true }])(
+      "meters both calls of a split summary (truncated prefix: $truncated)",
+      async ({ truncated }) => {
+        capture.bodies.length = 0;
+        // The last assistant alone exceeds Pi's 20k retained tail, so the cut splits that turn.
+        const messages: UIMessage[] = [
+          { id: "old-user", role: "user", parts: [{ type: "text", text: "History marker" }] },
+          { id: "old-answer", role: "assistant", parts: [{ type: "text", text: "Old answer" }] },
+          {
+            id: "split-user",
+            role: "user",
+            parts: [{ type: "text", text: "Prefix marker" + "x".repeat(16_000) }],
+          },
+          {
+            id: "split-answer",
+            role: "assistant",
+            parts: [{ type: "text", text: "y".repeat(90_000) }],
+          },
+          ...userTurn("Continue"),
+        ];
+        anthropicCompletion = (n) =>
+          n <= 2
+            ? { input: 60_000, output: 100, truncated: truncated && n === 2 }
+            : { input: 12, output: 4 };
+        const { usage, chunks } = await runTurn(() => "unused", undefined, undefined, {
+          binding: binding(32_000),
+          messages,
+        });
+        expect(capture.bodies).toHaveLength(3);
+        expect(capture.bodies[0]).toContain("History marker");
+        expect(capture.bodies[1]).toContain("Prefix marker");
+        expect(capture.bodies[1]).not.toContain("History marker");
+        const finish = chunks.find((c) => c.type === "finish");
+        const turn = turnMetadataFromMessage({ metadata: finish?.messageMetadata });
+        expect(Boolean(turn?.summary)).toBe(!truncated);
+        expect(usage).toHaveLength(1);
+        expect(usage[0]).toMatchObject({ inputTokens: 120_012, outputTokens: 204 });
+        expect(usage[0]).not.toHaveProperty("tiers");
+      },
+      30_000,
+    );
+
+    it("bands each provider call independently, including cached input", async () => {
+      capture.bodies.length = 0;
+      mcpSurface = connectorSurface([]);
+      anthropicCompletion = (n) =>
+        n === 1
+          ? { input: 20_000, output: 1_000 }
+          : { input: 30_000, cached: 80_000, output: 2_000 };
+      const { usage } = await runTurn(() => "unused", undefined, undefined, { binding: binding() });
+      expect(usage).toHaveLength(1);
+      expect(usage[0]).toMatchObject({
+        inputTokens: 50_000,
+        outputTokens: 3_000,
+        cacheReadTokens: 80_000,
+        tiers: [
+          {
+            input_tokens_above: 100_000,
+            input_tokens: 30_000,
+            output_tokens: 2_000,
+            cache_read_input_tokens: 80_000,
+            cache_creation_input_tokens: 0,
+          },
+        ],
+      });
+    }, 30_000);
+
+    it("records a settled provider call when the session then throws", async () => {
+      capture.bodies.length = 0;
+      const { usage, chunks } = await runTurn(() => "unused", undefined, undefined, {
+        binding: binding(),
+        createSession: async (options) => {
+          const { session } = await (await loadPiCodingAgentSdk()).createAgentSession(options);
+          const prompt = session.prompt.bind(session);
+          session.prompt = async (...args) => {
+            await prompt(...args);
+            throw new Error("tool host crashed");
+          };
+          return { session };
+        },
+      });
+      expect(chunks.some((c) => c.type === "error")).toBe(true);
+      expect(usage).toHaveLength(1);
+      expect(usage[0]).toMatchObject({ inputTokens: 12, outputTokens: 4 });
+    }, 30_000);
+
+    it.each([1, 2])(
+      "records only settled usage when request %i fails",
+      async (failedAt) => {
+        capture.bodies.length = 0;
+        mcpSurface = connectorSurface([]);
+        providerRefusal = (_body, n) => (n === failedAt ? AUTH_REFUSAL : undefined);
+        const { usage, chunks } = await runTurn(() => "unused", undefined, undefined, {
+          binding: binding(),
+        });
+        expect(chunks.some((c) => c.type === "error")).toBe(true);
+        expect(usage).toHaveLength(failedAt - 1);
+        if (failedAt === 2) expect(usage[0]).toMatchObject({ inputTokens: 12, outputTokens: 4 });
+      },
+      30_000,
+    );
+  });
 
   const toolPdfData = btoa("%PDF-1.7 connector-only file");
   const pdfResource = { mimeType: "application/pdf", blob: toolPdfData };
@@ -903,6 +1056,61 @@ describe("runPiChat against a stub provider", () => {
         api: "openai-completions",
         withheld: ["pdf"],
       });
+    }, 30_000);
+
+    it("retries a refused PDF using the checkpoint produced by the previous turn", async () => {
+      const summaryText = "Earlier turns agreed on invoice 731";
+      const model = { ...vision("anthropic-messages"), contextWindow: 48_000, maxTokens: 8_192 };
+      const history: UIMessage[] = [
+        { id: "u-old", role: "user", parts: [{ type: "text", text: "Discarded original text" }] },
+        { id: "a-old", role: "assistant", parts: [{ type: "text", text: "Old reply" }] },
+        {
+          id: "u-kept",
+          role: "user",
+          parts: [{ type: "text", text: "Retained question " + "x".repeat(82_000) }],
+        },
+      ];
+      capture.bodies.length = 0;
+      // The first response crosses the threshold. The following request is Pi's summary.
+      anthropicCompletion = (n) =>
+        n === 1 ? { input: 41_000, output: 4 } : { input: 20, output: 8, text: summaryText };
+      const previous = await runTurn(() => "test-bearer", undefined, undefined, {
+        model,
+        messages: history,
+      });
+      expect(capture.bodies).toHaveLength(2);
+      const answer: UIMessage = {
+        id: "a-kept",
+        role: "assistant",
+        parts: [{ type: "text", text: answered(previous.chunks) }],
+        metadata: previous.chunks.find((c) => c.type === "finish")?.messageMetadata,
+      };
+      const checkpoint = turnMetadataFromMessage(answer)?.summary;
+      expect(checkpoint?.text).toContain(summaryText);
+      expect(checkpoint?.keptFrom).toEqual({ messageId: "u-kept", offset: 0 });
+
+      capture.bodies.length = 0;
+      anthropicCompletion = undefined;
+      providerRefusal = refusing(pdfData);
+      const { chunks } = await runTurn(() => "test-bearer", undefined, undefined, {
+        model,
+        messages: [...history, answer, ...attaching("pdf")],
+        readAttachment: readFiles,
+      });
+      expect(capture.bodies).toHaveLength(2);
+      for (const body of capture.bodies) {
+        expect(body).toContain(summaryText);
+        expect(body).toContain("Retained question");
+        expect(body).toContain(ANSWER);
+        expect(body).not.toContain("Discarded original text");
+      }
+      expect(capture.bodies[0]).toContain(pdfData);
+      expect(capture.bodies[1]).not.toContain(pdfData);
+      expect(capture.bodies[1]).toContain(PDF_POINTER);
+      expect(answered(chunks)).toContain(ANSWER);
+      expect(chunks.some((c) => c.type === "error")).toBe(false);
+      expect(finishTurn(chunks)).toMatchObject({ finishReason: "stop" });
+      expect(finishTurn(chunks)).not.toHaveProperty("summary");
     }, 30_000);
 
     const TEXT_TYPES = [

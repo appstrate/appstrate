@@ -190,12 +190,12 @@ garde d'horodatage de Pi) séparément.
 
 ## Lot 2 : usage compté par appel
 
-- `ui-stream-mapper.ts` : l'usage de `compaction_end.result.usage` (non interrompu) s'ajoute au
-  cumul du tour (`addRequestUsage`) ; `lastSettledUsage` n'y est pas touché (un résumé n'est pas
-  la mesure du contexte). Même règle que le runner (`pi-runner.ts`, `compaction_end`).
-- `engine.ts` : l'écriture inline (`recordUsage`) passe dans une fermeture appelée une fois, depuis
-  le `finally`, après le détachement des événements : sortie nominale, échec fournisseur, arrêt,
-  exception relancée. Rien n'est écrit quand le cumul est nul.
+- En mode abonnement, le moteur observe le résultat de chaque appel fournisseur sur le
+  `ModelRuntime` du tour. Le tarif par palier s'applique individuellement, y compris aux deux
+  appels d'un résumé coupé au milieu du tour et aux réponses tronquées.
+- Le moteur écrit une ligne pour le tour dès que ses appels ont livré leur usage, même après un
+  échec ou un arrêt. Ce traitement est indépendant de la fermeture du flux et du point de reprise.
+  Un cumul nul ne produit aucune ligne.
 - Pas de double compte : une liaison inline (`createPiOAuthModelBinding`) appelle le fournisseur
   sur `model.baseUrl` et ne passe jamais par llm-proxy ; seule la liaison proxy, qui n'écrit rien
   elle-même, y passe. L'appel de résumé emprunte la même fonction de flux que les appels normaux,
@@ -243,9 +243,9 @@ Les points « Affichage » et « À envisager » de #2324 sont traités dans cet
 
 ## Affichage
 
-- Jauge et sélecteur suivent une seule règle (`model-fit.ts`) : seuil franchi si
-  `tokens > compactAt`, fenêtre dépassée si `tokens > fenêtre` et la fenêtre est déclarée. Une
-  mesure relue contre un autre modèle que celui qui l'a prise s'affiche avec « ≈ ».
+- Le modèle qui a pris la mesure suit ses seuils exacts. Pour un autre modèle, le sélecteur et
+  le texte de la jauge avertissent d'un dépassement à partir de 5 % au-dessus du seuil ou de la
+  fenêtre déclarée. La jauge affiche la mesure du premier modèle avec « ≈ ».
 - La mesure de la conversation est lue une fois (`ConversationContextProvider`) et ne change qu'à
   la fin d'un tour, pas à chaque fragment streamé.
 - Pourcentage du seuil non borné au-delà (150 %), arrondi par défaut en dessous ; anneau et barre

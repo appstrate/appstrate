@@ -232,69 +232,11 @@ describe("PiChatUiStreamMapper", () => {
     ]);
   });
 
-  it("accumulates usage and reports the finish reason", () => {
+  it("reports a tool-use finish reason", () => {
     const { mapper } = run([
-      {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          stopReason: "toolUse",
-          usage: {
-            input: 100,
-            output: 50,
-            cacheRead: 10,
-            cacheWrite: 5,
-            totalTokens: 165,
-            cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 },
-          },
-        },
-      },
+      { type: "message_end", message: { role: "assistant", stopReason: "toolUse" } },
     ]);
-    const meta = mapper.result();
-    expect(meta.usage).toEqual({
-      input_tokens: 100,
-      output_tokens: 50,
-      cache_read_input_tokens: 10,
-      cache_creation_input_tokens: 5,
-    });
-    // The terminal meta exposes NO `costUsd`: billing is computed by the ledger
-    // writer from these token counts + the model's catalog rates.
-    expect(meta).not.toHaveProperty("costUsd");
-    expect(meta.finishReason).toBe("tool-calls");
-  });
-
-  it("bands each model call at the tier of the rate card it reaches", () => {
-    const cost = {
-      input: 1,
-      output: 2,
-      tiers: [{ inputTokensAbove: 1_000, input: 2, output: 4, cacheRead: 0, cacheWrite: 0 }],
-    };
-    const mapper = new PiChatUiStreamMapper({ cost });
-    const end = (input: number, cacheRead: number) => ({
-      type: "message_end" as const,
-      message: {
-        role: "assistant",
-        stopReason: "stop",
-        usage: { input, output: 7, cacheRead, cacheWrite: 0, totalTokens: 0, cost: ZERO_COST },
-      },
-    });
-    // 600 + 500 = 1100 crosses the tier; 900 does not.
-    for (const e of [end(900, 0), end(600, 500)]) mapper.map(e);
-    expect(mapper.result().usage).toEqual({
-      input_tokens: 1_500,
-      output_tokens: 14,
-      cache_read_input_tokens: 500,
-      cache_creation_input_tokens: 0,
-      tiers: [
-        {
-          input_tokens_above: 1_000,
-          input_tokens: 600,
-          output_tokens: 7,
-          cache_read_input_tokens: 500,
-          cache_creation_input_tokens: 0,
-        },
-      ],
-    });
+    expect(mapper.result().finishReason).toBe("tool-calls");
   });
 
   it("captures a terminal error turn's message + error finish reason", () => {
@@ -576,7 +518,6 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
       end("stop", usage(1_500, 300)),
     ]);
     expect(mapper.result().lastSettledUsage).toEqual(usage(1_500, 300));
-    expect(mapper.result().usage.input_tokens).toBe(2_500);
   });
 
   it("skips an aborted or failed call, which measured nothing", () => {
@@ -599,7 +540,7 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
     ).toBe("s2");
   });
 
-  it("counts a summary's tokens in the turn's usage, never as the context measure", () => {
+  it("keeps the settled context measure across summary events", () => {
     const summarized: AgentSessionEvent = {
       type: "compaction_end",
       result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, usage: usage(7_000, 400) },
@@ -616,7 +557,6 @@ describe("PiChatUiStreamMapper — the last settled call", () => {
       summarized,
       aborted,
     ]).mapper.result();
-    expect(result.usage).toMatchObject({ input_tokens: 8_000, output_tokens: 500 });
     expect(result.lastSettledUsage).toEqual(usage(1_000, 100));
   });
 

@@ -86,10 +86,12 @@ export function ModelSelect({
     () =>
       tokens === undefined
         ? null
-        : new Map(models.map((model) => [
-            model.id,
-            modelFit(tokens, modelSizing(model), model.id !== measuredModelId),
-          ])),
+        : new Map(
+            models.map((model) => [
+              model.id,
+              modelFit(tokens, modelSizing(model), model.id !== measuredModelId),
+            ]),
+          ),
     [models, tokens, measuredModelId],
   );
   const hasOverrides = generation.temperature != null || generation.reasoning_level != null;

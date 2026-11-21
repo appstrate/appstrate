@@ -43,8 +43,6 @@ export interface PiCompactionResult {
   tokensBefore: number;
   /** Pi's estimate of the session after the summary, system prompt included. */
   estimatedTokensAfter?: number;
-  /** The summary call's own usage: a billed call that emits no `message_end`. */
-  usage?: PiUsage;
 }
 
 /** Pi's `compaction_end`; `result` is absent when the summary failed. */

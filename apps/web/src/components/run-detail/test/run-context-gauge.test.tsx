@@ -48,6 +48,18 @@ describe("ContextGaugeReadout", () => {
     expect(html).not.toContain("tabindex");
   });
 
+  it("lets the locale order both counts", () => {
+    const key = "run.contextGaugeCounts";
+    const original = i18n.getResource("fr", "agents", key);
+    i18n.addResource("fr", "agents", key, "{{window}} au total, {{used}} utilisés");
+    try {
+      const html = render(<ContextGaugeReadout turns={TURNS} status="success" />);
+      expect(text(html)).toBe(`200${nbsp}k au total, 187${nbsp}k utilisés`);
+    } finally {
+      i18n.addResource("fr", "agents", key, original);
+    }
+  });
+
   it("shows the peak once the run settled, and says so", () => {
     const html = render(<ContextGaugeReadout turns={TURNS} status="success" />);
     expect(text(html)).toBe(`187${nbsp}k / 200${nbsp}k`);
