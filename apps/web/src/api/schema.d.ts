@@ -1935,7 +1935,7 @@ export interface paths {
         };
         /**
          * Organization library — the placement map, graded by caller
-         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{id}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{id}/packages/{scope}/{name}` deactivates it there.
+         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: system, home, shared, organization) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{id}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{id}/packages/{scope}/{name}` deactivates it there.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -4173,6 +4173,30 @@ export interface paths {
         put: operations["movePackageHome"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}/org-offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Offer a package to the organization
+         * @description Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin session of the organization, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).
+         */
+        put: operations["offerPackageToOrg"];
+        post?: never;
+        /**
+         * Withdraw a package's offer to the organization
+         * @description Remove the offer. A space holding a row of its own is unaffected (its row decides). Every other space of the organization stops placing and activating the package through the offer, and in the same transaction every enabled schedule of the package there is disabled (`disabled_reason: package_removed`, jobs removed) — except in the package's home, which stays placed (its schedules, like any deactivated package's, fail visibly), and everywhere when the deployment's default still activates the package. Same authority as `PUT`. Idempotent: answers 204 when there was no offer. Audited as `package.offer_withdrawn`, with the `disabledScheduleIds` when any.
+         */
+        delete: operations["withdrawPackageOrgOffer"];
         options?: never;
         head?: never;
         patch?: never;
@@ -6552,6 +6576,10 @@ export interface components {
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
+            /** @description Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off). */
+            offered_to_org: boolean;
+            /** @description Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin session, and for a package homed in a space the type's `share` permission in that home. The route stays the authority; this is its verdict served in advance. */
+            org_offerable: boolean;
             /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
             activation: {
                 spaceId: string;
@@ -7077,17 +7105,26 @@ export interface components {
             /** @description Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404. */
             read_space_ids: string[];
         };
+        /** @description The offer of a package to its organization, as it stands after `PUT …/org-offer`. */
+        PackageOrgOffer: {
+            /** @enum {string} */
+            object: "package_org_offer";
+            /** @description Package id (`@scope/name`). */
+            packageId: string;
+            /** @enum {boolean} */
+            offered_to_org: true;
+        };
         /** @description One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it. */
         PackagePlacement: {
             /** @description Space id (`spc_…`) — always one the caller reads. */
             space_id: string;
             /**
-             * @description WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space).
+             * @description WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own). In that order of precedence.
              * @enum {string}
              */
-            via: "home" | "shared" | "system";
+            via: "home" | "shared" | "system" | "organization";
             /**
-             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.
              * @enum {string}
              */
             state: "active" | "inactive" | "none";
@@ -15924,6 +15961,8 @@ export interface operations {
                      *             "home_writable": true,
                      *             "home_deletable": true,
                      *             "home_shareable": true,
+                     *             "offered_to_org": false,
+                     *             "org_offerable": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -15967,6 +16006,8 @@ export interface operations {
                      *             "home_writable": false,
                      *             "home_deletable": false,
                      *             "home_shareable": false,
+                     *             "offered_to_org": false,
+                     *             "org_offerable": false,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -24504,6 +24545,81 @@ export interface operations {
             };
         };
     };
+    offerPackageToOrg: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The package is offered to the organization (new or already offered). */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageOrgOffer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The package has no published version to offer (`package_has_no_version` — publish one, then offer). RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    withdrawPackageOrgOffer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Offer withdrawn (or there was none). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listPackageShares: {
         parameters: {
             query?: never;
@@ -27803,6 +27919,8 @@ export interface operations {
                      *             "home_writable": true,
                      *             "home_deletable": true,
                      *             "home_shareable": true,
+                     *             "offered_to_org": false,
+                     *             "org_offerable": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -27846,6 +27964,8 @@ export interface operations {
                      *             "home_writable": false,
                      *             "home_deletable": false,
                      *             "home_shareable": false,
+                     *             "offered_to_org": false,
+                     *             "org_offerable": false,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",

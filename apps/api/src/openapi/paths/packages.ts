@@ -2234,6 +2234,63 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/{scope}/{name}/org-offer": {
+    put: {
+      operationId: "offerPackageToOrg",
+      tags: ["Packages"],
+      summary: "Offer a package to the organization",
+      description:
+        "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin session of the organization, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "The package is offered to the organization (new or already offered).",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PackageOrgOffer" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The package has no published version to offer (`package_has_no_version` — publish one, then offer). RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+    delete: {
+      operationId: "withdrawPackageOrgOffer",
+      tags: ["Packages"],
+      summary: "Withdraw a package's offer to the organization",
+      description:
+        "Remove the offer. A space holding a row of its own is unaffected (its row decides). Every other space of the organization stops placing and activating the package through the offer, and in the same transaction every enabled schedule of the package there is disabled (`disabled_reason: package_removed`, jobs removed) — except in the package's home, which stays placed (its schedules, like any deactivated package's, fail visibly), and everywhere when the deployment's default still activates the package. Same authority as `PUT`. Idempotent: answers 204 when there was no offer. Audited as `package.offer_withdrawn`, with the `disabledScheduleIds` when any.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "204": { description: "Offer withdrawn (or there was none)." },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/packages/{scope}/{name}/fork": {
     post: {
       operationId: "forkPackage",

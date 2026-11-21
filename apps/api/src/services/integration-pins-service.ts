@@ -180,7 +180,7 @@ export async function listIntegrationPins(
   scope: SpaceScope,
   integrationId: string,
 ): Promise<PinSummary[]> {
-  const agentActive = activePackagesFilter(scope, "agent");
+  const agentActive = activePackagesFilter(scope, "agent", scope.spaceId);
   const rows = await db
     .select({
       pin: integrationPins,
@@ -221,7 +221,7 @@ export async function listAgentsConsumingIntegration(
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
-        activePackagesFilter(scope, "agent"),
+        activePackagesFilter(scope, "agent", scope.spaceId),
         sql`(${packages.draftManifest} -> 'dependencies' -> 'integrations') ? ${integrationId}`,
       ),
     )
@@ -374,7 +374,7 @@ export async function listOpenAdminPinAgents(
         eq(integrationPins.integrationId, integrationId),
         isNull(integrationPins.userId),
         eq(integrationPins.allowAdditionalConnections, true),
-        activePackagesFilter(scope, "agent"),
+        activePackagesFilter(scope, "agent", scope.spaceId),
       ),
     )
     .orderBy(integrationPins.packageId);

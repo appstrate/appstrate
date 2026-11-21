@@ -3136,6 +3136,8 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
+        "offered_to_org",
+        "org_offerable",
         "placements",
         "activation",
       ],
@@ -3158,6 +3160,16 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
+        offered_to_org: {
+          type: "boolean",
+          description:
+            "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off).",
+        },
+        org_offerable: {
+          type: "boolean",
+          description:
+            "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin session, and for a package homed in a space the type's `share` permission in that home. The route stays the authority; this is its verdict served in advance.",
+        },
         activation: {
           type: "array",
           description:
@@ -3195,15 +3207,15 @@ export const schemas = {
       },
       via: {
         type: "string",
-        enum: ["home", "shared", "system"],
+        enum: ["home", "shared", "system", "organization"],
         description:
-          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space).",
+          "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own). In that order of precedence.",
       },
       state: {
         type: "string",
         enum: ["active", "inactive", "none"],
         description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
       },
       shared_by: {
         type: ["object", "null"],
@@ -3286,6 +3298,17 @@ export const schemas = {
         format: "date-time",
         description: "When the placement row was created (`space_packages.installed_at`).",
       },
+    },
+  },
+  PackageOrgOffer: {
+    type: "object",
+    description:
+      "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
+    required: ["object", "packageId", "offered_to_org"],
+    properties: {
+      object: { type: "string", enum: ["package_org_offer"] },
+      packageId: { type: "string", description: "Package id (`@scope/name`)." },
+      offered_to_org: { type: "boolean", enum: [true] },
     },
   },
   PackageHome: {

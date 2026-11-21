@@ -104,6 +104,35 @@ export const spacePackages = pgTable(
 );
 
 /**
+ * A package OFFERED to its organization: placed and active in every space of
+ * the org, personal spaces included, wherever a space holds no row of its own
+ * (a `space_packages` row always wins, `enabled = false` being the sticky
+ * opt-out). Presence of the row = offered; there is no state column.
+ * `offered_by` is the admin who offered it (`NULL` once they are gone).
+ * Written only by `services/package-org-offers.ts`; read through
+ * `offeredToSpaceOrgSql` (`services/package-placement.ts`).
+ */
+export const orgPackageOffers = pgTable(
+  "org_package_offers",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    offeredBy: text("offered_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.orgId, table.packageId] }),
+    index("idx_org_package_offers_package_id").on(table.packageId),
+    // Referencing-side index for the `user` SET NULL action.
+    index("idx_org_package_offers_offered_by").on(table.offeredBy),
+  ],
+);
+
+/**
  * RETIRED — folded into {@link spacePackages} (#2045). Read only by
  * `scripts/migration/0048-fold-package-shares.ts`, which copies every row into
  * a `space_packages` row, and by the boot guard that refuses to start until it

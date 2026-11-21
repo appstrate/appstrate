@@ -30,12 +30,17 @@ import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
-import type { OrgRole } from "@appstrate/core/permissions";
+import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  credentialAdmitsSpace,
+  credentialConfinedToSpaces,
+} from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import {
@@ -44,7 +49,11 @@ import {
   unnameableSpace,
   type ReachableSpace,
 } from "./reachable-spaces.ts";
-import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
+import {
+  listOrgOffers,
+  placementReadFilter,
+  placementRowJoin,
+} from "../services/package-placement.ts";
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
@@ -80,7 +89,7 @@ export async function assertExistingPackageActivationAccess(
         eq(packages.id, packageId),
         orgOrSystemFilter(c.get("orgId")),
         notEphemeralFilter(),
-        activeHereSql(),
+        activeHereSql(target),
       ),
     )
     .limit(1);
@@ -159,8 +168,8 @@ export function placementAccessSpaces(c: Context<AppEnv>): Promise<PackageAccess
 
 /**
  * Does the package's placement grant read from these spaces? The in-memory form
- * of `placementReadFilter` (RBAC spec §6.9, §6.10): homed there or holding a row
- * there. `<type>:read` stays with each reader. Read only: running also needs
+ * of `placementReadFilter` (RBAC spec §6.9, §6.10): homed there or placed there
+ * (`placedIn`: a row, or an offer to the organization). `<type>:read` stays with each reader. Read only: running also needs
  * activity ({@link agentExecutionBlock}).
  */
 export function placementGrantsRead(
@@ -348,15 +357,21 @@ async function loadPackageRow(packageId: string, orgId: string) {
 }
 
 /**
- * Every space of `orgId` holding a `space_packages` row for the package — the
- * placements {@link placementGrantsRead} needs beyond the home, which is a
- * column on the package row itself.
+ * Every space of `orgId` the package is placed in beyond its home — a
+ * `space_packages` row there, or every space when the package is offered to the
+ * organization — the placements {@link placementGrantsRead} needs, the home
+ * being a column on the package row itself.
  *
  * Split out from the row read because the write path never needs it: authority
  * is the home alone, so the placements are loaded only when a refusal has to
  * decide between 403 and 404.
  */
 async function loadPlacementSpaces(packageId: string, orgId: string): Promise<string[]> {
+  const offered = (await listOrgOffers(orgId, [packageId])).has(packageId);
+  if (offered) {
+    const all = await db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
+    return all.map((row) => row.id);
+  }
   const placed = await db
     .select({ spaceId: spacePackages.spaceId })
     .from(spacePackages)
@@ -636,6 +651,56 @@ export async function callerPlacementAuthority(
     sharedBy: c.get("user").id,
     authorizeHome: (homeSpaceId) => holdsHomeAuthority({ homeSpaceId }, accessible, permission),
   };
+}
+
+/** An organization owner or admin acting through a user session unconfined to spaces: the role half of the offer door. */
+export function callerAdministersOrg(c: Context<AppEnv>): boolean {
+  return (
+    isUserPrincipal(c) &&
+    !credentialConfinedToSpaces(c) &&
+    (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c))
+  );
+}
+
+/**
+ * Authority to OFFER a package to its organization, or to withdraw the offer
+ * (RBAC spec §6.10): an owner or admin of the organization, acting with a user
+ * credential unconfined to spaces, AND for a package homed in a space,
+ * `<type>:share` in that home. A system package has no home, so the org role
+ * alone decides. The role is asked before the package is read, so a member
+ * learns nothing about which ids exist. Returns the loaded row and the home
+ * rule as a predicate, which the offer service re-asks against the locked home.
+ */
+export async function assertPackageOfferAccess(
+  c: Context<AppEnv>,
+  packageId: string,
+): Promise<{
+  pkg: PackageAccessRow;
+  authorizeHome: PlacementAuthority["authorizeHome"];
+}> {
+  const orgId = c.get("orgId");
+  if (!callerAdministersOrg(c)) {
+    throw forbidden(
+      "Offering a package to the organization requires an owner or admin session, unconfined to spaces.",
+    );
+  }
+  const pkg = await loadPackageRow(packageId, orgId);
+  if (isSystemPackageRow(pkg)) return { pkg, authorizeHome: () => true };
+  const accessible = await placementAccessSpaces(c);
+  const share = packagePermission(pkg.type, "share");
+  const authorizeHome: PlacementAuthority["authorizeHome"] = (homeSpaceId) =>
+    holdsHomeAuthority({ homeSpaceId }, accessible, share);
+  if (!authorizeHome(pkg.homeSpaceId)) {
+    await refuseHomeAuthority(
+      c,
+      packageId,
+      pkg,
+      accessible,
+      share,
+      `Offering '${packageId}' to the organization requires '${share}' in its home space.`,
+    );
+  }
+  return { pkg, authorizeHome };
 }
 
 /** Which side's authority withdrew a placement — recorded on `package.unshared`. */

@@ -68,7 +68,7 @@ export async function sharePackage(params: {
       .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
       .limit(1);
     if (!target) throw notFound(`Space '${spaceId}' not found`);
-    const pkg = await loadPlaceablePackage(tx, { orgId, spaceId }, packageId);
+    const pkg = await loadPlaceablePackage(tx, { orgId }, packageId);
     const row = await placePackage(tx, pkg, spaceId, { ...placeAs, enabled });
     return { created: row !== null };
   });

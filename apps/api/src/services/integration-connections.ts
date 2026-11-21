@@ -50,7 +50,11 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import {
+  listOfferedToSpaceOrg,
+  placementReadFilter,
+  placementRowJoin,
+} from "./package-placement.ts";
 import {
   setExactlyOneDefault,
   isUniqueViolation,
@@ -815,11 +819,15 @@ export async function resolveIntegrationActivations(
       ),
     );
   const byId = new Map(rows.map((r) => [r.packageId, r]));
+  const offered = await listOfferedToSpaceOrg(spaceId, packageIds);
   for (const id of packageIds) {
     const row = byId.get(id);
     result.set(id, {
-      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the offer.
-      active: isActiveHere({ id, type: "integration", source: null }, row),
+      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the deployment's offer.
+      active: isActiveHere(
+        { id, type: "integration", source: null, offeredToOrg: offered.has(id) },
+        row,
+      ),
       blockUserConnections: row?.blockUserConnections === true,
     });
   }
