@@ -761,6 +761,23 @@ describe("search across spaces", () => {
     expect(pinned.data.searched_spaces).toBeUndefined();
   });
 
+  it("reports only the spaces an entry shown names: not one that answered nothing shown", async () => {
+    const one = await search(ownerHeaders(), { kinds: ["agent", "skill"], query: "third" });
+    expect(Object.keys(grantedIn(one.data, "skills"))).toEqual([
+      `skill://${third.id}/skillsext/third/third/SKILL.md`,
+    ]);
+    expect(one.data.searched_spaces).toEqual([third.id]);
+
+    const none = await search(ownerHeaders(), { kinds: ["agent", "skill"], query: "zzzunmatched" });
+    expect(none.data.searched_spaces).toBeUndefined();
+
+    // An agent cut by `limit` is not shown: its space is not reported.
+    const cut = await search(ownerHeaders(), { kinds: ["agent"], limit: 1 });
+    const agents = cut.data.agents as { total: number; items: Array<{ granted_in: string[] }> };
+    expect(agents.total).toBeGreaterThan(1);
+    expect(cut.data.searched_spaces).toEqual(agents.items[0]!.granted_in);
+  });
+
   it("describes an agent and a skill in the space it names, the agent's run_with naming it", async () => {
     const describe = async (args: Record<string, unknown>) =>
       parseSearch(await call(ownerHeaders(), "tools/call", { name: "describe", arguments: args }));

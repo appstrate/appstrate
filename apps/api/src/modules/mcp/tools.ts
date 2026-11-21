@@ -127,6 +127,7 @@ import {
   listSkills,
   readSpaces,
   skillSpaceRefusal,
+  spacesShown,
   unsearched,
   type AgentHit,
   type McpSkillReader,
@@ -417,7 +418,10 @@ interface SearchCall {
   signal: AbortSignal | undefined;
 }
 
-/** A kind's section (`denied`: operations withheld), or the refusal that answers a call naming it. */
+/**
+ * A kind's section (`denied`: operations withheld; `searched`: the spaces its shown entries name),
+ * or the refusal that answers a call naming it.
+ */
 type KindSearch = (
   call: SearchCall,
 ) => Promise<
@@ -672,7 +676,7 @@ function buildSearchTool(
       ...(call.spaces ? { spaceIds: call.spaces.map((space) => space.id) } : {}),
       ...(denied !== undefined ? { deniedCount: denied } : {}),
     });
-    // Without `space_id`, the spaces whose data was read: what the chat records as read.
+    // Without `space_id`, the spaces that contributed an entry to the result: what the chat records.
     const readSpaceIds = ctx.orgSpaces && args.space_id === undefined ? [...searched] : [];
     return jsonResult({
       ...sections,
@@ -765,15 +769,12 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
     name: hit.id,
     text: `${hit.display_name} ${hit.description}`,
   }));
+  const items = matches
+    .slice(0, limit)
+    .map(({ item }) => ({ ...item.hit, ...(spaces ? { granted_in: item.spaceIds } : {}) }));
   return {
-    section: {
-      total: matches.length,
-      items: matches
-        .slice(0, limit)
-        .map(({ item }) => ({ ...item.hit, ...(spaces ? { granted_in: item.spaceIds } : {}) })),
-      ...unsearched(refused),
-    },
-    searched: answered.flatMap(({ space }) => (space ? [space.id] : [])),
+    section: { total: matches.length, items, ...unsearched(refused) },
+    searched: spacesShown(items),
   };
 }
 
@@ -807,15 +808,12 @@ async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
     tokens,
     (skill) => ({ name: skill.name, text: `${skill.packageId} ${skill.description}` }),
   );
+  const items = matches
+    .slice(0, limit)
+    .map(({ item: { granted_in, ...hit } }) => ({ ...hit, ...(spaces ? { granted_in } : {}) }));
   return {
-    section: {
-      total: matches.length,
-      items: matches
-        .slice(0, limit)
-        .map(({ item: { granted_in, ...hit } }) => (spaces ? { ...hit, granted_in } : hit)),
-      ...unsearched(refused),
-    },
-    searched: answered.map(({ space }) => space.id),
+    section: { total: matches.length, items, ...unsearched(refused) },
+    searched: spacesShown(items),
   };
 }
 
@@ -2491,7 +2489,8 @@ function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<strin
     description: optional
       ? `The one space to search, by id: ${reached}. Omitted, every space you reach is searched ` +
         "and each item names the spaces where you reach it (`granted_in`): act on it with one of " +
-        "them, where your role there still decides."
+        "them, where your role there still decides. Pass it whenever the request or its context " +
+        "designates a space; omit it only when the space is unknown."
       : `The space this call acts in, by id: ${reached}. ` +
         "Take it from the user's request, or, when it names none, from the space your context " +
         "designates for such a request; with neither, a new package goes to the space marked " +

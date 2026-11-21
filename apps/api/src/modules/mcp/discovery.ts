@@ -76,6 +76,14 @@ export function unsearched(
   return spaces.length > 0 ? { unsearched: spaces } : {};
 }
 
+/**
+ * The `searched` of a section: the spaces named by the `granted_in` of an entry shown. A space
+ * that answered nothing shown contributed nothing to the result.
+ */
+export function spacesShown(...lists: readonly (readonly { granted_in?: readonly string[] }[])[]) {
+  return [...new Set(lists.flat().flatMap((entry) => entry.granted_in ?? []))];
+}
+
 export interface AgentHit {
   id: string;
   display_name: string;

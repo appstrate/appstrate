@@ -27,7 +27,7 @@ import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
-import { readSpaces, unsearched } from "./discovery.ts";
+import { readSpaces, spacesShown, unsearched } from "./discovery.ts";
 import {
   MAX_LISTED_SCOPES,
   readIntegrationTools,
@@ -181,7 +181,8 @@ export const INTEGRATION_TOOLS_DESCRIPTION =
   "`integration_tool` in `kinds` reads remote catalogs from their servers (the connection's " +
   "credential is sent, journaled as its call); otherwise, an `integration` included, remote " +
   "catalogs are read from the cache alone, a cold one's tools are listed by name only " +
-  "(`catalog_unreadable: true`) and the integration is named in `uncached`.";
+  "(`catalog_unreadable: true`); such an integration is named in `uncached` when it relates to the " +
+  "query, otherwise counted in `note`.";
 
 /** A listed entry, and the spaces of an org-wide call it is listed in (none when pinned). */
 type Merged<T> = T & { granted_in?: string[] };
@@ -193,8 +194,9 @@ const isReadable = (tool: CallableTool) => !(tool.kind === "remote" && tool.cata
  * The listings of the spaces of an org-wide call, or the one of a pinned connection, as one: a
  * tool listed in several spaces once, under `granted_in`, with the union of its connection ids
  * and missing scopes and the readable descriptor if any space read it; a connection, `not_ready`
- * or `unlisted` entry the same in several spaces once, under `granted_in`. A space whose listing
- * was refused is reported apart; all refused answers the first.
+ * or `unlisted` entry the same in several spaces once, under `granted_in`; an uncached integration
+ * once, under the spaces that report it. Each truncated catalog keeps its space and count.
+ * A space whose listing was refused is reported apart; all refused answers the first.
  */
 async function readAcrossSpaces(
   spaces: readonly McpSpace[] | undefined,
@@ -215,12 +217,12 @@ async function readAcrossSpaces(
   if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
 
   const tools = new Map<string, Merged<CallableTool>>();
-  const truncated = new Map<string, CallableListing["truncated_catalogs"][number]>();
-  const uncached = new Set<string>();
+  const truncatedCatalogs: Merged<CallableListing["truncated_catalogs"][number]>[] = [];
   const entries = {
     connections: new Map<string, Merged<CallableListing["connections"][number]>>(),
     not_ready: new Map<string, Merged<CallableListing["not_ready"][number]>>(),
     unlisted: new Map<string, Merged<CallableListing["unlisted"][number]>>(),
+    uncached: new Map<string, Merged<{ integration_package_id: string }>>(),
   };
   const add = <T extends object>(into: Map<string, Merged<T>>, entry: T, space?: McpSpace) => {
     const key = JSON.stringify(entry);
@@ -250,18 +252,20 @@ async function readAcrossSpaces(
     for (const connection of read.connections) add(entries.connections, connection, space);
     for (const entry of read.not_ready) add(entries.not_ready, entry, space);
     for (const entry of read.unlisted) add(entries.unlisted, entry, space);
-    for (const entry of read.truncated_catalogs) truncated.set(entry.integration_package_id, entry);
-    for (const name of read.uncached) uncached.add(name);
+    for (const entry of read.truncated_catalogs) {
+      truncatedCatalogs.push(space ? { ...entry, granted_in: [space.id] } : entry);
+    }
+    for (const name of read.uncached)
+      add(entries.uncached, { integration_package_id: name }, space);
   }
   return {
     tools: [...tools.values()],
     connections: [...entries.connections.values()],
     not_ready: [...entries.not_ready.values()],
     unlisted: [...entries.unlisted.values()],
-    truncated_catalogs: [...truncated.values()],
-    uncached: [...uncached],
+    truncated_catalogs: truncatedCatalogs,
+    uncached: [...entries.uncached.values()],
     refusedSpaces: refused,
-    searched: answered.flatMap(({ space }) => (space ? [space.id] : [])),
   };
 }
 
@@ -296,12 +300,20 @@ export async function searchIntegrationTools(
     about(entry.integration_package_id, entry.display_name),
   );
   const unlistedShown = read.unlisted.filter((entry) => about(entry.integration_package_id));
+  const truncatedShown = read.truncated_catalogs.filter((e) => about(e.integration_package_id));
   const matches = rankByKeywords(read.tools, tokens, (tool) => ({
     name: tool.name,
     text: `${tool.integration_package_id} ${tool.description}`,
   })).map(({ item }) => item);
   const shown = matches.slice(0, limit);
   const reached = new Set(shown.flatMap((tool) => tool.connection_ids));
+  // An uncached integration relates to the search by its id or by a tool of it shown.
+  const uncachedShown = read.uncached.filter(
+    (e) =>
+      about(e.integration_package_id) ||
+      shown.some((tool) => tool.integration_package_id === e.integration_package_id),
+  );
+  const connectionsShown = read.connections.filter((c) => reached.has(c.connection_id));
   const notes: string[] = [];
   if (notReadyShown.length > 0) {
     notes.push(
@@ -323,11 +335,23 @@ export async function searchIntegrationTools(
         (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
     );
   }
-  for (const entry of read.truncated_catalogs.filter((e) => about(e.integration_package_id))) {
+  if (read.uncached.length > uncachedShown.length) {
     notes.push(
-      `${entry.integration_package_id}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
-        "tool(s) its server lists were read, and a tool listed after them is not offered. " +
-        "Narrow with `integration`, or search the tool by name.",
+      `${read.uncached.length - uncachedShown.length} other integration(s) have no cached catalog, so ` +
+        "their tools may not match by description: search again with " +
+        '`kinds: ["integration_tool"]` to read them.',
+    );
+  }
+  for (const [id, catalogs] of Map.groupBy(
+    truncatedShown,
+    (entry) => entry.integration_package_id,
+  )) {
+    const count = catalogs[0]!.listed_tools;
+    const detail = catalogs.every((entry) => entry.listed_tools === count)
+      ? `only the first ${count} tool(s) were read from each truncated catalog`
+      : "the number of tools read varies by space";
+    notes.push(
+      `${id}'s catalog is incomplete: ${detail}. Narrow with \`integration\`, or search the tool by name.`,
     );
   }
   if (
@@ -346,20 +370,23 @@ export async function searchIntegrationTools(
     section: {
       total: matches.length,
       items: shown.map(listedTool),
-      ...(reached.size > 0
-        ? {
-            connections: read.connections
-              .filter((c) => reached.has(c.connection_id))
-              .map(listedConnection),
-          }
-        : {}),
+      ...(reached.size > 0 ? { connections: connectionsShown.map(listedConnection) } : {}),
       ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
       ...(unlistedShown.length > 0 ? { unlisted: unlistedShown } : {}),
-      ...(read.uncached.length > 0 ? { uncached: read.uncached } : {}),
+      ...(uncachedShown.length > 0
+        ? { uncached: uncachedShown.map((e) => e.integration_package_id) }
+        : {}),
       ...unsearched(read.refusedSpaces),
       ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
     },
-    searched: read.searched,
+    searched: spacesShown(
+      shown,
+      connectionsShown,
+      notReadyShown,
+      unlistedShown,
+      truncatedShown,
+      uncachedShown,
+    ),
   };
 }
 

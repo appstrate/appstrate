@@ -20,7 +20,11 @@ import {
   INSUFFICIENT_SCOPES_REMEDIES,
 } from "@appstrate/core/integration";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
-import { RUN_AND_WAIT_LONG_POLL_RESUME } from "../../../../src/modules/mcp/tools.ts";
+import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
+import {
+  deriveMcpSurface,
+  RUN_AND_WAIT_LONG_POLL_RESUME,
+} from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor } from "./helpers.ts";
 
@@ -402,5 +406,27 @@ describe("buildServerInstructions grounding", () => {
     for (const rendersCards of [false, true]) {
       expect(instructionsFor(permissions, rendersCards)).toContain("Start by calling get_me");
     }
+  });
+});
+
+describe("buildServerInstructions org-wide space guidance", () => {
+  it("sends `search` the space the request designates, and searches every space only when it is unknown", () => {
+    const surface = deriveMcpSurface(permissions, undefined, { type: "user", id: "user_1" }, true, {
+      credentialProxyOpen: true,
+    });
+    const space = {
+      id: "spc_1",
+      name: "One",
+      role: "admin",
+      personal: false,
+      permissions,
+      surface,
+    };
+    const text = buildServerInstructions(permissions, undefined, surface, false, {
+      reachable: [space],
+      current: space,
+    });
+    expect(text).toContain("pass that `space_id` to `search` too");
+    expect(text).toContain("search every space only when the space is unknown");
   });
 });

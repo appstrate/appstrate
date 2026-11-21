@@ -109,10 +109,11 @@ What happens under the hood:
 > writes alike: there is no default space. `search` alone may omit it: it then
 > searches every space you reach and each item's `granted_in` names the spaces
 > where it is usable, the `space_id` to act with; the result's top-level
-> `searched_spaces` lists the spaces whose agents, skills or integration tools it
-> read (absent when it read none, when `space_id` is named, and on a
+> `searched_spaces` lists the spaces that supplied at least one entry to the
+> result (absent when none did, when `space_id` is named, and on a
 > space-pinned endpoint), and a space whose read was refused, such as a skill
-> archive unavailable there, is named in its section's `unsearched`. The argument's schema lists your
+> archive unavailable there, is named in its section's `unsearched`. When the
+> request names a space or its context designates one, `search` takes its `space_id` too. The argument's schema lists your
 > spaces (name, `spc_…` id, your role there), since clients may truncate the
 > server instructions. Space names are not unique, so every machine field names
 > a space by its id: `granted_in` in results, and the bracketed ids in the
@@ -409,11 +410,12 @@ role. Runs keep their connections there:
   can call, under `integration_tools`. A search whose `kinds` does not list that
   kind (an `integration` alone included) reads remote servers' catalogs from the cache only: no
   server is contacted, no credential sent, no call journaled; a catalog not yet
-  cached lists its tools by declared name (`catalog_unreadable: true`) and the
-  integration is named in `uncached`. Listing the kind in `kinds` reads
-  cold catalogs from their servers, as described below. The REST route takes
-  the same choice as `catalogs=live|cached` (default `live`) and answers
-  `uncached` too. `describe` with `kind: "integration_tool"` and a tool's `id`
+  cached lists its tools by declared name (`catalog_unreadable: true`).
+  Without query keywords, `uncached` names all integrations whose catalogs were missing.
+  With keywords, it names those whose package ID matches or whose tools appear in the
+  results. The `note` counts the remaining integrations. Listing the kind in `kinds`
+  reads cold catalogs from their servers. The REST route takes `catalogs=live|cached`
+  (default `live`) and lists all cache misses in `uncached` for a cache-only request. `describe` with `kind: "integration_tool"` and a tool's `id`
   returns its `input_schema`, `output_schema`, `usage` and reached `connections`. A tool is named
   `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths of the
   integration expose it, `{ns}` being the package id in snake case, cut at 20
@@ -436,8 +438,9 @@ role. Runs keep their connections there:
   its own `granted_in`. `note` says when more tools match than `limit`
   shows, and when a remote server's catalog was read incomplete (it lists more
   than 500 tools over 20 pages, or more than 512 KiB of descriptors): the
-  listing's `truncated_catalogs` gives the tools read, `listed_tools`, and a
-  tool the server lists after those is not offered.
+  REST listing's `truncated_catalogs` gives the number of tools read in that space
+  (`listed_tools`). For an integration with truncated catalogs in several spaces,
+  the MCP note includes the count if they agree. Otherwise it says the count varies by space.
   `not_ready`, apart from the tools and present when not empty, lists the
   integrations active in the space you have no usable connection of and that
   offer a tool outside a run (an `api_call` tool, or a remote server's: an

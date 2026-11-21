@@ -1554,6 +1554,46 @@ describe("search — what an integration_tool search says it leaves out", () => 
     expect(payload.note).not.toContain("500");
   });
 
+  it.each([
+    ["spc_a", "spc_b", 120],
+    ["spc_b", "spc_a", 120],
+    ["spc_a", "spc_b", 40],
+  ] as const)(
+    "reports catalog truncation across %s then %s when B lists %i tools",
+    async (first, second, countB) => {
+      const spaces = [{ id: first }, { id: second }] as McpSpace[];
+      const found = await searchIntegrationTools(
+        spaces,
+        (space) => ({
+          origin: "https://test.local",
+          authHeaders: new Headers(),
+          dispatch: async () =>
+            listingOf([], {
+              truncated_catalogs: [
+                {
+                  integration_package_id: INTEGRATION,
+                  listed_tools: space?.id === "spc_a" ? 40 : countB,
+                },
+              ],
+            })(),
+          observe: () => {},
+          runs: false,
+        }),
+        { tokens: [], limit: 10, cachedOnly: true },
+        undefined,
+      );
+      if ("refused" in found) throw new Error("refused");
+      expect(found.searched.toSorted()).toEqual(["spc_a", "spc_b"]);
+      expect(found.section.note).toContain(`${INTEGRATION}'s catalog is incomplete`);
+      if (countB === 40) {
+        expect(found.section.note).toContain("only the first 40 tool(s)");
+      } else {
+        expect(found.section.note).not.toMatch(/\b(?:40|120)\b/);
+        expect(found.section.note).toContain("the number of tools read varies by space");
+      }
+    },
+  );
+
   it("says when the integration it filters on offers nothing", async () => {
     const payload = await search({ integration: "@acme/empty" }, { listing: listingOf([]) });
     expect(payload).toMatchObject({ total: 0, items: [] });

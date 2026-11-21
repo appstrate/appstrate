@@ -474,8 +474,9 @@ export async function handleChatStream(
     // A conversation acts in the spaces of its turn alone and records each one it acts in
     // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
     // or the space of a file `read_resource` reads, before the call, refused outside the set;
-    // search records the spaces it read (`searched_spaces`), and a launch refusal records
-    // the spaces whose activation state it discloses, before any result or card is shown.
+    // search records the spaces that contributed an entry to its result (`searched_spaces`), and
+    // a launch refusal records the spaces whose activation state it discloses, before any result
+    // or card is shown.
     // Skills are procedures, not data: injecting one touches no space.
     const organization: TurnSpaces = {
       spaces,
