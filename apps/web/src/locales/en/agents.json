@@ -585,6 +585,7 @@
   "list.count_other": "{{count}} items",
   "list.column.name": "Name",
   "list.column.state": "State",
+  "list.column.integrations": "Integrations",
   "list.usedByAgents_one": "Used by {{count}} agent",
   "list.usedByAgents_other": "Used by {{count}} agents",
   "packages.usedBy": "Used by",

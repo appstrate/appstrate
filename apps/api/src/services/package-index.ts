@@ -13,6 +13,7 @@ import { profiles } from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseScopedName } from "@appstrate/core/naming";
 import { readAgentAppearance, type PackageType } from "@appstrate/core/validation";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import type { AgentManifest } from "../types/index.ts";
 import { readsAgentContent, type SpaceGrant } from "../lib/permissions.ts";
 import {
@@ -21,7 +22,11 @@ import {
   type PackageAccessSpace,
 } from "../lib/package-access.ts";
 import { isPublished, listActivePackages } from "./space-packages.ts";
-import { inactiveRequiredIntegrationIds } from "./integration-connection-resolver.ts";
+import {
+  inactiveAmong,
+  usedIntegrations,
+  type IntegrationRequirement,
+} from "./integration-connection-resolver.ts";
 import { selectorlessLaunchManifests } from "./agent-version-resolver.ts";
 import { getRunningRunCounts } from "./state/runs.ts";
 import { getUnreadRunCountsByAgent } from "./state/run-reads.ts";
@@ -51,12 +56,14 @@ export async function listAgentIndex(
     getUnreadRunCountsByAgent(orgId, grants, actor),
     reach,
   ]);
+  // What a launch with `version` omitted runs, not the draft: the integrations a row names are
+  // the ones its run uses.
+  const used = await usedIntegrations(await selectorlessLaunchManifests(rows), orgId);
   // Single-space index only: an organization row spans spaces, each with its own activations.
   const inactive = singleSpaceId
-    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), {
-        orgId,
-        spaceId: singleSpaceId,
-      })
+    ? (await inactiveAmong(used, singleSpaceId)).map((list) =>
+        list.filter((entry) => entry.required).map((entry) => entry.integrationId),
+      )
     : null;
 
   return rows.map((row, i) => {
@@ -89,6 +96,7 @@ export async function listAgentIndex(
             }),
         integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
       },
+      integrations: listedIntegrations(used[i]!),
       running_runs: runningCounts.get(row.id) ?? 0,
       // The caller's own unread runs of this agent (per recipient, like a
       // schedule's `unread_count`).
@@ -108,6 +116,23 @@ export async function listAgentIndex(
       ...(inactive ? { inactive_required_integrations: inactive[i]! } : {}),
     };
   });
+}
+
+/**
+ * The integrations of an agent row, named and drawn off the manifests its launch pins. The
+ * manifest's declaration order does not survive JSONB, so the row gives its own: the required
+ * ones first, then by name.
+ */
+function listedIntegrations(used: readonly IntegrationRequirement[]) {
+  return used
+    .map((req) => ({
+      id: req.integrationId,
+      name: req.manifest.display_name ?? req.integrationId,
+      icon: req.manifest.icon ?? null,
+      required: req.required,
+      authenticated: !isUnauthenticatedIntegration(req.manifest),
+    }))
+    .sort((a, b) => Number(b.required) - Number(a.required) || a.name.localeCompare(b.name));
 }
 
 /**

@@ -1080,6 +1080,7 @@ export const schemas = {
       "running_runs",
       "unread_count",
       "dependencies",
+      "integrations",
       "scope",
       "keywords",
       "version",
@@ -1121,6 +1122,37 @@ export const schemas = {
         description:
           INACTIVE_REQUIRED_INTEGRATIONS.description +
           " Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces.",
+      },
+      integrations: {
+        type: "array",
+        description:
+          "The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins, whose manifest loads, leaving out an inert one (declared optional, selecting no tool or scope) as the run does. The name and the icon are read off that version of the integration's manifest, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map.",
+        items: {
+          type: "object",
+          required: ["id", "name", "icon", "required", "authenticated"],
+          properties: {
+            id: { type: "string", description: "Integration package id (`@scope/name`)." },
+            name: {
+              type: "string",
+              description: "The manifest's `display_name`, the id when it declares none.",
+            },
+            icon: {
+              type: ["string", "null"],
+              description:
+                "The manifest's `icon`: an Iconify id (`<prefix>:<name>`) or an image URL, `null` when it declares none.",
+            },
+            required: {
+              type: "boolean",
+              description:
+                "`integrations_configuration.<id>.required`: where it is not active, a launch is refused.",
+            },
+            authenticated: {
+              type: "boolean",
+              description:
+                "Whether the integration declares `auths`, as on the integration index. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection.",
+            },
+          },
+        },
       },
       running_runs: { type: "integer" },
       unread_count: {

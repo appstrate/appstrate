@@ -995,15 +995,35 @@ export async function inactiveDeclaredIntegrations(
   agentManifests: readonly Record<string, unknown>[],
   scope: SpaceScope,
 ): Promise<InactiveDeclaredIntegration[][]> {
-  const caches = await activationManifestCaches(agentManifests, scope.orgId);
+  return inactiveAmong(await usedIntegrations(agentManifests, scope.orgId), scope.spaceId);
+}
+
+/**
+ * Per manifest (input order), the requirements of the integrations a run of it uses: those it
+ * declares whose manifest loads at the version it pins, inert ones skipped as the run gate skips
+ * them. Published dependency pins are read in one batch across the list.
+ */
+export async function usedIntegrations(
+  agentManifests: readonly Record<string, unknown>[],
+  orgId: string,
+): Promise<IntegrationRequirement[][]> {
+  const caches = await activationManifestCaches(agentManifests, orgId);
   const perAgent = await Promise.all(
     agentManifests.map((manifest, i) => requirementsOf(manifest, caches[i]!)),
   );
-  const ids = [...new Set(perAgent.flat().map((req) => req.integrationId))];
-  const activeIds = await listActiveIntegrationIds(ids, scope.spaceId);
-  return perAgent.map((reqs) =>
+  return perAgent.map((reqs) => reqs.filter((req) => !isInert(req)));
+}
+
+/** Per agent, the {@link usedIntegrations} not active in `spaceId`, with the agent's `required` flag. */
+export async function inactiveAmong(
+  used: readonly (readonly IntegrationRequirement[])[],
+  spaceId: string,
+): Promise<InactiveDeclaredIntegration[][]> {
+  const ids = [...new Set(used.flat().map((req) => req.integrationId))];
+  const activeIds = await listActiveIntegrationIds(ids, spaceId);
+  return used.map((reqs) =>
     reqs
-      .filter((req) => !isInert(req) && !activeIds.has(req.integrationId))
+      .filter((req) => !activeIds.has(req.integrationId))
       .map(({ integrationId, required }) => ({ integrationId, required })),
   );
 }

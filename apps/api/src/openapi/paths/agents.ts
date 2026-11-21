@@ -173,6 +173,7 @@ const agentListResponses = {
                 skills: {},
                 integrations: {},
               },
+              integrations: [],
             },
             {
               id: "@appstrate/code-reviewer",
@@ -196,6 +197,15 @@ const agentListResponses = {
                 skills: { "@appstrate/summarize": "^1.0.0" },
                 integrations: { "@appstrate/github": "^2.0.0" },
               },
+              integrations: [
+                {
+                  id: "@appstrate/github",
+                  name: "GitHub",
+                  icon: "logos:github-icon",
+                  required: true,
+                  authenticated: true,
+                },
+              ],
             },
           ],
         },

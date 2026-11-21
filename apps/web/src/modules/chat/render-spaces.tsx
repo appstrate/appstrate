@@ -5,7 +5,7 @@ import { SpaceTilesOf } from "../../components/space-name";
 
 /**
  * The chat's seam to name spaces: {@link SpaceTilesOf}, none counted away. Several spaces stack
- * their tiles, ringed in `--space-tile-ring`, the colour a conversation row sets for its current
+ * their tiles, ringed in `--tile-ring`, the colour a conversation row sets for its current
  * state (rest, hover, active). A file of its own: a component file exports components only (fast
  * refresh).
  */

@@ -5991,6 +5991,19 @@ export interface components {
             type: "agent" | "skill" | "integration";
             /** @description Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ. Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces. */
             inactive_required_integrations?: string[];
+            /** @description The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins, whose manifest loads, leaving out an inert one (declared optional, selecting no tool or scope) as the run does. The name and the icon are read off that version of the integration's manifest, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map. */
+            integrations: {
+                /** @description Integration package id (`@scope/name`). */
+                id: string;
+                /** @description The manifest's `display_name`, the id when it declares none. */
+                name: string;
+                /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`) or an image URL, `null` when it declares none. */
+                icon: string | null;
+                /** @description `integrations_configuration.<id>.required`: where it is not active, a launch is refused. */
+                required: boolean;
+                /** @description Whether the integration declares `auths`, as on the integration index. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection. */
+                authenticated: boolean;
+            }[];
             running_runs: number;
             /** @description Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`. */
             unread_count: number;
@@ -8661,7 +8674,8 @@ export interface operations {
                      *           "dependencies": {
                      *             "skills": {},
                      *             "integrations": {}
-                     *           }
+                     *           },
+                     *           "integrations": []
                      *         },
                      *         {
                      *           "id": "@appstrate/code-reviewer",
@@ -8694,7 +8708,16 @@ export interface operations {
                      *             "integrations": {
                      *               "@appstrate/github": "^2.0.0"
                      *             }
-                     *           }
+                     *           },
+                     *           "integrations": [
+                     *             {
+                     *               "id": "@appstrate/github",
+                     *               "name": "GitHub",
+                     *               "icon": "logos:github-icon",
+                     *               "required": true,
+                     *               "authenticated": true
+                     *             }
+                     *           ]
                      *         }
                      *       ]
                      *     }
@@ -20699,7 +20722,8 @@ export interface operations {
                      *           "dependencies": {
                      *             "skills": {},
                      *             "integrations": {}
-                     *           }
+                     *           },
+                     *           "integrations": []
                      *         },
                      *         {
                      *           "id": "@appstrate/code-reviewer",
@@ -20732,7 +20756,16 @@ export interface operations {
                      *             "integrations": {
                      *               "@appstrate/github": "^2.0.0"
                      *             }
-                     *           }
+                     *           },
+                     *           "integrations": [
+                     *             {
+                     *               "id": "@appstrate/github",
+                     *               "name": "GitHub",
+                     *               "icon": "logos:github-icon",
+                     *               "required": true,
+                     *               "authenticated": true
+                     *             }
+                     *           ]
                      *         }
                      *       ]
                      *     }

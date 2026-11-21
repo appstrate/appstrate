@@ -83,6 +83,7 @@ const agent = (space_ids: string[]) => ({
   display_name: "Rapporteur",
   keywords: [],
   dependencies: { integrations: {} },
+  integrations: [],
   running_runs: 0,
   unread_count: 0,
   published: true,

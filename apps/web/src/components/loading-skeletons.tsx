@@ -611,7 +611,12 @@ function CollectionBlocks({
         ) : (
           <CardGridSkeleton
             placeholder={
-              <PackageCardSkeleton runnable={runnable} meta={cardMeta} spaceName={spaceName} />
+              <PackageCardSkeleton
+                runnable={runnable}
+                integrations={runnable}
+                meta={cardMeta}
+                spaceName={spaceName}
+              />
             }
           />
         )
@@ -812,7 +817,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable spaceName={on} />
+              <PackageCardSkeleton runnable integrations spaceName={on} />
             </div>
           ))}
         </div>
