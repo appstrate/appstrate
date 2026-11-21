@@ -93,7 +93,11 @@ import {
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
-import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import {
+  boundSpacesOf,
+  writesDelegated,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { readReconnectTarget } from "./integration-scope-resolver.ts";
 import {
@@ -270,7 +274,7 @@ export async function assertConnectionBelongsToActor(
 ): Promise<ReconnectTarget> {
   const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
   if (!target) throw notFound("Connection not found");
-  assertDelegatedReconnect(principal.binding !== null, target.spaceId, input.spaceId);
+  assertDelegatedReconnect(writesDelegated(principal), target.spaceId, input.spaceId);
   return target;
 }
 

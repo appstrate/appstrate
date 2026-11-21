@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AuthResolution.spaceIdsRestricted`** (`@appstrate/core/module`, #2336): whether `spaceIds` is a
+  restriction the person chose (default `true`). `false` marks the set as the spaces the person acts
+  in, so the credential acts on connections as the person while staying confined everywhere else.
 - `projectActiveInSpaces` in `@appstrate/core/mcp-spaces` filters launch alternatives by the spaces
   where the tool can repeat the operation. `ACTIVE_IN_SPACES_HINT` is the optional instruction
   accompanying those alternatives. `ACTIVE_SPACES_META_KEY` identifies the disclosed space IDs
