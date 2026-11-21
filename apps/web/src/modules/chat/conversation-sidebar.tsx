@@ -3,7 +3,7 @@
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
 import { CheckIcon, CopyIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { relativeAge } from "@appstrate/core/format";
+import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
 import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { cn } from "@appstrate/ui/cn";
@@ -31,7 +31,7 @@ import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
-import { formatDateField } from "../../lib/format-date";
+import { formatDateField, formatRelativeTime } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
   ConversationSidebarState,
@@ -271,19 +271,11 @@ export function ConversationFiles({
   );
 }
 
-/** « il y a 3 jours », in the interface's language; the age's units come from core. */
-function formatAge(iso: string, language: string): string {
-  const age = relativeAge(iso, Date.now());
-  if (!age) return "";
-  const rtf = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
-  return age.unit === "now" ? rtf.format(0, "second") : rtf.format(-age.count, age.unit);
-}
-
 function InfoDate({ iso }: { iso: string }) {
-  const { i18n } = useTranslation();
+  const now = useNowTick();
   return (
     <>
-      <span>{formatAge(iso, i18n.language)}</span>
+      <span>{formatRelativeTime(iso, now, "long")}</span>
       <span className="text-muted-foreground block text-xs">{formatDateField(iso)}</span>
     </>
   );

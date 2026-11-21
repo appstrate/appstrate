@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  formatAge as formatAgeIn,
+  formatRelativeTime as formatRelativeTimeIn,
+} from "@appstrate/core/format";
 import i18n from "../i18n";
 
 type DateGranularity = "date" | "datetime";
@@ -37,38 +41,18 @@ export function formatDateField(
   }
 }
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+/** `formatRelativeTime` of `@appstrate/core/format` on an ISO date, in the interface's language. */
+export function formatRelativeTime(
+  at: string,
+  now: number,
+  style?: Intl.RelativeTimeFormatStyle,
+): string {
+  return formatRelativeTimeIn(Date.parse(at), now, i18n.language, style);
+}
 
-/**
- * How far `at` is from `now` (epoch ms), in the interface language: « dans 3 h »,
- * « il y a 5 min », « maintenant » under a minute. Truncated toward zero, so a
- * run 1 h 50 away is never announced later (« dans 1 h »). Days are 24-hour
- * spans (« dans 1 j »), not « demain », which would depend on the reader's
- * midnight; months 30 days, years 365.
- */
-export function formatRelativeDate(at: number, now: number): string {
-  const diff = at - now;
-  const abs = Math.abs(diff);
-  const [value, unit]: [number, Intl.RelativeTimeFormatUnit] =
-    abs < MINUTE
-      ? [0, "second"]
-      : abs < HOUR
-        ? [diff / MINUTE, "minute"]
-        : abs < DAY
-          ? [diff / HOUR, "hour"]
-          : abs < 30 * DAY
-            ? [diff / DAY, "day"]
-            : abs < 365 * DAY
-              ? [diff / (30 * DAY), "month"]
-              : [diff / (365 * DAY), "year"];
-  const count = Math.trunc(value);
-  // `auto` only for zero: « maintenant », not « dans 0 seconde ».
-  return new Intl.RelativeTimeFormat(i18n.language, {
-    style: "short",
-    numeric: count === 0 ? "auto" : "always",
-  }).format(count, unit);
+/** `formatAge` of `@appstrate/core/format` on an ISO date, in the interface's language. */
+export function formatAge(at: string, now: number): string {
+  return formatAgeIn(Date.parse(at), now, i18n.language);
 }
 
 /**
@@ -76,7 +60,7 @@ export function formatRelativeDate(at: number, now: number): string {
  * the scheduler has not picked the run up yet, not missed it.
  */
 export function formatTimeUntil(at: string, now: number): string {
-  return formatRelativeDate(Math.max(Date.parse(at), now), now);
+  return formatRelativeTimeIn(Math.max(Date.parse(at), now), now, i18n.language);
 }
 
 /** A scheduled run read both ways: « dans 3 h · 22/11/2026 09:00 UTC ». */

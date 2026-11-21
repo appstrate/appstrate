@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { formatBytes, formatDuration, relativeAge } from "../src/format.ts";
+import { formatAge, formatBytes, formatDuration, formatRelativeTime } from "../src/format.ts";
 
 describe("formatDuration", () => {
   it("renders sub-second values as rounded milliseconds", () => {
@@ -62,26 +62,46 @@ describe("formatBytes", () => {
   });
 });
 
-describe("relativeAge", () => {
+describe("formatRelativeTime / formatAge", () => {
   const NOW = Date.parse("2026-10-15T12:00:00Z");
-  const ago = (ms: number) => new Date(NOW - ms).toISOString();
   const MIN = 60_000;
-  const DAY = 24 * 60 * MIN;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  // Intl separates with no-break spaces; the assertions are about the words.
+  const plain = (text: string) => text.replace(/\s/g, " ");
+  const rel = (offset: number, locale = "fr") =>
+    plain(formatRelativeTime(NOW + offset, NOW, locale));
+  const age = (offset: number) => plain(formatAge(NOW + offset, NOW, "fr"));
 
-  it("rounds to the coarsest unit that fits", () => {
-    expect(relativeAge(ago(59_000), NOW)).toEqual({ unit: "now", count: 0 });
-    expect(relativeAge(ago(MIN), NOW)).toEqual({ unit: "minute", count: 1 });
-    expect(relativeAge(ago(90_000), NOW)).toEqual({ unit: "minute", count: 2 });
-    expect(relativeAge(ago(90 * MIN), NOW)).toEqual({ unit: "hour", count: 2 });
-    expect(relativeAge(ago(25 * 60 * MIN), NOW)).toEqual({ unit: "day", count: 1 });
-    expect(relativeAge(ago(29 * DAY), NOW)).toEqual({ unit: "day", count: 29 });
-    expect(relativeAge(ago(65 * DAY), NOW)).toEqual({ unit: "month", count: 2 });
-    expect(relativeAge(ago(345 * DAY), NOW)).toEqual({ unit: "year", count: 1 });
-    expect(relativeAge(ago(800 * DAY), NOW)).toEqual({ unit: "year", count: 2 });
+  it("reads under a minute as now, in both directions", () => {
+    expect(rel(59_000)).toBe("maintenant");
+    expect(rel(-59_000)).toBe("maintenant");
+    expect(age(-59_000)).toBe("maintenant");
   });
 
-  it("reads a future timestamp as now and an unparseable one as null", () => {
-    expect(relativeAge(ago(-5 * MIN), NOW)).toEqual({ unit: "now", count: 0 });
-    expect(relativeAge("not a date", NOW)).toBeNull();
+  it("truncates toward zero, so nothing is announced later than it is", () => {
+    expect(rel(119 * MIN)).toBe("dans 1 h");
+    expect(rel(59 * MIN)).toBe("dans 59 min");
+    expect(rel(-90 * MIN)).toBe("il y a 1 h");
+  });
+
+  it("counts days as 24-hour spans, never as « demain »", () => {
+    expect(rel(25 * HOUR)).toBe("dans 1 j");
+    expect(rel(29 * DAY)).toBe("dans 29 j");
+    expect(rel(45 * DAY)).toBe("dans 1 m.");
+    expect(rel(400 * DAY)).toBe("dans 1 a");
+  });
+
+  it("renders an age as a bare quantity, the same units without « il y a »", () => {
+    expect(age(-5 * MIN)).toBe("5 min");
+    expect(age(-3 * DAY)).toBe("3 j");
+    expect(age(-800 * DAY)).toBe("2 ans");
+  });
+
+  it("speaks the locale it is given, English when it is absent or malformed", () => {
+    expect(rel(3 * HOUR, "en")).toBe("in 3 hr.");
+    expect(plain(formatRelativeTime(NOW + 3 * HOUR, NOW, "en", "long"))).toBe("in 3 hours");
+    expect(plain(formatRelativeTime(NOW + 3 * HOUR, NOW))).toBe("in 3 hr.");
+    expect(rel(3 * HOUR, "fr_FR")).toBe("in 3 hr.");
   });
 });
