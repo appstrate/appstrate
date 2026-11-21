@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
 import {
+  useAgentConnectionReadiness,
   useIntegrationDetails,
   useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
@@ -13,6 +15,7 @@ import {
   type IntegrationDetailWire,
 } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { bindsConnection } from "./binds-connection";
 import { ActivateIntegrationButton } from "../activate-integration-button";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
@@ -32,8 +35,10 @@ import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface AgentIntegrationsBlockProps {
-  /** The agent's declared integrations; the Connexions tab renders its own empty state. */
+  /** The agent's declared integrations. */
   entries: AgentIntegrationEntry[];
+  /** Shown when none of them binds a connection (none declared, or all declare no auths). */
+  empty: ReactNode;
   /** The agent whose resolution each row reads and whose member pin its picker writes. */
   agentPackageId: string;
   /** The rows for a schedule: "Compte utilisé" picks the connections frozen on it (`connection_overrides`) instead of the member's pin, and the readiness column and the admin's menu go. */
@@ -45,6 +50,7 @@ interface ScheduleOverrides {
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;
+  scheduleId?: string;
 }
 
 /** An integration's own detail read, as one row needs it. */
@@ -83,20 +89,37 @@ export function AgentIntegrationsBlock({
   entries,
   agentPackageId,
   scheduleOverrides,
+  empty,
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { can } = usePermissions();
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
+  const { data: readiness } = useAgentConnectionReadiness(
+    scheduleOverrides ? agentPackageId : undefined,
+    scheduleOverrides?.version,
+    scheduleOverrides?.scheduleId,
+  );
   // A pin binds the agent, whatever a schedule overrides: its rows offer none.
   const canPin = !scheduleOverrides && can("integrations:configure");
 
-  const rows: IntegrationRow[] = entries.map((entry, index) => {
-    const query = details[index]!;
-    return {
-      entry,
-      state: { detail: query.data, isLoading: query.isLoading, error: query.error },
-    };
-  });
+  const rows: IntegrationRow[] = entries
+    .map((entry, index) => {
+      const query = details[index]!;
+      return {
+        entry,
+        state: { detail: query.data, isLoading: query.isLoading, error: query.error },
+      };
+    })
+    // AFPS §7.2: an integration declaring no auths binds no connection, so it has no row here.
+    // On a schedule, judge the integration version it fires. The live manifest may have different auths.
+    .filter(({ entry, state }) =>
+      bindsConnection(
+        state.detail,
+        scheduleOverrides &&
+          readiness?.integrations.find((item) => item.integration_package_id === entry.id),
+      ),
+    );
+  if (rows.length === 0) return empty;
 
   return (
     <section aria-label={t("detail.connectionsTable.label")}>
@@ -235,6 +258,7 @@ function IntegrationConnectionCell({
           onChange: (ids) => scheduleOverrides.onChange(packageId, ids),
         }}
         version={scheduleOverrides.version}
+        scheduleId={scheduleOverrides.scheduleId}
       />
     );
   }

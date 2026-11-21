@@ -29,11 +29,17 @@ import {
   type ToolCallOutcome,
 } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH, REMOTE_TOOLS_CALL_PATH } from "./catalog.ts";
-import { asRecord, dispatchHeaders, jsonResult, type Refusal } from "./tool-results.ts";
+import {
+  asRecord,
+  dispatchHeaders,
+  jsonResult,
+  type Refusal,
+  type RouteRefusal,
+} from "./tool-results.ts";
 
 /** A tool of the listing, as the route returns it, with how `call_integration_tool` calls it. */
 export type CallableTool = IntegrationTool & {
-  /** How to call it and read its result, carried with its `input_schema` by `best_match`. */
+  /** How to call it and read its result, carried with its `input_schema` by `describe`. */
   usage: string;
   /** Its arguments as JSON Schema. */
   input_schema: Record<string, unknown>;
@@ -51,12 +57,6 @@ export type CallableTool = IntegrationTool & {
 };
 
 export type CallableListing = Omit<IntegrationToolListing, "tools"> & { tools: CallableTool[] };
-
-/** The listing route's refusal, as `invoke_operation` would relay it. */
-export interface ListingRefusal {
-  status: number;
-  body: unknown;
-}
 
 /** Scopes of a connection a search lists; past it `scopes_granted_count` gives the total. */
 export const MAX_LISTED_SCOPES = 20;
@@ -290,15 +290,16 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
  */
 export async function readIntegrationTools(
   ctx: DispatchContext,
-  query: { integration?: string; name?: string; connectionId?: string },
+  query: { integration?: string; name?: string; connectionId?: string; cachedOnly?: boolean },
   signal: AbortSignal | undefined,
-): Promise<CallableListing | { refused: ListingRefusal }> {
+): Promise<CallableListing | { refused: RouteRefusal }> {
   const url = new URL(INTEGRATION_TOOLS_PATH, ctx.origin);
   if (query.integration !== undefined) {
     url.searchParams.set("integration_package_id", query.integration);
   }
   if (query.name !== undefined) url.searchParams.set("name", query.name);
   if (query.connectionId !== undefined) url.searchParams.set("connection_id", query.connectionId);
+  if (query.cachedOnly) url.searchParams.set("catalogs", "cached");
   const response = await ctx.dispatch(
     new Request(url.toString(), {
       method: "GET",

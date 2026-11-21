@@ -19,6 +19,8 @@ export function loopbackHeaders(
     orgRole: OrgRole;
     permissions: string[];
     spaceIds?: string[];
+    /** Whether `spaceIds` is a limit the person chose (a limited conversation); default `true`. */
+    restricted?: boolean;
     chatSessionId?: string;
     /** The role preview the turn runs under, as the chat signs it. */
     viewAs?: ViewAsPersona;
@@ -32,6 +34,7 @@ export function loopbackHeaders(
     orgRole: options.orgRole,
     permissions: options.permissions,
     spaceIds: options.spaceIds,
+    restricted: options.restricted ?? true,
     chatSessionId: options.chatSessionId,
     viewAs: options.viewAs,
   });

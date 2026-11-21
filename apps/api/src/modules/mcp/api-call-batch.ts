@@ -504,7 +504,7 @@ export const API_CALL_DESCRIPTION =
   "Calls the integration's API with a connection's credential injected by the platform, never " +
   `shown to you: one request or a batch of up to ${MAX_REQUESTS}.`;
 
-/** What `best_match` says of a `{ns}__api_call` beside its `input_schema`. */
+/** What `describe` says of a `{ns}__api_call` beside its `input_schema`. */
 export const API_CALL_USAGE =
   "Requests run concurrently, not in order, and each counts against the proxy's rate limit. " +
   "Returns `{ session_id, results }`, one entry per request, in order. An entry with `status` " +

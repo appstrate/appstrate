@@ -249,7 +249,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Credential Proxy**    | Credential injection outside the sandbox: a remote run's calls, calls outside a run, the listing of what those reach            |
 | **LLM Proxy**           | Server-side LLM model injection — OpenAI + Anthropic protocol families                                                          |
 | **OAuth Clients**       | OIDC module — instance/end-user OAuth 2.1 client management                                                                     |
-| **CLI Sessions**        | OIDC module — admin oversight of CLI sessions per org (`cli-sessions` RBAC resource)                                            |
+| **Access grants**       | OIDC module — list and end CLI sessions and MCP client grants, per user and per org (`access-grants` RBAC resource)             |
 
 ### Agent runtime — MCP-only
 
@@ -397,4 +397,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, conventions, and
 
 ## License
 
-[Apache License 2.0](./LICENSE).
+[Apache License 2.0](./LICENSE). Everything in this repository is Apache-2.0. What a future enterprise edition may contain, and the commitments that hold either way: [Licensing](https://docs.appstrate.com/resources/licensing).

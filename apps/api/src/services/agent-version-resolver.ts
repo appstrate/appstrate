@@ -47,9 +47,14 @@
  * before the sidecar receives its spawn plan.
  */
 
+import { and, eq, exists, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { db } from "@appstrate/db/client";
+import { packageDistTags, packages, packageVersions } from "@appstrate/db/schema";
 import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
+  getVersionManifests,
   getVersionRow,
   readVersionArchive,
   requirePublishedPrompt,
@@ -57,6 +62,7 @@ import {
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 
 // Both keywords are reserved names (`isProtectedTag` in
 // `@appstrate/core/dist-tags`): they resolve here BEFORE any dist-tag lookup,
@@ -192,4 +198,70 @@ export async function resolveAgentRunManifest(
     agent: { ...agent, manifest: row.manifest as unknown as AgentManifest },
     overrideVersionLabel: row.version,
   };
+}
+
+/**
+ * Per row (input order), the manifest a launch WITHOUT a version selector judges — the omitted
+ * branch of {@link selectRunVersion}: a system agent's own definition, else the `latest` published
+ * version's manifest. An unpublished agent's selector-less launch is refused
+ * `no_published_version`, so `version=draft` is its only launch and its draft is judged. One
+ * query for every row; `latestVersionId` is the row's `latest` dist-tag target.
+ */
+export async function selectorlessLaunchManifests(
+  rows: readonly {
+    source: string | null;
+    draftManifest: unknown;
+    latestVersionId: number | null;
+  }[],
+): Promise<Record<string, unknown>[]> {
+  const versionIdOf = (row: (typeof rows)[number]) =>
+    row.source === "system" ? null : row.latestVersionId;
+  const manifests = await getVersionManifests(
+    rows.map(versionIdOf).filter((id): id is number => id != null),
+  );
+  return rows.map((row) => {
+    const versionId = versionIdOf(row);
+    return asRecord(versionId == null ? row.draftManifest : manifests.get(versionId));
+  });
+}
+
+/** The manifest a selector-less launch of agent `packageId` runs; null for any other type. */
+export async function selectorlessAgentManifest(
+  packageId: string,
+): Promise<Record<string, unknown> | null> {
+  const [row] = await db
+    .select({
+      type: packages.type,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      latestVersionId: packageDistTags.versionId,
+    })
+    .from(packages)
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (row?.type !== "agent") return null;
+  const [manifest] = await selectorlessLaunchManifests([row]);
+  return manifest!;
+}
+
+/** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
+export function latestTagJoin(packageIdColumn: AnyPgColumn) {
+  return and(
+    eq(packageDistTags.packageId, packageIdColumn),
+    eq(packageDistTags.tag, "latest"),
+    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(packageVersions)
+        .where(
+          and(
+            eq(packageVersions.id, packageDistTags.versionId),
+            eq(packageVersions.packageId, packageIdColumn),
+            eq(packageVersions.yanked, false),
+          ),
+        ),
+    ),
+  );
 }

@@ -31,8 +31,8 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { relativeAge } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
+import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -111,42 +111,6 @@ function useDebouncedTerm(input: string, delay: number): string {
 }
 
 /**
- * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
- * `Intl.RelativeTimeFormat` always prefixes "il y a" / "ago", three words more
- * than a 56px column holds, so the unit comes from the bundle (plural rules
- * included) and only the number is computed here.
- */
-const AGE_KEY = {
-  now: "threads.age.now",
-  minute: "threads.age.minutes",
-  hour: "threads.age.hours",
-  day: "threads.age.days",
-  month: "threads.age.months",
-  year: "threads.age.years",
-} as const;
-
-function relativeTime(iso: string, now: number, t: ChatTranslate): string {
-  const age = relativeAge(iso, now);
-  return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
-}
-
-/**
- * Re-render clock for the relative-time labels. Freshness of the list DATA is
- * event-driven (SSE + safety-net refetch), but React Query's structural sharing
- * keeps `data` referentially stable when the payload is unchanged — no
- * re-render, so a label computed at render time would freeze (the "now" label
- * forever on a quiet list). 30s granularity matches the coarsest visible unit.
- */
-function useNowTick(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
-/**
  * The chat's navigation, in the host shell's sidebar vocabulary (same groups,
  * rows and active fill as Studio's nav — the two products must read as one
  * app). "Nouvelle conversation" sits ABOVE the group rather than as a discreet
@@ -158,20 +122,26 @@ function useNowTick(): number {
  * unread until it is opened; `activeId` is never counted, since looking at it
  * IS reading it.
  *
- * `t` and `can` arrive as props, not from `useChatHost()`: the shell mounts
- * this list outside `ChatPage`, where the host bag is published.
+ * `t`, `can` and `formatAge` arrive as props, not from `useChatHost()`: the
+ * shell mounts this list outside `ChatPage`, where the host bag is published.
  */
 export function ChatConversationList({
   activeId,
   t,
   can,
   renderSpaces,
+  formatAge,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
   /** Names spaces: every row shows the spaces its conversation touched. */
   renderSpaces: RenderSpaces;
+  /**
+   * How old an ISO date is as of `now`, as a bare quantity in the host's
+   * language (« 5 min », « 3 j »): a row's age column is 56px.
+   */
+  formatAge: (iso: string, now: number) => string;
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
@@ -204,7 +174,7 @@ export function ChatConversationList({
       session={s}
       active={s.id === activeId}
       unread={s.unread && s.id !== activeId}
-      now={now}
+      age={formatAge(s.updatedAt, now)}
       t={t}
       canWrite={canWrite}
       renderSpaces={renderSpaces}
@@ -346,7 +316,7 @@ function ConversationRow({
   session,
   active,
   unread,
-  now,
+  age,
   t,
   canWrite,
   renderSpaces,
@@ -354,7 +324,8 @@ function ConversationRow({
   session: SessionSummary;
   active: boolean;
   unread: boolean;
-  now: number;
+  /** How old the conversation is, already rendered (« 5 min »). */
+  age: string;
   t: ChatTranslate;
   canWrite: boolean;
   renderSpaces: RenderSpaces;
@@ -404,10 +375,10 @@ function ConversationRow({
         size="lg"
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
-        // ring themselves in `--space-tile-ring`: the row's background in each of its states.
+        // ring themselves in `--tile-ring`: the row's background in each of its states.
         className={cn(
           canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
-          "[--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]",
+          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -453,7 +424,7 @@ function ConversationRow({
           <span
             className={`text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity ${canWrite ? "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0" : ""}`}
           >
-            {relativeTime(session.updatedAt, now, t)}
+            {age}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the

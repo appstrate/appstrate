@@ -6,7 +6,7 @@
  * End-users belong to a space and represent external users of the platform.
  */
 
-import { eq, and, or, ilike, desc, lt } from "drizzle-orm";
+import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, notifications, runReads, uploads, organizations } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
@@ -14,7 +14,7 @@ import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import { prefixedId } from "@appstrate/db/ids";
-import { buildUpdateSet } from "../lib/db-helpers.ts";
+import { buildUpdateSet, olderThanTimestampCursor } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope } from "./spaces.ts";
@@ -126,7 +126,8 @@ export async function listEndUsers(
   const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 20, 1), 100);
   const fetchLimit = limit + 1; // Fetch one extra to detect hasMore
 
-  const conditions = [eq(endUsers.orgId, scope.orgId), eq(endUsers.spaceId, scope.spaceId)];
+  const reach = and(eq(endUsers.orgId, scope.orgId), eq(endUsers.spaceId, scope.spaceId))!;
+  const conditions = [reach];
 
   if (params.externalId) {
     conditions.push(eq(endUsers.externalId, params.externalId));
@@ -145,25 +146,12 @@ export async function listEndUsers(
     );
     if (term) conditions.push(term);
   }
-  // Keyset pagination must use the SAME tuple the result set is ordered by —
-  // `(createdAt DESC, id DESC)` below. Filtering on `id` alone while sorting by
-  // `createdAt` makes the cursor boundary disagree with the sort order, so pages
-  // skip or duplicate rows. Resolve the cursor's `createdAt` and compare the full
-  // `(createdAt, id)` tuple lexicographically. A cursor id that no longer exists
-  // (deleted between page loads) drops its clause — the page just starts at the
-  // head rather than 500-ing.
-  if (params.startingAfter) {
-    const cursor = await getEndUserCursor(scope, params.startingAfter);
-    if (cursor) {
-      // Next page (older rows), DESC order: (createdAt, id) < (cursor.createdAt, cursor.id).
-      conditions.push(
-        or(
-          lt(endUsers.createdAt, cursor.createdAt),
-          and(eq(endUsers.createdAt, cursor.createdAt), lt(endUsers.id, cursor.id)),
-        )!,
-      );
-    }
-  }
+  const boundary = await olderThanTimestampCursor(
+    endUsers.createdAt,
+    endUsers.id,
+    params.startingAfter,
+    reach,
+  );
   const rows = await db
     .select({
       id: endUsers.id,
@@ -176,7 +164,7 @@ export async function listEndUsers(
       updatedAt: endUsers.updatedAt,
     })
     .from(endUsers)
-    .where(and(...conditions))
+    .where(and(...conditions, boundary))
     .orderBy(desc(endUsers.createdAt), desc(endUsers.id))
     .limit(fetchLimit);
 
@@ -378,30 +366,6 @@ export async function deleteEndUser(scope: SpaceScope, endUserId: string): Promi
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Resolve a keyset cursor (an end-user id) to its `(createdAt, id)` tuple,
- * scoped to the space for tenant safety. Returns `null` when the id is unknown
- * in this scope, so the caller can drop the boundary clause instead of paging
- * against a phantom cursor.
- */
-async function getEndUserCursor(
-  scope: SpaceScope,
-  id: string,
-): Promise<{ createdAt: Date; id: string } | null> {
-  const [row] = await db
-    .select({ createdAt: endUsers.createdAt, id: endUsers.id })
-    .from(endUsers)
-    .where(
-      and(
-        eq(endUsers.id, id),
-        eq(endUsers.orgId, scope.orgId),
-        eq(endUsers.spaceId, scope.spaceId),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
 
 async function findByExternalId(
   spaceId: string,

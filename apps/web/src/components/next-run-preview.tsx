@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { Calendar, Clock } from "lucide-react";
-import { formatDateField } from "../lib/format-date";
+import { ScheduledAt } from "./scheduled-at";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface NextRunPreviewProps {
@@ -11,7 +11,7 @@ interface NextRunPreviewProps {
   runNumber: number | null;
   agentName?: string;
   schedule_name: string;
-  next_run_at: string | Date;
+  next_run_at: string;
   /** The schedule's zone, named next to the time. */
   timezone: string;
   className?: string;
@@ -46,7 +46,7 @@ export function NextRunPreview({
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <span className="text-muted-foreground text-xs">
-            {formatDateField(next_run_at, "datetime", timezone)}
+            <ScheduledAt at={next_run_at} timeZone={timezone} variant="relative" />
           </span>
         </div>
       </div>

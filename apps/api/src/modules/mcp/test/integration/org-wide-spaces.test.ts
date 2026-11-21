@@ -74,6 +74,8 @@ describe("mcp org-wide connection", () => {
     expect(byId.get(gestion.id)?.role).toBe("admin");
     expect(byId.get(lecture.id)?.role).toBe("viewer");
     expect(byId.has(foreign.id)).toBe(false);
+    // A caller without a personal space sees none marked so.
+    expect(spaces.every((s) => (s as { personal?: boolean }).personal === false)).toBe(true);
 
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
@@ -87,11 +89,72 @@ describe("mcp org-wide connection", () => {
     });
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
+    // Only a permission refusal is final; a configuration one is repaired or, agreed, moved.
+    expect(instructions).toContain("A permission refusal (`403`, `not_granted`) is final");
+    expect(instructions).toMatch(
+      /A configuration refusal \(`agent_not_active_in_space`, `integration_not_active`/,
+    );
+    expect(instructions).toContain(
+      "`active_in_spaces`; act in another space only once the user agrees",
+    );
+    expect(instructions).toContain("a `required: true` one will refuse its launch there");
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
     expect(instructions).toContain(`createAgent [${gestion.id}]`);
     // The spaces are listed by the `space_id` schema, not repeated here.
     expect(instructions).toContain("Space names are not unique");
     expect(instructions).not.toContain(`Gestion (\`${gestion.id}\``);
+  });
+
+  it("marks the caller's own personal space, where a new package goes by default", async () => {
+    const perso = await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Perso",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+
+    const me = payload(await call("get_me", { space_id: gestion.id }));
+    const spaces = me.data.spaces as Array<{ id: string; personal: boolean }>;
+    const personal = new Map(spaces.map((s) => [s.id, s.personal]));
+    expect(personal.get(perso.id)).toBe(true);
+    expect(personal.get(defaultSpaceId)).toBe(false);
+    expect(personal.get(gestion.id)).toBe(false);
+    expect(personal.get(lecture.id)).toBe(false);
+
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const spaceId = (
+      listed.envelope.result?.tools as Array<{
+        name: string;
+        inputSchema: { properties: Record<string, { description: string }> };
+      }>
+    ).find((t) => t.name === "invoke_operation")!.inputSchema.properties.space_id!;
+    expect(spaceId.description).toContain(
+      "Perso (`" + perso.id + "`, role admin, your personal space)",
+    );
+    expect(spaceId.description).toContain("Gestion (`" + gestion.id + "`, role admin)");
+    expect(spaceId.description.match(/your personal space\)/g)).toHaveLength(1);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "0" },
+      },
+    });
+    const instructions = envelope.result?.instructions as string;
+    expect(instructions).toContain("goes to your personal space");
+    expect(instructions).toContain("personal_space_takes_no_keys");
+    // A team space already chosen (named, or designated by the context) is used; team spaces
+    // are offered only without a destination or when it is a personal space.
+    expect(instructions).toContain(
+      "the destination already chosen wins: the team space the request names, else the one your context designates",
+    );
+    expect(instructions).toContain("Only when there is none, or it is a personal space, offer");
+    expect(instructions).toContain("space-level OIDC client");
+    expect(instructions).not.toContain(`Perso (\`${perso.id}\``);
   });
 
   it("declares space_id on the tools that act in a space, and only those", async () => {
@@ -110,7 +173,7 @@ describe("mcp org-wide connection", () => {
       return Boolean(schema?.properties?.space_id) && schema!.required!.includes("space_id");
     };
     expect(spaceArg("invoke_operation")).toBe(true);
-    expect(spaceArg("describe_operation")).toBe(true);
+    expect(spaceArg("describe")).toBe(true);
     expect(spaceArg("get_me")).toBe(true);
     expect(spaceArg("get_runtime_capabilities")).toBe(false);
 
@@ -128,7 +191,7 @@ describe("mcp org-wide connection", () => {
     expect(invoke.startsWith("Available in:")).toBe(true);
     expect(invoke).toContain(gestion.id);
     expect(invoke).not.toContain(lecture.id);
-    expect(described("read_file")).not.toContain("Available in:");
+    expect(described("read")).not.toContain("Available in:");
   });
 
   it("requires space_id on a read as on a write, and names the space read", async () => {
@@ -164,7 +227,7 @@ describe("mcp org-wide connection", () => {
 
   it("refuses a write in the space whose role lacks it, naming where it is granted", async () => {
     const described = payload(
-      await call("describe_operation", { operation_id: "createAgent", space_id: defaultSpaceId }),
+      await call("describe", { kind: "operation", id: "createAgent", space_id: defaultSpaceId }),
     );
     expect(described.data.granted).toBe(false);
     expect(described.data.granted_in).toEqual([gestion.id]);
@@ -249,22 +312,59 @@ describe("mcp org-wide connection", () => {
 
   it("answers search for the space named, a denied row naming where it is granted", async () => {
     const res = payload(
-      await call("search_operations", { query: "createAgent", limit: 5, space_id: defaultSpaceId }),
+      await call("search", {
+        query: "createAgent",
+        limit: 5,
+        kinds: ["operation"],
+        space_id: defaultSpaceId,
+      }),
     );
-    const row = (res.data.denied as Array<{ operation_id: string; granted_in?: string[] }>).find(
-      (op) => op.operation_id === "createAgent",
-    );
+    const row = (
+      res.data.operations as { denied: Array<{ id: string; granted_in?: string[] }> }
+    ).denied.find((op) => op.id === "createAgent");
     expect(row?.granted_in).toEqual([gestion.id]);
 
-    // Granted in every reachable space: no `granted_in` at all, as in the index.
+    // Granted where it is searched: that space.
     const everywhere = payload(
-      await call("search_operations", { query: "listAgents", limit: 5, space_id: gestion.id }),
+      await call("search", {
+        query: "listAgents",
+        limit: 5,
+        kinds: ["operation"],
+        space_id: gestion.id,
+      }),
     );
     const listed = (
-      everywhere.data.operations as Array<{ operation_id: string; granted_in?: string[] }>
-    ).find((op) => op.operation_id === "listAgents");
+      everywhere.data.operations as { items: Array<{ id: string; granted_in?: string[] }> }
+    ).items.find((op) => op.id === "listAgents");
     expect(listed).toBeDefined();
-    expect(listed!.granted_in).toBeUndefined();
+    expect(listed!.granted_in).toEqual([gestion.id]);
+  });
+
+  it("lets search omit space_id: an operation granted in one space is listed, naming it", async () => {
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+    const schema = (
+      envelope.result?.tools as Array<{
+        name: string;
+        inputSchema: { properties: Record<string, unknown>; required?: string[] };
+      }>
+    ).find((t) => t.name === "search")!.inputSchema;
+    expect(schema.properties.space_id).toBeDefined();
+    expect(schema.required ?? []).not.toContain("space_id");
+
+    const across = payload(await call("search", { query: "createAgent", kinds: ["operation"] }));
+    const operations = across.data.operations as {
+      items: Array<{ id: string; granted_in: string[] }>;
+      denied?: Array<{ id: string }>;
+    };
+    expect(operations.items.find((op) => op.id === "createAgent")?.granted_in).toEqual([
+      gestion.id,
+    ]);
+    expect((operations.denied ?? []).map((op) => op.id)).not.toContain("createAgent");
   });
 
   it("re-checks kind:inline as its own act: an operator runs agents, not inline runs", async () => {

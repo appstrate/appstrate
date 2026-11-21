@@ -11,6 +11,7 @@
     "report": "npx playwright show-report"
   },
   "devDependencies": {
+    "@appstrate/mcp-transport": "workspace:*",
     "@playwright/test": "^1.65.1"
   }
 }

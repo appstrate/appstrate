@@ -20,7 +20,8 @@
  *     with no `placeAs` refuses exactly the packages that are not placed.
  *
  * The table is every cell of the rule: two provenances × the home here or
- * elsewhere × a `space_packages` row present or absent. One cell sits outside
+ * elsewhere × a `space_packages` row present or absent × offered to the
+ * organization or not. One cell sits outside
  * it because it needs a SECOND space to state — a row in another space — and
  * it is the negative the rule is most easily widened into.
  *
@@ -41,7 +42,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { grepFiles, REPO_ROOT } from "../../helpers/source-grep.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
+import { seedOrgOffer, seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
 import { placementReadFilter, placementRowJoin } from "../../../src/services/package-placement.ts";
 import { isPackageReadableInSpace, placementGrantsRead } from "../../../src/lib/package-access.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
@@ -60,6 +61,10 @@ const HOMES = [
 const ROWS = [
   { label: "a row here", row: true },
   { label: "no row", row: false },
+] as const;
+const OFFERS = [
+  { label: "offered to the organization", offered: true },
+  { label: "not offered", offered: false },
 ] as const;
 
 /**
@@ -100,46 +105,50 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
   for (const source of SOURCES) {
     for (const { label: homeLabel, here } of HOMES) {
       for (const { label: rowLabel, row } of ROWS) {
-        it(`${source} / ${homeLabel} / ${rowLabel}`, async () => {
-          const id = `@placement/${source}`;
-          const system = source === "system";
-          const homeSpaceId = system ? null : here ? ctx.defaultSpaceId : elsewhere;
-          await seedPackage({
-            id,
-            orgId: system ? null : ctx.orgId,
-            type: "agent",
-            source,
-            homeSpaceId,
-            draftManifest: { name: id, version: "0.1.0", type: "agent" },
+        for (const { label: offerLabel, offered } of OFFERS) {
+          it(`${source} / ${homeLabel} / ${rowLabel} / ${offerLabel}`, async () => {
+            const id = `@placement/${source}`;
+            const system = source === "system";
+            const homeSpaceId = system ? null : here ? ctx.defaultSpaceId : elsewhere;
+            await seedPackage({
+              id,
+              orgId: system ? null : ctx.orgId,
+              type: "agent",
+              source,
+              homeSpaceId,
+              draftManifest: { name: id, version: "0.1.0", type: "agent" },
+            });
+            if (row) await seedPackageShare(ctx.defaultSpaceId, id);
+            if (offered) await seedOrgOffer(ctx.orgId, id);
+
+            // The rule itself, spelled out once here so the four forms are
+            // compared against the RULE and not merely against each other —
+            // four statements agreeing on the same wrong answer is the failure
+            // a parity test between them cannot see.
+            const expected = system || (here && !system) || row || offered;
+
+            const fromSql = await sqlSaysPlaced(ctx.defaultSpaceId, id);
+            const fromQuery = await isPackageReadableInSpace(ctx.defaultSpaceId, id);
+            // The system term belongs to the CALLER of this form — see the
+            // module docstring above.
+            const fromMemory =
+              system ||
+              placementGrantsRead(
+                { homeSpaceId },
+                // `loadPlacementSpaces`: a row's space, or every space of an offering org.
+                row || offered ? [ctx.defaultSpaceId] : [],
+                new Set([ctx.defaultSpaceId]),
+              );
+            const fromDoor = await doorSaysPlaced(ctx.defaultSpaceId, id);
+
+            expect({ fromSql, fromQuery, fromMemory, fromDoor }).toEqual({
+              fromSql: expected,
+              fromQuery: expected,
+              fromMemory: expected,
+              fromDoor: expected,
+            });
           });
-          if (row) await seedPackageShare(ctx.defaultSpaceId, id);
-
-          // The rule itself, spelled out once here so the four forms are
-          // compared against the RULE and not merely against each other —
-          // four statements agreeing on the same wrong answer is the failure
-          // a parity test between them cannot see.
-          const expected = system || (here && !system) || row;
-
-          const fromSql = await sqlSaysPlaced(ctx.defaultSpaceId, id);
-          const fromQuery = await isPackageReadableInSpace(ctx.defaultSpaceId, id);
-          // The system term belongs to the CALLER of this form — see the
-          // module docstring above.
-          const fromMemory =
-            system ||
-            placementGrantsRead(
-              { homeSpaceId },
-              row ? [ctx.defaultSpaceId] : [],
-              new Set([ctx.defaultSpaceId]),
-            );
-          const fromDoor = await doorSaysPlaced(ctx.defaultSpaceId, id);
-
-          expect({ fromSql, fromQuery, fromMemory, fromDoor }).toEqual({
-            fromSql: expected,
-            fromQuery: expected,
-            fromMemory: expected,
-            fromDoor: expected,
-          });
-        });
+        }
       }
     }
   }

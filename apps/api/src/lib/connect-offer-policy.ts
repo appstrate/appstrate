@@ -10,7 +10,7 @@
 import type { Context } from "hono";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { callerPermissions } from "./permissions.ts";
-import { isUserPrincipal } from "./principal.ts";
+import { connectionPrincipal, writesDelegated } from "./connection-principal.ts";
 import type { AppEnv } from "../types/index.ts";
 
 export interface ConnectOfferPolicy {
@@ -18,7 +18,7 @@ export interface ConnectOfferPolicy {
   canConnect: boolean;
   /** Actor holds `integrations:configure` — overrides `block_user_connections`. */
   canConfigure: boolean;
-  /** A delegated credential: its reconnect links reach rows scoped to the space only. */
+  /** The caller is bound (`writesDelegated`): its links write and reconnect space-scope rows only. */
   delegated: boolean;
 }
 
@@ -38,6 +38,6 @@ export function connectOfferPolicyFromRequest(c: Context<AppEnv>): ConnectOfferP
   return {
     canConnect: permissions.has("integrations:connect"),
     canConfigure: permissions.has("integrations:configure"),
-    delegated: !isUserPrincipal(c),
+    delegated: writesDelegated(connectionPrincipal(c)),
   };
 }

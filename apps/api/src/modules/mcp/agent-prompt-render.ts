@@ -94,7 +94,7 @@ const spaceArgument = (spaceId: string): string => `"space_id": ${JSON.stringify
 
 const fileStep = (space: string): string =>
   "File fields (`format: uri` with a `contentMediaType`) take a URI, never `data:`. For each " +
-  "local file, read only `createUpload`'s body shape with `describe_operation`, call it " +
+  "local file, read only `createUpload`'s body shape with `describe` (kind `operation`), call it " +
   "with `invoke_operation` (ignore its `runAgent` and `data:` advice), both with " +
   `\`${space}\`, run \`curl --fail -X PUT --upload-file <path>\` to the returned \`url\` with ` +
   "each returned header as `-H`, and pass the returned `upload://` `uri`. An `appfile://` URI " +
@@ -166,6 +166,13 @@ export function renderAgentPrompt(view: AgentLaunchView, request?: string): stri
         "by whom).",
       "- A `400`, or a `404` other than `agent_not_found`, `agent_not_active_in_space` or " +
         "`no_published_version`: fix `input` with the user, then retry.",
+      `- ${code("agent_not_active_in_space")}, or a \`409\` whose \`errors\` hold ` +
+        `${code("integration_not_active")}: a configuration to repair. Offer its remedy here ` +
+        "(activate with `activatePackage` when your role allows; an organization owner or " +
+        "admin can offer it in the organization catalog, or use `offerPackageToOrg` with an unconfined credential, " +
+        "activating it in every space without a " +
+        "row of its own), or a space of its `active_in_spaces`; act only once the user " +
+        "agrees, never silently.",
       "- Anything else: report it and stop.",
       "Once a run `id` exists, never call `run_and_wait` again.",
     ],

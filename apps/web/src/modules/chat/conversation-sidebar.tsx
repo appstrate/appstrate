@@ -3,9 +3,11 @@
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
 import { CheckIcon, CopyIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { relativeAge } from "@appstrate/core/format";
+import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
+import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { cn } from "@appstrate/ui/cn";
+import { formatCompactTokens } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -16,7 +18,8 @@ import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { FileArtifact } from "../../components/file-artifact";
 import { RowSpaceName, RunRow } from "../../components/run-row";
-import { TextSkeleton } from "../../components/loading-skeletons";
+import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
+import { SkeletonLine } from "../../components/skeleton-line";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
@@ -28,7 +31,7 @@ import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
-import { formatDateField } from "../../lib/format-date";
+import { formatDateField, formatRelativeTime } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
   ConversationSidebarState,
@@ -247,7 +250,7 @@ export function ConversationFiles({
           onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
         >
           <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-            <MimeIcon mime={file.mime} className="text-muted-foreground size-4" />
+            <MimeIcon mime={file.mime} name={file.name} className="text-muted-foreground size-4" />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium">{file.name}</span>
@@ -268,19 +271,11 @@ export function ConversationFiles({
   );
 }
 
-/** « il y a 3 jours », in the interface's language; the age's units come from core. */
-function formatAge(iso: string, language: string): string {
-  const age = relativeAge(iso, Date.now());
-  if (!age) return "";
-  const rtf = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
-  return age.unit === "now" ? rtf.format(0, "second") : rtf.format(-age.count, age.unit);
-}
-
 function InfoDate({ iso }: { iso: string }) {
-  const { i18n } = useTranslation();
+  const now = useNowTick();
   return (
     <>
-      <span>{formatAge(iso, i18n.language)}</span>
+      <span>{formatRelativeTime(iso, now, "long")}</span>
       <span className="text-muted-foreground block text-xs">{formatDateField(iso)}</span>
     </>
   );
@@ -306,6 +301,120 @@ function ConversationId({ id }: { id: string }) {
   );
 }
 
+/** One `dt`/`dd` pair of the Infos panel, on the panel's label column. */
+function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
+    </div>
+  );
+}
+
+/** The details while they load, row for row; a date row is two lines (age, then date). */
+function ConversationDetailsSkeleton() {
+  const row = (key: string, width: string, lines = 1) => (
+    <div key={key} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
+      <SkeletonLine className="w-20 text-sm" />
+      <div>
+        {Array.from({ length: lines }, (_, i) => (
+          <SkeletonLine key={i} className={i ? "w-16 text-xs" : cn("text-sm", width)} />
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <Waiting className="flex flex-col gap-5">
+      <SkeletonLine className="w-2/3 text-base font-semibold" />
+      <div className="flex flex-col gap-3">
+        {row("created", "w-24", 2)}
+        {row("activity", "w-24", 2)}
+        {row("messages", "w-8")}
+        {row("status", "w-16")}
+      </div>
+      <div className="flex flex-col gap-2">
+        <SkeletonLine className="w-32 text-sm font-medium" />
+        <div className="flex flex-col gap-3">
+          {row("context", "w-28")}
+          {row("models", "w-40")}
+          {row("tokens", "w-36")}
+        </div>
+        <SkeletonLine className="w-3/4 text-xs" />
+      </div>
+    </Waiting>
+  );
+}
+
+/**
+ * The models that closed the conversation's turns and the context it carries, from the turns' own
+ * metadata, beside the tokens every metered call consumed, from the server's ledger sum.
+ */
+function ConversationUsage({
+  session,
+}: {
+  session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
+}) {
+  const { t } = useTranslation("chat");
+  const { models, context } = conversationStats(session.messages);
+  const { usage } = session;
+  const read =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0);
+  const generated = usage.output_tokens ?? 0;
+  const metered = read + generated > 0;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">{t("context.info.usageTitle")}</h3>
+      {models.length === 0 && !context && !metered ? (
+        <p className="text-muted-foreground text-sm">{t("context.info.noTurn")}</p>
+      ) : (
+        <>
+          <dl className="flex flex-col gap-3 text-sm">
+            {context ? (
+              <InfoRow label={t("context.info.currentContext")}>
+                {t("contextUsage.counts", {
+                  used: formatCompactTokens(context.tokens),
+                  max: formatCompactTokens(context.window),
+                })}
+              </InfoRow>
+            ) : null}
+            {models.length > 0 ? (
+              <InfoRow label={t("context.info.models", { count: models.length })}>
+                <ul className="flex flex-col gap-0.5">
+                  {models.map((model) => (
+                    <li key={model.modelId}>
+                      {model.failed > 0
+                        ? t("context.info.modelTurnsFailed", {
+                            model: model.label,
+                            count: model.turns,
+                            failed: model.failed,
+                          })
+                        : t("context.info.modelTurns", { model: model.label, count: model.turns })}
+                    </li>
+                  ))}
+                </ul>
+              </InfoRow>
+            ) : null}
+            {metered ? (
+              <InfoRow label={t("context.info.tokens")}>
+                {t("context.info.tokensReadGenerated", {
+                  read: formatCompactTokens(read),
+                  generated: formatCompactTokens(generated),
+                })}
+              </InfoRow>
+            ) : null}
+          </dl>
+          {metered ? (
+            <p className="text-muted-foreground text-xs">{t("context.info.tokensScope")}</p>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
 function ConversationDetails({
   conversationId,
   active,
@@ -319,7 +428,7 @@ function ConversationDetails({
   if (!conversationId) {
     return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;
   }
-  if (query.isLoading) return <TextSkeleton />;
+  if (query.isLoading) return <ConversationDetailsSkeleton />;
   if (query.error || !query.data) {
     return <p className="text-muted-foreground text-sm">{t("context.error")}</p>;
   }
@@ -342,12 +451,12 @@ function ConversationDetails({
       </h3>
       <dl className="flex flex-col gap-3 text-sm">
         {rows.map(([label, value]) => (
-          <div key={label} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
-            <dt className="text-muted-foreground">{label}</dt>
-            <dd className="min-w-0 break-words">{value}</dd>
-          </div>
+          <InfoRow key={label} label={label}>
+            {value}
+          </InfoRow>
         ))}
       </dl>
+      <ConversationUsage session={session} />
     </>
   );
 }

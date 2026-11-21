@@ -29,6 +29,7 @@
  */
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
+import type { LaunchSpacesLookup } from "../lib/launch-spaces.ts";
 import type { AgentManifest } from "../types/index.ts";
 import {
   ApiError,
@@ -101,6 +102,8 @@ export async function runInlinePreflight(params: {
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    */
   connectOffers?: ConnectOfferPolicy | null;
+  /** Fail-fast only, like `connectOffers`: the launch 409's `active_in_spaces`. */
+  launchSpaces?: LaunchSpacesLookup;
   /**
    * Caller-selected integration versions (`body.dependency_overrides`). Must be
    * the SAME map the kickoff freezes with, so the memo seeded here holds the
@@ -291,6 +294,7 @@ export async function runInlinePreflight(params: {
         manifestCache,
         ...(readinessLaunch ? { launchOverrides: readinessLaunch } : {}),
         ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
+        ...(params.launchSpaces ? { launchSpaces: params.launchSpaces } : {}),
       });
     } else {
       const readiness = await collectAgentReadiness({

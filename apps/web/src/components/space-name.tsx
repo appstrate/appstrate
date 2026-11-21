@@ -10,13 +10,14 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel, spaceLabels } from "../lib/space-label";
+import { STACK_TILE, TileStack } from "./tile-stack";
 
 /** What naming a space reads of it. */
 export type SpaceListed = Parameters<typeof spaceTile>[0];
 
 /** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row, `lg` heading a table row. */
 const SIZES = {
-  sm: { box: "gap-1.5 text-xs", tile: "size-4 rounded-[4px]" },
+  sm: { box: "gap-1.5 text-xs", tile: STACK_TILE },
   md: { box: "gap-2.5 text-sm", tile: "size-6" },
   lg: { box: "gap-3 text-sm", tile: "size-7 rounded-md" },
 } as const;
@@ -40,14 +41,9 @@ function SpaceTile({
   );
 }
 
-/** The ring of a stacked tile: the container's `--space-tile-ring`, else the page background. */
-const RING = "ring-(--space-tile-ring,var(--background))";
-
 /**
- * Several spaces' tiles stacked, the first in front and each next one behind it, ringed in `--space-tile-ring`
- * (the colour of the surface they sit on, which the container sets for each of its states: a
- * conversation row or the chat's top-bar trigger; `--background` when none does) so the edges
- * stay readable. Past `max`, the rest is counted.
+ * Several spaces' tiles stacked ({@link TileStack}): the first in front and each next one behind
+ * it. Past `max`, the rest is counted.
  */
 export function SpaceTileStack({
   spaces,
@@ -58,33 +54,15 @@ export function SpaceTileStack({
   size?: keyof typeof SIZES;
   max?: number;
 }) {
-  const shown = max === undefined ? spaces : spaces.slice(0, max);
-  const hidden = spaces.length - shown.length;
-  // Reversed in the DOM, read in order on screen: the first space is painted last, in front.
   return (
-    <span className="flex shrink-0 flex-row-reverse items-center" data-testid="space-tile-stack">
-      {hidden > 0 && (
-        <span
-          className={cn(
-            "bg-muted text-muted-foreground -ml-1 flex shrink-0 items-center justify-center text-[10px] leading-none font-medium tabular-nums ring-2",
-            SIZES[size].tile,
-            RING,
-          )}
-        >
-          +{hidden}
-        </span>
-      )}
-      {shown
-        .map((space, index) => (
-          <SpaceTile
-            key={space.id}
-            space={space}
-            size={size}
-            className={cn("ring-2", RING, index > 0 && "-ml-1")}
-          />
-        ))
-        .reverse()}
-    </span>
+    <TileStack
+      items={spaces}
+      keyOf={(space) => space.id}
+      render={(space, className) => <SpaceTile space={space} size={size} className={className} />}
+      tileClass={SIZES[size].tile}
+      max={max}
+      testId="space-tile-stack"
+    />
   );
 }
 

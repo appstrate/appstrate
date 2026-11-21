@@ -102,7 +102,7 @@ export function createFilesRouter() {
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
-  // Every door by id resolves the file in its own space, as the MCP `read_file`
+  // Every door by id resolves the file in its own space, as the MCP `read`
   // that hands out its `content_url` does.
   router.get("/files/:id", rateLimit(120), requireCeiling("files", "read"), async (c) => {
     const actor = getActor(c);

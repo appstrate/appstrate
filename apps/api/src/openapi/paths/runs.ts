@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connectionConflictContent, jsonRpcRequestBody, problemContent } from "../responses.ts";
+import {
+  agentNotActiveContent,
+  connectionConflictContent,
+  jsonRpcRequestBody,
+  problemContent,
+} from "../responses.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
   runToolsMcpMethodNotAllowed,
@@ -464,9 +469,10 @@ const canonicalRunsPaths = {
             "Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it).",
         },
         "404": {
-          $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`, or launch it in one of the problem's `active_in_spaces`.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: agentNotActiveContent,
         },
         "409": {
           description:
@@ -1496,7 +1502,7 @@ const canonicalRunsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
+            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: connectionConflictContent,
         },

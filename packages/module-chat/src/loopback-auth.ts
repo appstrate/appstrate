@@ -104,6 +104,8 @@ interface LoopbackClaims extends LoopbackIdentity {
    * the bearer reaches; MCP bearer only. Absent means unbound — the inference bearer.
    */
   spaceIds?: string[];
+  /** Whether `spaceIds` is a limit the person chose (a limited conversation); read only beside `spaceIds`. */
+  restricted?: boolean;
 }
 
 function sign(payload: string): string {
@@ -184,18 +186,21 @@ export function mintMcpLoopbackToken(
     injectedSkills?: InjectedSkills;
     /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
     spaceIds?: readonly string[];
+    /** Whether the conversation is limited to a space (its connections then stay in it). Absent: limited. */
+    restricted?: boolean;
     /** The persisted conversation of the turn, whose own files a run it launches may consume. */
     chatSessionId?: string | null;
   },
   opts?: { ttlMs?: number },
 ): string {
-  const { permissions, spaceIds, ...rest } = identity;
+  const { permissions, spaceIds, restricted, ...rest } = identity;
   return mint({
     ...rest,
     permissions: [...permissions],
     firstPartyLoopback: false,
     ttlMs: opts?.ttlMs ?? TOKEN_TTL_MS,
     spaceIds: spaceIds && [...spaceIds],
+    restricted: spaceIds ? restricted : undefined,
   });
 }
 
@@ -254,7 +259,13 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // is server-minted from a process-local secret (see top-of-file rationale).
       firstPartyLoopback: claims.firstPartyLoopback === true,
       permissions,
-      ...(claims.spaceIds !== undefined ? { spaceIds: claims.spaceIds } : {}),
+      ...(claims.spaceIds !== undefined
+        ? {
+            spaceIds: claims.spaceIds,
+            // Only an explicit `false` lifts the restriction; absent or malformed stays restricted.
+            ...(claims.restricted === false ? { spaceIdsRestricted: false } : {}),
+          }
+        : {}),
       // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
       // the preview). `chatSessionId` names the issuing conversation (usage
       // attribution, a run's inputs); `viewAs` is re-published before any permission is resolved.

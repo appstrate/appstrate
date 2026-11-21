@@ -93,7 +93,7 @@ import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
-import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
+import { listActiveAgentHints, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { VIEW_AS_HEADER, canReadRuns } from "@appstrate/core/permissions";
@@ -523,7 +523,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
       ? listUsableIntegrationsForActor(scope, actor)
       : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
-      ? withHomeWritable().then((homeWritable) => listRunnableAgents(scope, { homeWritable }))
+      ? withHomeWritable().then((homeWritable) => listActiveAgentHints(scope, { homeWritable }))
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
       ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))

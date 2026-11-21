@@ -76,7 +76,11 @@ function cardFor(verdict: "allowed" | "not_shareable" | "forbidden" | null): str
     $api.queryOptions("get", "/api/integrations/{packageId}", {
       params: { path: { packageId: "@acme/gmail" }, ...scoped },
     }).queryKey,
-    { manifest: { display_name: "Gmail" }, auths: [], active: false },
+    {
+      manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+      auths: [],
+      active: false,
+    },
   );
 
   // `renderToStaticMarkup` takes zustand's SERVER snapshot, so the current
@@ -92,6 +96,7 @@ function cardFor(verdict: "allowed" | "not_shareable" | "forbidden" | null): str
       <AgentIntegrationsBlock
         entries={[{ id: "@acme/gmail", version: "1.0.0", tools: undefined, scopes: undefined }]}
         agentPackageId="@acme/agent"
+        empty={null}
       />,
       { queryClient: qc },
     );

@@ -12,6 +12,7 @@
     "./ui": "./src/ui/index.tsx",
     "./conversation-skeleton": "./src/ui/conversation-skeleton.tsx",
     "./unread": "./src/ui/use-sessions.ts",
+    "./conversation-stats": "./src/ui/conversation-stats.ts",
     "./package-authoring": "./src/ui/package-authoring-store.ts",
     "./preferences": "./src/ui/preferences.ts",
     "./capabilities": "./src/capabilities.ts"
@@ -33,6 +34,7 @@
     "ai": "^7.0.173",
     "assistant-stream": "^0.3.26",
     "drizzle-orm": "^0.45.4",
+    "file-type": "^22.3.0",
     "ioredis": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "zod": "^4.6.7"

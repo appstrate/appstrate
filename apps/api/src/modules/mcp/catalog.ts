@@ -32,13 +32,13 @@ export interface CatalogOperation {
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
   requirement: RouteRequirement;
-  /** Raw OpenAPI operation node (for `describe_operation`). */
+  /** Raw OpenAPI operation node (for `describe`). */
   operation: OperationNode;
 }
 
 interface OperationCatalog {
   operations: Map<string, CatalogOperation>;
-  /** Component schemas, for resolving `$ref`s in `describe_operation`. */
+  /** Component schemas, for resolving `$ref`s in `describe`. */
   componentSchemas: Record<string, unknown>;
 }
 
@@ -77,7 +77,7 @@ function extractHeaderParams(node: OperationNode): string[] {
 /** The credential proxy's route: kept out of the catalog, dispatched to by `call_integration_tool` alone. */
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
-/** The integration tool routes: kept out of the catalog, dispatched to by the two integration tools alone. */
+/** The integration tool routes: kept out of the catalog, dispatched to by `call_integration_tool` and the `integration_tool` kind of `search` and `describe` alone. */
 export const INTEGRATION_TOOLS_PATH = "/api/credential-proxy/tools";
 export const REMOTE_TOOLS_CALL_PATH = "/api/credential-proxy/tools/call";
 
@@ -95,9 +95,10 @@ const RUN_TOOLS_MCP_PATHS: ReadonlySet<string> = new Set(["/internal/mcp", "/api
  * 9728 well-known (no recursive self-invocation), the run MCP server (a transport
  * for the process executing a run, not an operation), the served-skill
  * routes (the endpoint serves skills through the Skills extension, not as
- * operations), the spec document and its viewer, which `describe_operation`
+ * operations), the spec document and its viewer, which `describe`
  * already serves piecewise, and the credential proxy and its tool routes, which
- * the two integration tools alone reach (`integration-tools.ts`).
+ * `call_integration_tool` and the `integration_tool` kind of `search` and `describe`
+ * alone reach (`integration-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
@@ -226,7 +227,7 @@ function indexByTag(ops: CatalogOperation[], label: (id: string) => string = (id
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";
 
-/** Every component schema reachable from `root` via `$ref`, for describe_operation to inline. */
+/** Every component schema reachable from `root` via `$ref`, for describe to inline. */
 export function collectReferencedSchemas(
   root: unknown,
   componentSchemas: Record<string, unknown>,
