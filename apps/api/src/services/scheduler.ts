@@ -167,9 +167,9 @@ export async function scheduleActorRunSpaces(
     // frozen actor is the caller in personal spaces too (RBAC spec §3.6).
     const snapshots = await loadSpaceAccessForIds(spaceIds, orgId, actor.id);
     return new Set(
-      snapshots.flatMap(({ orgRole, space, member }) => {
+      snapshots.flatMap(({ orgRole, space, member, personalSpaceRole }) => {
         if (!orgRole) return [];
-        const role = resolveSpaceRole(orgRole, space, member, actor.id);
+        const role = resolveSpaceRole(orgRole, space, member, actor.id, personalSpaceRole);
         return spacePermissions(role).has("agents:run") ? [space.id] : [];
       }),
     );

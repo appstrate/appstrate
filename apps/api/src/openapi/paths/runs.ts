@@ -3,6 +3,7 @@
 import {
   agentNotActiveContent,
   connectionConflictContent,
+  inlineRunForbiddenContent,
   jsonRpcRequestBody,
   problemContent,
 } from "../responses.ts";
@@ -854,7 +855,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
         "413": {
@@ -999,7 +1005,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -1495,9 +1506,10 @@ const canonicalRunsPaths = {
           },
         },
         "403": {
-          $ref: "#/components/responses/Forbidden",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
           description:
-            'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
+            '`inline_run_not_allowed_in_space` when a `kind: "inline"` source is posted by a caller who cannot compose here (`agents:write`; `active_in_spaces` names the spaces where they can). Otherwise insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {

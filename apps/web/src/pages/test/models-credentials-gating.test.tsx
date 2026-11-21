@@ -60,7 +60,7 @@ function renderFor(permissions: string[], tab = ""): { html: string; credentialF
   // The personal tab waits on the org's settings before drawing its table.
   queryClient.setQueryData(
     ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-    { personal_model_credentials: true },
+    { personal_model_credentials: true, personal_space_role: "admin" },
   );
   const credentialFlags = observerEnabledFlags(queryClient.getQueryCache(), CREDENTIALS_PATH);
   const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({

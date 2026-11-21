@@ -6407,6 +6407,12 @@ export interface components {
             value: string;
             note?: string;
         };
+        /** @description `inline_run_not_allowed_in_space`: the caller's role in this space does not allow composing an inline run (it needs `agents:write` and `agents:run` here). `active_in_spaces` lists the caller's other spaces, within the credential's reach, where they hold both. */
+        InlineRunNotAllowedProblem: components["schemas"]["ProblemDetail"] & {
+            /** @enum {string} */
+            code?: "inline_run_not_allowed_in_space";
+            active_in_spaces: components["schemas"]["ActiveInSpaces"];
+        };
         /** @description Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The bound set is floor ∪ selection, floor first in its own order, then the selection's additions in theirs, deduplicated. Governed — an admin pin, else an enforced org default — the governing set is the floor, bound whole, and the selection is the launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override), else the member pin when additions are open, else nothing; no soft org default and no fallback contributes. Additions are open only under an admin pin that allows them with no enforced org default (`additional_connections_allowed`); open, the selection is drawn from the connections the actor can reach, closed, an override naming a connection outside the floor is `override_outranked`. Ungoverned there is no floor, and the first layer with a set is the selection: launch override → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick). More than 20 connections in all is `connection_set_too_large`; then a health and scope check on every bound connection. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. Per-connection provenance, read off the fields: under governance the floor is `admin_pinned_connection_ids` when an admin pin exists, else `org_default_connection_ids` (enforced); every other id of `resolved_connection_ids` is an addition — here the member pin's (`member_pinned_connection_ids`); a run's launch override, when it carries one, supplies them instead. Ungoverned, the whole set comes from `source`. */
         IntegrationAgentResolution: {
             /**
@@ -7028,6 +7034,11 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
+            /**
+             * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs what is active there, activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
+             * @enum {string}
+             */
+            personal_space_role: "admin" | "operator";
         };
         Organization: {
             id: string;
@@ -22441,7 +22452,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "api_version": "2026-03-21",
-                     *       "personal_model_credentials": true
+                     *       "personal_model_credentials": true,
+                     *       "personal_space_role": "admin"
                      *     }
                      */
                     "application/json": components["schemas"]["OrgSettings"];
@@ -22471,6 +22483,11 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
+                    /**
+                     * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs what is active there, activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
+                     * @enum {string}
+                     */
+                    personal_space_role?: "admin" | "operator";
                 };
             };
         };
@@ -25971,7 +25988,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             409: components["responses"]["RunAdmissionConflict"];
             /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
@@ -26079,7 +26105,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
@@ -26232,8 +26267,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when a `kind: "inline"` source is posted by a caller who cannot compose here (`agents:write`; `active_in_spaces` names the spaces where they can). Otherwise insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             /** @description `idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above). */
             409: {

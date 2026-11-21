@@ -102,8 +102,30 @@ describe("renderAgentPrompt", () => {
     expect(repair).toBeGreaterThan(-1);
     expect(repair).toBeLessThan(text.indexOf("Anything else: report it and stop."));
     expect(text.slice(repair)).toMatch(/^[^\n]*`active_in_spaces`; act only once the user agrees/);
-    // #2336: an owner or admin can offer the integration to the whole organization instead.
-    expect(text.slice(repair)).toContain("`offerPackageToOrg`");
+    // The remedies are the server instructions' to teach: one copy.
+    expect(text.slice(repair)).toContain(
+      "Repair it as the Appstrate server's instructions describe",
+    );
+    expect(text).not.toContain("offerPackageToOrg");
+  });
+
+  it("sends no `space_id` on a connection pinned to one space, whose tools refuse it", () => {
+    const pinned = renderAgentPrompt(view({ spaceId: undefined }));
+    expect(pinned).not.toContain("space_id");
+    expect(callOf(pinned)).not.toHaveProperty("space_id");
+    const withFile = view({
+      spaceId: undefined,
+      input: {
+        schema: {
+          type: "object",
+          properties: { doc: { type: "string", format: "uri", contentMediaType: "text/csv" } },
+        },
+        values: {},
+        locked_fields: [],
+      },
+    });
+    expect(renderAgentPrompt(withFile)).toContain("`createUpload`");
+    expect(renderAgentPrompt(withFile)).not.toContain("space_id");
   });
 
   it("includes the upload recipe only with an unlocked file field", () => {

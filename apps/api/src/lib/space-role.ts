@@ -11,7 +11,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import { organizations, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
 
@@ -32,7 +32,35 @@ export interface CustomSpaceRole {
 
 /** Two shapes, not one string: the DB stores presets under a CHECK and customs under an FK. */
 export type SpaceRoleRef =
-  { kind: "preset"; preset: SpaceRolePreset } | { kind: "custom"; role: CustomSpaceRole };
+  | { kind: "preset"; preset: SpaceRolePreset; plus?: readonly Permission[] }
+  | { kind: "custom"; role: CustomSpaceRole };
+
+/** The org's `personal_space_role` setting: what an org member may hold in their own personal space. */
+export type PersonalSpaceRole = "admin" | "operator";
+
+/**
+ * Granted on top of `operator` to a member under the `operator` cap, so nothing they already
+ * own in their personal space becomes impossible to stop or remove.
+ */
+export const PERSONAL_CAP_DELETE_PERMISSIONS: readonly Permission[] = [
+  "agents:delete",
+  "skills:delete",
+  "integrations:delete",
+  "schedules:delete",
+];
+
+/**
+ * The setting's key read from the SAME statement as the space (RBAC spec §4.4): joined on
+ * `organizations`, never cached. Selected as text so a stray stored value cannot be typed.
+ */
+export const PERSONAL_SPACE_ROLE_COLUMN = sql<
+  string | null
+>`${organizations.orgSettings}->>'personal_space_role'`;
+
+/** `operator` only when stored exactly so, else `admin`. */
+export function toPersonalSpaceRole(stored: string | null | undefined): PersonalSpaceRole {
+  return stored === "operator" ? "operator" : "admin";
+}
 
 export interface SpaceMemberRow {
   ref: SpaceRoleRef;
@@ -56,23 +84,26 @@ export function resolveSpaceRole(
   space: SpaceAccessRow,
   memberRow: SpaceMemberRow | null,
   callerId: string | null,
+  personalSpaceRole: PersonalSpaceRole,
 ): SpaceRoleRef | null {
   // FIRST LINE, before the org role: a personal space belongs to one member and
   // to nobody else (RBAC spec §3.6). An organization owner or admin gets
-  // `null` here, and every caller renders that as 404 — the space is `private`,
-  // so for them it does not exist. Converting it to a team space
-  // (`POST /api/spaces/{id}/convert-to-team`) is the one way in, and it is
+  // `null` here, and every caller renders that as 404 — converting it to a team
+  // space (`POST /api/spaces/{id}/convert-to-team`) is the one way in, and it is
   // audited.
   //
-  // The owner holds `admin` there — except a GUEST, who holds `operator`. A
-  // guest is an external identity with no implicit reach into any space (§3.2),
-  // invited to USE one thing; `admin` in their own space would let them author
-  // and launch arbitrary agents on the organization's LLM budget, which is the
-  // one thing their org role exists to withhold. `operator` is receive-and-run:
-  // exactly what a space shared TO them is for.
+  // The owner holds `admin` there, with two reductions. A GUEST holds `operator`:
+  // an external identity invited to USE one thing, not to author agents on the
+  // organization's LLM budget. A MEMBER under the org's `personal_space_role:
+  // operator` holds `operator` plus the delete permissions, so they can still
+  // stop and remove what they own. Owners and admins always keep `admin`.
   if (space.ownerUserId !== null) {
     if (space.ownerUserId !== callerId) return null;
-    return { kind: "preset", preset: orgRole === "guest" ? "operator" : "admin" };
+    if (orgRole === "guest") return { kind: "preset", preset: "operator" };
+    if (orgRole === "member" && personalSpaceRole === "operator") {
+      return { kind: "preset", preset: "operator", plus: PERSONAL_CAP_DELETE_PERMISSIONS };
+    }
+    return { kind: "preset", preset: "admin" };
   }
   // By org role, which is why an explicit row for them is refused at write.
   if (orgRole === "owner" || orgRole === "admin") return { kind: "preset", preset: "admin" };
@@ -98,7 +129,11 @@ export function resolveSpaceRole(
  */
 export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
-  if (ref.kind === "preset") return presetPermissions(ref.preset);
+  if (ref.kind === "preset") {
+    const granted = presetPermissions(ref.preset);
+    for (const permission of ref.plus ?? []) granted.add(permission);
+    return granted;
+  }
   return partitionSpacePermissions(ref.role.permissions).granted;
 }
 

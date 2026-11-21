@@ -30,7 +30,9 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
+import { reportPermissionDenial } from "@appstrate/core/permissions";
+import { inlineRunNotAllowedInSpace } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import {
   invalidRequest,
   notFound,
@@ -370,7 +372,10 @@ export function createRunsRemoteRouter() {
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
         // mirror of `canComposeInline` (@appstrate/core/permissions).
-        assertPermission(c, "agents", "write");
+        if (!c.get("permissions")?.has("agents:write")) {
+          reportPermissionDenial(c, "agents:write");
+          throw await inlineRunNotAllowedInSpace(c);
+        }
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);

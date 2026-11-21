@@ -10,11 +10,11 @@ import {
   isInlineShadowRunReadable,
 } from "../lib/package-access.ts";
 import { ACTIVE_IN_SPACES_HINT } from "@appstrate/core/mcp-spaces";
-import { canReadRuns } from "@appstrate/core/permissions";
+import { canReadRuns, reportPermissionDenial } from "@appstrate/core/permissions";
 import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
-import type { LaunchSpace } from "../lib/launch-spaces.ts";
+import { otherSpacesHolding, type LaunchSpace } from "../lib/launch-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -152,6 +152,39 @@ export function requireActiveAgent(alternatives: (c: Context<AppEnv>) => Promise
     }
     return next();
   }, ACTIVE_AGENT_GATE);
+}
+
+/**
+ * The inline-run doors compose an agent on the fly (`canComposeInline`: `agents:write` and
+ * `agents:run`). A caller who cannot here is told so, and which of their other spaces would let
+ * them (`active_in_spaces`), instead of a bare `forbidden`. Mounted in front of the per-grant
+ * `requirePermission` guards, which stay the enforcement; the alternatives are computed on refusal only.
+ */
+export function requireInlineCompose() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const held = c.get("permissions");
+    const missing = (["agents:write", "agents:run"] as const).find((p) => !held?.has(p));
+    if (missing) {
+      reportPermissionDenial(c, missing);
+      throw await inlineRunNotAllowedInSpace(c);
+    }
+    return next();
+  };
+}
+
+/** The refusal of an inline run by a caller who cannot compose in this space. */
+export async function inlineRunNotAllowedInSpace(c: Context<AppEnv>): Promise<ApiError> {
+  const spaceId = c.get("spaceId");
+  const activeInSpaces = await otherSpacesHolding(c, ["agents:write", "agents:run"]);
+  return new ApiError({
+    status: 403,
+    code: "inline_run_not_allowed_in_space",
+    title: "Inline Run Not Allowed",
+    detail:
+      `Your role in space '${spaceId}' does not allow composing an inline run` +
+      (activeInSpaces.length > 0 ? ACTIVE_IN_SPACES_HINT : "."),
+    extensions: { active_in_spaces: activeInSpaces },
+  });
 }
 
 /** An agent the caller can see but not run here: activate it here or, with consent, use `activeInSpaces`. */

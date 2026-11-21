@@ -206,6 +206,12 @@ export const ORG_SETTINGS_PROPERTIES = {
     description:
       "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
   },
+  personal_space_role: {
+    type: "string",
+    enum: ["admin", "operator"],
+    description:
+      "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs what is active there, activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.",
+  },
 };
 
 /**
@@ -613,6 +619,21 @@ export const schemas = {
       },
     ],
   },
+  InlineRunNotAllowedProblem: {
+    description:
+      "`inline_run_not_allowed_in_space`: the caller's role in this space does not allow composing an inline run (it needs `agents:write` and `agents:run` here). `active_in_spaces` lists the caller's other spaces, within the credential's reach, where they hold both.",
+    allOf: [
+      { $ref: "#/components/schemas/ProblemDetail" },
+      {
+        type: "object",
+        required: ["active_in_spaces"],
+        properties: {
+          code: { type: "string", enum: ["inline_run_not_allowed_in_space"] },
+          active_in_spaces: { $ref: "#/components/schemas/ActiveInSpaces" },
+        },
+      },
+    ],
+  },
   ConnectionResolutionWarning: {
     description:
       "A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`, and the `auth_key` to connect when the dep's own auth serves the selection), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`.",
@@ -895,7 +916,7 @@ export const schemas = {
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
-    required: ["personal_model_credentials"],
+    required: ["personal_model_credentials", "personal_space_role"],
     properties: ORG_SETTINGS_PROPERTIES,
   },
   ProfileBatchItem: {

@@ -121,7 +121,7 @@ function renderPage(
   queryClient.setQueryData(["get", "/api/models", ORG_SCOPE], { data: data.models });
   queryClient.setQueryData(
     ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-    { personal_model_credentials: true },
+    { personal_model_credentials: true, personal_space_role: "admin" },
   );
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),

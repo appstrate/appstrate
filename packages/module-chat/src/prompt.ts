@@ -4,14 +4,14 @@
  * The chat's system prompt: the persona (`buildSystemPrompt`) and the caller context block
  * (`buildCallerContextBlock`, rendered by `formatCallerContext`, with the skills it injects).
  *
- * Neither restates what the platform MCP server's `instructions` already send through the
- * engine's own handshake (space selection and refusals, integration preference, async runs,
- * heavy lists): a second copy only drifts. Only chat-specific guidance lives here.
+ * Neither restates what the platform MCP server's `instructions` and tool descriptions already
+ * send through the engine's own handshake (the space choice order and its refusals, integration
+ * preference, async runs, launch warnings, the inline manifest, connection overrides): a second
+ * copy only drifts. The context block states facts only, never a rule. Only chat-specific
+ * guidance lives here.
  */
 
 import type { Context } from "hono";
-import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
-import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
@@ -22,11 +22,7 @@ import {
 import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
 import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
-import {
-  CONNECTION_RESOLUTION_WARNING_CODES,
-  platformToolName,
-  type ConnectionResolutionWarningCode,
-} from "@appstrate/core/integration";
+import { platformToolName } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import {
@@ -38,9 +34,6 @@ import {
 } from "./skills.ts";
 
 type InjectedSkillMap = InjectedSkills["skills"];
-
-/** A launch warning code as the persona names it. */
-const warningCode = (code: ConnectionResolutionWarningCode) => `\`${code}\``;
 
 /** The name a run's agent sees for the platform `log` tool. */
 const PLATFORM_LOG_TOOL = platformToolName("log");
@@ -124,7 +117,6 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const invoke = (yes: string, no = "") => (invokes ? yes : no);
   const skills = (yes: string, no = "") => (readsSkills ? yes : no);
   const tools = (yes: string, no = "") => (callsIntegrationTools ? yes : no);
-  const connections = (yes: string, no = "") => (readsConnections ? yes : no);
   // What `get_me` returns this turn, by the grant each half of its payload reads.
   const getMeReturns = [
     ...(readsConnections ? ["the integrations they have connected (`connections`)"] : []),
@@ -149,11 +141,7 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
     `You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}`,
   )}
 
-Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
-    'search for the right operation with `search` (pass `kinds: ["operation"]`), read its schema with `describe`, then invoke it with `invoke_operation`',
-    'search for the right operation with `search` (pass `kinds: ["operation"]`) and read its schema with `describe`: you can look things up, you cannot act — answer the user from what you read, and never claim to have carried an operation out',
-  )}.${runs(` When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics.`)} Never invent an operationId or argument shape.
-
+${invoke("", "You can look things up, you cannot act: answer the user from what you read, and never claim to have carried an operation out.\n")}
 Choosing what to do:
 ${invoke(
   `- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`; the permissions listed in your context decide what you may call, so never name an act they do not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}\n${
@@ -163,26 +151,26 @@ ${invoke(
   }`,
 )}- Use files already supplied to your model directly. If you have only an \`appfile://\` URI for a file the user asks about, call \`read\` first. When it returns readable text or a file was sent to your model, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns only metadata or a format the model cannot read), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
 ${tools(
-  "- If the request needs a connected integration's data or action, call it directly: find the tool with `search`, its `integration_tool` kind, in the space concerned, call it with `call_integration_tool`, and answer from its result. It lists only integrations connected in that space (one to reconnect comes back with a connect card): when the one needed is absent, offer to connect it with `initiateIntegrationConnect`, which shows the user a connect card. Never activate a package the user did not ask for: when connecting needs it activated in the space, ask first. For a temporary file read, pass `read_as_file: true` with one GET in the integration API tool's arguments. A successful read applies to this turn only. Answer from what your model received.\n" +
+  "- If the request needs a connected integration's data or action, call it directly: find the tool with `search`, its `integration_tool` kind, in the space concerned, call it with `call_integration_tool`, and answer from its result. The one needed may be absent (one to reconnect comes back with a connect card): offer to connect it with `initiateIntegrationConnect`, which shows the user a connect card. For a temporary file read, pass `read_as_file: true` with one GET in the integration API tool's arguments. A successful read applies to this turn only. Answer from what your model received.\n" +
     inline(
       "To keep a copy, launch an inline run that fetches the source with that integration and writes it to outputs/. For an exact copy, give the run a revision-specific source or require the same strong ETag using If-Match. If the source lacks a version guarantee, changed, or no longer allows access, ask before saving another version. Use a run for Office formats and other files requiring conversion.\n",
     ),
 )}${runs(
-    `- If the request needs external information or context and names no source, use an available integration rather than answering from memory${connections(" — connected ones first (`get_me` lists them, per space)")}.
+    `- If the request needs external information or context and names no source, use an available integration rather than answering from memory.
 ${tools(
   "- Run an agent instead when the task needs a runtime — a shell, a filesystem, code execution, files written to `outputs/`, long multi-step processing, a fan-out — or the integration tools cannot do it:",
   "- If the request needs an integration, an MCP, or any external action, run an agent:",
 )}
-  1. Prefer an existing agent the user can run when one matches the intent — \`get_me\`, for the space concerned (naming its \`space_id\`), lists the agents of that space they can run, each with \`published\`, \`home_writable\` and \`takes_input\`; when its \`agents_truncated\` is true, look the rest up with \`invoke_operation\` — and call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent declares an input schema (it is validated against it); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent with no published version (\`published: false\`) runs only as \`version:"draft"\`, and only for a user who authors it (\`home_writable: true\`): for anyone else it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
+  1. Run an existing agent when one matches the intent: \`get_me\` for the space concerned lists the agents the user can run, each with \`published\`, \`home_writable\` and \`takes_input\`. Call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` and \`name\`, and an \`input\` only when the agent declares an input schema. An agent with \`published: false\` and \`home_writable: false\` cannot be run: say so${inline(" and offer to compose an inline run instead", " and stop — there is no other way to run it")}.
 ${inline(
-  `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a \`manifest\` plus a top-level \`prompt\`. ${INLINE_MANIFEST_RULE} Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"); the platform derives the matching \`@inline/<kebab-case-slug>\` name. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version, looked up for the space concerned${connections(": `get_me` gives both, as `integration_package_id` and `version`, for each integration the user has connected there")}), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (read with \`getIntegration\`) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. To know which tools an integration offers, read it with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` on every integration the request relies on, to refuse the launch (a 409) instead; never launch without the integration the user asked for.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
+  `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`, a \`manifest\` and a top-level \`prompt\`. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
 
 When a request chains several external actions (e.g. scrape a page THEN email the result), do NOT chain one run per action: compose ONE sub-agent that declares ALL the needed integrations under \`dependencies.integrations\` and describes the whole chain in its \`prompt\` — a single \`run_and_wait\` call. Split into separate runs only when you must decide something between the steps (the user has to confirm, or the next step depends on a result you need to inspect first).
 
 When you do fan out several sub-agents (genuinely independent pieces of work), three rules hold:
 - Deliverable in a file, summary in \`output\`: tell each sub-agent to WRITE its full findings to \`outputs/<topic>.md\` (or \`.json\`) AND to return through \`output\` only a short summary naming that file. Both, always — a payload returned only through \`output\` is not a file you can chain, and a sub-agent that writes the file but never calls \`output\` fails its run.
-- Fan in by REFERENCE, never by copy: give the next run the earlier runs' \`appfile://\` URIs (from each \`run_and_wait\` result's \`files\`) in its \`context_files\` argument — the platform mounts them read-only under \`files/\` and tells the run they are there. NEVER paste a previous run's content into the next run's \`prompt\`: data retyped by a model is data corrupted — every URL, figure and date you re-transcribe is one you can get wrong, and the file itself cannot be.
-- Bound the effort: every sub-agent \`prompt\` must carry an explicit ceiling (e.g. "at most 3 searches"), a stop criterion ("stop at 5 findings"), and \`output\` as the mandatory last action. This is measured, not decorative: the same deliverable took 43 s and $0.14 with those three lines, against 275 s and $0.92 from a prompt that only asked for "5 to 8 items, verified by sources".
+- Fan in by reference, never by copy: give the next run the earlier runs' \`appfile://\` URIs (each \`run_and_wait\` result's \`files\`) in \`context_files\`; a result retyped into a \`prompt\` is a result you can get wrong.
+- Bound the effort: every sub-agent \`prompt\` must carry an explicit ceiling (e.g. "at most 3 searches"), a stop criterion ("stop at 5 findings"), and \`output\` as the mandatory last action.
 
 Once a fan-out's results are all back, write the synthesis into your message BEFORE launching the next step. A finished result that exists only inside a tool result is lost if the turn ends there — deliver it first, then continue.
 
@@ -210,31 +198,34 @@ Then read \`result.summary\` from the \`run_and_wait\` result and reply to the u
     ) +
     "\n",
 )}
-You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`${inline('; for inline runs pass `{ kind:"inline", manifest, prompt, input?, context_files? }` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch')}. ${inline("Either kind also takes", "It also takes")} \`connection_overrides\` — a top-level \`{ "<integration id>": ["<connection id>", …] }\` map (always an array, even for one id), used to bind the connection the user names (resolve its id from \`get_me\`'s \`connections\` before launching) and to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\`, \`owned_by_actor\` and \`needs_reconnection\` — pick from those, don't go list connections; never pick one with \`needs_reconnection: true\`, the run fails on it — ask the user to reconnect it instead; and a candidate with \`owned_by_actor: false\` is a colleague's shared account, so use it only when the user named it, otherwise ask), and to bind several connections of one integration when the task needs them all; \`[]\` runs without that integration (refused for one the agent marks \`required\`, unless an admin imposes connections on it: \`[]\` then adds nothing); connections an admin imposes on an integration stay bound whatever you pass, so there the map only adds to them, and an addition the admin closed answers \`override_outranked\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
+Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
-After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: offer the activation described below for that code, and do not re-run unless the user asks.
+After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. A \`warnings\` item names an integration the run started without: say so in one sentence and never present the result as covering that source.
 
 `,
     "\n",
   )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error or warning on \`integrations.<id>\` means the integration is not activated, whether or not it is connected, in the space the failed call acted in — the space its \`space_id\` named, as every call names one — so do NOT restart the connect flow (connecting is personal, activating is per space). Offer to activate it there, which someone allowed to manage that space may do; once the user agrees, call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`) with the path parameter \`id\` and the \`space_id\` both that space's id, and the body \`{ "packageId": "<that integration id>" }\`; after a failed call, then re-run once. Or propose re-running in a space of the refusal's \`active_in_spaces\`, only with the user's agreement. If that call is refused, report the refusal with its error and stop. An agent's activation, or a share that lands it ON, lists in \`warnings[]\` its declared integrations not active in that space: not an error, but a \`required: true\` one will refuse its launch there, so offer to activate it, with the user's agreement.`)}
+`)}When a tool call fails with a recoverable error, correct the input and retry, up to a few attempts. Surface the failure, with its exact error, only once reasonable fixes are exhausted.
 
-Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
+Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(" Follow the direct-reading rule above before considering a run; when a run is justified, hand the URI over as `run_and_wait` describes.")} Never invent an \`appfile://\` URI.
 
-${runs(`Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
+${runs(`Files a run writes under \`outputs/\` render as downloadable chips in this chat. Content returned only through the \`output\` tool is plain data for YOU: it never becomes a file the user can open.${inline(` When the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), have the sub-agent write it to \`outputs/\` AND return a short \`output\` payload for your own summary. Name it in kebab-case, in the user's language, with enough subject or scope to stand alone (for example, \`analyse-concurrents-restaurants-lyon.md\`). Without a named format, default to markdown; reach for another format only when the user asks.`)}
 
-`)}Your context block below is DATA — the user's identity and role, the current date, the space a request naming none acts in${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run${
+`)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run${
     getMeReturns.length === 0
       ? ""
-      : `: both differ per space, so call \`get_me\` for ${new Intl.ListFormat("en").format(getMeReturns)} in the space concerned, naming its \`space_id\``
+      : `: both differ per space, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names`
   }. How to act on it:
 - Use the current date to resolve relative dates.
-${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
+${idVerbatimBullet}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
 `)}${skills(
-    author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
+    author(
+      `- Skills are not run on their own. When you build or compose an agent and one of the listed skills fits the task, declare it under \`dependencies.skills\` keyed by its id, with the version shown (or \`"*"\` if none).
+`,
+      inline(`- When you compose an inline agent and one of the listed skills fits the task, declare it under the manifest's \`dependencies.skills\` keyed by its id, with the version shown (or \`"*"\` if none).
 `),
+    ),
   )}${reads(`- The context carries NO run history. When the user asks about a recent or failed run${runs(", or wants to re-run something")}, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
 `)}
 The context lists the permissions this turn holds, in the same \`resource:action\` vocabulary as an operation's \`required_permissions\`. An operation that needs one outside that list is refused by the platform: say which permission is missing${invoke(" instead of attempting it")}, and never claim an ability the list does not carry.`;
@@ -331,11 +322,9 @@ type CallerContextOpts = {
   now?: Date;
   capabilities: TurnCapabilities;
   rolePreview: boolean;
-  /** The spaces the turn can act in (the origin alone when limited): the default is picked among them. */
-  spaces: readonly ReachableSpaceGrant[];
-  /** The conversation's origin space, when it can act there: the default of a request naming none. */
+  /** The space the conversation was opened in, when the turn can act there. */
   origin?: { id: string; name: string };
-  /** Limited to the origin space: the turn's spaces are that space alone. */
+  /** Limited to the origin space, which is then the only space the turn reaches. */
   restricted: boolean;
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
@@ -345,13 +334,6 @@ type CallerContextOpts = {
   /** The `auto` catalogue, listed by {@link buildCallerContextBlock}. */
   skillCatalogue?: readonly CatalogueSkill[];
 };
-
-/**
- * What the personal fallback space does not cover: the server instructions send what a personal
- * space refuses to a team space the user picks, and the fallback must not contradict them.
- */
-const PERSONAL_FALLBACK_CARVE_OUT =
-  " — except what a personal space refuses (an API key, an end-user, a space-level OIDC client), for which you offer team spaces first";
 
 /** Render the caller context into a system-prompt block, with the skills it injected. */
 export function formatCallerContext(
@@ -379,23 +361,16 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // The default of a request naming no space, never a pin: the origin space, else the caller's
-  // personal space, else the organization's default space, when the turn acts there (with
-  // none, the model asks); a limited conversation's origin alone. The spaces themselves, and
-  // that every space-acting tool takes a `space_id`, are the tools' schemas and the server's
-  // instructions (`NO_FALLBACK_HINT` included), not repeated here.
-  const fallback = opts.origin
-    ? undefined
-    : (opts.spaces.find((space) => space.personal) ?? opts.spaces.find((space) => space.isDefault));
-  lines.push(
-    opts.restricted && opts.origin
-      ? `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`): pass \`${opts.origin.id}\` as the \`space_id\` of every call; no other space can be reached. The user lifts the limit in the composer.`
-      : opts.origin
-        ? `This conversation's space is ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`.`
-        : fallback
-          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`${fallback.personal ? PERSONAL_FALLBACK_CARVE_OUT : ""}; when you create something there, name that space in your reply.`
-          : "Ask the user which space when the request does not say; never guess it.",
-  );
+  // Facts only: the choice of a space for a call is the server instructions' rule.
+  if (opts.origin) {
+    lines.push(
+      `This conversation was opened in ${opts.origin.name} (\`${opts.origin.id}\`)${
+        opts.restricted
+          ? " and is limited to it: no other space can be reached. The user lifts the limit in the composer."
+          : "."
+      }`,
+    );
+  }
   // The set is the union over the turn's spaces: it bounds what the turn may attempt, while
   // each call is decided by the role held in the space it names. Permissions are in the
   // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
@@ -614,9 +589,8 @@ function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served
 }
 
 /**
- * Build the caller-context system-prompt block: the identity, the spaces the turn can
- * act in (the acting set, the origin space alone when the conversation is limited) with the
- * origin space as the default, when there is one, and the turn's permissions. Built from the
+ * Build the caller-context system-prompt block: the identity, the space the conversation was
+ * opened in (and whether it is limited to it), when there is one, and the turn's permissions. Built from the
  * already-authenticated request context, with no read of the platform: the integrations and
  * the agents differ per space, so the model looks them up with its tools. The skills are
  * those of the turn's spaces, one per package (the first in reach order), each bound in the
@@ -670,7 +644,6 @@ export async function buildCallerContextBlock(
     capabilities,
     rolePreview: persona !== undefined,
     permissions: args.permissions,
-    spaces: args.spaces,
     origin: args.origin,
     restricted: args.restricted,
     skills,

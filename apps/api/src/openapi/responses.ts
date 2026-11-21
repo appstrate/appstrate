@@ -34,6 +34,18 @@ export const agentNotActiveContent = {
   },
 } as const;
 
+/** The `content` of a 403 that may be `inline_run_not_allowed_in_space`: `anyOf`, as above. */
+export const inlineRunForbiddenContent = {
+  "application/problem+json": {
+    schema: {
+      anyOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        { $ref: "#/components/schemas/InlineRunNotAllowedProblem" },
+      ],
+    },
+  },
+} as const;
+
 /** The `content` of a JSON-RPC 2.0 error with `id: null`. */
 export const jsonRpcErrorContent = {
   "application/json": {

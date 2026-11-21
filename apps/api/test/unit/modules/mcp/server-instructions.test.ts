@@ -22,7 +22,7 @@ import {
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { RUN_AND_WAIT_LONG_POLL_RESUME } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { instructionsFor } from "./helpers.ts";
+import { instructionsFor, orgSpace, orgWideInstructionsFor } from "./helpers.ts";
 
 // The appended operation index is filtered per operation against the mounted
 // guards, so building the instructions reads the route table.
@@ -172,21 +172,20 @@ describe("MCP server instructions — connect bullet", () => {
   it("tells the model to resolve a named connection from get_me before launching", () => {
     const text = instructionsFor(permissions);
     expect(text).toContain("When the request names a connection");
-    expect(text).toContain("each integration lists its `connections`");
+    expect(text).toContain("each integration entry lists its `connections`");
     expect(text).toContain("BEFORE launching");
     expect(text).toContain("never launch without the integration the user asked for");
   });
 
-  it("tells the model an `active: false` entry is a connection whose integration is off in that space", () => {
+  it("puts `active` on the integration entry, a configuration refusal to repair", () => {
     const text = instructionsFor(permissions);
-    expect(text).toContain("an entry with `active: false` is a connection the user holds");
-    expect(text).toContain("from chat, direct them to the package in the organization catalog");
     expect(text).toContain(
-      "`offerPackageToOrg` for an owner or admin with an unconfined credential",
+      "`active: false` on the entry means the integration is off in that space",
     );
-    expect(text).toContain(
-      "never move it to another space where the integration is active without asking first",
-    );
+    expect(text).not.toContain("is a connection the user holds");
+    // The remedy and the space choice are the Org & space context's, not the connect bullet's.
+    expect(text).not.toContain("never move it to another space");
+    expect(text).not.toContain("direct them to the package in the organization catalog");
   });
 
   it("says a schedule write wants the user's one connection named too", () => {
@@ -401,6 +400,141 @@ describe("buildServerInstructions grounding", () => {
   it("points every client at get_me, the chat included: the tool is declared for all", () => {
     for (const rendersCards of [false, true]) {
       expect(instructionsFor(permissions, rendersCards)).toContain("Start by calling get_me");
+    }
+  });
+});
+
+// ── The space hierarchy, written once (#2343) ──────────────────────────────
+//
+// Only the tokens a model branches on are pinned: the order, the personal space for an inline run
+// and a new package, the three cases a space cannot serve and their remedies, and never switching
+// silently. The chat layer states none of it (`prompt-invariants.test.ts`).
+
+describe("MCP server instructions — org-wide space choice", () => {
+  const AUTHOR = ["mcp:read", "mcp:invoke", "runs:read", "agents:run", "agents:write"];
+  const OPERATOR = ["mcp:read", "mcp:invoke", "runs:read", "agents:run"];
+  const mine = orgSpace("spc_mine", "Mine", "admin", true, AUTHOR);
+  const team = orgSpace("spc_team", "Team", "builder", false, AUTHOR);
+  const spaceContext = (text: string) =>
+    text.slice(text.indexOf("## Org & space context"), text.indexOf("## Beyond the per-operation"));
+
+  it("orders the choice: one listed, the request, personal, the context, a credential's own", () => {
+    const text = spaceContext(orgWideInstructionsFor([mine, team]));
+    const at = (fragment: string) => {
+      const index = text.indexOf(fragment);
+      expect(index).toBeGreaterThan(-1);
+      return index;
+    };
+    const order = [
+      "1. Only one space is listed",
+      "2. The user's request names a space",
+      "3. For an inline run",
+      "4. For any other act: the space your context designates",
+      "5. A credential with no personal space",
+    ].map(at);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(text).toContain("the space the conversation was opened in");
+    expect(text).toContain("`space_id`");
+  });
+
+  it("sends an inline run and a new package to the personal space where the role allows it", () => {
+    const text = spaceContext(orgWideInstructionsFor([mine, team]));
+    expect(text).toContain('an inline run (`run_and_wait` with `kind: "inline"`)');
+    expect(text).toContain("a new package (agent, skill, integration)");
+    expect(text).toContain("your personal space (the one marked `your personal space`)");
+    expect(text).toContain("where your role allows it; your reply names it");
+  });
+
+  it("never sends a new package or an inline run to a personal space its role caps to operator", () => {
+    const capped = orgSpace("spc_mine", "Mine", "operator", true, OPERATOR);
+    const text = spaceContext(orgWideInstructionsFor([capped, team]));
+    // The personal-space destination is not offered for either act...
+    expect(text).not.toContain("your personal space (the one marked");
+    // ...which are named as refused there, with the sanctioned path.
+    expect(text).toContain("does not allow an inline run");
+    expect(text).toContain("a new package");
+    expect(text).toContain("never send it there");
+    expect(text).toContain("propose a space where your role does (case c)");
+    // A role that composes but cannot author keeps the destination for the act it allows.
+    const composer = orgSpace("spc_mine", "Mine", "builder", true, [...OPERATOR, "agents:write"]);
+    expect(spaceContext(orgWideInstructionsFor([composer, team]))).toContain(
+      "your personal space (the one marked",
+    );
+  });
+
+  it("has no personal-space step for a caller with no personal space", () => {
+    const text = spaceContext(orgWideInstructionsFor([team]));
+    expect(text).toContain("You have no personal space");
+    expect(text).not.toContain("your personal space (the one marked");
+  });
+
+  it("names the three cases a space cannot serve, each with its remedy", () => {
+    const text = spaceContext(orgWideInstructionsFor([mine, team]));
+    expect(text).toContain("never switch to another space silently");
+    // (a) off there: activate, or offer to the organization; a space's own row still wins.
+    expect(text).toContain("(a) The integration is off there");
+    expect(text).toContain("`activatePackage`");
+    expect(text).toContain("`offerPackageToOrg`");
+    expect(text).toContain("from chat, the organization catalog");
+    expect(text).toContain("a space's own switched-off row still wins");
+    expect(text).toContain("no connection becomes reachable by it");
+    // (b) the connection is not reachable there: connect one's own, or a team space.
+    expect(text).toContain("(b) The connection needed is missing or not reachable there");
+    expect(text).toContain("never reaches a personal space");
+    expect(text).toContain("connect one's own, or run in a named team space");
+    expect(text).toContain("Never suggest sharing a member's account");
+    // (c) the role does not allow it: a named space of the refusal, with the user's choice.
+    expect(text).toContain("(c) Your role there does not allow the act");
+    expect(text).toContain("`not_granted`");
+    expect(text).toContain("`inline_run_not_allowed_in_space`");
+    expect(text).toContain("`granted_in`");
+    expect(text).toContain("act there only once the user chooses it");
+    // An existing agent: a space where it is active.
+    expect(text).toContain("use a space where it is active");
+    expect(text).toContain("`active_in_spaces`");
+  });
+
+  it("states the permission refusal once, as proposing a space, not as final", () => {
+    const text = spaceContext(orgWideInstructionsFor([mine, team]));
+    expect(text).not.toContain("is final for that task");
+    expect(text.match(/Do not retry in another space on your own/g)).toHaveLength(1);
+  });
+
+  it("tells the model to pass `space_id` to `search` whenever the space is known", () => {
+    const text = spaceContext(orgWideInstructionsFor([mine, team]));
+    expect(text).toContain("`search` may omit `space_id`; pass it whenever the space is known");
+    expect(text).toContain("it searches every space you reach");
+    expect(text).toContain("`searched_spaces`");
+    expect(text).toContain("`granted_in`");
+  });
+
+  it("keeps the personal-space carve-out for keys, end-users and OIDC clients", () => {
+    const text = spaceContext(orgWideInstructionsFor([mine, team]));
+    for (const code of [
+      "personal_space_takes_no_keys",
+      "personal_space_takes_no_end_users",
+      "personal_space_takes_no_oauth_clients",
+    ]) {
+      expect(text).toContain(code);
+    }
+  });
+
+  it("gives a pinned connection no choice order, with the permission/configuration split in one sentence", () => {
+    const text = spaceContext(instructionsFor(permissions));
+    expect(text).toContain("the one space this connection is pinned to");
+    expect(text).toContain("A refusal for your role (`403`, `not_granted`) is final");
+    expect(text).toContain("A configuration refusal");
+    expect(text).not.toContain("Choose the space in this order");
+    expect(text).not.toContain("never move it");
+    expect(text).not.toContain("from chat");
+    expect(text).not.toContain("offerPackageToOrg");
+  });
+
+  it("states no space rule outside the Org & space context", () => {
+    const text = orgWideInstructionsFor([mine, team], true);
+    const outside = text.replace(spaceContext(text), "");
+    for (const restated of ["your personal space", "the space your context designates"]) {
+      expect(outside).not.toContain(restated);
     }
   });
 });

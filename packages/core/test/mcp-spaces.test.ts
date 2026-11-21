@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { describeSpace, spaceIdRefusal } from "../src/mcp-spaces.ts";
+import {
+  ACTIVE_IN_SPACES_HINT,
+  describeSpace,
+  projectActiveInSpaces,
+  spaceIdRefusal,
+} from "../src/mcp-spaces.ts";
 
 describe("describeSpace", () => {
   it("names the space, its id and the caller's role there", () => {
@@ -51,5 +56,33 @@ describe("spaceIdRefusal", () => {
 
   it("accepts a reachable space", () => {
     expect(spaceIdRefusal(spaces, "spc_b")).toBeUndefined();
+  });
+});
+
+describe("projectActiveInSpaces", () => {
+  const problem = (code: string) => ({
+    code,
+    detail: `Refused${ACTIVE_IN_SPACES_HINT}`,
+    active_in_spaces: [
+      { id: "spc_a", name: "Alpha" },
+      { id: "spc_b", name: "Beta" },
+    ],
+  });
+
+  it("trims and records the list of inline_run_not_allowed_in_space like the other codes", () => {
+    const kept = projectActiveInSpaces(problem("inline_run_not_allowed_in_space"), () => [
+      { id: "spc_b" },
+    ]);
+    expect(kept?.ids).toEqual(["spc_b"]);
+    expect(kept?.body.active_in_spaces).toEqual([{ id: "spc_b", name: "Beta" }]);
+  });
+
+  it("drops the hint from the detail when no listed space is eligible", () => {
+    const none = projectActiveInSpaces(problem("inline_run_not_allowed_in_space"), () => []);
+    expect(none?.body.detail).toBe("Refused.");
+  });
+
+  it("ignores a code it does not know", () => {
+    expect(projectActiveInSpaces(problem("forbidden"), () => [])).toBeUndefined();
   });
 });

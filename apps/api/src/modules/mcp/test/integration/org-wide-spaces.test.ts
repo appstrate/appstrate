@@ -89,14 +89,10 @@ describe("mcp org-wide connection", () => {
     });
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
-    // Only a permission refusal is final; a configuration one is repaired or, agreed, moved.
-    expect(instructions).toContain("A permission refusal (`403`, `not_granted`) is final");
-    expect(instructions).toMatch(
-      /A configuration refusal \(`agent_not_active_in_space`, `integration_not_active`/,
-    );
-    expect(instructions).toContain(
-      "`active_in_spaces`; act in another space only once the user agrees",
-    );
+    // A space that cannot serve is never swapped silently: the cases and their remedies.
+    expect(instructions).toContain("never switch to another space silently");
+    expect(instructions).toContain("(c) Your role there does not allow the act");
+    expect(instructions).toContain("use a space where it is active");
     expect(instructions).toContain("a `required: true` one will refuse its launch there");
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
     expect(instructions).toContain(`createAgent [${gestion.id}]`);
@@ -145,14 +141,14 @@ describe("mcp org-wide connection", () => {
       },
     });
     const instructions = envelope.result?.instructions as string;
-    expect(instructions).toContain("goes to your personal space");
+    expect(instructions).toContain("your personal space (the one marked `your personal space`)");
     expect(instructions).toContain("personal_space_takes_no_keys");
     // A team space already chosen (named, or designated by the context) is used; team spaces
-    // are offered only without a destination or when it is a personal space.
+    // are offered only when there is none.
     expect(instructions).toContain(
-      "the destination already chosen wins: the team space the request names, else the one your context designates",
+      "the team space the request names, else the one your context designates",
     );
-    expect(instructions).toContain("Only when there is none, or it is a personal space, offer");
+    expect(instructions).toContain("with none, offer the team spaces");
     expect(instructions).toContain("space-level OIDC client");
     expect(instructions).not.toContain(`Perso (\`${perso.id}\``);
   });
@@ -524,4 +520,4 @@ describe("mcp org-wide connection", () => {
   });
 });
 
-const NO_FALLBACK_FRAGMENT = "Do not retry this action in another space";
+const NO_FALLBACK_FRAGMENT = "Do not retry in another space on your own";

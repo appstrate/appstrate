@@ -142,10 +142,11 @@ export function spaceRef(space: McpSpace): { id: string; name: string } {
   return { id: space.id, name: space.name };
 }
 
-/** The rule a refusal carries in org-wide mode. */
+/** The rule a refusal for the caller's role carries in org-wide mode. */
 export const NO_FALLBACK_HINT =
-  "Do not retry this action in another space to get around the refusal; report it to the " +
-  "user, who decides which space the action belongs in.";
+  "Do not retry in another space on your own to get around the refusal: name a space of " +
+  "`granted_in` or `active_in_spaces`, when there is one, and act there only once the user " +
+  "chooses it.";
 
 export function spaceMismatchRefusal(acts: string, argument: string, space?: McpSpace): Refusal {
   return {

@@ -2,8 +2,7 @@
 
 /**
  * The chat injects a "## Your context" block into the system prompt so the agent knows who it
- * is acting for, their role, the spaces the conversation can act in (its origin space being the
- * default of a request naming none) and the skills it follows. `formatCallerContext` renders that block from the
+ * is acting for, their role, the space the conversation was opened in and the skills it follows. `formatCallerContext` renders that block from the
  * caller's identity; `buildCallerContextBlock` reads the skills over a platform connection.
  */
 
@@ -30,10 +29,9 @@ const contextText = (...args: Parameters<typeof identityContext>) => identityCon
 /** `formatCallerContext` over an identity given loosely: what is not named is not known. */
 function identityContext(
   raw: Parameters<typeof callerIdentity>[0],
-  opts: Omit<Parameters<typeof formatCallerContext>[1], "spaces"> &
-    Partial<Pick<Parameters<typeof formatCallerContext>[1], "spaces">>,
+  opts: Parameters<typeof formatCallerContext>[1],
 ) {
-  return formatCallerContext(callerIdentity(raw), { spaces: [], ...opts });
+  return formatCallerContext(callerIdentity(raw), opts);
 }
 const blockText = async (...args: Parameters<typeof buildCallerContextBlock>) =>
   (await buildCallerContextBlock(...args)).text;
@@ -82,7 +80,6 @@ const REACH = [
 const BASE_OPTS = {
   capabilities: caps(BUILDER),
   rolePreview: false,
-  spaces: REACH,
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
