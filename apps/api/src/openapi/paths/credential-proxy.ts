@@ -551,7 +551,7 @@ const notReadyIntegrationSchema = {
         "What a call naming no connection gets for this caller, as the integration detail's " +
         "`proxy_connection` states it, judged against the latest published version: one of " +
         "`none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable` " +
-        "(`proxy_closed` never: a closed space refuses the listing itself).",
+        "(`proxy_closed` never: a closed space refuses the listing itself; nor `not_published`: only integrations with a published version are listed).",
       properties: proxyConnectionVerdictProperties,
     },
     refusal: {

@@ -799,6 +799,7 @@
   "integration.defaultConnection.direct.unusable": "La connexion sélectionnée ne peut pas servir cet appel sans agent.",
   "integration.defaultConnection.direct.proxy_closed": "Cet espace autorise les appels à cette intégration uniquement depuis un agent.",
   "integration.defaultConnection.direct.not_required": "Cette intégration fonctionne sans compte.",
+  "integration.defaultConnection.direct.not_published": "À publier : un appel sans agent demande une version publiée de l’intégration.",
   "integration.defaultConnection.direct.inactive": "Les appels sont indisponibles tant que cette intégration est désactivée dans cet espace.",
   "integrations.activate.hint": "Activez cette intégration depuis l’en-tête de la page pour configurer ses connexions et ses accès.",
   "integration.notInSpace.hint": "Elle n'y est ni hébergée ni partagée, ou elle n'existe plus. Changez d'espace, ou demandez à un administrateur de la partager ici.",

@@ -209,6 +209,8 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
     active: detail.active,
     published,
     connection: detail.proxy_connection.status,
+    connected:
+      detail.auths.length === 0 || detail.auths.some((auth) => auth.connections.length > 0),
     // The detail reads the published version, else the draft.
     toolsDeclared: declaredToolNames(manifest).length > 0,
   });

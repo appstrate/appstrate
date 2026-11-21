@@ -75,6 +75,14 @@ async function seedConnectionFor(opts: {
     orgId: opts.orgId,
     type: "integration",
     source: "local",
+    // The connection's auth must be declared, or the context drops the connection.
+    draftManifest: {
+      name: opts.integrationId,
+      version: "0.1.0",
+      type: "integration",
+      description: "Test agent",
+      auths: { google: {} },
+    },
   }).catch(() => undefined); // already seeded by an earlier connection of the integration
   const [row] = await db
     .insert(integrationConnections)

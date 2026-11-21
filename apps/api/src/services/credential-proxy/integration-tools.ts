@@ -119,7 +119,8 @@ interface IntegrationToolQuery {
 /**
  * The `proxy_connection` statuses of an integration without a usable connection: a call naming
  * none is refused, and no connection a call could name instead clears it. `proxy_closed` is none
- * of a listing's: `reachOutsideRun` refuses a closed space before it.
+ * of a listing's: `reachOutsideRun` refuses a closed space before it. Nor is `not_published`:
+ * the listing judges the published manifests alone.
  */
 const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
   "none",

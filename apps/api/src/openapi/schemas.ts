@@ -3235,7 +3235,7 @@ export const schemas = {
         active_by_default: {
           type: "boolean",
           description:
-            "Active in every space by the deployment's default alone (a system package, or a system integration the deployment switches on): an offer would change nothing, so `PUT …/org-offer` refuses to create one (400) while an existing offer can still be withdrawn.",
+            "Active in every space by the deployment's default alone (a system-source package the deployment switches on; an organization-published integration named in `SYSTEM_INTEGRATIONS` is not): an offer would change nothing, so `PUT …/org-offer` refuses to create one (400) while an existing offer can still be withdrawn.",
         },
         activation: {
           type: "array",

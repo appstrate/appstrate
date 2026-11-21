@@ -173,7 +173,12 @@ beforeEach(async () => {
     orgId: null,
     type: "integration",
     source: "system",
-    draftManifest: { name: CATALOG_SSH, version: "1.0.0", type: "integration" },
+    draftManifest: {
+      name: CATALOG_SSH,
+      version: "1.0.0",
+      type: "integration",
+      auths: { ssh: { type: "api_key" } },
+    },
   });
   admin = await principal("admin");
   member = await principal("member");

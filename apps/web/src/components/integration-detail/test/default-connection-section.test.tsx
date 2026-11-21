@@ -53,6 +53,12 @@ describe("DefaultConnectionSection", () => {
     );
   });
 
+  it("says a call without an agent needs a published version", () => {
+    expect(section({ status: "not_published", imposed: false })).toContain(
+      t("integration.defaultConnection.direct.not_published"),
+    );
+  });
+
   it("shows the inactive state even with a usable connection", () => {
     expect(
       section({ status: "ready", imposed: false, connection_id: "personal" }, false, false),

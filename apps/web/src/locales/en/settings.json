@@ -798,6 +798,7 @@
   "integration.defaultConnection.direct.unusable": "The selected connection cannot serve this call without an agent.",
   "integration.defaultConnection.direct.proxy_closed": "This space only allows agents to call this integration.",
   "integration.defaultConnection.direct.not_required": "This integration works without an account.",
+  "integration.defaultConnection.direct.not_published": "To publish: a call without an agent needs a published version of the integration.",
   "integration.defaultConnection.direct.inactive": "Calls are unavailable while this integration is inactive in this space.",
   "integrations.activate.hint": "Activate this integration from the page header to configure its connections and access.",
   "integration.notInSpace.hint": "It is neither homed nor shared here, or it no longer exists. Switch space, or ask an admin to share it here.",

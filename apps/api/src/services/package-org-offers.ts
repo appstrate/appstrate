@@ -16,7 +16,7 @@ import { orgPackageOffers, schedules, spacePackages, spaces } from "@appstrate/d
 import { forbidden, invalidRequest } from "../lib/errors.ts";
 import { assertHasPublishedVersion, loadPlaceablePackage } from "./space-packages.ts";
 import type { PlacementAuthority } from "./space-packages.ts";
-import { isActiveByDefault } from "./package-activation.ts";
+import { isActiveByDefault, isActiveEverywhereByDefault } from "./package-activation.ts";
 import { disableArmedSchedules, withdrawPlacement } from "./package-placement.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 
@@ -52,7 +52,7 @@ export async function offerPackageToOrg(params: {
   return db.transaction(async (tx) => {
     const pkg = await loadOfferablePackage(tx, orgId, packageId, authorizeHome);
     if (pkg.offeredToOrg) return { created: false };
-    if (isActiveByDefault(pkg)) {
+    if (isActiveEverywhereByDefault(pkg)) {
       throw invalidRequest(
         `'${packageId}' is already active in every space by the deployment's default: an offer would change nothing.`,
       );

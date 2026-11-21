@@ -68,6 +68,19 @@ export function isActiveByDefault(pkg: Omit<ActivatablePackage, "offeredToOrg">)
 }
 
 /**
+ * Does the deployment alone make the package run in EVERY space: shipped by the
+ * platform (`source = 'system'`, placed everywhere) AND active by default? An
+ * integration the organization published and `SYSTEM_INTEGRATIONS` names is
+ * active-without-row by {@link isActiveByDefault} but placed only where it is
+ * homed or shared, so an offer still changes something for it.
+ */
+export function isActiveEverywhereByDefault(
+  pkg: Omit<ActivatablePackage, "offeredToOrg">,
+): boolean {
+  return pkg.source === "system" && isActiveByDefault(pkg);
+}
+
+/**
  * Is the package active in a space that holds NO placement row for it?
  *
  * The deployment's default or the organization's offer: the half of the rule

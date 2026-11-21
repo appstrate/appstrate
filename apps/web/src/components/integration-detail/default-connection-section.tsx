@@ -17,6 +17,7 @@ const directCallLabels = {
   unusable: "integration.defaultConnection.direct.unusable",
   proxy_closed: "integration.defaultConnection.direct.proxy_closed",
   not_required: "integration.defaultConnection.direct.not_required",
+  not_published: "integration.defaultConnection.direct.not_published",
   inactive: "integration.defaultConnection.direct.inactive",
 } as const satisfies Record<
   IntegrationDetailWire["proxy_connection"]["status"] | "inactive",

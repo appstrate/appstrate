@@ -23,6 +23,7 @@ import {
 import {
   seedOrgOffer,
   seedPackage,
+  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
@@ -203,5 +204,26 @@ describe("the sheet and the chat agree on an offered integration and its connect
     expect(fromChat?.active).toBe(false);
     expect(fromChat?.via).toBe(fromSheet.availability.via);
     expect(fromChat?.connections.map((c) => c.id)).toEqual([connectionId]);
+  });
+
+  it("both drop the connection once the published version declares no auth, and keep it before", async () => {
+    await seedPublishedVersion(INTEGRATION, "1.0.0");
+    const headers = authHeaders(olivia);
+    const [before, beforeChat] = [await sheet(headers), await chat(headers)];
+    expect(before.connections.map((c) => c.id)).toEqual([connectionId]);
+    expect(beforeChat?.connections.map((c) => c.id)).toEqual([connectionId]);
+
+    // v2 declares no auth at all.
+    const { auths: _removed, ...withoutAuths } = localIntegrationManifest({
+      name: INTEGRATION,
+      version: "2.0.0",
+      displayName: "CRM",
+      auths: {},
+    }) as unknown as Record<string, unknown>;
+    await seedPublishedVersion(INTEGRATION, "2.0.0", { manifest: withoutAuths });
+    const [after, afterChat] = [await sheet(headers), await chat(headers)];
+    expect(after.connections).toEqual([]);
+    // No connection left: the chat lists no entry for the integration at all.
+    expect(afterChat).toBeUndefined();
   });
 });

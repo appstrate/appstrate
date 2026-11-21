@@ -169,7 +169,11 @@ import {
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
-import { readIntegrationManifestForConnect } from "./integration-service.ts";
+import {
+  readIntegrationManifestForConnect,
+  readIntegrationManifestForProxy,
+  readPublishedIntegrationManifests,
+} from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
 
 // ─────────────────────────────────────────────
@@ -585,6 +589,9 @@ async function selectConnection(
  *   - `unusable`: `insufficient_scopes`, `auth_serves_no_selected_tool`, or another refusal (logged).
  *   - `proxy_closed`: the space closes the credential proxy outside a run, whatever the caller's
  *     role: only a run reaches its connections.
+ *   - `not_published`: the integration has no published version, which the proxy answers 404
+ *     (`readIntegrationManifestForProxy`); it outranks every other status, since no call can
+ *     succeed. A saved draft is read by the detail, never by the proxy.
  *
  * `imposed`: an enforced org default governs the integration here — the space's admins decide.
  */
@@ -597,18 +604,24 @@ export type ProxyConnectionStatus =
   | "default_unavailable"
   | "unusable"
   | "proxy_closed"
-  | "not_required";
+  | "not_required"
+  | "not_published";
 
 async function proxyConnectionVerdict(
   packageId: string,
   manifest: IntegrationManifest,
-  context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
+  context: { orgId: string; spaceId: string; actor: Actor; reach: ReachOutsideRun },
   auths: IntegrationAuthStatus[],
 ): Promise<{ status: ProxyConnectionStatus; imposed: boolean; connection_id?: string }> {
+  // Read once, for `imposed` and for the selection.
+  const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
+  const proxyRead = await readIntegrationManifestForProxy(packageId, context.orgId, null);
+  if (!proxyRead.ok && proxyRead.failure.kind === "not_published") {
+    return { status: "not_published", imposed: orgDefaults[packageId]?.enforce === true };
+  }
   const { status, imposed, connectionId } = await proxyConnectionOutcome(packageId, manifest, {
     ...context,
-    // Read once, for `imposed` and for the selection.
-    orgDefaults: await listOrgDefaultsForResolver(context.spaceId),
+    orgDefaults,
   });
   const visible =
     connectionId && auths.some((auth) => auth.connections.some((c) => c.id === connectionId));
@@ -2698,7 +2711,9 @@ interface UsableConnection {
  * The integrations the actor holds a connection it may bind ({@link usableInSpace}) for, one per
  * integration; `source`: own, shared, or both. `active` says whether the integration is switched on
  * in the space, as a run or a proxy call requires: an inactive one binds nothing here, and is listed
- * so the actor can be told its connection exists and why a run does not use it.
+ * so the actor can be told its connection exists and why a run does not use it. A connection whose
+ * auth the integration no longer declares (published manifest, else draft: the sheet's) binds
+ * nowhere and is left out, with an integration left with none.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2710,6 +2725,7 @@ export async function listUsableIntegrationsForActor(
       id: integrationConnections.id,
       integrationId: integrationConnections.integrationId,
       label: integrationConnections.label,
+      authKey: integrationConnections.authKey,
       accountId: integrationConnections.accountId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
@@ -2721,11 +2737,30 @@ export async function listUsableIntegrationsForActor(
     .orderBy(...OLDEST_FIRST);
   if (rows.length === 0) return [];
 
+  const listedIds = [...new Set(rows.map((row) => row.integrationId))];
+  const [pkgRows, published] = await Promise.all([
+    db
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(inArray(packages.id, listedIds)),
+    readPublishedIntegrationManifests(listedIds, scope.orgId),
+  ]);
+  const draftAuths = new Map(
+    pkgRows.map((p) => [p.id, (p.draftManifest as IntegrationManifest | null)?.auths] as const),
+  );
+  const declaresAuth = (row: { integrationId: string; authKey: string }) =>
+    Object.hasOwn(
+      published.has(row.integrationId)
+        ? (published.get(row.integrationId)!.auths ?? {})
+        : (draftAuths.get(row.integrationId) ?? {}),
+      row.authKey,
+    );
+
   const acc = new Map<
     string,
     { own: boolean; shared: boolean; healthy: boolean; connections: UsableConnection[] }
   >();
-  for (const row of rows) {
+  for (const row of rows.filter(declaresAuth)) {
     const entry = acc.get(row.integrationId) ?? {
       own: false,
       shared: false,
@@ -2748,11 +2783,8 @@ export async function listUsableIntegrationsForActor(
 
   // Sorted on purpose: an unordered SELECT may permute it between identical calls.
   const ids = [...acc.keys()].sort();
+  if (ids.length === 0) return [];
   const activations = await resolveIntegrationActivations(ids, scope.spaceId);
-  const pkgRows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(inArray(packages.id, ids));
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
   // The integration's own version, off the selected draft manifest: a caller pinning a
   // `dependencies.integrations` range needs no guess.
@@ -3377,6 +3409,7 @@ export async function getIntegrationAuthStatuses(
       packageId,
       manifest,
       {
+        orgId: scope.orgId,
         spaceId: scope.spaceId,
         actor: caller.principal.actor,
         reach,

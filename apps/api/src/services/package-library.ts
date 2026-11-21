@@ -17,7 +17,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import {
-  isActiveByDefault,
+  isActiveEverywhereByDefault,
   isActiveHere,
   placementVia,
   type PlacementVia,
@@ -268,7 +268,7 @@ async function readPackageLibrary(
     const rowsBySpace = placementRows.get(row.id);
 
     const offered = offeredIds.has(row.id);
-    const activeByDefault = isActiveByDefault({ id: row.id, type, source: row.source });
+    const activeByDefault = isActiveEverywhereByDefault({ id: row.id, type, source: row.source });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
