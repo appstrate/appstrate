@@ -81,6 +81,7 @@ import {
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
+import { packageAvailabilityIn } from "../services/package-library.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { VERSION_SELECTOR_DRAFT } from "../services/agent-version-resolver.ts";
@@ -901,8 +902,15 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     if (!detail) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
+    // `availability`: the library's projection for this space, never a second computation.
+    const availability = await packageAvailabilityIn(
+      c,
+      itemId,
+      spaceId,
+      packagePermission(rcfg.cfg.type, "read"),
+    );
 
-    return sendPackageDetail(c, detail);
+    return sendPackageDetail(c, { ...detail, body: { ...detail.body, availability } });
   };
 }
 

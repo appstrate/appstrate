@@ -316,7 +316,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   PackagePlacement:
     "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
   PackageAvailability:
-    "integration detail sub-object; the SPA reads it through the generated spec type of getIntegration",
+    "package detail sub-object (integration, agent, skill); mirrored by the optional `availability` of the AgentDetail / OrgPackageItemDetail shared-types",
   PackageShare:
     "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   PackageOrgOffer:
