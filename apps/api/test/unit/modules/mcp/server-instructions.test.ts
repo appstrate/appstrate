@@ -549,8 +549,10 @@ describe("MCP server instructions — org-wide space choice", () => {
 
   it("tells the model to pass `space_id` to `search` whenever the space is known", () => {
     const text = spaceContext(orgWideInstructionsFor([mine, team]));
-    expect(text).toContain("`search` may omit `space_id`; pass it whenever the space is known");
-    expect(text).toContain("it searches every space you reach");
+    expect(text).toContain("pass that `space_id` to `search` too");
+    expect(text).toContain("search every space only when the space is unknown");
+    expect(text).toContain("An empty result is the answer");
+    expect(text).toContain("only the spaces that supplied entries shown");
     expect(text).toContain("`searched_spaces`");
     expect(text).toContain("`granted_in`");
   });

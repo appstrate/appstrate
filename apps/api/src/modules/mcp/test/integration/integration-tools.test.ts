@@ -640,6 +640,23 @@ describe("mcp integration tools", () => {
         expect(named.data.searched_spaces).toBeUndefined();
       });
 
+      it("reports only the spaces a tool shown names: not one that answered nothing, nor a search that found nothing", async () => {
+        // A space the integration is not active in answers an empty listing.
+        const empty = await seedSpace({ orgId: owner.orgId, name: "Vide" });
+        const found = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect((found.data.searched_spaces as string[]).sort()).toEqual(
+          [owner.defaultSpaceId, other.id].sort(),
+        );
+        expect(found.data.searched_spaces).not.toContain(empty.id);
+
+        const none = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
+          query: "zzzunmatched",
+        });
+        expect(none.isError).toBe(false);
+        expect(none.data.searched_spaces).toBeUndefined();
+      });
+
       it("leaves a space that closes the proxy out of a default search, and refuses the kind named once every space closes it", async () => {
         await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, other.id));
         const defaulted = await callTool(caller, "search", {});
@@ -1195,6 +1212,16 @@ describe("mcp integration tools", () => {
       expect(section(general.data).items.find((t) => t.id === REMOTE_TOOL)).toMatchObject({
         catalog_unreadable: true,
       });
+      // An uncached integration is named only when it relates to the query.
+      const unrelated = await callTool(caller, "search", { query: "zzzunmatched" });
+      expect(section(unrelated.data).uncached).toBeUndefined();
+      // The others are only counted, without naming an integration or a space.
+      const unrelatedNote = (unrelated.data.integration_tools as { note?: string }).note ?? "";
+      expect(unrelatedNote).toContain("1 other integration(s) have no cached catalog");
+      expect(unrelatedNote).not.toContain(REMOTE_ID);
+      expect((general.data.integration_tools as { note?: string }).note ?? "").not.toContain(
+        "have no cached catalog",
+      );
 
       // Naming the kind reads it from the server, as the call it journals.
       const named = await callTool(caller, "search", {

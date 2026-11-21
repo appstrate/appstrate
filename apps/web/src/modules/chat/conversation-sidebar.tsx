@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
-import { CheckIcon, CopyIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  CheckIcon,
+  CopyIcon,
+  FilesIcon,
+  PanelRightCloseIcon,
+  PanelRightIcon,
+  XIcon,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
@@ -10,6 +18,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
+import { Card } from "@appstrate/ui/components/card";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
@@ -17,6 +26,7 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
+import { EmptyState, ErrorState } from "../../components/page-states";
 import { FileArtifact } from "../../components/file-artifact";
 import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
@@ -33,20 +43,27 @@ import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField, formatRelativeTime } from "../../lib/format-date";
-import type {
-  ConversationSidebarAction,
-  ConversationSidebarState,
-  ConversationSidebarTab,
-  LocalSidebarFile,
-  SidebarFile,
-  StoredSidebarFile,
+import {
+  shownFile,
+  type ConversationSidebarAction,
+  type ConversationSidebarState,
+  type ConversationSidebarTab,
+  type LocalSidebarFile,
+  type SidebarFile,
+  type StoredSidebarFile,
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
-import { usePanelWidth } from "./use-panel-width";
+import { usePanelWidth, type PanelView } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
+
+/**
+ * The panel's own frame: it floats beside the thread, so its cards (and the
+ * previewed file) are rounder than a page's and lifted by a light shadow.
+ */
+const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
 
 /** The shell header's one control for the context panel, wherever it is drawn. */
 export function ConversationContextToggle({
@@ -77,14 +94,6 @@ export function ConversationContextToggle({
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function PanelState({ children }: { children: ReactNode }) {
-  return (
-    <div className="text-muted-foreground flex h-full items-center justify-center p-6 text-center text-sm">
-      {children}
-    </div>
   );
 }
 
@@ -134,7 +143,7 @@ function ShownStoredFile({
       error={error}
       fallbackName={file.name || t("context.file.untitled")}
       onClose={onClose}
-      className="h-full rounded-none border-0"
+      className={cn("h-full", FLOATING_FRAME)}
     />
   );
 }
@@ -157,7 +166,7 @@ function ShownLocalFile({
       error={null}
       fallbackName={file.local.name || t("context.file.untitled")}
       onClose={onClose}
-      className="h-full rounded-none border-0"
+      className={cn("h-full", FLOATING_FRAME)}
     />
   );
 }
@@ -191,14 +200,24 @@ export function ConversationRuns({
     },
   );
 
-  if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <TextSkeleton className="p-4" />;
-  if (query.error) return <PanelState>{t("context.error")}</PanelState>;
+  if (!conversationId) {
+    return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
+  }
+  if (query.isLoading) {
+    return (
+      <Card className={FLOATING_FRAME}>
+        <TextSkeleton className="p-4" />
+      </Card>
+    );
+  }
+  if (query.error) return <ErrorState error={query.error} compact />;
   const runs = query.data?.data ?? [];
-  if (runs.length === 0) return <PanelState>{t("context.runs.empty")}</PanelState>;
+  if (runs.length === 0) {
+    return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
+  }
 
   return (
-    <div className="divide-y">
+    <Card className={cn("divide-y", FLOATING_FRAME)}>
       {runs.map((run) => (
         <RunRow
           key={run.id}
@@ -212,7 +231,7 @@ export function ConversationRuns({
           className="px-3"
         />
       ))}
-    </div>
+    </Card>
   );
 }
 
@@ -235,19 +254,29 @@ export function ConversationFiles({
     enabled: active && !!conversationId,
   });
 
-  if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <TextSkeleton className="p-4" />;
-  if (query.error) return <PanelState>{t("context.error")}</PanelState>;
+  if (!conversationId) {
+    return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
+  }
+  if (query.isLoading) {
+    return (
+      <Card className={FLOATING_FRAME}>
+        <TextSkeleton className="p-4" />
+      </Card>
+    );
+  }
+  if (query.error) return <ErrorState error={query.error} compact />;
   const files = query.data?.data ?? [];
-  if (files.length === 0) return <PanelState>{t("context.files.empty")}</PanelState>;
+  if (files.length === 0) {
+    return <EmptyState message={t("context.files.empty")} icon={FilesIcon} compact />;
+  }
 
   return (
-    <div className="divide-y">
+    <Card className={cn("divide-y", FLOATING_FRAME)}>
       {files.map((file) => (
         <button
           key={file.id}
           type="button"
-          className="hover:bg-muted/40 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
+          className="hover:bg-muted/50 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
           onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
         >
           <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
@@ -268,7 +297,7 @@ export function ConversationFiles({
           {named && <RowSpaceName spaceId={file.spaceId} />}
         </button>
       ))}
-    </div>
+    </Card>
   );
 }
 
@@ -315,15 +344,17 @@ function ConversationDetailsSkeleton() {
     </div>
   );
   return (
-    <Waiting className="flex flex-col gap-5">
-      <SkeletonLine className="w-2/3 text-base font-semibold" />
-      <div className="flex flex-col gap-3">
-        {row("created", "w-24", 2)}
-        {row("activity", "w-24", 2)}
-        {row("messages", "w-8")}
-        {row("status", "w-16")}
+    <Waiting className="divide-y">
+      <div className="flex flex-col gap-4 p-4">
+        <SkeletonLine className="w-2/3 text-base font-semibold" />
+        <div className="flex flex-col gap-3">
+          {row("created", "w-24", 2)}
+          {row("activity", "w-24", 2)}
+          {row("messages", "w-8")}
+          {row("status", "w-16")}
+        </div>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 p-4">
         <SkeletonLine className="w-32 text-sm font-medium" />
         <div className="flex flex-col gap-3">
           {row("context", "w-28")}
@@ -430,12 +461,10 @@ function ConversationDetails({
   const query = useSessionDetail(active ? conversationId : null);
 
   if (!conversationId) {
-    return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;
+    return <p className="text-muted-foreground p-4 text-sm">{t("context.unsaved")}</p>;
   }
   if (query.isLoading) return <ConversationDetailsSkeleton />;
-  if (query.error || !query.data) {
-    return <p className="text-muted-foreground text-sm">{t("context.error")}</p>;
-  }
+  if (query.error || !query.data) return <ErrorState error={query.error} compact />;
 
   const session = query.data;
   const rows: [string, ReactNode][] = [
@@ -450,17 +479,21 @@ function ConversationDetails({
 
   return (
     <>
-      <h3 className="text-base font-semibold break-words">
-        {session.title || t("context.info.untitled")}
-      </h3>
-      <FactGrid columns={1}>
-        {rows.map(([label, value]) => (
-          <Fact key={label} label={label}>
-            {value}
-          </Fact>
-        ))}
-      </FactGrid>
-      <ConversationUsage session={session} />
+      <div className="flex flex-col gap-4 p-4">
+        <h3 className="text-base font-semibold break-words">
+          {session.title || t("context.info.untitled")}
+        </h3>
+        <FactGrid columns={1}>
+          {rows.map(([label, value]) => (
+            <Fact key={label} label={label}>
+              {value}
+            </Fact>
+          ))}
+        </FactGrid>
+      </div>
+      <div className="p-4">
+        <ConversationUsage session={session} />
+      </div>
     </>
   );
 }
@@ -480,11 +513,17 @@ function ConversationInfo({
       ? undefined
       : (detail.data ?? null);
   return (
-    <div className="flex flex-col gap-5 p-4">
+    <Card className={cn("divide-y", FLOATING_FRAME)}>
       <ConversationDetails conversationId={conversationId} active={active} />
-      <ChatAccessSummary conversation={conversation} />
-      {conversationId ? <ConversationId id={conversationId} /> : null}
-    </div>
+      <div className="p-4">
+        <ChatAccessSummary conversation={conversation} />
+      </div>
+      {conversationId ? (
+        <div className="px-4 py-2">
+          <ConversationId id={conversationId} />
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
@@ -497,10 +536,13 @@ function ConversationContext({
   conversationId,
   state,
   dispatch,
+  closable,
 }: {
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
+  /** The phone's sheet has no header toggle beside it: it carries its own close. */
+  closable: boolean;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
   // reads wait until it is open.
@@ -509,15 +551,17 @@ function ConversationContext({
   const { tabs, activeTab } = useConversationTabs(state.activeTab);
   // Read from the state, not the readable tabs: a file the thread opens shows
   // even for a caller whose Files tab is not drawn.
-  const previewedFile = state.activeTab === "files" ? state.selectedFile : null;
+  const previewedFile = shownFile(state);
 
   if (previewedFile) {
     return (
-      <ShownFile
-        file={previewedFile}
-        backToList={state.fileFromList}
-        onClose={() => dispatch({ type: "close-file" })}
-      />
+      <div className="h-full p-3">
+        <ShownFile
+          file={previewedFile}
+          backToList={state.fileFromList}
+          onClose={() => dispatch({ type: "close-file" })}
+        />
+      </div>
     );
   }
 
@@ -527,7 +571,7 @@ function ConversationContext({
       onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
       className="flex h-full min-h-0 flex-col"
     >
-      <AgentDetailPaneHeader className="gap-2">
+      <AgentDetailPaneHeader className="justify-end gap-2 border-b-0">
         <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
           {tabs.map(({ id, Icon, label }) => (
             <TabsTrigger key={id} value={id} className="gap-1.5">
@@ -536,18 +580,24 @@ function ConversationContext({
             </TabsTrigger>
           ))}
         </TabsList>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto size-8 shrink-0"
-          aria-label={t("context.collapse")}
-          onClick={() => dispatch({ type: "toggle" })}
-        >
-          <XIcon />
-        </Button>
+        {closable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            aria-label={t("context.collapse")}
+            onClick={() => dispatch({ type: "toggle" })}
+          >
+            <XIcon />
+          </Button>
+        ) : null}
       </AgentDetailPaneHeader>
       {tabs.map(({ id }) => (
-        <TabsContent key={id} value={id} className="mt-0 min-h-0 flex-1 overflow-auto">
+        <TabsContent
+          key={id}
+          value={id}
+          className="mt-0 min-h-0 flex-1 overflow-auto px-3 pt-1 pb-3"
+        >
           {id === "runs" ? (
             <ConversationRuns conversationId={conversationId} active={active} />
           ) : null}
@@ -580,7 +630,9 @@ export function ConversationSidebar({
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
-  const size = usePanelWidth(panelRef);
+  const { activeTab } = useConversationTabs(state.activeTab);
+  const view: PanelView = shownFile(state) ? "file" : activeTab.id === "info" ? "info" : "list";
+  const size = usePanelWidth(panelRef, view);
 
   if (!desktop) {
     return (
@@ -592,12 +644,17 @@ export function ConversationSidebar({
           id={CONVERSATION_CONTEXT_PANEL_ID}
           side="right"
           aria-describedby={undefined}
-          // The panel's header carries the one close control, as on desktop.
+          // The panel's header carries the one close control.
           showCloseButton={false}
-          className="bg-card flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+          className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
         >
           <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
-          <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
+          <ConversationContext
+            conversationId={conversationId}
+            state={state}
+            dispatch={dispatch}
+            closable
+          />
         </SheetContent>
       </Sheet>
     );
@@ -605,7 +662,9 @@ export function ConversationSidebar({
 
   // The column keeps its place in the layout and animates its width: closed,
   // it is 0 wide and `inert` (out of the tab order and the accessibility tree).
-  // Its content keeps the full width so nothing reflows mid-transition.
+  // Its content keeps the full width so nothing reflows mid-transition, and is
+  // anchored right: switching views (list, details, file) widens or narrows
+  // the column from its left edge, toward the thread.
   return (
     <aside
       ref={panelRef}
@@ -614,11 +673,20 @@ export function ConversationSidebar({
       inert={!state.expanded}
       className={cn(
         "relative shrink-0 overflow-hidden",
-        !dragging && "duration-base ease-surface transition-[width] motion-reduce:transition-none",
+        !dragging && "ease-surface transition-[width]",
+        state.expanded ? "duration-base" : "duration-fast",
       )}
       style={{ width: state.expanded ? size.width : 0 }}
     >
-      <div className="bg-card absolute inset-y-0 right-0 border-l" style={{ width: size.width }}>
+      <div
+        className={cn(
+          "ease-surface absolute inset-y-0 right-0 transition-[opacity,translate]",
+          state.expanded
+            ? "duration-base translate-x-0 opacity-100"
+            : "duration-fast translate-x-6 opacity-0",
+        )}
+        style={{ width: size.width }}
+      >
         <PanelResizeHandle
           controls={CONVERSATION_CONTEXT_PANEL_ID}
           label={t("context.resize")}
@@ -630,7 +698,12 @@ export function ConversationSidebar({
           onCommit={size.commit}
           onDraggingChange={setDragging}
         />
-        <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
+        <ConversationContext
+          conversationId={conversationId}
+          state={state}
+          dispatch={dispatch}
+          closable={false}
+        />
       </div>
     </aside>
   );

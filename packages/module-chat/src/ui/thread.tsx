@@ -279,7 +279,7 @@ function ScrollToBottom() {
         type="button"
         variant="outline"
         size="icon"
-        className="absolute -top-10 rounded-full disabled:invisible"
+        className="absolute -top-13 rounded-full disabled:invisible"
         aria-label={t("thread.scrollToBottom")}
       >
         <ArrowDownIcon />
