@@ -442,24 +442,18 @@ describe("MCP server instructions — org-wide space choice", () => {
     expect(text).toContain('an inline run (`run_and_wait` with `kind: "inline"`)');
     expect(text).toContain("a new package (agent, skill, integration)");
     expect(text).toContain("your personal space (the one marked `your personal space`)");
-    expect(text).toContain("where your role allows it; your reply names it");
+    expect(text).toContain("your reply names it");
   });
 
-  it("never sends a new package or an inline run to a personal space its role caps to operator", () => {
+  it("names the personal space first even where the role is capped: the refusal there is what the model relays", () => {
     const capped = orgSpace("spc_mine", "Mine", "operator", true, OPERATOR);
     const text = spaceContext(orgWideInstructionsFor([capped, team]));
-    // The personal-space destination is not offered for either act...
-    expect(text).not.toContain("your personal space (the one marked");
-    // ...which are named as refused there, with the sanctioned path.
-    expect(text).toContain("does not allow an inline run");
-    expect(text).toContain("a new package");
-    expect(text).toContain("never send it there");
-    expect(text).toContain("propose a space where your role does (case c)");
-    // A role that composes but cannot author keeps the destination for the act it allows.
-    const composer = orgSpace("spc_mine", "Mine", "builder", true, [...OPERATOR, "agents:write"]);
-    expect(spaceContext(orgWideInstructionsFor([composer, team]))).toContain(
-      "your personal space (the one marked",
-    );
+    // Same step as an uncapped caller: told in advance that the personal space refuses, a real
+    // model picks the one space that allows and never asks.
+    expect(text).toContain("3. For an inline run");
+    expect(text).toContain("Send it there first, whatever your role there");
+    expect(text).toContain("never a reason to start in another space");
+    expect(text).toContain("403 `inline_run_not_allowed_in_space`");
   });
 
   it("has no personal-space step for a caller with no personal space", () => {
@@ -470,7 +464,9 @@ describe("MCP server instructions — org-wide space choice", () => {
 
   it("names the three cases a space cannot serve, each with its remedy", () => {
     const text = spaceContext(orgWideInstructionsFor([mine, team]));
-    expect(text).toContain("never switch to another space silently");
+    expect(text).toContain("STOP: make no further call that changes anything or acts elsewhere");
+    expect(text).toContain("only the user's answer in a later message chooses one");
+    expect(text).toContain("Naming an integration in the request is not that answer");
     // (a) off there: activate, or offer to the organization; a space's own row still wins.
     expect(text).toContain("(a) The integration is off there");
     expect(text).toContain("`activatePackage`");
@@ -481,7 +477,7 @@ describe("MCP server instructions — org-wide space choice", () => {
     // (b) the connection is not reachable there: connect one's own, or a team space.
     expect(text).toContain("(b) The connection needed is missing or not reachable there");
     expect(text).toContain("never reaches a personal space");
-    expect(text).toContain("connect one's own, or run in a named team space");
+    expect(text).toContain("connecting one's own; running in a named team space");
     expect(text).toContain("Never suggest sharing a member's account");
     // (c) the role does not allow it: a named space of the refusal, with the user's choice.
     expect(text).toContain("(c) Your role there does not allow the act");

@@ -90,7 +90,9 @@ describe("mcp org-wide connection", () => {
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
     // A space that cannot serve is never swapped silently: the cases and their remedies.
-    expect(instructions).toContain("never switch to another space silently");
+    expect(instructions).toContain(
+      "STOP: make no further call that changes anything or acts elsewhere",
+    );
     expect(instructions).toContain("(c) Your role there does not allow the act");
     expect(instructions).toContain("use a space where it is active");
     expect(instructions).toContain("a `required: true` one will refuse its launch there");

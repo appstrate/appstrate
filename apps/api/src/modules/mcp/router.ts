@@ -313,50 +313,40 @@ const ORG_BOUNDARY =
 const pinnedSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. ${ORG_BOUNDARY} A refusal for your role (\`403\`, \`not_granted\`) is final: report it. A configuration refusal (an agent or integration not active in the space, a connection missing or needing reconnection) is repairable: offer its remedy (connect, or \`activatePackage\` when your role allows).`;
 
 /**
- * The space hierarchy, written once for every tool that takes `space_id`. Step 3 follows the
- * caller's own personal space: an act its role there does not allow is never sent to it.
+ * The space hierarchy, written once for every tool that takes `space_id`. Step 3 names the
+ * personal space whatever the caller's role there: a role that refuses the act answers with a
+ * refusal listing where it is allowed, which the model relays. Measured with a real model: told
+ * in advance that the personal space refuses, it picks the one space that allows and never asks.
  */
 function orgWideSpaceContext(
   spaces: OrgWideSpaces,
   acts: { inline: boolean; authors: boolean },
 ): string {
   const personal = spaces.reachable.find((space) => space.personal);
-  const allowed = personal
-    ? ([
-        ...(acts.inline
-          ? [[personal.surface.composes, 'an inline run (`run_and_wait` with `kind: "inline"`)']]
+  const personalActs = personal
+    ? [
+        ...(acts.inline ? ['an inline run (`run_and_wait` with `kind: "inline"`)'] : []),
+        ...(acts.authors ? ["a new package (agent, skill, integration)"] : []),
+        ...(spaces.reachable.some((space) => space.surface.proxies)
+          ? ["a direct integration tool call (`call_integration_tool`)"]
           : []),
-        ...(acts.authors
-          ? [[personal.surface.authors, "a new package (agent, skill, integration)"]]
-          : []),
-      ] as [boolean, string][])
+      ]
     : [];
-  const sent = allowed.filter(([ok]) => ok).map(([, act]) => act);
-  const refused = allowed.filter(([ok]) => !ok).map(([, act]) => act);
   const personalStep = !personal
-    ? "You have no personal space: an inline run or a new package follows steps 4 and 5."
-    : allowed.length === 0
-      ? "Not applicable: this connection composes no inline run and authors no package."
-      : [
-          sent.length > 0
-            ? `For ${sent.join(" and for ")}: your personal space (the one marked \`your personal space\`), where your role allows it; your reply names it.`
-            : "",
-          refused.length > 0
-            ? `Your role in your personal space does not allow ${refused.join(" or ")}: never send it there; propose a space where your role does (case c).`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
+    ? "You have no personal space: steps 4 and 5 apply to every act."
+    : personalActs.length === 0
+      ? "Not applicable to this connection: steps 4 and 5 apply to every act."
+      : `For ${personalActs.join(", ")}: your personal space (the one marked \`your personal space\`); your reply names it. Send it there first, whatever your role there and even when another space looks better suited or is the only one where it would work: a refusal or a space that cannot serve is the next rule's case, never a reason to start in another space.`;
   return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. ${ORG_BOUNDARY}
 - Every tool that acts in a space REQUIRES \`space_id\`: the server picks no default. Its schema lists your spaces, their ids and your role in each; your role in the space a call names decides that call. Choose the space in this order:
   1. Only one space is listed (a conversation limited to a space, a narrowed credential): that one.
   2. The user's request names a space: that one.
   3. ${personalStep}
-  4. For any other act: the space your context designates (for the chat, the space the conversation was opened in); with none, ask when several could serve.
+  4. For any other act: the space your context designates (for the chat, the space the conversation was opened in); with none, ask which space; a space is not designated because the request would work there.
   5. A credential with no personal space (API key, end-user, delegated credential) uses its own space; when several are reachable and nothing designates one, ask.
-- When the space this order gives cannot serve the request, never switch to another space silently: say why, offer what the caller may do, and act on the answer.
-  (a) The integration is off there (\`active: false\`, \`integration_not_active\`): activate it there (\`activatePackage\`: path \`id\` and \`space_id\` both that space, when your role allows), or, for an organization owner or admin, offer it to the organization (from chat, the organization catalog; otherwise \`offerPackageToOrg\` with an unconfined credential). That activates it in every space without a row of its own; a space's own switched-off row still wins, and no connection becomes reachable by it.
-  (b) The connection needed is missing or not reachable there (a colleague's connection shared with team spaces only never reaches a personal space): connect one's own, or run in a named team space where it is reachable. Never suggest sharing a member's account for a need that is only the caller's own.
+- When the space this order gives cannot serve the request, STOP: make no further call that changes anything or acts elsewhere (no activation, no offer, no connect flow, no run in another space). Reply with the reason and the options below, and wait: only the user's answer in a later message chooses one. Naming an integration in the request is not that answer.
+  (a) The integration is off there (\`active: false\`, \`integration_not_active\`). Options: activating it there (\`activatePackage\`: path \`id\` and \`space_id\` both that space, when your role allows); running in a named space where it is active; for an organization owner or admin, offering it to the organization (from chat, the organization catalog; otherwise \`offerPackageToOrg\` with an unconfined credential), which activates it in every space without a row of its own: a space's own switched-off row still wins, and no connection becomes reachable by it.
+  (b) The connection needed is missing or not reachable there (a colleague's connection shared with team spaces only never reaches a personal space). Options: connecting one's own; running in a named team space where it is reachable. Never suggest sharing a member's account for a need that is only the caller's own.
   (c) Your role there does not allow the act (\`not_granted\`, 403 \`inline_run_not_allowed_in_space\`): ${NO_FALLBACK_HINT}
   To launch an existing agent, use a space where it is active (\`agent_not_active_in_space\`, \`active_in_spaces\`). Activating an agent, or sharing it so that it lands ON, refuses nothing: the response's \`warnings[]\` names each declared integration inactive in that space, and a \`required: true\` one will refuse its launch there — offer to activate it, with the user's agreement.
 - \`search\` may omit \`space_id\`; pass it whenever the space is known. Omitted, it searches every space you reach (\`searched_spaces\`; a chat conversation is attached to each), and each item's \`granted_in\` names the spaces where you reach it: act on it with one of them.
