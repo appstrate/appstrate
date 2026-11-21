@@ -92,6 +92,7 @@ import {
   OLDEST_FIRST,
   ownRowInSpace,
   ownUsableInSpace,
+  sharedInto,
   usableInSpace,
   type ConnectionCaller,
 } from "./connection-reach.ts";
@@ -2672,17 +2673,6 @@ interface UsableConnection {
   needs_reconnection: boolean;
 }
 
-/** The compact projection of a usable row for `actor`. */
-function toUsableConnection(row: SelectableRow, actor: Actor): UsableConnection {
-  return {
-    id: row.id,
-    label: row.label,
-    account_id: row.accountId,
-    owned_by_actor: actorOwns(actor, row),
-    needs_reconnection: row.needsReconnection,
-  };
-}
-
 /**
  * The integrations the actor holds a connection it may bind ({@link usableInSpace}) for, one per
  * integration; `source`: own, shared, or both. `active` says whether the integration is switched on
@@ -2694,12 +2684,21 @@ export async function listUsableIntegrationsForActor(
   actor: Actor,
 ): Promise<UsableIntegration[]> {
   await assertSpaceInScope(scope);
-  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, "usable");
+  const rows = await db
+    .select({
+      id: integrationConnections.id,
+      integrationId: integrationConnections.integrationId,
+      label: integrationConnections.label,
+      accountId: integrationConnections.accountId,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+      shared: sql<boolean>`${sharedInto(scope.spaceId)}`,
+      needsReconnection: integrationConnections.needsReconnection,
+    })
+    .from(integrationConnections)
+    .where(usableInSpace(scope.spaceId, actor))
+    .orderBy(...OLDEST_FIRST);
   if (rows.length === 0) return [];
-  const shares = await loadConnectionShares(
-    db,
-    rows.map((row) => row.id),
-  );
 
   const acc = new Map<
     string,
@@ -2712,11 +2711,17 @@ export async function listUsableIntegrationsForActor(
       healthy: false,
       connections: [],
     };
-    const connection = toUsableConnection(row, actor);
-    entry.own ||= connection.owned_by_actor;
-    entry.shared ||= shares.get(row.id)?.includes(scope.spaceId) ?? false;
+    const owned = actorOwns(actor, row);
+    entry.own ||= owned;
+    entry.shared ||= row.shared;
     entry.healthy ||= !row.needsReconnection;
-    entry.connections.push(connection);
+    entry.connections.push({
+      id: row.id,
+      label: row.label,
+      account_id: row.accountId,
+      owned_by_actor: owned,
+      needs_reconnection: row.needsReconnection,
+    });
     acc.set(row.integrationId, entry);
   }
 
