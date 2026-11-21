@@ -25,9 +25,17 @@ const SCOPE_TRUTH_TABLE: {
   name: string;
   vars: Record<string, unknown>;
   kind: "person" | "delegated";
+  /** `null`: unbound; `spaceIds: null`: bound to the org alone. */
+  binding: { orgId: string; spaceIds: string[] | null } | null;
   delegated: boolean;
 }[] = [
-  { name: "web session", vars: { principalKind: "user" }, kind: "person", delegated: false },
+  {
+    name: "web session",
+    vars: { principalKind: "user" },
+    kind: "person",
+    binding: null,
+    delegated: false,
+  },
   {
     name: "chat, unlimited conversation",
     vars: {
@@ -36,18 +44,21 @@ const SCOPE_TRUTH_TABLE: {
       credentialSpaceIdsRestricted: false,
     },
     kind: "person",
+    binding: { orgId: "org_1", spaceIds: null },
     delegated: false,
   },
   {
     name: "chat, limited conversation",
     vars: { principalKind: "user", credentialSpaceIds: ["spc_a"] },
     kind: "person",
+    binding: { orgId: "org_1", spaceIds: ["spc_a"] },
     delegated: true,
   },
   {
     name: "pinned MCP token",
     vars: { principalKind: "user", credentialSpaceId: "spc_a" },
     kind: "person",
+    binding: { orgId: "org_1", spaceIds: ["spc_a"] },
     delegated: true,
   },
   {
@@ -59,15 +70,23 @@ const SCOPE_TRUTH_TABLE: {
       credentialSpaceIdsRestricted: false,
     },
     kind: "person",
+    binding: { orgId: "org_1", spaceIds: ["spc_a"] },
     delegated: true,
   },
   {
     name: "API key",
     vars: { principalKind: "delegate", credentialSpaceId: "spc_a" },
     kind: "delegated",
+    binding: { orgId: "org_1", spaceIds: ["spc_a"] },
     delegated: true,
   },
-  { name: "end-user", vars: { principalKind: "end_user" }, kind: "delegated", delegated: true },
+  {
+    name: "end-user",
+    vars: { principalKind: "end_user" },
+    kind: "delegated",
+    binding: { orgId: "org_1", spaceIds: null },
+    delegated: true,
+  },
   {
     name: "delegate with an unrestricted flag",
     vars: {
@@ -76,6 +95,7 @@ const SCOPE_TRUTH_TABLE: {
       credentialSpaceIdsRestricted: false,
     },
     kind: "delegated",
+    binding: { orgId: "org_1", spaceIds: ["spc_a"] },
     delegated: true,
   },
 ];
@@ -85,6 +105,7 @@ describe("connection scope truth table (principal, scope rule, connect offer)", 
     it(row.name, () => {
       const principal = connectionPrincipal(contextOf(row.vars));
       expect(principal.kind).toBe(row.kind);
+      expect(principal.binding).toEqual(row.binding);
       expect(writesDelegated(principal)).toBe(row.delegated);
       const policy = connectOfferPolicyFromRequest(
         contextOf({ ...row.vars, permissions: new Set() }, { [RUN_CONNECT_OFFERS_HEADER]: "1" }),

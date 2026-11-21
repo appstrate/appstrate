@@ -17,12 +17,13 @@ interface ConnectionBinding {
 
 /**
  * Who acts on connections, decided once at the door. A user principal acts as the person, whatever
- * the transport, bound only when its credential is confined to spaces (`credentialConfinedToSpaces`:
- * a pin, an allowlist), to its org and the spaces it names, except an unpinned allowlist the person
- * did not choose (`credentialSpaceIdsRestricted === false`: an unlimited chat turn), which acts as
- * the person, unbound. Any other credential is delegated:
- * bound to its org, and to the space it pins when it pins one. `X-Space-Id` addresses the request
- * space and grants no binding.
+ * the transport; unbound (`binding: null`, every org the person belongs to) unless its credential is
+ * confined (`credentialConfinedToSpaces`: a pin, an allowlist), which binds it to its org and the
+ * spaces it names. An unpinned allowlist the person did not choose
+ * (`credentialSpaceIdsRestricted === false`: an unlimited chat turn) binds to its org alone
+ * (`spaceIds: null`): it reaches nothing of another org, and acts on connections of its org as the
+ * person does. Any other credential is delegated: bound to its org, and to the space it pins when
+ * it pins one. `X-Space-Id` addresses the request space and grants no binding.
  */
 export type ConnectionPrincipal =
   | { kind: "person"; actor: Actor; binding: ConnectionBinding | null }
@@ -31,12 +32,7 @@ export type ConnectionPrincipal =
 export function connectionPrincipal(c: Context<AppEnv>): ConnectionPrincipal {
   const actor = getActor(c);
   const isUser = c.get("principalKind") === "user";
-  const actsAsPerson =
-    isUser &&
-    (!credentialConfinedToSpaces(c) ||
-      (c.get("credentialSpaceId") === undefined &&
-        c.get("credentialSpaceIdsRestricted") === false));
-  if (actsAsPerson) {
+  if (isUser && !credentialConfinedToSpaces(c)) {
     return { kind: "person", actor, binding: null };
   }
   const orgId = c.get("orgId");
@@ -44,9 +40,10 @@ export function connectionPrincipal(c: Context<AppEnv>): ConnectionPrincipal {
   const pinned = c.get("credentialSpaceId");
   const allowlist = c.get("credentialSpaceIds");
   // A pin and an allowlist both confine: the spaces both admit.
+  const chosen = !isUser || pinned !== undefined || c.get("credentialSpaceIdsRestricted") !== false;
   const spaceIds =
     pinned && allowlist ? allowlist.filter((id) => id === pinned) : pinned ? [pinned] : allowlist;
-  const binding = { orgId, spaceIds: spaceIds ?? null };
+  const binding = { orgId, spaceIds: chosen ? (spaceIds ?? null) : null };
   return c.get("principalKind") === "user"
     ? { kind: "person", actor, binding }
     : { kind: "delegated", actor, binding };
@@ -58,9 +55,10 @@ export function boundSpacesOf(principal: ConnectionPrincipal): readonly string[]
 }
 
 /**
- * Whether a connection the principal writes is delegated, hence scoped to a space: any bound
- * principal. The one scope rule of every connect door (`writesOrgScope` reads it).
+ * Whether a connection the principal writes is delegated, hence scoped to a space: a delegated
+ * credential, or a person bound to spaces. The one scope rule of every connect door
+ * (`writesOrgScope` reads it).
  */
 export function writesDelegated(principal: ConnectionPrincipal): boolean {
-  return principal.binding !== null;
+  return principal.kind === "delegated" || boundSpacesOf(principal) !== null;
 }
