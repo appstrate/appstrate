@@ -19,6 +19,7 @@ import {
   spaceArgumentRefusal,
   type OrgWideSpaces,
 } from "../../../apps/api/src/modules/mcp/spaces.ts";
+import { ACTIVE_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -26,8 +27,24 @@ import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools
 const ORIGIN = "http://127.0.0.1:1";
 const RUN_ID = "run_org_1";
 const SPACES = [
-  { id: "spc_alpha", name: "Alpha", role: "operator", permissions: ["files:read"] },
-  { id: "spc_beta", name: "Beta", role: "admin", permissions: ["files:read"] },
+  {
+    id: "spc_alpha",
+    name: "Alpha",
+    role: "operator",
+    permissions: ["files:read", "mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+  },
+  {
+    id: "spc_beta",
+    name: "Beta",
+    role: "admin",
+    permissions: ["files:read", "mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+  },
+  {
+    id: "spc_runonly",
+    name: "Run only",
+    role: "custom",
+    permissions: ["mcp:read", "mcp:invoke", "agents:run"],
+  },
 ];
 
 /**
@@ -47,8 +64,15 @@ interface RegisteredTool {
 }
 
 /** Everything the transport saw, in order, with the touches interleaved. */
-function transcript() {
+function transcript(searchKinds?: string[]) {
   const events: string[] = [];
+  /** The `searched_spaces` the stub's `search` answers with, when set. */
+  const answers: {
+    searched?: unknown;
+    launchProblem?: Record<string, unknown>;
+    invokedSpaces?: string[];
+  } = {};
+  const chunks: unknown[] = [];
   const launches: Array<{ spaceHeader: string | null; body: string }> = [];
   const polls: Array<string | null> = [];
   const toolCalls: unknown[] = [];
@@ -94,10 +118,24 @@ function transcript() {
               },
             },
             {
-              name: "read_file",
+              name: "read",
               inputSchema: {
                 type: "object",
                 properties: { uri: { type: "string" }, space_id: spaceId },
+                required: ["space_id"],
+              },
+            },
+            {
+              name: "search",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  query: { type: "string" },
+                  ...(searchKinds
+                    ? { kinds: { type: "array", items: { type: "string", enum: searchKinds } } }
+                    : {}),
+                  space_id: spaceId,
+                },
               },
             },
             {
@@ -114,10 +152,40 @@ function transcript() {
       if (msg.method === "tools/call") {
         events.push("tools/call");
         toolCalls.push(msg.params);
+        if (
+          answers.launchProblem &&
+          (msg.params as { name?: string }).name === "invoke_operation"
+        ) {
+          return reply({
+            content: [
+              { type: "text", text: JSON.stringify({ status: 409, body: answers.launchProblem }) },
+            ],
+            isError: true,
+            _meta: { [ACTIVE_SPACES_META_KEY]: answers.invokedSpaces },
+          });
+        }
         if (REFUSED.test(JSON.stringify(msg.params))) {
           return reply({
             content: [{ type: "text", text: JSON.stringify(PLATFORM_REFUSAL) }],
             isError: true,
+          });
+        }
+        const uri = (msg.params as { arguments?: { uri?: string } }).arguments?.uri;
+        if (uri?.startsWith("skill://")) {
+          return reply({
+            content: [
+              { type: "resource", resource: { uri, mimeType: "text/markdown", text: "# Tone" } },
+            ],
+          });
+        }
+        if ((msg.params as { name?: string }).name === "search") {
+          const found = {
+            operations: { total: 0, items: [] },
+            ...(answers.searched !== undefined ? { searched_spaces: answers.searched } : {}),
+          };
+          return reply({
+            content: [{ type: "text", text: JSON.stringify(found) }],
+            structuredContent: found,
           });
         }
         return reply({ content: [{ type: "text", text: "{}" }] });
@@ -139,6 +207,7 @@ function transcript() {
       events.push("launch");
       const body = await req.text();
       launches.push({ spaceHeader: req.headers.get("x-space-id"), body });
+      if (answers.launchProblem) return Response.json(answers.launchProblem, { status: 409 });
       if (REFUSED.test(body)) {
         return new Response(JSON.stringify({ status: 404, detail: "File not found" }), {
           status: 404,
@@ -156,7 +225,7 @@ function transcript() {
   }) as typeof fetch;
 
   const lookups: string[] = [];
-  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups };
+  return { fetch: fetchImpl, events, launches, polls, toolCalls, lookups, answers, chunks };
 }
 
 function organizationOf(
@@ -185,7 +254,11 @@ async function tools(transport: ReturnType<typeof transcript>, failingTouch?: st
     url: platformMcpUrl(ORIGIN, "org_1"),
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: organizationOf(transport, failingTouch),
-    writeChunk: () => {},
+    writeChunk: (chunk) => {
+      transport.events.push("chunk");
+      transport.chunks.push(chunk);
+    },
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: transport.fetch,
@@ -215,6 +288,70 @@ describe("a forwarded tool", () => {
       expect(refused.accepted).toEqual(SPACES.map((space) => space.id));
       expect(transport.events).toEqual([]);
       expect(transport.toolCalls).toEqual([]);
+    } finally {
+      await built.close();
+    }
+  });
+});
+
+describe("launch alternatives on a conversation", () => {
+  const wanted = { id: "spc_alpha", name: "An active destination" };
+  const problem = { code: "missing_integration_connection", active_in_spaces: [wanted] };
+  for (const name of ["invoke_operation", "run_and_wait"]) {
+    const args =
+      name === "invoke_operation"
+        ? { operation_id: "runAgent", space_id: "spc_beta" }
+        : { kind: "agent", scope: "@acme", name: "demo", space_id: "spc_beta" };
+    it(`records the spaces of the ${name} refusal before showing it`, async () => {
+      const transport = transcript();
+      transport.answers.launchProblem = problem;
+      transport.answers.invokedSpaces = [wanted.id];
+      const { built, tool } = await tools(transport);
+      try {
+        const result = await tool(name).execute("c", args);
+        expect(JSON.parse(text(result)).body.active_in_spaces).toEqual([wanted]);
+        expect(transport.events).toEqual(
+          name === "invoke_operation"
+            ? ["touch spc_beta", "tools/call", "touch spc_alpha"]
+            : ["touch spc_beta", "launch", "touch spc_alpha", "chunk"],
+        );
+      } finally {
+        await built.close();
+      }
+    });
+
+    it(`withholds the ${name} result and every card if a returned space cannot be recorded`, async () => {
+      const transport = transcript();
+      transport.answers.launchProblem = problem;
+      transport.answers.invokedSpaces = [wanted.id];
+      const { built, tool } = await tools(transport, wanted.id);
+      try {
+        const result = await tool(name).execute("c", args);
+        expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+        expect(text(result)).not.toContain(wanted.name);
+        expect(transport.chunks).toEqual([]);
+      } finally {
+        await built.close();
+      }
+    });
+  }
+
+  it("suggests only spaces where the chat's local run_and_wait can also read the run", async () => {
+    const transport = transcript();
+    transport.answers.launchProblem = {
+      ...problem,
+      active_in_spaces: [wanted, { id: "spc_runonly", name: "Run only" }],
+    };
+    const { built, tool } = await tools(transport);
+    try {
+      const result = await tool("run_and_wait").execute("c", {
+        kind: "agent",
+        scope: "@acme",
+        name: "demo",
+        space_id: "spc_beta",
+      });
+      expect(JSON.parse(text(result)).body.active_in_spaces).toEqual([wanted]);
+      expect(JSON.stringify(transport.chunks)).not.toContain("Run only");
     } finally {
       await built.close();
     }
@@ -292,6 +429,77 @@ describe("the conversation's forwarded tools and resources", () => {
     }
   });
 
+  it("records, after a call that omits an optional space_id, the spaces its result says it read, and none before", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_alpha"];
+    const { built, tool } = await tools(transport);
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(transport.events).toEqual(["tools/call", "touch spc_alpha"]);
+      expect(text(result)).toContain("searched_spaces");
+
+      // A result that lists none records none.
+      transport.answers.searched = undefined;
+      transport.events.length = 0;
+      await tool("search").execute("c2", { query: "x" });
+      expect(transport.events).toEqual(["tools/call"]);
+
+      // A named space is recorded before the call, as ever.
+      transport.events.length = 0;
+      await tool("search").execute("c3", { query: "x", space_id: "spc_beta" });
+      expect(transport.events).toEqual(["touch spc_beta", "tools/call"]);
+
+      transport.events.length = 0;
+      await tool("invoke_operation").execute("c4", { operation_id: "listAgents" });
+      expect(transport.events).toEqual(["tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("withholds the result of a call that read a space outside the turn", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_alpha", "spc_elsewhere"];
+    const { built, tool } = await tools(transport);
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+      expect(text(result)).not.toContain("operations");
+      expect(transport.events).toEqual(["tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("withholds the result of a call whose read spaces cannot be recorded", async () => {
+    const transport = transcript();
+    transport.answers.searched = ["spc_beta"];
+    const { built, tool } = await tools(transport, "spc_beta");
+    try {
+      const result = await tool("search").execute("c1", { query: "x" });
+      expect(JSON.parse(text(result))).toMatchObject({ code: "spaces_not_recorded" });
+      expect(text(result)).not.toContain("operations");
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("keeps the text of a skill read through `read` in the replay", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const result = (await tool("read").execute("c1", {
+        uri: "skill://spc_beta/acme/tone/tone/SKILL.md",
+        space_id: "spc_beta",
+      })) as { content: Array<{ text?: string }>; persistedContent?: unknown };
+      expect(result.content.map((block) => block.text).join("")).toContain("# Tone");
+      // No receipt stands in for it: the stored content is the text itself.
+      expect(result.persistedContent).toBeUndefined();
+    } finally {
+      await built.close();
+    }
+  });
+
   it("records the space of a resource URI it can place, before the read", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
@@ -336,7 +544,7 @@ describe("the files a call names", () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      await tool("read_file").execute("c1", {
+      await tool("read").execute("c1", {
         uri: "appfile://file_beta0001",
         space_id: "spc_alpha",
         again: ["appfile://file_gamma001", { deep: "appfile://file_own00001" }],

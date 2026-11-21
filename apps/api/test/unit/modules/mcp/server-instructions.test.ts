@@ -168,6 +168,27 @@ describe("MCP server instructions — connect bullet", () => {
     expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
   });
 
+  // #2336: a named connection is resolved from get_me and passed before launching.
+  it("tells the model to resolve a named connection from get_me before launching", () => {
+    const text = instructionsFor(permissions);
+    expect(text).toContain("When the request names a connection");
+    expect(text).toContain("each integration lists its `connections`");
+    expect(text).toContain("BEFORE launching");
+    expect(text).toContain("never launch without the integration the user asked for");
+  });
+
+  it("tells the model an `active: false` entry is a connection whose integration is off in that space", () => {
+    const text = instructionsFor(permissions);
+    expect(text).toContain("an entry with `active: false` is a connection the user holds");
+    expect(text).toContain("from chat, direct them to the package in the organization catalog");
+    expect(text).toContain(
+      "`offerPackageToOrg` for an owner or admin with an unconfined credential",
+    );
+    expect(text).toContain(
+      "never move it to another space where the integration is active without asking first",
+    );
+  });
+
   it("says a schedule write wants the user's one connection named too", () => {
     const bullet = instructionsFor(permissions)
       .split("\n")

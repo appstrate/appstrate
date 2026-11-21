@@ -28,12 +28,13 @@
 
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packageVersions, packages, schedules } from "@appstrate/db/schema";
+import { packageVersions, packages, schedules } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { getLatestVersionInfo, getVersionRow } from "./package-versions.ts";
 import { isPackageActiveHere } from "./space-packages.ts";
+import { placedSpaceIds } from "./package-placement.ts";
 
 interface Finding {
   packageId: string;
@@ -173,12 +174,10 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     const latest = await getLatestVersionInfo(agent.id);
 
     // The ONE activation rule, asked once per space holding a row for this
-    // agent (`isPackageActiveHere`): an operator report that named rows would
-    // name spaces where the agent cannot run at all.
-    const rowSpaces = await db
-      .select({ spaceId: spacePackages.spaceId })
-      .from(spacePackages)
-      .where(eq(spacePackages.packageId, agent.id));
+    // agent, or per space of the organization when it is offered to it
+    // (`placedSpaceIds`, then `isPackageActiveHere`): an operator report that
+    // named rows would name spaces where the agent cannot run at all.
+    const rowSpaces = (await placedSpaceIds(orgId, agent.id)).map((spaceId) => ({ spaceId }));
     const rowVerdicts = await Promise.all(
       rowSpaces.map(async (row) => ({
         spaceId: row.spaceId,

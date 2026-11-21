@@ -33,9 +33,9 @@ const NO_PACKAGE_RESOURCES = {
  * those two methods, because an unpatched loader would scan the host.
  *
  * Every session also gets {@link inlineImageBudgetExtension}. It sits in this
- * shared loader so every session builder (runs and chat) gets it; chat carries
- * no tool-result images today (module-chat flattens MCP images to text and has
- * no built-in tools), so in practice it protects runs.
+ * shared loader so every session builder (runs and chat) gets it. Chat has no
+ * built-in tools, but its relayed MCP tool results and resource reads can carry
+ * image blocks, so the budget applies there too.
  */
 export async function createIsolatedResourceLoader({
   DefaultResourceLoader,

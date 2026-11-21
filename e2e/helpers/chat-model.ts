@@ -28,7 +28,9 @@ export async function withLocalChatModel<T>(
     modelId: string;
     input: Array<"text" | "image">;
     /** The assistant's reply to a request; receives the parsed Chat Completions body. */
-    reply: (body: ChatCompletionBody) => string;
+    reply: (
+      body: ChatCompletionBody,
+    ) => string | Response | { name: string; arguments: Record<string, unknown> };
   },
   run: (model: LocalChatModel) => Promise<T>,
 ): Promise<T> {
@@ -41,16 +43,30 @@ export async function withLocalChatModel<T>(
     }
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
-    const content = reply(JSON.parse(Buffer.concat(chunks).toString()) as ChatCompletionBody);
+    const answer = reply(JSON.parse(Buffer.concat(chunks).toString()) as ChatCompletionBody);
+    if (answer instanceof Response) {
+      res.writeHead(answer.status, Object.fromEntries(answer.headers)).end(await answer.text());
+      return;
+    }
+    const toolCall =
+      typeof answer === "string"
+        ? undefined
+        : {
+            index: 0,
+            id: `call_${answer.name}`,
+            type: "function",
+            function: { name: answer.name, arguments: JSON.stringify(answer.arguments) },
+          };
+    const delta = toolCall ? { tool_calls: [toolCall] } : { content: answer };
     const frame = {
       id: "e2e-chat",
       model: modelId,
       object: "chat.completion.chunk",
-      choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }],
+      choices: [{ index: 0, delta: { role: "assistant", ...delta }, finish_reason: null }],
     };
     const end = {
       ...frame,
-      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      choices: [{ index: 0, delta: {}, finish_reason: toolCall ? "tool_calls" : "stop" }],
       usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
     };
     res

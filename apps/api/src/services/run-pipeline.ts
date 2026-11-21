@@ -49,6 +49,7 @@ import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
+import type { LaunchSpacesLookup } from "../lib/launch-spaces.ts";
 import type { FileReference } from "./run-launcher/types.ts";
 import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -207,6 +208,8 @@ export async function resolveRunPreflight(params: {
    * request and no human to hand a link to, so it passes nothing.
    */
   connectOffers?: ConnectOfferPolicy | null;
+  /** Request paths only, like `connectOffers`: forwarded to readiness verbatim. */
+  launchSpaces?: LaunchSpacesLookup;
 }): Promise<ResolutionFieldError[]> {
   const { agent, spaceId, orgId, actor } = params;
 
@@ -268,6 +271,7 @@ export async function resolveRunPreflight(params: {
     ...(params.launchOverrides ? { launchOverrides: params.launchOverrides } : {}),
     manifestCache,
     ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
+    ...(params.launchSpaces ? { launchSpaces: params.launchSpaces } : {}),
   });
 }
 

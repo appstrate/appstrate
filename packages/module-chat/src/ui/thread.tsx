@@ -43,16 +43,16 @@ import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
-  SearchOperationsToolUI,
-  DescribeOperationToolUI,
+  SearchToolUI,
+  DescribeToolUI,
   ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import {
-  getSelectedModelAcceptsImages,
-  getSelectedModelReadsPdf,
+  getSelectedModelSendsImages,
+  getSelectedModelSendsPdf,
   subscribeModel,
 } from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
@@ -65,6 +65,7 @@ import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useConversationScope } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { ContextGauge } from "./context-gauge.tsx";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
@@ -138,8 +139,8 @@ export function Thread({
         {/* Register the rich tool cards (these render nothing themselves). */}
         <InvokeOperationToolUI />
         <RunAndWaitToolUI />
-        <SearchOperationsToolUI />
-        <DescribeOperationToolUI />
+        <SearchToolUI />
+        <DescribeToolUI />
         <ImportPackageFileToolUI />
 
         {/* Empty: composer centered mid-screen for a strong first impression.
@@ -294,23 +295,22 @@ function ComposerAttachmentChip() {
   const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, openFile, t } = useChatHost();
-  // A model known not to read images only gets the file's pointer: say so under the chip.
-  const acceptsImages = React.useSyncExternalStore(
+  // A file the selected model is declared unable to take only gets its pointer: say so under the chip.
+  const sendsImages = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelAcceptsImages,
-    getSelectedModelAcceptsImages,
+    getSelectedModelSendsImages,
+    getSelectedModelSendsImages,
   );
-  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
-  const readsPdf = React.useSyncExternalStore(
+  const sendsPdf = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelReadsPdf,
-    getSelectedModelReadsPdf,
+    getSelectedModelSendsPdf,
+    getSelectedModelSendsPdf,
   );
   const notice =
-    file && isImageMime(file.type) && acceptsImages === false
-      ? t("composer.imageNotSeen")
-      : file?.type === "application/pdf" && readsPdf === false
-        ? t("composer.pdfNotRead")
+    file && isImageMime(file.type) && !sendsImages
+      ? t("composer.imageNotSent")
+      : file?.type === "application/pdf" && !sendsPdf
+        ? t("composer.pdfNotSent")
         : undefined;
   const preview =
     openFile && file && localPreviewKind(file.type)
@@ -328,24 +328,20 @@ function ComposerAttachmentChip() {
         name={name}
         file={file}
         preview={preview}
-        trailing={
-          <>
-            {size > 0 && (
-              <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
-            )}
-            <AttachmentPrimitive.Remove asChild>
-              <button
-                type="button"
-                aria-label={t("composer.removeAttachment")}
-                className={cn(
-                  "text-muted-foreground hover:text-foreground desktop-pointer:size-3.5",
-                  CHIP_REMOVE_CLASS,
-                )}
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </AttachmentPrimitive.Remove>
-          </>
+        sizeLabel={size > 0 ? formatBytes(size) : undefined}
+        remove={
+          <AttachmentPrimitive.Remove asChild>
+            <button
+              type="button"
+              aria-label={t("composer.removeAttachment")}
+              className={cn(
+                "text-muted-foreground hover:text-foreground desktop-pointer:size-3.5",
+                CHIP_REMOVE_CLASS,
+              )}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </AttachmentPrimitive.Remove>
         }
       />
       {notice && (
@@ -641,6 +637,7 @@ function Composer({
           {slot}
         </div>
         <div className="flex items-center gap-2 [grid-area:send]">
+          <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild disabled={limitPending}>
               <Button

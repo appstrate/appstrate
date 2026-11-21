@@ -471,7 +471,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       email: "stage3@example.com",
       scope: "openid profile email",
     });
-    const denied = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const denied = await app.request(`/api/orgs/${orgId}/access-grants`, {
       headers: { Authorization: `Bearer ${identityOnly}` },
     });
     expect(denied.status).toBe(403);

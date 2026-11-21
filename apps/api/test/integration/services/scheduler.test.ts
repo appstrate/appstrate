@@ -358,6 +358,7 @@ describeRequiresRedis("scheduler service", () => {
           description: "Other",
         },
       });
+      await seedSpacePackage(otherDefaultSpaceId, otherPkg.id);
       await createJudgedSchedule(
         { orgId: otherOrg.id, spaceId: otherDefaultSpaceId },
         otherPkg.id,
@@ -406,6 +407,7 @@ describeRequiresRedis("scheduler service", () => {
         name: "Agent 1 Schedule",
         cronExpression: "0 * * * *",
       });
+      await seedSpacePackage(defaultSpaceId, pkg2.id);
       await createJudgedSchedule({ orgId: orgId, spaceId: defaultSpaceId }, pkg2.id, actor, {
         name: "Agent 2 Schedule",
         cronExpression: "*/15 * * * *",
@@ -1363,6 +1365,7 @@ describeRequiresRedis("scheduler service", () => {
         })
         .returning({ id: integrationConnections.id });
       await seedShares(conn!.id, [closed.id]);
+      await seedSpacePackage(closed.id, packageId);
       const schedule = await createJudgedSchedule({ orgId, spaceId: closed.id }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [conn!.id] },
@@ -1399,6 +1402,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
     packageId = (await seedPackage({ orgId: ctx.orgId, id: "@casorg/agent" })).id;
+    await seedSpacePackage(scope.spaceId, packageId);
   });
 
   /** The caller's read of a new schedule — what a PATCH judges, then writes against. */
@@ -1577,6 +1581,7 @@ describe("schedule disabled_reason", () => {
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
     packageId = (await seedPackage({ orgId: ctx.orgId, id: "@reasonorg/agent" })).id;
+    await seedSpacePackage(scope.spaceId, packageId);
   });
 
   const create = () =>

@@ -18,7 +18,7 @@
  * problem, never a reason to drop the job.
  */
 
-import { and, eq, lt, lte, isNull, isNotNull, inArray, sql, desc, gte, or } from "drizzle-orm";
+import { and, eq, lte, isNull, isNotNull, inArray, sql, desc, gte } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { storageDeletionJobs } from "@appstrate/db/schema";
 import {
@@ -31,7 +31,7 @@ import { getEnv } from "@appstrate/env";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import type { DbOrTx } from "../lib/db-helpers.ts";
+import { olderThanTimestampCursor, type DbOrTx } from "../lib/db-helpers.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   RUN_WORKSPACE_BUCKET,
@@ -405,31 +405,17 @@ export async function listStorageDeletionJobs(params: {
   startingAfter?: string;
 }): Promise<ListEnvelope<StorageDeletionJobView>> {
   const { limit } = params;
-  const conditions = [statusFilter(params.status)];
-
-  if (params.startingAfter) {
-    const [cursor] = await db
-      .select({ createdAt: storageDeletionJobs.createdAt, id: storageDeletionJobs.id })
-      .from(storageDeletionJobs)
-      .where(eq(storageDeletionJobs.id, params.startingAfter))
-      .limit(1);
-    if (cursor) {
-      conditions.push(
-        or(
-          lt(storageDeletionJobs.createdAt, cursor.createdAt),
-          and(
-            eq(storageDeletionJobs.createdAt, cursor.createdAt),
-            lt(storageDeletionJobs.id, cursor.id),
-          ),
-        )!,
-      );
-    }
-  }
+  const boundary = await olderThanTimestampCursor(
+    storageDeletionJobs.createdAt,
+    storageDeletionJobs.id,
+    params.startingAfter,
+    undefined, // Operator list spans all jobs, including a cursor whose status has changed.
+  );
 
   const rows = await db
     .select()
     .from(storageDeletionJobs)
-    .where(and(...conditions))
+    .where(and(statusFilter(params.status), boundary))
     .orderBy(desc(storageDeletionJobs.createdAt), desc(storageDeletionJobs.id))
     .limit(limit + 1);
 

@@ -93,8 +93,8 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
  * A minted `connect_url` is a bearer capability that creates a connection AS
  * the calling actor. Set this header ONLY from a caller that either renders the
  * connect card itself (the chat) or hands the link straight to the human who is
- * that actor — the external MCP `run_and_wait`, `search_integration_tools` and
- * `call_integration_tool` tools qualify, because the model driving them already
+ * that actor — the external MCP `run_and_wait`, `search` / `describe` (integration
+ * tools) and `call_integration_tool` tools qualify, because the model driving them already
  * receives a `connect_url` from `initiateIntegrationConnect` on that very same
  * path, so this is not a new exposure class. Never set it from
  * a caller that logs its responses, persists them, or forwards them to a third

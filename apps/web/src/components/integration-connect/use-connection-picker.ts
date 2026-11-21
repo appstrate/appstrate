@@ -65,6 +65,7 @@ export interface ConnectionPickerOptions {
   persistence: ConnectionPickerPersistence;
   /** Version the readiness verdict is read for, so a launch form matches what it runs. Omitted: the server's default. */
   version?: string;
+  scheduleId?: string;
 }
 
 /** `openPopup` is injectable for tests (must resolve `true` once active integration queries refetched). */
@@ -106,6 +107,7 @@ export function useConnectionPicker(
     agentScopes,
     persistence,
     version,
+    scheduleId,
   }: ConnectionPickerOptions,
   deps: ConnectionPickerDeps = {},
 ) {
@@ -114,8 +116,14 @@ export function useConnectionPicker(
     integrationId,
     agentPackageId,
     version,
+    scheduleId,
   );
-  const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
+  const readResolution = useReadIntegrationResolution(
+    integrationId,
+    agentPackageId,
+    version,
+    scheduleId,
+  );
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
   const hostedPopup = useHostedConnectPopup();

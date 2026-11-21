@@ -63,7 +63,7 @@ import { assertVersionNotLower, findHigherPublishedVersion } from "./package-ver
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { activatePackage, type PlacementAuthority } from "./space-packages.ts";
+import { activatePackage, activationWarnings, type PlacementAuthority } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -614,6 +614,14 @@ export async function importBundle(
       spaceId: scope.spaceId,
       err: getErrorMessage(err),
     });
+  }
+
+  // An agent root now on here: each declared integration it would run without, or be refused on.
+  if (rootActive) {
+    const rootType = bundleRootType(bundle);
+    for (const w of await activationWarnings(scope, rootParsed.packageId, rootType)) {
+      warnings.push(`${bundle.root}: ${w.message}`);
+    }
   }
 
   return {

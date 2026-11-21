@@ -46,6 +46,11 @@ export type AgentSessionEvent =
   | { type: "turn_end"; message: unknown; toolResults: unknown[] }
   | { type: "agent_end"; messages: unknown[] }
   | {
+      type: "compaction_end";
+      result: unknown;
+      aborted: boolean;
+    }
+  | {
       type: "tool_execution_end";
       toolCallId: string;
       toolName: string;
@@ -108,6 +113,7 @@ type _MessageEnd = Assert<Conforms<VendorEvent<"message_end">, OurEvent<"message
 type _TurnEnd = Assert<Conforms<VendorEvent<"turn_end">, OurEvent<"turn_end">>>;
 type _AgentEnd = Assert<Conforms<VendorEvent<"agent_end">, OurEvent<"agent_end">>>;
 type _ToolEnd = Assert<Conforms<VendorEvent<"tool_execution_end">, OurEvent<"tool_execution_end">>>;
+type _CompactionEnd = Assert<Conforms<VendorEvent<"compaction_end">, OurEvent<"compaction_end">>>;
 
 // Assistant-stream events the mapper branches on. Asserted per variant, not on
 // the whole union: a NEW streaming variant Pi adds and the mapper ignores is
@@ -153,6 +159,7 @@ type VendorConformance = _MessageStart &
   _TurnEnd &
   _AgentEnd &
   _ToolEnd &
+  _CompactionEnd &
   _StreamTextStart &
   _StreamTextDelta &
   _StreamTextEnd &

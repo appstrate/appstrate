@@ -858,6 +858,17 @@ export const credentialProxyPaths = {
             "`X-Connection-Id` names one on `/api/credential-proxy/proxy`.",
           schema: { type: "string", format: "uuid" },
         },
+        {
+          name: "catalogs",
+          in: "query",
+          required: false,
+          description:
+            "`live` (the default) reads a remote catalog the cache does not hold from its " +
+            "server, as described above. `cached` reads the cache alone: a catalog not in it is " +
+            "not listed, so no server is contacted, no credential sent and no call journaled; its " +
+            "declared tools are listed `catalog_unreadable`, and the integration in `uncached`.",
+          schema: { type: "string", enum: ["live", "cached"] },
+        },
       ],
       responses: {
         "200": {
@@ -872,7 +883,14 @@ export const credentialProxyPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["tools", "connections", "not_ready", "unlisted", "truncated_catalogs"],
+                required: [
+                  "tools",
+                  "connections",
+                  "not_ready",
+                  "unlisted",
+                  "truncated_catalogs",
+                  "uncached",
+                ],
                 additionalProperties: false,
                 properties: {
                   tools: { type: "array", items: integrationToolSchema },
@@ -914,6 +932,13 @@ export const credentialProxyPaths = {
                         },
                       },
                     },
+                  },
+                  uncached: {
+                    type: "array",
+                    description:
+                      "With `catalogs=cached`: the remote integrations whose catalog the cache " +
+                      "did not hold, listed by their declared tools. Empty otherwise.",
+                    items: { type: "string" },
                   },
                 },
               },

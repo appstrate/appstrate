@@ -13,7 +13,7 @@ import { db } from "@appstrate/db/client";
 import { integrationConnectionShares, integrationConnections } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestOrg, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { orgPermissions, presetPermissions } from "../../../src/lib/permissions.ts";
@@ -150,5 +150,82 @@ describe("its owner's connections under a space allowlist", () => {
       [inside]: "Renamed",
       [orgWide]: "Org",
     });
+  });
+});
+
+describe("an unlimited conversation's bearer acts within its organization, as the member does", () => {
+  const bearer = (restricted: boolean) =>
+    loopbackHeaders(owner, owner.orgId, {
+      orgRole: "owner",
+      permissions: [...orgPermissions("owner"), ...presetPermissions("admin"), "mcp:read"],
+      spaceIds: [owner.defaultSpaceId],
+      restricted,
+    });
+
+  /** The owner's connection of a second organization they also own. */
+  async function seedOtherOrgConnection(): Promise<string> {
+    const { org, defaultSpaceId } = await createTestOrg(owner.user.id);
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@chatorg/gmail",
+        authKey: "google",
+        accountId: "acct-other",
+        orgId: org.id,
+        spaceId: null,
+        originSpaceId: defaultSpaceId,
+        userId: owner.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "Other org",
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  const call = (headers: Record<string, string>, path: string, method = "GET", body?: unknown) =>
+    app.request(path, {
+      method,
+      headers: { ...headers, "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+  const listedIds = async (headers: Record<string, string>) => {
+    const listed = (await (await call(headers, "/api/me/connections")).json()) as {
+      data: Array<{ connections: Array<{ connection_id: string }> }>;
+    };
+    return listed.data.flatMap((group) => group.connections.map((row) => row.connection_id));
+  };
+
+  it("lists and renames its org's org-scope connection, and sees nothing of another org", async () => {
+    const mine = await seedConnection(null, "Org");
+    const other = await seedOtherOrgConnection();
+    const headers = bearer(false);
+
+    expect(await listedIds(headers)).toEqual([mine]);
+    expect(
+      (await call(headers, `/api/me/connections/${mine}`, "PATCH", { label: "Renamed" })).status,
+    ).toBe(200);
+    // A delete is idempotent (204), but the row of the other org stays.
+    expect((await call(headers, `/api/me/connections/${other}`, "DELETE")).status).toBe(204);
+    expect(
+      (await call(headers, `/api/me/connections/${other}`, "PATCH", { label: "x" })).status,
+    ).toBe(404);
+    expect((await call(headers, `/api/me/connections/${mine}`, "DELETE")).status).toBe(204);
+    const left = await db.select({ id: integrationConnections.id }).from(integrationConnections);
+    expect(left.map((row) => row.id)).toEqual([other]);
+  });
+
+  it("a limited conversation's bearer sees nothing of another org either, and deletes no org-scope row", async () => {
+    const mine = await seedConnection(null, "Org");
+    const other = await seedOtherOrgConnection();
+    const headers = bearer(true);
+
+    expect(await listedIds(headers)).toEqual([mine]);
+    // A delete is idempotent (204), but the row of the other org stays.
+    expect((await call(headers, `/api/me/connections/${other}`, "DELETE")).status).toBe(204);
+    expect((await call(headers, `/api/me/connections/${mine}`, "DELETE")).status).toBe(403);
+    const left = await db.select({ id: integrationConnections.id }).from(integrationConnections);
+    expect(left.map((row) => row.id).sort()).toEqual([mine, other].sort());
   });
 });

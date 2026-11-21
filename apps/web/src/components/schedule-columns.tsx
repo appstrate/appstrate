@@ -21,7 +21,8 @@ import type { DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { CountBadge } from "./count-badge";
 import { ActorLabel } from "./actor-label";
-import { CellDate, CellPlaceholder, CellText } from "./table-cells";
+import { CellEmpty, CellPlaceholder, CellText } from "./table-cells";
+import { ScheduledAt } from "./scheduled-at";
 import { formatDateField } from "../lib/format-date";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
@@ -101,12 +102,20 @@ export function useScheduleColumns({
     {
       id: "next",
       header: t("schedules.column.next"),
-      width: 110,
+      width: 200,
       elastic: true,
       align: "end",
-      cell: (schedule) => (
-        <CellDate value={scheduleNextRunAt(schedule)} timeZone={schedule.timezone} />
-      ),
+      cell: (schedule) => {
+        const nextRunAt = scheduleNextRunAt(schedule);
+        return nextRunAt ? (
+          // A narrow column cuts the date, never how soon: the date stays on hover.
+          <CellText title={formatDateField(nextRunAt, "datetime", schedule.timezone)}>
+            <ScheduledAt at={nextRunAt} timeZone={schedule.timezone} />
+          </CellText>
+        ) : (
+          <CellEmpty />
+        );
+      },
     },
     {
       id: "last",

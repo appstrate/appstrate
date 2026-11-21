@@ -72,7 +72,7 @@ describe("collectPrincipalPermissions — boot validation", () => {
       manifest: { id: "grantor", name: "Grantor", version: "1.0.0" },
       async init() {},
       permissionsContribution: () => [
-        { resource: "cli-sessions", actions: ["read"], level: "org", grantTo: ["owner"] },
+        { resource: "access-grants", actions: ["read"], level: "org", grantTo: ["owner"] },
         // Org-level too, but opted into API keys — the neighbour that must fail.
         {
           resource: "oauth-clients",
@@ -85,9 +85,9 @@ describe("collectPrincipalPermissions — boot validation", () => {
       principalPermissions: { mayGrant, resolve: async () => [] },
     });
 
-    const ok = contributor(["cli-sessions:read"]);
+    const ok = contributor(["access-grants:read"]);
     withSnapshot([ok]);
-    expect(collectPrincipalPermissions([ok])[0]!.mayGrant).toEqual(["cli-sessions:read"]);
+    expect(collectPrincipalPermissions([ok])[0]!.mayGrant).toEqual(["access-grants:read"]);
 
     const bad = contributor(["oauth-clients:read"]);
     withSnapshot([bad]);

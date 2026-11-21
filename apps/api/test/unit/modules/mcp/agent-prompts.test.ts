@@ -78,7 +78,10 @@ function provider(spaces: PromptSpace[], agentsBySpace: Record<string, FakeAgent
     prompts: buildAgentPromptProvider({
       origin: "http://localhost:3000",
       authHeaders: new Headers({ authorization: "Bearer test" }),
-      dispatch: fake.dispatch,
+      dispatchIn: (spaceId) => (request) => {
+        request.headers.set("x-space-id", spaceId);
+        return fake.dispatch(request);
+      },
       spaces,
     }),
     requests: fake.requests,

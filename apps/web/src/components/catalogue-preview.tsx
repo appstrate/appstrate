@@ -60,6 +60,7 @@ import {
 import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
 import { SettingsGroup } from "./settings/setting-row";
+import { OrgOfferRow } from "./org-offer-row";
 import { ManifestOverview } from "./package-manifest/manifest-overview";
 import { SettingsHeading } from "./settings/settings-heading";
 
@@ -220,10 +221,16 @@ export function CataloguePreview({
   // A version carries its own description; the row's is the current one's.
   const description = (pinnedVersion ? detail?.description : undefined) || item.description;
 
+  // Active with no row of its own: the organization's offer runs it here.
+  const viaOrganization = new Set(
+    item.placements.filter((entry) => entry.via === "organization").map((entry) => entry.space_id),
+  );
   const stateLabel = (row: SheetSpaceRow) => {
     const base =
       row.state === "active"
-        ? t("catalogue.filter.active")
+        ? viaOrganization.has(row.id)
+          ? t("catalogue.sheet.viaOrganization")
+          : t("catalogue.filter.active")
         : row.state === "inactive"
           ? [
               t("catalogue.filter.inactive"),
@@ -401,6 +408,7 @@ export function CataloguePreview({
       <ManifestOverview manifest={(agent ?? other)?.manifest} />
 
       <SettingsGroup title={t("orgSettings.inviteSpacesLabel")} className="mt-8 mb-0">
+        <OrgOfferRow item={item} />
         {mode === "readonly" && (
           <p className="text-sm">
             {placement.activeIn.length > 0

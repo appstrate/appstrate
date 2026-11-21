@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `search_integration_tools` and `call_integration_tool` through the real `/api/mcp/o/:org`
+ * the `integration_tool` kind of `search`/`describe` and `call_integration_tool` through the real `/api/mcp/o/:org`
  * endpoint, the real
  * credential-proxy routes behind them and a real minted MCP instance token (DCR client,
  * authorization-code flow, `aud` = the organization's MCP resource):
@@ -14,7 +14,7 @@
  *     upstream's answer, cut and filtered, or the proxy's own refusal. A connection another
  *     member shared is reached once named by a holder of `credential-proxy:call`, never with
  *     `credential-proxy:call-own` alone;
- *   - `search_integration_tools` and the catalog's listing operation serve the same rows: the caller's
+ *   - `search` (kind `integration_tool`) and the catalog's listing operation serve the same rows: the caller's
  *     own, and for a holder of `credential-proxy:call` those shared into the space;
  *   - a remote MCP integration's typed tool (a fake server on loopback) searched, described and
  *     called on both endpoints, an integration nobody connected in `not_ready` with its connect
@@ -42,7 +42,12 @@ import {
   memberHolding,
   type TestContext,
 } from "../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
+import {
+  seedApiKey,
+  seedSpace,
+  seedSpaceMember,
+  seedSpacePackage,
+} from "../../../../../test/helpers/seed.ts";
 import { seedShares } from "../../../../../test/helpers/connection-shares.ts";
 import {
   seedProxyConnection,
@@ -200,14 +205,31 @@ async function mcp(
 interface ListedTool {
   name: string;
   description: string;
-  inputSchema: { required?: string[] };
+  annotations?: Record<string, unknown>;
+  inputSchema: {
+    required?: string[];
+    properties?: Record<string, { items?: { enum?: string[] } }>;
+  };
 }
 
 async function listTools(caller: Caller): Promise<ListedTool[]> {
   return ((await mcp(caller, "tools/list")).result?.tools as ListedTool[]) ?? [];
 }
 
-const toolNames = async (caller: Caller) => (await listTools(caller)).map((tool) => tool.name);
+/**
+ * Stands for "`search` declares the `integration_tool` kind" in `toolNames`: the kind is no tool
+ * of its own, but it is declared exactly where `call_integration_tool` is.
+ */
+const INTEGRATION_KIND = "search (integration_tool kind)";
+
+const toolNames = async (caller: Caller) => {
+  const tools = await listTools(caller);
+  const kinds = tools.find((tool) => tool.name === "search")?.inputSchema.properties?.kinds;
+  return [
+    ...tools.map((tool) => tool.name),
+    ...(kinds?.items?.enum?.includes("integration_tool") ? [INTEGRATION_KIND] : []),
+  ];
+};
 
 async function callTool(
   caller: Caller,
@@ -305,14 +327,14 @@ describe("mcp integration tools", () => {
       for (const preset of ["admin", "operator"] as const) {
         const caller = preset === "admin" ? owner : await memberContext(owner, "member", preset);
         const names = await toolNames(await instanceCaller(caller));
-        expect(names, preset).toContain("search_integration_tools");
+        expect(names, preset).toContain(INTEGRATION_KIND);
         expect(names, preset).toContain("call_integration_tool");
       }
 
       const runner = await toolNames(
         await instanceCaller(await memberContext(owner, "member", "runner")),
       );
-      expect(runner).not.toContain("search_integration_tools");
+      expect(runner).not.toContain(INTEGRATION_KIND);
       expect(runner).not.toContain("call_integration_tool");
       // The control: a runner runs agents, which is not what declares the tools.
       expect(runner).toContain("run_and_wait");
@@ -322,7 +344,7 @@ describe("mcp integration tools", () => {
       const names = await toolNames(
         await instanceCaller(await memberHolding(owner, CALL_OWN_ROLE)),
       );
-      expect(names).toContain("search_integration_tools");
+      expect(names).toContain(INTEGRATION_KIND);
       expect(names).toContain("call_integration_tool");
     });
 
@@ -337,7 +359,7 @@ describe("mcp integration tools", () => {
         path: spacePath(owner, personal.id),
         headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
       });
-      expect(names).toContain("search_integration_tools");
+      expect(names).toContain(INTEGRATION_KIND);
       expect(names).toContain("call_integration_tool");
       expect(names).toContain("run_and_wait");
     });
@@ -347,7 +369,7 @@ describe("mcp integration tools", () => {
       const without = await toolNames(
         await keyCaller(owner, ["mcp:read", "mcp:invoke", "agents:run", "runs:read"]),
       );
-      expect(without).not.toContain("search_integration_tools");
+      expect(without).not.toContain(INTEGRATION_KIND);
       expect(without).not.toContain("call_integration_tool");
       expect(without).toContain("run_and_wait");
 
@@ -356,7 +378,7 @@ describe("mcp integration tools", () => {
         const withIt = await toolNames(
           await keyCaller(owner, ["mcp:read", "mcp:invoke", permission]),
         );
-        expect(withIt, permission).toContain("search_integration_tools");
+        expect(withIt, permission).toContain(INTEGRATION_KIND);
         expect(withIt, permission).toContain("call_integration_tool");
       }
     });
@@ -366,7 +388,7 @@ describe("mcp integration tools", () => {
         path: spacePath(owner),
         headers: { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
       });
-      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain(INTEGRATION_KIND);
       expect(names).not.toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
     });
@@ -386,7 +408,7 @@ describe("mcp integration tools", () => {
         path: spacePath(owner),
         headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
       });
-      expect(names).toContain("search_integration_tools");
+      expect(names).toContain(INTEGRATION_KIND);
       expect(names).toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
       expect(names).toContain("run_and_wait");
@@ -410,7 +432,7 @@ describe("mcp integration tools", () => {
       // Granted in one of the two spaces: the description names it, and only it.
       const availableIn = apiCall.description.slice(
         0,
-        apiCall.description.indexOf("Call a tool search_integration_tools"),
+        apiCall.description.indexOf("Call an integration tool search returned"),
       );
       expect(availableIn).toStartWith("Available in: ");
       expect(availableIn).toContain(owner.defaultSpaceId);
@@ -438,17 +460,17 @@ describe("mcp integration tools", () => {
     it("declares neither in a space that closes the credential proxy, to the org owner too", async () => {
       const caller = await instanceCaller(owner);
       expect(await toolNames(caller)).toEqual(
-        expect.arrayContaining(["search_integration_tools", "call_integration_tool"]),
+        expect.arrayContaining([INTEGRATION_KIND, "call_integration_tool"]),
       );
       await db
         .update(spaces)
         .set({ credentialProxyOpen: false })
         .where(eq(spaces.id, owner.defaultSpaceId));
       const names = await toolNames(caller);
-      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain(INTEGRATION_KIND);
       expect(names).not.toContain("call_integration_tool");
       const getMe = (await listTools(caller)).find((tool) => tool.name === "get_me")!;
-      expect(getMe.description).not.toContain("search_integration_tools");
+      expect(getMe.description).not.toContain("`integration_tool` kind");
     });
 
     it("withholds them per space on the organization's endpoint when one space is closed", async () => {
@@ -464,7 +486,7 @@ describe("mcp integration tools", () => {
       )!;
       const availableIn = callIntegrationTool.description.slice(
         0,
-        callIntegrationTool.description.indexOf("Call a tool search_integration_tools"),
+        callIntegrationTool.description.indexOf("Call an integration tool search returned"),
       );
       expect(availableIn).toContain(owner.defaultSpaceId);
       expect(availableIn).not.toContain(closed.id);
@@ -483,6 +505,155 @@ describe("mcp integration tools", () => {
       expect(error).toContain(`'Coffre' (${closed.id}) closes the credential proxy outside a run`);
       expect(error).not.toContain("role");
       expect(upstreamCalls).toHaveLength(0);
+    });
+
+    it("annotates search and describe as reaching third-party servers when they declare the kind", async () => {
+      const annotations = async (caller: Caller) => {
+        const tools = await listTools(caller);
+        return ["search", "describe"].map(
+          (name) => tools.find((tool) => tool.name === name)!.annotations,
+        );
+      };
+      for (const hints of await annotations(await instanceCaller(owner))) {
+        expect(hints).toMatchObject({
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        });
+      }
+      const runner = await instanceCaller(await memberContext(owner, "member", "runner"));
+      for (const hints of await annotations(runner)) {
+        expect(hints).toMatchObject({ readOnlyHint: true, openWorldHint: false });
+      }
+    });
+
+    it("refuses the integration tool kind in a space that closes the proxy, and leaves it out of a default search", async () => {
+      const closed = await seedSpace({ orgId: owner.orgId, name: "Coffre" });
+      await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, closed.id));
+      const caller: Caller = {
+        path: `/api/mcp/o/${owner.orgId}`,
+        headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+      };
+
+      for (const [name, args] of [
+        ["search", { kinds: ["integration_tool"] }],
+        ["describe", { kind: "integration_tool", id: TOOL }],
+      ] as const) {
+        const refused = await callTool(caller, name, { space_id: closed.id, ...args });
+        expect(refused.isError, name).toBe(true);
+        expect(refused.data, name).toMatchObject({
+          code: "credential_proxy_closed",
+          space: { id: closed.id, name: "Coffre" },
+          granted_in: [owner.defaultSpaceId],
+        });
+      }
+
+      const defaulted = await callTool(caller, "search", { space_id: closed.id });
+      expect(defaulted.isError).toBe(false);
+      expect(defaulted.data.integration_tools).toBeUndefined();
+      expect(defaulted.data.operations).toBeDefined();
+      expect(upstreamCalls).toHaveLength(0);
+    });
+
+    it("refuses the integration tool kind with not_granted where the role lacks the proxy permission", async () => {
+      const operator = await memberContext(owner, "member", "operator");
+      const other = await seedSpace({ orgId: owner.orgId, name: "Autre" });
+      await seedSpaceMember({ spaceId: other.id, userId: operator.user.id, presetRole: "runner" });
+      const caller: Caller = {
+        path: `/api/mcp/o/${owner.orgId}`,
+        headers: { Authorization: `Bearer ${await mintInstanceToken(operator)}` },
+      };
+
+      for (const [name, args] of [
+        ["search", { kinds: ["integration_tool"] }],
+        ["describe", { kind: "integration_tool", id: TOOL }],
+      ] as const) {
+        const refused = await callTool(caller, name, { space_id: other.id, ...args });
+        expect(refused.isError, name).toBe(true);
+        expect(refused.data, name).toMatchObject({
+          code: "not_granted",
+          space: { id: other.id, name: "Autre" },
+          granted_in: [owner.defaultSpaceId],
+        });
+      }
+
+      const defaulted = await callTool(caller, "search", { space_id: other.id });
+      expect(defaulted.isError).toBe(false);
+      expect(defaulted.data.integration_tools).toBeUndefined();
+    });
+
+    describe("searching across spaces", () => {
+      let other: { id: string };
+      let caller: Caller;
+
+      beforeEach(async () => {
+        // An org-scoped connection serves every space the integration is active in.
+        await connect(owner, "mine");
+        await db
+          .update(integrationConnections)
+          .set({ spaceId: null })
+          .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+        other = await seedSpace({ orgId: owner.orgId, name: "Atelier" });
+        await seedSpacePackage(other.id, INTEGRATION_ID);
+        caller = {
+          path: `/api/mcp/o/${owner.orgId}`,
+          headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+        };
+      });
+
+      const items = (data: Record<string, unknown>) =>
+        (data.integration_tools as { items: Array<{ id: string; granted_in: string[] }> }).items;
+
+      it("lists a tool usable in two spaces once, naming both", async () => {
+        const all = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect(all.isError).toBe(false);
+        expect(items(all.data).map((item) => item.id)).toEqual([TOOL]);
+        expect(items(all.data)[0]!.granted_in.sort()).toEqual(
+          [owner.defaultSpaceId, other.id].sort(),
+        );
+        // The connection listed the same in both spaces is one entry, naming both.
+        const connections = (
+          all.data.integration_tools as { connections: Array<{ granted_in: string[] }> }
+        ).connections;
+        expect(connections).toHaveLength(1);
+        expect(connections[0]!.granted_in.sort()).toEqual([owner.defaultSpaceId, other.id].sort());
+
+        const one = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
+          space_id: other.id,
+        });
+        expect(items(one.data)[0]!.granted_in).toEqual([other.id]);
+      });
+
+      it("reports the spaces whose tools a search without space_id read: not the one that closes the proxy", async () => {
+        await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, other.id));
+        const read = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect(read.data.searched_spaces).toEqual([owner.defaultSpaceId]);
+
+        const operations = await callTool(caller, "search", { kinds: ["operation"] });
+        expect(operations.data.searched_spaces).toBeUndefined();
+        const named = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
+          space_id: owner.defaultSpaceId,
+        });
+        expect(named.data.searched_spaces).toBeUndefined();
+      });
+
+      it("leaves a space that closes the proxy out of a default search, and refuses the kind named once every space closes it", async () => {
+        await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, other.id));
+        const defaulted = await callTool(caller, "search", {});
+        expect(items(defaulted.data)[0]!.granted_in).toEqual([owner.defaultSpaceId]);
+
+        await db
+          .update(spaces)
+          .set({ credentialProxyOpen: false })
+          .where(eq(spaces.id, owner.defaultSpaceId));
+        const closed = await callTool(caller, "search", { kinds: ["integration_tool"] });
+        expect(closed.isError).toBe(true);
+        // No space allows the kind, so it is no longer declared at all.
+        expect(closed.data).toMatchObject({ code: "invalid_argument", arguments: ["kinds"] });
+      });
     });
 
     for (const open of [true, false]) {
@@ -783,23 +954,24 @@ describe("mcp integration tools", () => {
       expect(upstreamAuth()).toEqual(["Bearer tok-own"]);
     });
 
-    it("serves the listing operation the same rows as search_integration_tools: shared ones for credential-proxy:call only", async () => {
+    it("serves the listing operation the same rows as search: shared ones for credential-proxy:call only", async () => {
       /** `[connection_id, owned_by_actor]` of each row, read at both doors. */
       const listedBy = async (asCaller: Caller) => {
-        const listed = await callTool(asCaller, "search_integration_tools");
+        const listed = await callTool(asCaller, "search", { kinds: ["integration_tool"] });
+        const section = listed.data.integration_tools as Record<string, unknown>;
         const invoked = await callTool(asCaller, "invoke_operation", {
           operation_id: "listCredentialProxyConnections",
         });
         expect(invoked.isError).toBe(false);
-        const tools = listed.data.tools as Array<{
-          tool: string;
+        const tools = section.items as Array<{
+          id: string;
           integration_package_id: string;
           connection_ids: string[];
         }>;
-        expect(tools.map((tool) => [tool.tool, tool.integration_package_id])).toEqual([
+        expect(tools.map((tool) => [tool.id, tool.integration_package_id])).toEqual([
           [TOOL, INTEGRATION_ID],
         ]);
-        const rows = listed.data.connections as Array<
+        const rows = section.connections as Array<
           Record<string, unknown> & { connection_id: string; owned_by_actor: boolean }
         >;
         expect([...tools[0]!.connection_ids].sort()).toEqual(
@@ -905,23 +1077,32 @@ describe("mcp integration tools", () => {
     /** Search, read the typed tool, call it and read the not-ready integration, through `caller`. */
     async function searchAndCall(caller: Caller, spaceId?: string) {
       const where = spaceId === undefined ? {} : { space_id: spaceId };
-      const searched = await callTool(caller, "search_integration_tools", {
+      const searched = await callTool(caller, "search", {
         ...where,
+        kinds: ["integration_tool"],
         query: "search",
       });
       expect(searched.isError).toBe(false);
-      expect(searched.data.best_match).toMatchObject({
-        tool: REMOTE_TOOL,
+      const described = await callTool(caller, "describe", {
+        ...where,
+        kind: "integration_tool",
+        id: REMOTE_TOOL,
+      });
+      expect(described.data).toMatchObject({
+        kind: "integration_tool",
+        id: REMOTE_TOOL,
         integration_package_id: REMOTE_ID,
         description: `${REMOTE_ID}. Full-text search.`,
         input_schema: { type: "object", properties: {} },
       });
       // `not_ready` is filtered like the tools: searched by its integration.
-      const forNotes = await callTool(caller, "search_integration_tools", {
+      const forNotes = await callTool(caller, "search", {
         ...where,
+        kinds: ["integration_tool"],
         integration: NOTES_ID,
       });
-      const notReady = forNotes.data.not_ready as Array<{
+      const notReady = (forNotes.data.integration_tools as Record<string, unknown>)
+        .not_ready as Array<{
         integration_package_id: string;
         proxy_connection: { status: string };
         refusal?: { code: string; connect_url?: string };
@@ -999,6 +1180,34 @@ describe("mcp integration tools", () => {
       });
     });
 
+    it("reads a cold remote catalog only for a search naming the kind, never for a default one", async () => {
+      const caller = await instanceCaller(owner);
+      const section = (data: Record<string, unknown>) =>
+        data.integration_tools as {
+          items: Array<{ id: string; catalog_unreadable?: true }>;
+          uncached?: string[];
+        };
+
+      // A search over every kind sends nothing to the server: the declared names, flagged.
+      const general = await callTool(caller, "search", { query: "search" });
+      expect(server.requests).toEqual([]);
+      expect(section(general.data).uncached).toEqual([REMOTE_ID]);
+      expect(section(general.data).items.find((t) => t.id === REMOTE_TOOL)).toMatchObject({
+        catalog_unreadable: true,
+      });
+
+      // Naming the kind reads it from the server, as the call it journals.
+      const named = await callTool(caller, "search", {
+        kinds: ["integration_tool"],
+        query: "search",
+      });
+      expect(server.requests.some((r) => r.body.includes('"tools/list"'))).toBe(true);
+      expect(section(named.data).uncached).toBeUndefined();
+      expect(
+        section(named.data).items.find((t) => t.id === REMOTE_TOOL)?.catalog_unreadable,
+      ).toBeUndefined();
+    });
+
     it("refuses a call on the endpoint pinned to a space that closes the credential proxy, before any exchange", async () => {
       const caller = await instanceCaller(owner);
       await db
@@ -1025,13 +1234,13 @@ describe("mcp integration tools", () => {
       };
       const closed = await describeGetMe();
       expect(closed).toContain("an admin closed this space's credential proxy");
-      expect(closed).not.toContain("are listed by `search_integration_tools`");
+      expect(closed).not.toContain("listed by `search` (`integration_tool` kind)");
       await db
         .update(spaces)
         .set({ credentialProxyOpen: true })
         .where(eq(spaces.id, owner.defaultSpaceId));
       const open = await describeGetMe();
-      expect(open).toContain("are listed by `search_integration_tools`");
+      expect(open).toContain("listed by `search` (`integration_tool` kind)");
       expect(open).not.toContain("closed this space's credential proxy");
     });
   });
@@ -1093,7 +1302,7 @@ describe("mcp integration tools", () => {
       const names = await toolNames(
         await instanceCaller(await memberContext(owner, "member", "runner")),
       );
-      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain(INTEGRATION_KIND);
       expect(names).not.toContain("call_integration_tool");
       expect(server.requests).toEqual([]);
     });
@@ -1103,20 +1312,34 @@ describe("mcp integration tools", () => {
         const member = preset === "admin" ? owner : await memberContext(owner, "member", preset);
         const caller = await instanceCaller(member);
 
-        const targeted = await callTool(caller, "search_integration_tools", {
+        const targeted = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
           integration: OPEN_ID,
+          query: "image",
         });
         expect(targeted.isError).toBe(false);
-        expect(targeted.data.best_match).toMatchObject({
-          tool: OPEN_TOOL,
+        const described = await callTool(caller, "describe", {
+          kind: "integration_tool",
+          id: OPEN_TOOL,
+        });
+        expect(described.data).toMatchObject({
+          kind: "integration_tool",
+          id: OPEN_TOOL,
           integration_package_id: OPEN_ID,
           description: "Files. Reads an image.",
           input_schema: { type: "object", properties: {} },
         });
         // An empty `not_ready` is left out.
-        expect(targeted.data.not_ready ?? []).toEqual([]);
-        const general = await callTool(caller, "search_integration_tools", { query: "image" });
-        expect((general.data.best_match as { tool: string }).tool).toBe(OPEN_TOOL);
+        expect(
+          (targeted.data.integration_tools as { not_ready?: unknown[] }).not_ready ?? [],
+        ).toEqual([]);
+        const general = await callTool(caller, "search", {
+          kinds: ["integration_tool"],
+          query: "image",
+        });
+        expect(
+          (general.data.integration_tools as { items: Array<{ id: string }> }).items[0]!.id,
+        ).toBe(OPEN_TOOL);
 
         const envelope = await mcp(caller, "tools/call", {
           name: "call_integration_tool",

@@ -14,6 +14,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
@@ -210,11 +211,13 @@ interface StoredMessage {
   content: Record<string, unknown>;
 }
 
-/** A conversation as the detail route serves it: its row, history and skill selection. */
+/** A conversation as the detail route serves it: its row, history, skill selection and usage. */
 export interface SessionHistory extends SessionSummary {
   messages: UIMessage[];
   skills: ChatSkillSelection;
   createdAt: string;
+  /** Tokens of every model call metered for the conversation's turns. */
+  usage: TokenUsage;
 }
 
 /**
@@ -238,6 +241,7 @@ export async function loadHistory(
     skill_mode: ChatSkillMode;
     pinned_skills: string[];
     createdAt: string;
+    usage: TokenUsage;
   };
   return {
     ...row,

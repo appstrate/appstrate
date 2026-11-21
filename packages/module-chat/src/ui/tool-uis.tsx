@@ -501,13 +501,13 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
   return typeof v === "string" && v ? v : undefined;
 }
 
-export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "search_operations",
+export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "search",
   render: (props: AnyToolProps) => (
     <ToolCallCard
       phase={deriveToolPhase(props)}
       Icon={SearchIcon}
-      labelKey="tool.searchOperations"
+      labelKey="tool.search"
       idText={stringArg(props.args, "query")}
       args={props.args}
       result={props.result}
@@ -519,14 +519,14 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
   ),
 });
 
-export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "describe_operation",
+export const DescribeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "describe",
   render: (props: AnyToolProps) => (
     <ToolCallCard
       phase={deriveToolPhase(props)}
       Icon={BookOpenIcon}
-      labelKey="tool.describeOperation"
-      idText={stringArg(props.args, "operation_id")}
+      labelKey="tool.describe"
+      idText={stringArg(props.args, "id")}
       args={props.args}
       result={props.result}
       isError={props.isError}

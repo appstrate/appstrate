@@ -1,0 +1,349 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * `search` and `describe` over the kinds beside operations: agents, read from the agent routes
+ * behind the dispatch, and skills, read from the Skills extension's reader. The routes' guards
+ * and the reader's ACL are the integration suites'; here, what each kind lists and describes, and
+ * when a kind is declared.
+ */
+
+import { describe, expect, it } from "bun:test";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
+import { deriveMcpSurface, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { noExtra, parseResult, toolsFor } from "./helpers.ts";
+
+await registerTestPlatformApp();
+
+const READER = ["mcp:read", "mcp:invoke", "agents:read", "agents:run", "runs:read", "skills:read"];
+const SPACE = "spc_1";
+
+const skillEntry = (scope: string, name: string, description: string): SkillEntry => ({
+  uri: `skill://${SPACE}/${scope}/${name}/${name}/SKILL.md`,
+  frontmatter: { name, description },
+  resources: [
+    { uri: `skill://${SPACE}/${scope}/${name}/${name}/SKILL.md`, digest: "sha256:0", size: 1 },
+  ],
+});
+
+const TONE = skillEntry("acme", "tone", "Sets the tone of a reply.");
+const ELSEWHERE: SkillEntry = {
+  ...skillEntry("acme", "other", "Another space's skill."),
+  uri: "skill://spc_2/acme/other/other/SKILL.md",
+};
+
+const AGENTS = [
+  {
+    id: "@acme/invoice-sorter",
+    display_name: "Invoice sorter",
+    description: "Sorts invoices.",
+    published: true,
+  },
+  { id: "@acme/draft-only", display_name: "", description: "Not yet published.", published: false },
+];
+
+function makeTools(
+  permissions: string[],
+  {
+    agentsStatus = 200,
+    refusingSpaces = [],
+    orgWide = false,
+    readOnlySpaces = [],
+    emptySpaces = [],
+    agentActive = true,
+  }: {
+    agentsStatus?: number;
+    /** Org-wide: spaces whose agents route refuses. */
+    refusingSpaces?: string[];
+    orgWide?: boolean;
+    /** Org-wide: spaces where the caller cannot launch (no `mcp:invoke`). */
+    readOnlySpaces?: string[];
+    /** Org-wide: spaces listing no agent. */
+    emptySpaces?: string[];
+    /** The `active` the agent detail answers. */
+    agentActive?: boolean;
+  } = {},
+) {
+  const requests: string[] = [];
+  const dispatch: Dispatch = async (req) => {
+    const url = new URL(req.url);
+    requests.push(`${url.pathname}${url.search}`);
+    if (url.pathname === "/api/agents") {
+      return agentsStatus === 200
+        ? Response.json({ object: "list", data: AGENTS, hasMore: false })
+        : Response.json({ code: "forbidden" }, { status: agentsStatus });
+    }
+    if (url.pathname === "/api/packages/agents/@acme/invoice-sorter") {
+      return Response.json({
+        id: "@acme/invoice-sorter",
+        display_name: "Invoice sorter",
+        description: "Sorts invoices.",
+        version: "1.2.0",
+        definition: "published",
+        input: { schema: { type: "object", properties: { month: { type: "string" } } } },
+        active: agentActive,
+        prompt: "the agent's own prompt, which a launch does not need",
+      });
+    }
+    return Response.json({ code: "agent_not_found" }, { status: 404 });
+  };
+  const surface = deriveMcpSurface(
+    new Set(permissions),
+    undefined,
+    { type: "user", id: "user_1" },
+    true,
+    {
+      credentialProxyOpen: true,
+    },
+  );
+  const readOnly = deriveMcpSurface(
+    new Set(permissions.filter((p) => p !== "mcp:invoke")),
+    undefined,
+    { type: "user", id: "user_1" },
+    true,
+    { credentialProxyOpen: true },
+  );
+  const space = (id: string) => ({
+    id,
+    name: id,
+    role: "admin",
+    personal: false,
+    permissions: new Set(permissions),
+    surface: readOnlySpaces.includes(id) ? readOnly : surface,
+  });
+  const orgSpaces = orgWide
+    ? {
+        reachable: [space(SPACE), space("spc_2")],
+        current: space(SPACE),
+        dispatchIn: (spaceId: string): Dispatch =>
+          refusingSpaces.includes(spaceId)
+            ? async () => Response.json({ code: "forbidden" }, { status: 403 })
+            : emptySpaces.includes(spaceId)
+              ? async () => Response.json({ object: "list", data: [], hasMore: false })
+              : dispatch,
+      }
+    : undefined;
+  const tools = toolsFor({
+    origin: "https://test.local",
+    orgSpaces,
+    authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+    permissions: new Set(permissions),
+    ceiling: undefined,
+    dispatch,
+    actor: { type: "user", id: "user_1" },
+    scope: { orgId: "org_1", spaceId: SPACE },
+    skills: {
+      list: async (_definition, spaceIds) =>
+        [TONE, ELSEWHERE].filter(
+          (entry) => !spaceIds || spaceIds.some((id) => entry.uri.startsWith(`skill://${id}/`)),
+        ),
+      entry: async (uri) => [TONE, ELSEWHERE].find((entry) => entry.uri === uri) ?? null,
+      read: async () => {
+        throw new Error("not read here");
+      },
+    },
+    fileAccess: async () => ({ grants: [] }),
+    authorizeBundle: async () => {},
+    placeRootAs: async () => null,
+    requestId: "req_test",
+    followRunLogs: () => () => {},
+  });
+  const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
+  const call = async (name: string, args: Record<string, unknown>) =>
+    parseResult(await byName.get(name)!.handler(args, noExtra));
+  return { byName, call, requests };
+}
+
+describe("search over agents and skills", () => {
+  it("searches every declared kind when none is named, one section each", async () => {
+    const { call } = makeTools(READER);
+    const result = await call("search", {});
+    expect(Object.keys(result).sort()).toEqual(["agents", "operations", "skills"]);
+    expect(result.agents).toEqual({
+      total: 2,
+      items: [
+        {
+          id: "@acme/invoice-sorter",
+          display_name: "Invoice sorter",
+          description: "Sorts invoices.",
+          published: true,
+        },
+        // No display name: the id stands in.
+        {
+          id: "@acme/draft-only",
+          display_name: "@acme/draft-only",
+          description: "Not yet published.",
+          published: false,
+        },
+      ],
+    });
+    // The skills of the space the call entered, not of every space the reader reaches.
+    expect(result.skills).toEqual({
+      total: 1,
+      items: [
+        {
+          id: TONE.uri,
+          packageId: "@acme/tone",
+          name: "tone",
+          description: "Sets the tone of a reply.",
+        },
+      ],
+    });
+  });
+
+  it("searches only the kinds named, and refuses a kind it does not declare", async () => {
+    const { call, requests } = makeTools(READER);
+    const skills = await call("search", { kinds: ["skill"], query: "tone" });
+    expect(Object.keys(skills)).toEqual(["skills"]);
+    expect(requests).toEqual([]);
+    const refused = await call("search", { kinds: ["agent", "file"] });
+    expect(refused).toMatchObject({ code: "invalid_argument", arguments: ["kinds"] });
+    expect(refused.accepted).toEqual(["operation", "agent", "skill"]);
+  });
+
+  it("relays the agents route's refusal in its section", async () => {
+    const { byName, call } = makeTools(READER, { agentsStatus: 403 });
+    const named = await byName.get("search")!.handler({ kinds: ["agent"] }, noExtra);
+    expect(named.isError).toBe(true);
+    expect(parseResult(named)).toEqual({ status: 403, body: { code: "forbidden" } });
+    // A search that did not name the kind leaves it out, and answers the rest.
+    const defaulted = await call("search", {});
+    expect(Object.keys(defaulted).sort()).toEqual(["operations", "skills"]);
+  });
+
+  it("narrows an omitted kinds to the kind of the filter passed, and refuses a filter its kinds exclude", async () => {
+    const { call, requests } = makeTools(READER);
+    const tagged = await call("search", { tag: "agents" });
+    expect(Object.keys(tagged)).toEqual(["operations"]);
+    expect(requests).toEqual([]);
+    expect(await call("search", { kinds: ["agent"], tag: "agents" })).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["tag"],
+    });
+  });
+
+  it("names an acting tool only to a caller it is declared to", async () => {
+    const reader = makeTools(["mcp:read", "agents:read", "skills:read"]);
+    const description = reader.byName.get("search")!.descriptor.description!;
+    expect(description).toContain("skills → read");
+    expect(description).not.toContain("invoke_operation");
+    expect(description).not.toContain("run_and_wait");
+    const agent = await reader.call("describe", { kind: "agent", id: "@acme/invoice-sorter" });
+    expect(agent.run_with).toBeUndefined();
+  });
+
+  it("declares agents and skills only to a caller granted their reads", async () => {
+    const { byName, call } = makeTools(["mcp:read"]);
+    const kinds = (
+      byName.get("search")!.descriptor.inputSchema.properties as Record<
+        string,
+        { items: { enum: string[] } }
+      >
+    ).kinds!.items.enum;
+    expect(kinds).toEqual(["operation"]);
+    expect(Object.keys(await call("search", {}))).toEqual(["operations"]);
+    expect(await call("describe", { kind: "agent", id: "@acme/invoice-sorter" })).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["kind"],
+      accepted: ["operation"],
+    });
+  });
+});
+
+describe("describe of an agent or a skill", () => {
+  it("returns an agent's launch contract, without its editor state", async () => {
+    const { call, requests } = makeTools(READER);
+    const agent = await call("describe", { kind: "agent", id: "@acme/invoice-sorter" });
+    // The definition a launch with `version` omitted runs.
+    expect(requests).toEqual(["/api/packages/agents/@acme/invoice-sorter?version=latest"]);
+    expect(agent.run_with).toEqual({
+      tool: "run_and_wait",
+      arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter" },
+    });
+    expect(agent).toMatchObject({
+      kind: "agent",
+      id: "@acme/invoice-sorter",
+      definition: "published",
+      input: { schema: { type: "object", properties: { month: { type: "string" } } } },
+    });
+    expect(agent.prompt).toBeUndefined();
+  });
+
+  it("offers no run_with for an agent that is not active in the described space", async () => {
+    const { call } = makeTools(READER, { agentActive: false });
+    const agent = await call("describe", { kind: "agent", id: "@acme/invoice-sorter" });
+    expect(agent.active).toBe(false);
+    expect(agent.run_with).toBeUndefined();
+  });
+
+  it("relays the agent route's refusal, and refuses an id that is not an agent's", async () => {
+    const { byName, call } = makeTools(READER);
+    const missing = await byName
+      .get("describe")!
+      .handler({ kind: "agent", id: "@acme/nope" }, noExtra);
+    expect(missing.isError).toBe(true);
+    expect(parseResult(missing)).toMatchObject({ status: 404, body: { code: "agent_not_found" } });
+    expect(await call("describe", { kind: "agent", id: "nope" })).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["id"],
+    });
+  });
+
+  it("returns a skill's entry, and not_found for a URI the reader does not serve", async () => {
+    const { call } = makeTools(READER);
+    expect(await call("describe", { kind: "skill", id: TONE.uri })).toEqual({
+      kind: "skill",
+      id: TONE.uri,
+      packageId: "@acme/tone",
+      frontmatter: TONE.frontmatter,
+      resources: TONE.resources,
+    });
+    expect(
+      await call("describe", { kind: "skill", id: "skill://spc_1/acme/gone/gone/SKILL.md" }),
+    ).toMatchObject({ code: "not_found", arguments: ["id"] });
+  });
+
+  it("names what is missing", async () => {
+    const { call } = makeTools(READER);
+    expect(await call("describe", {})).toMatchObject({
+      code: "missing_argument",
+      arguments: ["kind", "id"],
+    });
+  });
+});
+
+describe("search across spaces", () => {
+  it("reports a space whose agents route refused, and answers the others", async () => {
+    const { call } = makeTools(READER, { refusingSpaces: ["spc_2"], orgWide: true });
+    const result = await call("search", { kinds: ["agent"] });
+    const agents = result.agents as { items: Array<{ granted_in: string[] }>; unsearched: unknown };
+    expect(agents.items.every((item) => item.granted_in.join() === SPACE)).toBe(true);
+    expect(agents.unsearched).toEqual([{ space_id: "spc_2", status: 403, code: "forbidden" }]);
+  });
+});
+
+describe("agents across spaces", () => {
+  it("names the spaces where an agent is listed", async () => {
+    const { call } = makeTools(READER, { orgWide: true });
+    const found = await call("search", { kinds: ["agent"] });
+    const items = (found.agents as { items: Array<{ id: string; granted_in: string[] }> }).items;
+    expect(items.find((item) => item.id === "@acme/invoice-sorter")?.granted_in).toEqual([
+      SPACE,
+      "spc_2",
+    ]);
+  });
+
+  it("names the space an agent is described in, and its run_with the same", async () => {
+    const { call } = makeTools(READER, { orgWide: true });
+    const described = await call("describe", {
+      kind: "agent",
+      id: "@acme/invoice-sorter",
+      space_id: SPACE,
+    });
+    expect(described.space).toEqual({ id: SPACE, name: SPACE });
+    expect(described.run_with).toEqual({
+      tool: "run_and_wait",
+      arguments: { kind: "agent", scope: "@acme", name: "invoice-sorter", space_id: SPACE },
+    });
+  });
+});

@@ -40,11 +40,13 @@
     "./components/model-picker-labels": "./src/components/model-picker-labels.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
+    "./context-window": "./src/context-window.ts",
     "./identity-colors": "./src/identity-colors.ts",
     "./keyset-paging": "./src/keyset-paging.ts",
     "./lucide-names": "./src/lucide-names.ts",
     "./use-copy-to-clipboard": "./src/use-copy-to-clipboard.ts",
     "./use-live-elapsed-ms": "./src/use-live-elapsed-ms.ts",
+    "./use-now-tick": "./src/use-now-tick.ts",
     "./use-keyboard-viewport": "./src/use-keyboard-viewport.ts",
     "./use-mobile": "./src/use-mobile.ts"
   },

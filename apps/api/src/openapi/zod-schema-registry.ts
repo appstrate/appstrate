@@ -762,7 +762,8 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   "POST /api/auth/device/code": "Better Auth device-grant route (RFC 8628); no Zod in this repo",
   "POST /api/auth/cli/token": "Better Auth CLI-grant route; no Zod in this repo",
   "POST /api/auth/cli/revoke": "Better Auth CLI-grant route; no Zod in this repo",
-  "POST /api/auth/cli/sessions/revoke": "Better Auth CLI-session route; no Zod in this repo",
+  "POST /api/auth/access-grants/revoke":
+    "Better Auth access-grants route; body parsed by better-call, no Zod in this repo",
   // The LLM proxy forwards the provider's own request envelope verbatim; the
   // schema is the provider's, and re-declaring it as Zod would fork it. That is
   // true of every shape in `LLM_PROXY_ROUTES` by construction — a shape is in

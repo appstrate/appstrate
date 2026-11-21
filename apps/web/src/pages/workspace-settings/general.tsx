@@ -199,7 +199,9 @@ function GeneralForm({
           </SettingRow>
 
           {space.personal ? (
-            <p className="text-muted-foreground text-sm">{t("spaces.personal.settingsLocked")}</p>
+            <p className="text-muted-foreground pb-8 text-sm">
+              {t("spaces.personal.settingsLocked")}
+            </p>
           ) : (
             <>
               {/* A personal space has no appearance of its own: it is drawn as its owner.
@@ -358,29 +360,41 @@ function GeneralForm({
                   </div>
                 </SettingRow>
               )}
-
-              <SettingRow
-                variant="toggle"
-                label={
-                  <Label htmlFor="space-credential-proxy-open" className="cursor-pointer">
-                    {t("spaces.credentialProxyOpenLabel")}
-                  </Label>
-                }
-                description={t("spaces.credentialProxyOpenHint")}
-                details={t("spaces.credentialProxyOpenDetails")}
-                status={
-                  <SaveFeedback {...fieldWriteState(updateMutation, "credential_proxy_open")} />
-                }
-              >
-                <Switch
-                  id="space-credential-proxy-open"
-                  checked={activeProxyOpen}
-                  disabled={updateMutation.isPending}
-                  onCheckedChange={(checked) => commitProxyOpen(checked === true)}
-                />
-              </SettingRow>
             </>
           )}
+
+          {/* Drawn on a personal space too, read-only: the server refuses the switch there
+              (`personal_space_immutable`) and it stays open — the space's only member reaches
+              only the connections they put in it. */}
+          <SettingRow
+            variant="toggle"
+            label={
+              <Label
+                htmlFor="space-credential-proxy-open"
+                className={space.personal ? undefined : "cursor-pointer"}
+              >
+                {t("spaces.credentialProxyOpenLabel")}
+              </Label>
+            }
+            description={
+              space.personal
+                ? t("spaces.personal.credentialProxyAlwaysOpen")
+                : t("spaces.credentialProxyOpenHint")
+            }
+            details={space.personal ? undefined : t("spaces.credentialProxyOpenDetails")}
+            status={
+              space.personal ? undefined : (
+                <SaveFeedback {...fieldWriteState(updateMutation, "credential_proxy_open")} />
+              )
+            }
+          >
+            <Switch
+              id="space-credential-proxy-open"
+              checked={activeProxyOpen}
+              disabled={space.personal || updateMutation.isPending}
+              onCheckedChange={(checked) => commitProxyOpen(checked === true)}
+            />
+          </SettingRow>
         </SettingsGroup>
       </fieldset>
       <ManualSave dirty={draft.dirty} onSave={save} onDiscard={draft.reset} />

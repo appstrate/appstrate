@@ -55,9 +55,12 @@ function toolCall(
   };
 }
 
-/** POST a `search_operations` call, with `_meta` when given. */
+/** POST a `search` call, with `_meta` when given. */
 async function searchOperations(meta?: Record<string, unknown>): Promise<Response> {
-  return app.request(mcpPath(headers), toolCall("search_operations", { query: "agent" }, meta));
+  return app.request(
+    mcpPath(headers),
+    toolCall("search", { query: "agent", kinds: ["operation"] }, meta),
+  );
 }
 
 /** The JSON payload a tool returns in its first text block. */
@@ -125,7 +128,7 @@ describe("mcp transport: SSE only when progress is asked for", () => {
     expect(text).toStartWith(SSE_OPEN);
     const result = sseResult(text);
     expect(result.error).toBeUndefined();
-    expect(toolData(result).total as number).toBeGreaterThan(0);
+    expect((toolData(result).operations as { total: number }).total).toBeGreaterThan(0);
   });
 
   it("keeps the plain JSON response for the same call without a progressToken", async () => {
@@ -133,7 +136,7 @@ describe("mcp transport: SSE only when progress is asked for", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toStartWith("application/json");
     const envelope = (await res.json()) as JsonRpcEnvelope;
-    expect(toolData(envelope).total as number).toBeGreaterThan(0);
+    expect((toolData(envelope).operations as { total: number }).total).toBeGreaterThan(0);
   });
 
   it("answers an unparseable body as JSON, through the SDK's own parse error", async () => {

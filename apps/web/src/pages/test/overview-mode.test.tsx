@@ -83,6 +83,7 @@ const agent = (space_ids: string[]) => ({
   display_name: "Rapporteur",
   keywords: [],
   dependencies: { integrations: {} },
+  integrations: [],
   running_runs: 0,
   unread_count: 0,
   published: true,
@@ -243,7 +244,7 @@ describe("the agent index in the mode", () => {
     expect(html).not.toContain("enterSpace=");
     // The « Espace » column names the home and counts the other, named in the badge's label.
     expect(html).toContain(">Espace<");
-    expect(html).toMatch(/title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b"/);
+    expect(html).toMatch(/title="Studio">Studio<\/span>.*aria-label="Actif aussi dans spc_b"/);
     expect(html).toContain("1 élément");
   });
 
@@ -370,7 +371,7 @@ describe("the integration index in the mode", () => {
     expect(html).not.toContain("enterSpace=");
     // The org-scoped connection reaches both spaces and counts once.
     expect(html).toMatch(
-      /title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b".*?<span aria-hidden="true">·<\/span>.*?2 connexions/,
+      /title="Studio">Studio<\/span>.*aria-label="Actif aussi dans spc_b".*?<span aria-hidden="true">·<\/span>.*?2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
