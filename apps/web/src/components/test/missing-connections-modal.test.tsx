@@ -67,7 +67,7 @@ const readinessKey = (version?: string, spaceId?: string) =>
     },
   }).queryKey;
 
-const readiness = (res: Resolution, runBlocking: boolean) => ({
+const readiness = (res: Resolution, runBlocking: boolean, connectionRequired = true) => ({
   blocks_run: runBlocking,
   errors: [],
   integrations: [
@@ -75,6 +75,7 @@ const readiness = (res: Resolution, runBlocking: boolean) => ({
       integration_package_id: INTEGRATION,
       required: false,
       run_blocking: runBlocking,
+      connection_required: connectionRequired,
       inert: false,
       resolution: res,
     },
@@ -342,6 +343,50 @@ describe("MissingRow", () => {
       expect(blocked).toContain(refusalMessage({ code: "must_choose_connection" })!);
       const clear = renderActivated(resolution({}), false);
       expect(clear).toContain(label("missingConnections.resolved"));
+    });
+
+    it("follows another member's activation and a later switch-off", () => {
+      const errors = [inactive()];
+      const here = new Set<string>();
+      expect(stillActivated(errors, here, errors).size).toBe(0);
+      expect(stillActivated(errors, here, [fieldError("not_connected")]).has(INTEGRATION)).toBe(
+        true,
+      );
+      expect(stillActivated(errors, here, []).has(INTEGRATION)).toBe(true);
+      expect(stillActivated(errors, new Set([INTEGRATION]), errors).size).toBe(0);
+    });
+
+    it("resolves an activated integration that needs no connection without a picker", () => {
+      const qc = new QueryClient();
+      const spacesKey = $api.queryOptions("get", "/api/spaces", {
+        params: { header: { "X-Org-Id": undefined } },
+      }).queryKey;
+      qc.setQueryData(spacesKey, {
+        object: "list",
+        data: [{ id: SPACE, permissions: ["integrations:read"] }],
+        hasMore: false,
+      });
+      qc.setQueryData(readinessKey(undefined, SPACE), readiness(resolution({}), false, false));
+      const snapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
+        ...spaceStore.getInitialState(),
+        id: SPACE,
+      });
+      try {
+        const html = render(
+          <MissingRow
+            err={inactive()}
+            agentPackageId={AGENT}
+            version={undefined}
+            integrationEntries={undefined}
+            activated
+          />,
+          { queryClient: qc },
+        );
+        expect(html).toContain(label("missingConnections.resolved"));
+        expect(html).not.toContain(`data-testid="member-picker-${INTEGRATION}"`);
+      } finally {
+        snapshot.mockRestore();
+      }
     });
 
     it("holds the re-run while the verdict still blocks the activated integration", () => {

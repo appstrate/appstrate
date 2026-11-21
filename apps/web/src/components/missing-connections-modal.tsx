@@ -4,6 +4,7 @@ import { Card } from "@appstrate/ui/components/card";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { ActivateIntegrationButton } from "./activate-integration-button";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
@@ -13,7 +14,7 @@ import { IntegrationConnectionPicker } from "./integration-connect/integration-c
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
 import {
   blockingIntegrationIds,
-  useAgentConnectionReadiness,
+  useAgentConnectionReadinessOptions,
   useIntegrationReadinessEntry,
 } from "../hooks/use-integrations";
 import { useIntegrationName } from "../hooks/use-integration-name";
@@ -63,15 +64,29 @@ export function MissingConnectionsModal({
   retrying,
 }: MissingConnectionsModalProps) {
   const { t } = useTranslation(["agents"]);
-  // The live verdict of the launched version: a row it still blocks holds the re-run.
-  const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
-  const stillBlocking = readiness && blockingIntegrationIds(readiness);
-
-  // Integrations activated from this modal: their row is resolved, so a re-run is worth offering
-  // even when every refusal was the structural `integration_not_active`.
+  // An administrator may repair the placement outside this dialog. Recheck on opening and
+  // on returning to the tab, using only a verdict fetched since this particular refusal.
+  const readiness = useQuery({
+    ...useAgentConnectionReadinessOptions(agentPackageId, version),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  });
+  const live =
+    readiness.isEnabled && readiness.isSuccess && readiness.isFetchedAfterMount
+      ? readiness.data
+      : undefined;
   const [switchedOn, setActivated] = useState<ReadonlySet<string>>(new Set());
-  const activated = stillActivated(errors, switchedOn);
-  const { showRetry, canRetry } = retryDecision(errors, retrying, stillBlocking, activated);
+  const activated = stillActivated(errors, switchedOn, live?.errors);
+  const { showRetry, canRetry } = retryDecision(
+    errors,
+    retrying,
+    live && blockingIntegrationIds(live),
+    activated,
+  );
+  // A launcher who cannot read readiness can still ask the run gate after an administrator acts.
+  const retryWithoutVerdict =
+    (!readiness.isEnabled || readiness.isError) &&
+    errors.some((e) => e.code === "integration_not_active");
   const allInactive = onlyAwaitingActivation(errors, activated);
 
   return (
@@ -81,7 +96,7 @@ export function MissingConnectionsModal({
       title={t("missingConnections.title")}
       actions={
         <div className="flex items-center gap-2">
-          {showRetry && (
+          {(showRetry || retryWithoutVerdict) && (
             <PendingButton
               onClick={onRetry}
               pending={retrying}
@@ -130,7 +145,7 @@ export function MissingRow({
   agentPackageId: string;
   version: string | undefined;
   integrationEntries: AgentIntegrationEntry[] | undefined;
-  /** An `integration_not_active` row the user switched on from this modal. */
+  /** An `integration_not_active` row now switched on in this space. */
   activated?: boolean;
   onActivated?: (packageId: string) => void;
 }) {
@@ -165,7 +180,7 @@ export function MissingRow({
   // non-structural row holds a spinner until both land. Both reads gate on
   // `integrations:read`: without it neither lands, so the row names the
   // integration and waits for nothing.
-  const pickable = !isStructural && readsIntegrations;
+  const pickable = !isStructural && readsIntegrations && verdict?.connection_required !== false;
   const canRenderPicker = pickable && !!verdict;
   const loadingVerdict = pickable && !canRenderPicker;
 
