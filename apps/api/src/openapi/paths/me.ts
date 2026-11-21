@@ -887,14 +887,56 @@ export const mePaths = {
                   },
                   connections: {
                     type: "array",
-                    description: "Integrations the caller could attach to an agent.",
+                    description:
+                      "Integrations the caller holds a connection usable in this space for, active here or not (`active`).",
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "name", "source"],
+                      required: [
+                        "integration_package_id",
+                        "name",
+                        "source",
+                        "active",
+                        "connections",
+                      ],
                       properties: {
                         integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
+                        active: {
+                          type: "boolean",
+                          description:
+                            "Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent.",
+                        },
+                        connections: {
+                          type: "array",
+                          description:
+                            "The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`.",
+                          items: {
+                            type: "object",
+                            required: [
+                              "id",
+                              "label",
+                              "account_id",
+                              "owned_by_actor",
+                              "needs_reconnection",
+                            ],
+                            properties: {
+                              id: { type: "string" },
+                              label: { type: "string" },
+                              account_id: { type: "string" },
+                              owned_by_actor: {
+                                type: "boolean",
+                                description:
+                                  "False: a colleague's connection shared into the space. Use it only when the user named it.",
+                              },
+                              needs_reconnection: {
+                                type: "boolean",
+                                description:
+                                  "True: the credentials died; a run naming it fails until its owner reconnects it.",
+                              },
+                            },
+                          },
+                        },
                         version: {
                           type: "string",
                           description:
@@ -1048,11 +1090,35 @@ export const mePaths = {
                   personal: false,
                 },
                 connections: [
-                  { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+                  {
+                    integration_package_id: "@appstrate/gmail",
+                    name: "Gmail",
+                    source: "own",
+                    active: true,
+                    connections: [
+                      {
+                        id: "conn_1",
+                        label: "ada@acme.com",
+                        account_id: "ada@acme.com",
+                        owned_by_actor: true,
+                        needs_reconnection: false,
+                      },
+                    ],
+                  },
                   {
                     integration_package_id: "@appstrate/clickup",
                     name: "ClickUp",
                     source: "shared",
+                    active: true,
+                    connections: [
+                      {
+                        id: "conn_2",
+                        label: "Acme workspace",
+                        account_id: "acme",
+                        owned_by_actor: false,
+                        needs_reconnection: false,
+                      },
+                    ],
                   },
                 ],
                 recent_runs: [

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import { listOrgOffers } from "../services/package-placement.ts";
 import { getPackageLibrary } from "../services/package-library.ts";
 import type { Context, Next } from "hono";
 import { z } from "zod";
@@ -911,9 +912,13 @@ export function createSpacesRouter() {
     const data = await readJsonBody(c, updatePackageSchema);
 
     const placement = await getSpacePackage(scope, packageId);
+    if (!placement && !(await listOrgOffers(orgId, [packageId])).has(packageId)) {
+      throw notFound(`Package '${packageId}' is not placed in this space`);
+    }
     let generationConfig = data.generation_config;
-    if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
-      const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
+    if (data.modelId !== undefined || generationConfig !== undefined) {
+      const effectiveModelId =
+        data.modelId !== undefined ? data.modelId : (placement?.modelId ?? null);
       const explicitModel =
         data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
@@ -928,7 +933,7 @@ export function createSpacesRouter() {
       } else if (
         generationConfig === undefined &&
         data.modelId !== undefined &&
-        placement.generation_config
+        placement?.generation_config
       ) {
         // Reconcile only when `modelId` is part of THIS patch: re-clamping
         // stored settings is a response to the selected model possibly

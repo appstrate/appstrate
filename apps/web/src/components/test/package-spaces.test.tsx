@@ -32,7 +32,7 @@ describe("PackageSpaces", () => {
       <PackageSpaces item={{ homeSpaceId: "spc_b", spaceIds: ["spc_b", "spc_a", "spc_c"] }} />,
     );
     expect(html).toContain(">Studio<");
-    expect(html).toContain('aria-label="Partagé avec Atelier, Coffre"');
+    expect(html).toContain('aria-label="Actif aussi dans Atelier, Coffre"');
     expect(html).toMatch(/>\+2<\/span>/);
   });
 
@@ -41,7 +41,7 @@ describe("PackageSpaces", () => {
       <PackageSpaces item={{ homeSpaceId: "spc_b", spaceIds: ["spc_b"] }} />,
     );
     expect(html).toContain(">Studio<");
-    expect(html).not.toContain("Partagé avec");
+    expect(html).not.toContain("Actif aussi dans");
   });
 
   it("draws no tile for a home it is switched off in: its first active space leads", () => {
@@ -87,7 +87,7 @@ describe("PackageSpaces", () => {
       const html = renderInSpaces(<PackageSpaces item={detail} />, overview);
       expect(html).toContain(">Studio<");
       expect(html).toContain('data-testid="space-tile-stack"');
-      expect(html).toContain('aria-label="Partagé avec Atelier"');
+      expect(html).toContain('aria-label="Actif aussi dans Atelier"');
       // Named as a space, never as « Espace d'origine ».
       expect(html).not.toContain("origine");
     }

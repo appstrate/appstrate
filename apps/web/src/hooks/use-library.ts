@@ -11,6 +11,7 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { splitPackageRef } from "../lib/package-paths";
 import { activationGate, mayRemoveFromSpace } from "../lib/catalogue-gates";
 
 /** `GET /api/library`: every package and where it is PLACED. The space form (`/api/spaces/{id}/library`) is the same shape narrowed to one space. */
@@ -280,4 +281,21 @@ export function usePackageActivation(
     },
     pending: setActive.isPending,
   };
+}
+
+/** Offers `packageId` to the organization (`PUT …/org-offer`), or withdraws the offer (`DELETE`). */
+export async function setOrgOffer(packageId: string, offered: boolean) {
+  const params = { params: { path: splitPackageRef(packageId) } };
+  if (offered) await client.PUT("/api/packages/{scope}/{name}/org-offer", params);
+  else await client.DELETE("/api/packages/{scope}/{name}/org-offer", params);
+}
+
+/** The offer changes where the package runs in every space without a row of its own: both libraries and every package cache refresh. */
+export function useSetOrgOffer() {
+  const invalidate = useInvalidatePackageActivation();
+  return useMutation({
+    mutationFn: ({ packageId, offered }: { packageId: string; offered: boolean }) =>
+      setOrgOffer(packageId, offered),
+    onSettled: invalidate,
+  });
 }

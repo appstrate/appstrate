@@ -102,6 +102,8 @@ describe("renderAgentPrompt", () => {
     expect(repair).toBeGreaterThan(-1);
     expect(repair).toBeLessThan(text.indexOf("Anything else: report it and stop."));
     expect(text.slice(repair)).toMatch(/^[^\n]*`active_in_spaces`; act only once the user agrees/);
+    // #2336: an owner or admin can offer the integration to the whole organization instead.
+    expect(text.slice(repair)).toContain("`offerPackageToOrg`");
   });
 
   it("includes the upload recipe only with an unlocked file field", () => {

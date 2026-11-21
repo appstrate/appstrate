@@ -183,6 +183,45 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(await db.select().from(runs)).toHaveLength(0);
   });
 
+  // A request naming one connection of several: declared `required`, an unresolved choice is a 409
+  // listing both; with the override naming one, the run binds that one.
+  it("refuses a required inline integration held twice without an override, binds the named one with it", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const named = await seedIntegrationConnection(ctx, INTEGRATION, { label: "Prod server" });
+    const other = await seedIntegrationConnection(ctx, INTEGRATION, { label: "Staging server" });
+    const manifest = inlineAgentManifest([INTEGRATION], { required: [INTEGRATION] });
+
+    const refused = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest,
+      prompt: "do the thing",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.data.status).toBe(409);
+    const err = (refused.data.body as ProblemDetails).errors!.find(
+      (e) => e.field === `integrations.${INTEGRATION}`,
+    );
+    expect(err!.code).toBe("must_choose_connection");
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([named, other].sort());
+    expect(await db.select().from(runs)).toHaveLength(0);
+
+    const launched = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest,
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [named] },
+    });
+    expect(launched.data.body).toBeUndefined();
+    const [row] = await db
+      .select()
+      .from(runs)
+      .where(eq(runs.id, launched.data.id as string));
+    expect(row!.resolvedConnections).toMatchObject({
+      [INTEGRATION]: [{ connectionId: named, source: "run_override" }],
+    });
+  }, 60_000);
+
   it("relays an integration_not_active refusal with its remedy and the spaces where it is active", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);

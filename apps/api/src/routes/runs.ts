@@ -60,7 +60,7 @@ import {
   agentReadIsSummary,
   assertDraftSelectorAllowed,
   assertDependencyDraftOverridesAllowed,
-  assertPackageDependenciesAccessible,
+  assertLaunchDependenciesAccessible,
 } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
@@ -711,7 +711,7 @@ export function createRunsRouter() {
     requirePermission("agents", "run"),
     // The two guards say the caller may compose; every package the posted
     // manifest DEPENDS on is then judged one by one in the handler
-    // (`assertPackageDependenciesAccessible`).
+    // (`assertLaunchDependenciesAccessible`).
     runLaunchIdempotency(),
     async (c) => {
       const orgId = c.get("orgId");
@@ -731,7 +731,7 @@ export function createRunsRouter() {
         body,
         connectOffers: connectOfferPolicyFromRequest(c),
         launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"]),
-        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+        authorizeDependencies: (manifest) => assertLaunchDependenciesAccessible(c, manifest),
       });
 
       // ----- Context files (fan-in by reference) -----
@@ -856,7 +856,7 @@ export function createRunsRouter() {
         actor,
         body,
         mode: "accumulate",
-        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+        authorizeDependencies: (manifest) => assertLaunchDependenciesAccessible(c, manifest),
       });
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.

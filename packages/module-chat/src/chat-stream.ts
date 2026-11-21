@@ -541,6 +541,7 @@ export async function handleChatStream(
                   permissions: [...callerPermissions],
                   viewAs: persona,
                   spaceIds: spaces.map((space) => space.id),
+                  restricted,
                 })}`,
                 "x-org-id": orgId,
               },
@@ -837,6 +838,7 @@ export async function handleChatStream(
       injectedSkills,
       // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
+      restricted: scope.restricted,
       // The conversation issuing its requests: a run it launches may take its own files.
       chatSessionId,
     },

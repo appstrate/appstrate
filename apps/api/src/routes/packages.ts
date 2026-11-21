@@ -27,6 +27,7 @@ import {
   assertHasPublishedVersion,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
+import { offerPackageToOrg, withdrawOrgOffer } from "../services/package-org-offers.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
@@ -94,6 +95,7 @@ import {
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
   assertPackageShareAccessForPlacement,
+  assertPackageOfferAccess,
   assertPackageShareAccess,
   assertPlacementRemovalAccess,
   callerPlacementAuthority,
@@ -2233,6 +2235,56 @@ export function createPackagesRouter() {
         ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
       },
     });
+    return c.body(null, 204);
+  });
+
+  // --- Offer to the organization (RBAC spec §6.10) ---
+  //
+  // An owner/admin session, plus `<type>:share` in the home of a homed package
+  // (`assertPackageOfferAccess`). Both verbs are idempotent.
+
+  router.put(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const { authorizeHome } = await assertPackageOfferAccess(c, packageId);
+    const { created } = await offerPackageToOrg({
+      orgId,
+      packageId,
+      offeredBy: c.get("user").id,
+      authorizeHome,
+    });
+    if (created) {
+      await recordAuditFromContext(c, {
+        action: "package.offered_to_org",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { orgId },
+      });
+    }
+    return c.json({ object: "package_org_offer", packageId, offered_to_org: true });
+  });
+
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const { authorizeHome } = await assertPackageOfferAccess(c, packageId);
+    const { removed, disabledScheduleIds } = await withdrawOrgOffer({
+      orgId,
+      packageId,
+      authorizeHome,
+    });
+    await removeScheduleJobs(disabledScheduleIds);
+    if (removed) {
+      await recordAuditFromContext(c, {
+        action: "package.offer_withdrawn",
+        resourceType: "package",
+        resourceId: packageId,
+        after: {
+          orgId,
+          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+        },
+      });
+    }
     return c.body(null, 204);
   });
 

@@ -151,7 +151,7 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
       targets: [...base.targets, { id: "personal", name: "Mon espace" }],
     };
     const html = render(<ConnectionShareEditor {...props} />);
-    expect(html).toContain("Tous les espaces");
+    expect(html).toContain("Tous les espaces d'équipe");
     expect(html).not.toContain("+ futurs");
     expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
     expect(targetTestIds(treeOf(props))).toEqual([]);
@@ -164,7 +164,7 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
 
   it("reads the canonical server mode without a separate team-space listing", () => {
     const props = { ...base, shareAllSpaces: true, sharedSpaceIds: [HERE], targets: [] };
-    expect(render(<ConnectionShareEditor {...props} />)).toContain("Tous les espaces");
+    expect(render(<ConnectionShareEditor {...props} />)).toContain("Tous les espaces d'équipe");
     expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
     expect(targetTestIds(treeOf(props))).toEqual([]);
     expect(render(<ConnectionShareEditor {...props} shareAllSpaces={false} />)).toContain(

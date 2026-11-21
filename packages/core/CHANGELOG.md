@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AuthResolution.spaceIdsRestricted`** (`@appstrate/core/module`, #2336): whether `spaceIds` is a
+  restriction the person chose (default `true`). `false` marks the set as the spaces the person acts
+  in, so the credential acts on connections as the person while staying confined everywhere else.
 - **`formatRelativeTime(at, now, locale?, style?)`, `formatAge(at, now, locale?)`**
   (`@appstrate/core/format`): `at` relative to `now`, both epoch milliseconds, in either
   direction, rendered by `Intl` in the given locale (English when absent or malformed, as

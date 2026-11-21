@@ -226,6 +226,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         }
         if (resolution.spaceIds !== undefined) {
           c.set("credentialSpaceIds", resolution.spaceIds);
+          if (resolution.spaceIdsRestricted === false) c.set("credentialSpaceIdsRestricted", false);
         }
         if (resolution.endUser) {
           c.set("endUser", resolution.endUser);

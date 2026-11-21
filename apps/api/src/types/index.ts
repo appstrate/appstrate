@@ -95,6 +95,8 @@ export type AppEnv = {
      * cut to them and a request acts in one of them. Absent for a credential bound to none.
      */
     credentialSpaceIds?: readonly string[];
+    /** Set to `false` when `credentialSpaceIds` is not a restriction the person chose (`AuthResolution.spaceIdsRestricted`). */
+    credentialSpaceIdsRestricted?: false;
     /**
      * The space the endpoint itself pins (the space-pinned MCP endpoint), whatever the
      * credential reaches: the reach is cut to it like a pinned dispatch's.

@@ -317,6 +317,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
   PackageShare:
     "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+  PackageOrgOffer:
+    "offer acknowledgement of `PUT …/org-offer`; no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   ShareTarget:
     "request-body value object of POST /packages/{scope}/{name}/shares; never a response",
   ShareTargetView:
