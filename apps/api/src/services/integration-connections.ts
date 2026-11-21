@@ -2648,6 +2648,11 @@ interface UsableIntegration {
   integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
+  /**
+   * Whether the integration is active in the space. False: the actor holds a connection usable here
+   * but a run could bind nothing of it until the integration is switched on (or offered) here.
+   */
+  active: boolean;
   /** The integration's own manifest version, so a caller pins a satisfiable range. */
   version?: string;
   /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
@@ -2669,9 +2674,10 @@ interface UsableConnection {
 }
 
 /**
- * The integrations the actor could attach to an agent here, one per integration with a connection
- * it may bind ({@link usableInSpace}) and active in the space, as a run or a proxy call requires;
- * `source`: own, shared, or both.
+ * The integrations the actor holds a connection it may bind ({@link usableInSpace}) for, one per
+ * integration; `source`: own, shared, or both. `active` says whether the integration is switched on
+ * in the space, as a run or a proxy call requires: an inactive one binds nothing here, and is listed
+ * so the actor can be told its connection exists and why a run does not use it.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2721,8 +2727,7 @@ export async function listUsableIntegrationsForActor(
 
   // Sorted on purpose: an unordered SELECT may permute it between identical calls.
   const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
-  const ids = [...active].sort();
-  if (ids.length === 0) return [];
+  const ids = [...acc.keys()].sort();
   const pkgRows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
@@ -2744,12 +2749,19 @@ export async function listUsableIntegrationsForActor(
   return ids.map((integrationId) => {
     const { own, shared, healthy, connections } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
+    const isActive = active.has(integrationId);
     return {
       integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
-      version: versionMap.get(integrationId),
-      default_tools: defaultToolsMap.get(integrationId),
+      active: isActive,
+      // What a run would bind: nothing of an inactive integration.
+      ...(isActive
+        ? {
+            version: versionMap.get(integrationId),
+            default_tools: defaultToolsMap.get(integrationId),
+          }
+        : {}),
       ...(healthy ? {} : { needs_reconnection: true as const }),
       connections,
     };

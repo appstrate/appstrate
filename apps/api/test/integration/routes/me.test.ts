@@ -384,18 +384,32 @@ describe("Me API (/api/me)", () => {
       });
     });
 
-    describe("connections lists only integrations active in the space", () => {
+    describe("connections flags whether each integration is active in the space", () => {
       afterEach(() => {
         __resetSystemIntegrationsForTest();
       });
 
-      async function listedIntegrations(spaceId = ctx.defaultSpaceId) {
+      type Listed = {
+        integration_package_id: string;
+        active: boolean;
+        version?: string;
+        default_tools?: unknown;
+        connections: { id: string }[];
+      };
+
+      async function listedEntries(spaceId = ctx.defaultSpaceId): Promise<Listed[]> {
         const res = await app.request("/api/me/context", {
           headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
         });
         expect(res.status).toBe(200);
-        const body = (await res.json()) as { connections: { integration_package_id: string }[] };
-        return body.connections.map((c) => c.integration_package_id);
+        return ((await res.json()) as { connections: Listed[] }).connections;
+      }
+
+      /** The ids of the integrations ACTIVE in the space. */
+      async function listedIntegrations(spaceId = ctx.defaultSpaceId) {
+        return (await listedEntries(spaceId))
+          .filter((c) => c.active)
+          .map((c) => c.integration_package_id);
       }
 
       /** An org-scope connection (serving every space of the org) of the caller. */
@@ -408,16 +422,25 @@ describe("Me API (/api/me)", () => {
           userId: ctx.user.id,
         });
 
-      it("omits an org-scope connection where its integration is not activated", async () => {
-        await seedOrgConnection("@ctx/twilio");
+      it("lists an org-scope connection where its integration is not activated, as inactive", async () => {
+        const connectionId = await seedOrgConnection("@ctx/twilio");
         const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
         await seedSpacePackage(team.id, "@ctx/twilio");
 
-        expect(await listedIntegrations()).toEqual([]);
-        expect(await listedIntegrations(team.id)).toEqual(["@ctx/twilio"]);
+        const here = await listedEntries();
+        expect(here.map((c) => [c.integration_package_id, c.active])).toEqual([
+          ["@ctx/twilio", false],
+        ]);
+        // Nothing a run could bind, but the connection stays nameable.
+        expect(here[0]!.version).toBeUndefined();
+        expect(here[0]!.default_tools).toBeUndefined();
+        expect(here[0]!.connections.map((c) => c.id)).toEqual([connectionId]);
+        expect(
+          (await listedEntries(team.id)).map((c) => [c.integration_package_id, c.active]),
+        ).toEqual([["@ctx/twilio", true]]);
       });
 
-      it("follows a system integration's activation: listed without a row, omitted when switched off", async () => {
+      it("follows a system integration's activation: active without a row, inactive when switched off", async () => {
         initSystemIntegrations([{ id: "@ctx/system-mail" }]);
         await seedOrgConnection("@ctx/system-mail");
 
@@ -425,6 +448,19 @@ describe("Me API (/api/me)", () => {
 
         await seedSpacePackage(ctx.defaultSpaceId, "@ctx/system-mail", { enabled: false });
         expect(await listedIntegrations()).toEqual([]);
+        expect((await listedEntries()).map((c) => [c.integration_package_id, c.active])).toEqual([
+          ["@ctx/system-mail", false],
+        ]);
+      });
+
+      it("sorts active and inactive entries together by integration id", async () => {
+        await seedOrgConnection("@ctx/zeta");
+        await seedOrgConnection("@ctx/alpha");
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/zeta");
+        expect((await listedEntries()).map((c) => [c.integration_package_id, c.active])).toEqual([
+          ["@ctx/alpha", false],
+          ["@ctx/zeta", true],
+        ]);
       });
 
       it("lists the integrations GET /api/credential-proxy/connections lists", async () => {

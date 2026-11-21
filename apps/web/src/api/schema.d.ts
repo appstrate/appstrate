@@ -17552,6 +17552,7 @@ export interface operations {
                      *           "integration_package_id": "@appstrate/gmail",
                      *           "name": "Gmail",
                      *           "source": "own",
+                     *           "active": true,
                      *           "connections": [
                      *             {
                      *               "id": "conn_1",
@@ -17566,6 +17567,7 @@ export interface operations {
                      *           "integration_package_id": "@appstrate/clickup",
                      *           "name": "ClickUp",
                      *           "source": "shared",
+                     *           "active": true,
                      *           "connections": [
                      *             {
                      *               "id": "conn_2",
@@ -17648,12 +17650,14 @@ export interface operations {
                             /** @description Failure message for non-success runs, when available. */
                             error?: string | null;
                         }[];
-                        /** @description Integrations the caller could attach to an agent. */
+                        /** @description Integrations the caller holds a connection usable in this space for, active here or not (`active`). */
                         connections: {
                             integration_package_id: string;
                             name: string;
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
+                            /** @description Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent. */
+                            active: boolean;
                             /** @description The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`. */
                             connections: {
                                 id: string;

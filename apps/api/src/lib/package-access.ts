@@ -1150,10 +1150,33 @@ function manifestPackageRefs(
 }
 
 /** Caller-authored references need live source read access; unchanged references need no new scope. */
-export async function assertPackageDependenciesAccessible(
+export function assertPackageDependenciesAccessible(
   c: Context<AppEnv>,
   manifest: Record<string, unknown>,
   previous: Record<string, unknown> = {},
+): Promise<void> {
+  return assertDependenciesReachable(c, manifest, previous, assertCatalogPackageAccess);
+}
+
+/**
+ * {@link assertPackageDependenciesAccessible} for a launch (an inline run's posted manifest): a
+ * dependency is judged over the credential's own reach ({@link credentialReachableSpaces}), not the
+ * entered space alone. A credential bound to a set of spaces (the chat's bearer) names a package
+ * homed in another of its spaces and not placed in the entered one; the readiness gate then answers
+ * its actionable `integration_not_active`, the same answer a session gets, instead of an opaque 404.
+ */
+export function assertLaunchDependenciesAccessible(
+  c: Context<AppEnv>,
+  manifest: Record<string, unknown>,
+): Promise<void> {
+  return assertDependenciesReachable(c, manifest, {}, assertPackageReachableForPlacement);
+}
+
+async function assertDependenciesReachable(
+  c: Context<AppEnv>,
+  manifest: Record<string, unknown>,
+  previous: Record<string, unknown>,
+  assertReachable: (c: Context<AppEnv>, packageId: string) => Promise<unknown>,
 ): Promise<void> {
   const previousIds = new Set(manifestPackageRefs(previous).map((ref) => ref.id));
   const seen = new Set<string>();
@@ -1179,5 +1202,5 @@ export async function assertPackageDependenciesAccessible(
       ),
     );
   // Readiness keeps the existing missing-dependency errors; known but inaccessible sources are hidden.
-  for (const { id } of existing) await assertCatalogPackageAccess(c, id);
+  for (const { id } of existing) await assertReachable(c, id);
 }

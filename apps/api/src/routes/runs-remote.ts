@@ -44,7 +44,7 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import {
-  assertPackageDependenciesAccessible,
+  assertLaunchDependenciesAccessible,
   assertDraftSelectorAllowed,
   assertDependencyDraftOverridesAllowed,
 } from "../lib/package-access.ts";
@@ -381,7 +381,7 @@ export function createRunsRemoteRouter() {
         await assertDependencyDraftOverridesAllowed(c, dependencyOverrides, src.manifest);
 
         const preflight = await runInlinePreflight({
-          authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+          authorizeDependencies: (manifest) => assertLaunchDependenciesAccessible(c, manifest),
           launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"], {
             dependencyOverrides,
           }),

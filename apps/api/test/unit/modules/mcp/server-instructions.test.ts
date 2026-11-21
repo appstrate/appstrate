@@ -177,6 +177,13 @@ describe("MCP server instructions — connect bullet", () => {
     expect(text).toContain("never launch without the integration the user asked for");
   });
 
+  it("tells the model an `active: false` entry is a connection whose integration is off in that space", () => {
+    const text = instructionsFor(permissions);
+    expect(text).toContain("an entry with `active: false` is a connection the user holds");
+    expect(text).toContain("`activatePackage`, or `offerPackageToOrg` for an owner or admin");
+    expect(text).toContain("never move the run to another space silently");
+  });
+
   it("says a schedule write wants the user's one connection named too", () => {
     const bullet = instructionsFor(permissions)
       .split("\n")

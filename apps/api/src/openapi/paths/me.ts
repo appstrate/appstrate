@@ -887,14 +887,26 @@ export const mePaths = {
                   },
                   connections: {
                     type: "array",
-                    description: "Integrations the caller could attach to an agent.",
+                    description:
+                      "Integrations the caller holds a connection usable in this space for, active here or not (`active`).",
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "name", "source", "connections"],
+                      required: [
+                        "integration_package_id",
+                        "name",
+                        "source",
+                        "active",
+                        "connections",
+                      ],
                       properties: {
                         integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
+                        active: {
+                          type: "boolean",
+                          description:
+                            "Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent.",
+                        },
                         connections: {
                           type: "array",
                           description:
@@ -1082,6 +1094,7 @@ export const mePaths = {
                     integration_package_id: "@appstrate/gmail",
                     name: "Gmail",
                     source: "own",
+                    active: true,
                     connections: [
                       {
                         id: "conn_1",
@@ -1096,6 +1109,7 @@ export const mePaths = {
                     integration_package_id: "@appstrate/clickup",
                     name: "ClickUp",
                     source: "shared",
+                    active: true,
                     connections: [
                       {
                         id: "conn_2",
