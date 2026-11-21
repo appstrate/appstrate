@@ -13,7 +13,7 @@ import { SkeletonBadge, SkeletonLine } from "@/components/skeleton-line";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
-import { formatRelativeTime } from "../../../lib/format-date";
+import { formatDateField, formatRelativeTime } from "../../../lib/format-date";
 
 function deliveryStatusVariant(d: WebhookDelivery): "success" | "failed" | "pending" {
   if (d.status === "pending") return "pending";
@@ -77,7 +77,9 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
                 <Badge variant={variant}>{deliveryStatusLabel(d)}</Badge>
                 {d.latency != null && <span>{d.latency}ms</span>}
                 <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
-                <span>{formatRelativeTime(d.createdAt, now)}</span>
+                <time dateTime={d.createdAt} title={formatDateField(d.createdAt)}>
+                  {formatRelativeTime(d.createdAt, now)}
+                </time>
               </div>
               {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
             </Card>

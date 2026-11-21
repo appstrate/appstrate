@@ -4,12 +4,24 @@ import { useSyncExternalStore } from "react";
 
 const TICK_MS = 10_000;
 
+const floored = () => Math.floor(Date.now() / TICK_MS) * TICK_MS;
+
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | undefined;
+// The snapshot is this stored value, never a fresh clock read: two reads in one
+// render must agree, which `Date.now()` cannot promise across a tick boundary.
+let now = floored();
 
 function subscribe(listener: () => void): () => void {
+  if (listeners.size === 0) {
+    // Stale since the last subscriber left; React re-reads it once subscribed.
+    now = floored();
+    timer = setInterval(() => {
+      now = floored();
+      listeners.forEach((notify) => notify());
+    }, TICK_MS);
+  }
   listeners.add(listener);
-  timer ??= setInterval(() => listeners.forEach((notify) => notify()), TICK_MS);
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) {
@@ -19,10 +31,7 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** The clock floored to the tick: stable between ticks, as a snapshot must be. */
-function snapshot(): number {
-  return Math.floor(Date.now() / TICK_MS) * TICK_MS;
-}
+const snapshot = () => now;
 
 /**
  * The current time for a relative label (« dans 3 min ») or a date grouping,

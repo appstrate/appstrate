@@ -139,7 +139,7 @@ export function ChatConversationList({
   renderSpaces: RenderSpaces;
   /**
    * How old an ISO date is as of `now`, as a bare quantity in the host's
-   * language (« 5 min », « 3 j »): a row's age column is 56px. Pass a stable function.
+   * language (« 5 min », « 3 j »): a row's age column is 56px.
    */
   formatAge: (iso: string, now: number) => string;
 }) {

@@ -111,13 +111,16 @@ function relativeSpan(
             : abs < 365 * DAY_MS
               ? ([diff / (30 * DAY_MS), "month"] as const)
               : ([diff / (365 * DAY_MS), "year"] as const);
-  return [Math.trunc(value) || 0, unit];
+  // `+ 0` turns -0 into 0, so a past instant under a minute is « maintenant », not « -0 ».
+  return [Math.trunc(value) + 0, unit];
 }
 
 /**
- * When `at` is relative to `now` (epoch ms), as a phrase: « dans 3 h »,
+ * `at` relative to `now`, both epoch milliseconds, as a phrase: « dans 3 h »,
  * « il y a 5 min », « maintenant » under a minute (`Intl.RelativeTimeFormat`).
- * `locale` as for {@link formatBytes}: omitted or malformed, English.
+ * `locale` as for {@link formatBytes}: omitted or malformed, English. Like it,
+ * a display helper never throws: a non-finite `at` (an unparseable date)
+ * renders "".
  */
 export function formatRelativeTime(
   at: number,
@@ -125,6 +128,7 @@ export function formatRelativeTime(
   locale?: string,
   style: Intl.RelativeTimeFormatStyle = "short",
 ): string {
+  if (!Number.isFinite(at)) return "";
   const [count, unit] = relativeSpan(at, now);
   // `auto` only for zero: « maintenant », not « dans 0 seconde ».
   return new Intl.RelativeTimeFormat(canonicalLocale(locale) ?? "en", {
@@ -134,11 +138,13 @@ export function formatRelativeTime(
 }
 
 /**
- * How old `at` is as of `now`, as a bare quantity for a narrow column
- * (« 5 min », « 3 h », « 2 j »), « maintenant » under a minute. Same units as
- * {@link formatRelativeTime}, without its « il y a ».
+ * How old `at` is as of `now`, both epoch milliseconds, as a bare quantity for
+ * a narrow column (« 5 min », « 3 h », « 2 j »), « maintenant » under a minute.
+ * Same units, locale and "" for a non-finite `at` as {@link formatRelativeTime},
+ * without its « il y a ».
  */
 export function formatAge(at: number, now: number, locale?: string): string {
+  if (!Number.isFinite(at)) return "";
   const [count, unit] = relativeSpan(at, now);
   const tag = canonicalLocale(locale) ?? "en";
   if (count === 0) return new Intl.RelativeTimeFormat(tag, { numeric: "auto" }).format(0, unit);

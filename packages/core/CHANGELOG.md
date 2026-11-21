@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`formatRelativeTime(at, now, locale?, style?)`, `formatAge(at, now, locale?)`**
-  (`@appstrate/core/format`): a date relative to now, in both directions, rendered by `Intl` in
-  the given locale (English when absent or malformed, as `formatBytes`). `formatRelativeTime` is
+  (`@appstrate/core/format`): `at` relative to `now`, both epoch milliseconds, in either
+  direction, rendered by `Intl` in the given locale (English when absent or malformed, as
+  `formatBytes`). A non-finite `at` (an unparseable date) renders `""`; neither throws. `formatRelativeTime` is
   a phrase (`Intl.RelativeTimeFormat`: « dans 3 h », « il y a 5 min », « maintenant »);
   `formatAge` the same span as a bare quantity for a narrow column (`Intl.NumberFormat` units:
   « 5 min », « 3 j »). One unit ladder for both: minutes, hours, days under 30, months of 30

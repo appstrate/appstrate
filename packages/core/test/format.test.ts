@@ -98,6 +98,11 @@ describe("formatRelativeTime / formatAge", () => {
     expect(age(-800 * DAY)).toBe("2 ans");
   });
 
+  it("renders nothing for an unparseable date, never « maintenant » or a throw", () => {
+    expect(formatRelativeTime(Number.NaN, NOW, "fr")).toBe("");
+    expect(formatAge(Date.parse("not a date"), NOW, "fr")).toBe("");
+  });
+
   it("speaks the locale it is given, English when it is absent or malformed", () => {
     expect(rel(3 * HOUR, "en")).toBe("in 3 hr.");
     expect(plain(formatRelativeTime(NOW + 3 * HOUR, NOW, "en", "long"))).toBe("in 3 hours");
