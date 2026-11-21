@@ -199,7 +199,7 @@ function SpaceLineBlocks() {
   );
 }
 
-/** An integration's « Connexion utilisée par défaut », under its connections table: a group heading, then the default's rows. */
+/** An integration's « Connexion utilisée par défaut », under its connections table: a group heading, the default's row, then the exceptions (sub-heading, table, add button). */
 function DefaultConnectionBlocks() {
   return (
     <div className="mt-8 flex flex-col gap-6">
@@ -209,7 +209,20 @@ function DefaultConnectionBlocks() {
           <SkeletonLine className="w-full text-sm leading-relaxed" />
         </div>
       </header>
-      <SettingsSkeleton rows={2} />
+      <SettingsSkeleton rows={1} />
+      {/* The exceptions: their sub-heading, the table's card, then « Ajouter ». */}
+      <div>
+        <header className="mb-3">
+          <SkeletonLine className="w-44 text-sm font-semibold" />
+          <div className="mt-1 max-w-2xl">
+            <SkeletonLine className="w-full text-sm leading-relaxed" />
+          </div>
+        </header>
+        <div className="mb-4">
+          <TableBlocks framed />
+        </div>
+        <Skeleton className="h-8 w-32" />
+      </div>
     </div>
   );
 }

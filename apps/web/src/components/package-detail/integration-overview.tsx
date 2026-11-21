@@ -68,7 +68,7 @@ function AvailabilityCard({
               state={catalogue.state}
               className="text-primary w-fit text-sm font-medium hover:underline"
             >
-              {t("integration.availability.share")}
+              {catalogue.label}
             </Link>
           )}
         </div>

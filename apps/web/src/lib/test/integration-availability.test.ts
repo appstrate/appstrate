@@ -32,14 +32,31 @@ describe("availabilityLabel", () => {
     });
   });
 
-  it("reads inactive whatever the provenance", () => {
+  it("keeps the provenance of an inactive placement", () => {
+    for (const via of ["home", "system", "organization"] as const) {
+      expect(availabilityLabel({ ...base, via, state: "inactive" })).toEqual({
+        key: `integration.availability.off.${via}`,
+        params: {},
+      });
+    }
+    expect(
+      availabilityLabel({
+        via: "shared",
+        state: "inactive",
+        shared_by: { user_id: "u", name: "Ada" },
+      }),
+    ).toEqual({ key: "integration.availability.off.sharedBy", params: { name: "Ada" } });
+    expect(availabilityLabel({ ...base, via: "shared", state: "inactive" }).key).toBe(
+      "integration.availability.off.shared",
+    );
+  });
+
+  it("reads plainly inactive when no placement exists", () => {
     for (const via of ["home", "shared", "system", "organization"] as const) {
-      for (const state of ["inactive", "none"] as const) {
-        expect(availabilityLabel({ ...base, via, state })).toEqual({
-          key: "integrations.badge.inactive",
-          params: {},
-        });
-      }
+      expect(availabilityLabel({ ...base, via, state: "none" })).toEqual({
+        key: "integrations.badge.inactive",
+        params: {},
+      });
     }
   });
 });
