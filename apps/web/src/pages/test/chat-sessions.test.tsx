@@ -70,6 +70,7 @@ function renderConversationList(qc: QueryClient, can: (permission: string) => bo
             t={(key) => key}
             can={can}
             renderSpaces={() => null}
+            formatAge={() => "age"}
           />
         </ChatTransportProvider>
       </SidebarProvider>,

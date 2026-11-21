@@ -9,10 +9,12 @@ import {
   assertPackageMutationAccess,
   isInlineShadowRunReadable,
 } from "../lib/package-access.ts";
+import { ACTIVE_IN_SPACES_HINT } from "@appstrate/core/mcp-spaces";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
+import type { LaunchSpace } from "../lib/launch-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -125,8 +127,10 @@ export function requireAgentOrInlineRun() {
  * Readiness (`GET …/connection-readiness`) deliberately does NOT mount this: it
  * REPORTS what blocks a run, so inactivity belongs in its payload as a blocking
  * error, and a 404 would blank the panel that explains the refusal.
+ *
+ * The refusing route supplies the alternative spaces for its own request.
  */
-export function requireActiveAgent() {
+export function requireActiveAgent(alternatives: (c: Context<AppEnv>) => Promise<LaunchSpace[]>) {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const agent = c.get("package");
     const orgId = c.get("orgId");
@@ -137,20 +141,30 @@ export function requireActiveAgent() {
     // caller has just lost sight of this agent, and the named one would report
     // a state they are no longer entitled to observe.
     if (block === "not_placed") throw agentNotFound(agent.id);
-    if (block === "not_active") throw agentNotActiveInSpace(agent.id, spaceId);
+    if (block === "not_active") {
+      // The activation refusal precedes body, version and draft-authority checks. A
+      // selection the route cannot honor gives no alternatives and keeps the original 404.
+      const activeInSpaces = await alternatives(c).catch((err: unknown) => {
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) return [];
+        throw err;
+      });
+      throw agentNotActiveInSpace(agent.id, spaceId, activeInSpaces);
+    }
     return next();
   }, ACTIVE_AGENT_GATE);
 }
 
-/** The refusal of an agent the caller CAN see and CANNOT run here. */
-function agentNotActiveInSpace(packageId: string, spaceId: string) {
+/** An agent the caller can see but not run here: activate it here or, with consent, use `activeInSpaces`. */
+function agentNotActiveInSpace(packageId: string, spaceId: string, activeInSpaces: LaunchSpace[]) {
   return new ApiError({
     status: 404,
     code: "agent_not_active_in_space",
     title: "Agent Not Active",
     detail:
       `Agent '${packageId}' is placed in space '${spaceId}' but not active there. ` +
-      `Activate it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
+      `Activate it with POST /api/spaces/${spaceId}/packages {"packageId":"${packageId}"}` +
+      (activeInSpaces.length > 0 ? ACTIVE_IN_SPACES_HINT : "."),
+    extensions: { active_in_spaces: activeInSpaces },
   });
 }
 

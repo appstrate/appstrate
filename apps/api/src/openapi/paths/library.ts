@@ -60,6 +60,8 @@ const PACKAGES_EXAMPLE = {
       home_writable: true,
       home_deletable: true,
       home_shareable: true,
+      offered_to_org: false,
+      org_offerable: true,
       placements: [
         {
           space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -100,6 +102,8 @@ const PACKAGES_EXAMPLE = {
       home_writable: false,
       home_deletable: false,
       home_shareable: false,
+      offered_to_org: false,
+      org_offerable: false,
       placements: [
         {
           space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -144,7 +148,7 @@ const organizationLibraryPaths = {
       description:
         "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its " +
         "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
-        "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
+        "(`via`: system, home, shared, organization) and whether that space runs it (`state`: active, inactive, none). " +
         "Graded by the caller: the spaces list and the placements include only the spaces whose own library " +
         "(`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — " +
         "and each package type also requires that type's read permission in the space. So the response is the union " +

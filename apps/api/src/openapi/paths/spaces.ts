@@ -459,7 +459,8 @@ export const spacesPaths = {
         "Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. " +
         "Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. " +
         "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. " +
-        "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
+        "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. " +
+        "Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -490,7 +491,12 @@ export const spacesPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/SpacePackage" },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/SpacePackage" },
+                  { $ref: "#/components/schemas/ActivationWarnings" },
+                ],
+              },
             },
           },
         },
@@ -500,7 +506,12 @@ export const spacesPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/SpacePackage" },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/SpacePackage" },
+                  { $ref: "#/components/schemas/ActivationWarnings" },
+                ],
+              },
             },
           },
         },

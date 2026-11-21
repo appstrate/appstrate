@@ -287,7 +287,7 @@ describe("the spaces a conversation touched", () => {
 
   it("rings the stacked tiles in the container's variable, the page background by default", () => {
     const { html } = renderOverview(<SpaceTilesOf spaceIds={["spc_a", "spc_b"]} />, spaces);
-    expect(html.match(/ring-\(--space-tile-ring,var\(--background\)\)/g)).toHaveLength(2);
+    expect(html.match(/ring-\(--tile-ring,var\(--background\)\)/g)).toHaveLength(2);
   });
 
   it("reads a single space as the usual tile and name", () => {

@@ -69,12 +69,13 @@ type LoadedPickerProps = Omit<ConnectionPickerOptions, "persistence"> & {
 };
 
 function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedPickerProps) {
-  const { integrationId, agentPackageId, version } = options;
+  const { integrationId, agentPackageId, version, scheduleId } = options;
   const picker = useConnectionPicker({ ...options, persistence });
   const { data: entry, isError } = useIntegrationReadinessEntry(
     integrationId,
     agentPackageId,
     version,
+    scheduleId,
   );
 
   // Failure first: `isPending` is false once a query failed, so a missing verdict alone would

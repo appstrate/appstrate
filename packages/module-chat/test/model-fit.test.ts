@@ -107,6 +107,14 @@ describe("modelFit", () => {
     expect(modelFit(128_001, sizing)).toBe("window");
   });
 
+  it("requires a 5% margin for a different tokenizer at each declared limit", () => {
+    expect(modelFit(100_001, sizing, true)).toBeNull();
+    expect(modelFit(104_999, sizing, true)).toBeNull();
+    expect(modelFit(105_000, sizing, true)).toBe("threshold");
+    expect(modelFit(128_001, sizing, true)).toBe("threshold");
+    expect(modelFit(134_400, sizing, true)).toBe("window");
+  });
+
   it("agrees with the gauge on the model that measured", () => {
     for (const tokens of [99_000, 100_000, 100_001, 130_000]) {
       const gaugeFull = contextReading({ tokens, ...sizing }).level === "full";

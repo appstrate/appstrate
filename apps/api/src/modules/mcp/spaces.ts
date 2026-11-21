@@ -11,6 +11,7 @@ import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { enterableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import type { DispatchPin } from "../../lib/internal-dispatch.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
 import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
@@ -21,6 +22,8 @@ export interface McpSpace {
   name: string;
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
+  /** Whether it is the caller's own personal space. */
+  personal: boolean;
   permissions: ReadonlySet<string>;
   /** The acts the caller holds there (`deriveMcpSurface` over `permissions` and the space). */
   surface: McpSurface;
@@ -41,7 +44,7 @@ export interface OrgWideToolSpaces extends OrgWideSpaces {
 /** {@link OrgWideToolSpaces.dispatchIn} over `send`: a `bound` credential is pinned to the space per dispatch, any other enters it by `x-space-id`. */
 export function spaceDispatcher(
   spaces: OrgWideSpaces,
-  send: (request: Request, spacePin?: string) => Promise<Response>,
+  send: (request: Request, pin?: DispatchPin) => Promise<Response>,
   bound: boolean,
 ): (spaceId: string) => Dispatch {
   return (spaceId) => {
@@ -50,7 +53,7 @@ export function spaceDispatcher(
     }
     return (request) => {
       request.headers.set("x-space-id", spaceId);
-      return send(request, bound ? spaceId : undefined);
+      return send(request, bound ? { spaceId } : undefined);
     };
   };
 }
@@ -78,6 +81,7 @@ export async function listReachableSpaces(
       id: space.id,
       name: space.name,
       role: toSpaceRoleWire(space.role)!.name,
+      personal: space.personal,
       permissions: space.permissions,
       surface: surfaceOf(space.permissions, space),
     }));

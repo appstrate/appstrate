@@ -20,7 +20,13 @@
  */
 
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
-import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
+import {
+  ACTIVE_SPACES_META_KEY,
+  projectActiveInSpaces,
+  spaceIdRefusal,
+  type NamedSpace,
+} from "@appstrate/core/mcp-spaces";
+import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import {
   parseSkillUri,
@@ -51,6 +57,7 @@ import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
@@ -174,11 +181,11 @@ type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
 
 async function liveRelayedImage(
   block: Extract<RemoteToolResult["content"][number], { type: "image" }>,
-  modelSeesImages: boolean,
+  sendsImages: boolean,
 ): Promise<PiToolResult["content"][number]> {
   const mimeType = normalizeMime(block.mimeType);
   if (!isRasterImageMime(mimeType)) return { type: "text", text: "Unsupported image format." };
-  if (!modelSeesImages) return { type: "text", text: "The current model cannot read images." };
+  if (!sendsImages) return { type: "text", text: "The current model cannot read images." };
   if (Buffer.byteLength(block.data, "base64") > RESOURCE_BLOB_MAX_BYTES) {
     return { type: "text", text: RESOURCE_OVERSIZED_NOTE };
   }
@@ -199,7 +206,7 @@ async function liveRelayedImage(
 async function relayedToolResult(
   result: RemoteToolResult,
   scope: OfferScope,
-  modelSeesImages: boolean,
+  sendsImages: boolean,
 ): Promise<PiToolResult> {
   const blocks = result.content.map((block) => {
     const audience = block.annotations?.audience;
@@ -216,14 +223,14 @@ async function relayedToolResult(
   if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
   for (const [index, block] of blocks.entries()) {
-    if (block.type === "image") content[index] = await liveRelayedImage(block, modelSeesImages);
+    if (block.type === "image") content[index] = await liveRelayedImage(block, sendsImages);
   }
   const persistedContent = content.map((block) =>
     block.type === "text"
       ? block
       : {
           type: "text" as const,
-          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, supplied for this turn]`,
+          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, read for this turn]`,
         },
   );
   return { ...projected, content, persistedContent };
@@ -317,7 +324,7 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
-  modelSeesImages?: boolean;
+  fileDelivery: FileDelivery;
   pdfInput?: TurnPdfInput;
 };
 
@@ -522,16 +529,14 @@ function omitsOptionalSpace(inputSchema: unknown, args: Record<string, unknown>)
 }
 
 /**
- * A call that names no space records the spaces its result says it read (`searched_spaces`),
+ * Record the spaces a platform result says it read (a search or a configuration refusal),
  * before the result is returned. The refusal that withholds the result when a listed space is not
  * the turn's or cannot be recorded; `undefined` when every one is recorded.
  */
-async function enterSearchedSpaces(
+async function recordResultSpaces(
   organization: TurnSpaces,
-  structuredContent: unknown,
+  listed: unknown,
 ): Promise<Record<string, unknown> | undefined> {
-  const listed = (structuredContent as { searched_spaces?: unknown } | null | undefined)
-    ?.searched_spaces;
   if (listed === undefined) return undefined;
   const turnSpaces = new Set(organization.spaces.map((space) => space.id));
   const ids: unknown[] = Array.isArray(listed) ? listed : [null];
@@ -609,13 +614,17 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
-        if (spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)) {
-          const refusal = await enterSearchedSpaces(organization, result.structuredContent);
-          if (refusal) return refusalToolResult(refusal, scope, turnBudget);
-        }
+        const readSpaces =
+          toolName === "invoke_operation" && result.isError
+            ? result._meta?.[ACTIVE_SPACES_META_KEY]
+            : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
+              ? result.structuredContent?.searched_spaces
+              : undefined;
+        const unrecorded = await recordResultSpaces(organization, readSpaces);
+        if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
-            await relayedToolResult(result, scope, opts.modelSeesImages === true),
+            await relayedToolResult(result, scope, opts.fileDelivery.image),
             turnBudget,
           );
         }
@@ -793,7 +802,7 @@ function makeListSkillsExtension(
 /** One projection for both MCP resource reads and embedded resources from governed tool calls. */
 async function liveResources(
   resources: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"],
-  opts: Pick<BuildPlatformMcpToolsOptions, "modelSeesImages" | "pdfInput">,
+  opts: Pick<BuildPlatformMcpToolsOptions, "fileDelivery" | "pdfInput">,
   toolCallId: string,
 ) {
   const content: PiToolResult["content"] = [];
@@ -814,9 +823,9 @@ async function liveResources(
         { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
         toolCallId,
       );
-      note = pdf.note;
-      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
-    } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
+      if ("reference" in pdf) content.push({ type: "text", text: pdf.reference });
+      else note = pdf.note;
+    } else if (isRasterImageMime(mimeType) && opts.fileDelivery.image) {
       content.push({ type: "image", mimeType, data: blob });
     } else {
       note = "This file format cannot be read by the current model.";
@@ -905,13 +914,38 @@ function makeRunAndWaitExtension(
           },
         })) {
           finalPayload = step.payload;
+          if (step.isError) {
+            // This tool launches over REST. Restrict its alternatives to the same tool and
+            // record them before any preliminary card, tool result or history can reveal them.
+            const projected = projectActiveInSpaces(step.payload.body, () =>
+              ctx.organization.spaces.filter(({ permissions }) => {
+                const has = (permission: string) => permissions.includes(permission);
+                return (
+                  has("mcp:read") &&
+                  has("mcp:invoke") &&
+                  canRunAgents(has) &&
+                  (args.kind !== "inline" || canComposeInline(has))
+                );
+              }),
+            );
+            if (projected) {
+              const unrecorded = await recordResultSpaces(ctx.organization, projected.ids);
+              if (unrecorded) {
+                return withTurnBudgetNote(
+                  toPiToolResult(unrecorded, runAndWaitScope),
+                  ctx.turnBudget,
+                );
+              }
+              finalPayload = { ...step.payload, body: projected.body };
+            }
+          }
           // Live card: push each step's payload under this tool call id so the
           // UI reflects launch → progress → terminal before execute resolves.
           // `preliminary` (AI SDK): the call is not settled until the result below.
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
-            output: toPiToolResult(step.payload, runAndWaitScope),
+            output: toPiToolResult(finalPayload, runAndWaitScope),
             preliminary: true,
           });
         }

@@ -574,6 +574,18 @@ export interface BasePackageListItem {
   forked_from?: string | null;
 }
 
+/** One integration an agent of the index uses, named and drawn from its pinned manifest. */
+export interface AgentListIntegration {
+  id: string;
+  /** The manifest's `display_name`, the id when it declares none. */
+  name: string;
+  /** The manifest's `icon`, `null` when it declares none. */
+  icon: string | null;
+  required: boolean;
+  /** Declares `auths`; `false` for an unauthenticated integration, which binds no connection. */
+  authenticated: boolean;
+}
+
 export interface AgentListItem extends BasePackageListItem {
   /** The spaces of the index where the agent is active, its home first when it is one of them, then in the order of the space listing. */
   space_ids: string[];
@@ -592,6 +604,10 @@ export interface AgentListItem extends BasePackageListItem {
     skills?: Record<string, string>;
     integrations: Record<string, string>;
   };
+  /** The integrations a launch with `version` omitted uses (inert ones, and on a single-space index optional inactive ones, left out). */
+  integrations: AgentListIntegration[];
+  /** Required integrations not active in the space (they refuse the launch); single-space index only. */
+  inactive_required_integrations?: string[];
   running_runs: number;
   /** Runs of this agent the caller has not read yet (per recipient, like a schedule's). */
   unread_count: number;

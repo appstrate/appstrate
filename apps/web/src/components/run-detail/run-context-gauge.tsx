@@ -34,11 +34,10 @@ export function ContextGaugeReadout({
   const isActive = (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
   const value = isActive ? reading.current : reading.peak;
   const fraction = isActive ? reading.currentFraction : reading.peakFraction;
-  const counts = `${formatCompactTokens(value, i18n.language)} / ${formatTokenFigure(
-    reading.window,
-    reading.windowAssumed,
-    i18n.language,
-  )}`;
+  const counts = t("run.contextGaugeCounts", {
+    used: formatCompactTokens(value, i18n.language),
+    window: formatTokenFigure(reading.window, reading.windowAssumed, i18n.language),
+  });
 
   const windowHint = reading.windowAssumed
     ? t("run.contextGaugeWindowAssumed", {

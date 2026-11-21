@@ -40,8 +40,8 @@ type PackageIconProps = {
  * `icon` follows one grammar for every type (`@appstrate/core/appearance`):
  * an agent is an `IdentityTile` (its colour, derived from its package `id` when
  * it chose none; `lucide:bot` when it has no icon), an integration shows its
- * logo (a neutral placeholder when it has none), the other types show their
- * type's glyph on a muted ground.
+ * logo on a white ground of its own (a neutral placeholder when it has none),
+ * the other types show their type's glyph on a muted ground.
  */
 export function PackageIcon(props: PackageIconProps) {
   const { type, name, icon, color, size = "md", className } = props;
@@ -70,12 +70,26 @@ export function PackageIcon(props: PackageIconProps) {
     );
     const parsed = parseIcon(icon);
     if (!parsed) return placeholder;
+    // A logo is a brand's glyph, transparent and drawn for a light surface: a black one vanishes
+    // on the dark theme. It sits on a white ground of its own, as an app icon does, which keeps
+    // its colours exact on every theme (what Linear's or Raycast's catalogues do, and why app
+    // directories refuse transparent icons). A glyph drawn in `currentColor` (Lucide, simple-icons)
+    // takes the ground's dark ink, not the theme's text colour. A glyph that cannot be drawn leaves
+    // the ground and the placeholder's puzzle on it, in a grey that reads on white.
     return (
-      <ManifestGlyph
-        icon={parsed}
-        className={cn("shrink-0", box, GLYPH_PADDING[size])}
-        fallback={placeholder}
-      />
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-center bg-white text-neutral-900",
+          box,
+          GLYPH_PADDING[size],
+        )}
+      >
+        <ManifestGlyph
+          icon={parsed}
+          className="size-full"
+          fallback={<Puzzle className={cn(mutedGlyph, "text-neutral-400")} aria-hidden />}
+        />
+      </span>
     );
   }
 

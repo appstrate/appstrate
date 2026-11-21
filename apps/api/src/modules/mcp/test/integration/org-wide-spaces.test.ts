@@ -74,6 +74,8 @@ describe("mcp org-wide connection", () => {
     expect(byId.get(gestion.id)?.role).toBe("admin");
     expect(byId.get(lecture.id)?.role).toBe("viewer");
     expect(byId.has(foreign.id)).toBe(false);
+    // A caller without a personal space sees none marked so.
+    expect(spaces.every((s) => (s as { personal?: boolean }).personal === false)).toBe(true);
 
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
@@ -87,11 +89,72 @@ describe("mcp org-wide connection", () => {
     });
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
+    // Only a permission refusal is final; a configuration one is repaired or, agreed, moved.
+    expect(instructions).toContain("A permission refusal (`403`, `not_granted`) is final");
+    expect(instructions).toMatch(
+      /A configuration refusal \(`agent_not_active_in_space`, `integration_not_active`/,
+    );
+    expect(instructions).toContain(
+      "`active_in_spaces`; act in another space only once the user agrees",
+    );
+    expect(instructions).toContain("a `required: true` one will refuse its launch there");
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
     expect(instructions).toContain(`createAgent [${gestion.id}]`);
     // The spaces are listed by the `space_id` schema, not repeated here.
     expect(instructions).toContain("Space names are not unique");
     expect(instructions).not.toContain(`Gestion (\`${gestion.id}\``);
+  });
+
+  it("marks the caller's own personal space, where a new package goes by default", async () => {
+    const perso = await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Perso",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+
+    const me = payload(await call("get_me", { space_id: gestion.id }));
+    const spaces = me.data.spaces as Array<{ id: string; personal: boolean }>;
+    const personal = new Map(spaces.map((s) => [s.id, s.personal]));
+    expect(personal.get(perso.id)).toBe(true);
+    expect(personal.get(defaultSpaceId)).toBe(false);
+    expect(personal.get(gestion.id)).toBe(false);
+    expect(personal.get(lecture.id)).toBe(false);
+
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const spaceId = (
+      listed.envelope.result?.tools as Array<{
+        name: string;
+        inputSchema: { properties: Record<string, { description: string }> };
+      }>
+    ).find((t) => t.name === "invoke_operation")!.inputSchema.properties.space_id!;
+    expect(spaceId.description).toContain(
+      "Perso (`" + perso.id + "`, role admin, your personal space)",
+    );
+    expect(spaceId.description).toContain("Gestion (`" + gestion.id + "`, role admin)");
+    expect(spaceId.description.match(/your personal space\)/g)).toHaveLength(1);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "0" },
+      },
+    });
+    const instructions = envelope.result?.instructions as string;
+    expect(instructions).toContain("goes to your personal space");
+    expect(instructions).toContain("personal_space_takes_no_keys");
+    // A team space already chosen (named, or designated by the context) is used; team spaces
+    // are offered only without a destination or when it is a personal space.
+    expect(instructions).toContain(
+      "the destination already chosen wins: the team space the request names, else the one your context designates",
+    );
+    expect(instructions).toContain("Only when there is none, or it is a personal space, offer");
+    expect(instructions).toContain("space-level OIDC client");
+    expect(instructions).not.toContain(`Perso (\`${perso.id}\``);
   });
 
   it("declares space_id on the tools that act in a space, and only those", async () => {

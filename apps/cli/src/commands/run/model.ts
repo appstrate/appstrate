@@ -25,7 +25,6 @@ import type { Api, Model } from "../../lib/pi-sdk.ts";
 import { deriveProviderFromApi, llmProxyBaseUrl, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import type { ModelInputModality } from "@appstrate/core/module";
 import { isPiModelDialect } from "@appstrate/core/sidecar-types";
 import {
@@ -46,7 +45,7 @@ interface ModelFlags {
 interface ResolvedModel {
   model: Model<Api>;
   apiKey: string;
-  /** No window was declared (always so in env mode): `model` runs on `DEFAULT_CONTEXT_WINDOW`. */
+  /** The model runs with a fallback window. */
   contextWindowAssumed?: true;
 }
 
@@ -143,10 +142,9 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     // One spelling of those zeros; `ZERO_MODEL_COST` carries both reasons the
     // record exists, and the `compat` exemption above does NOT extend to it.
     cost: { ...ZERO_MODEL_COST },
-    // Env mode has no source for the model's limits: the runner's defaults, the window flagged
-    // as assumed.
-    contextWindow: DEFAULT_CONTEXT_WINDOW,
-    maxTokens: DEFAULT_MAX_TOKENS,
+    // Direct CLI runs keep their historical limits when the model declares none.
+    contextWindow: 200_000,
+    maxTokens: 8_192,
   };
 
   return { model, apiKey, contextWindowAssumed: true };

@@ -51,8 +51,8 @@ import {
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import {
-  getSelectedModelAcceptsImages,
-  getSelectedModelReadsPdf,
+  getSelectedModelSendsImages,
+  getSelectedModelSendsPdf,
   subscribeModel,
 } from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
@@ -299,23 +299,22 @@ function ComposerAttachmentChip() {
   const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, openFile, t } = useChatHost();
-  // A model known not to read images only gets the file's pointer: say so under the chip.
-  const acceptsImages = React.useSyncExternalStore(
+  // A file the selected model is declared unable to take only gets its pointer: say so under the chip.
+  const sendsImages = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelAcceptsImages,
-    getSelectedModelAcceptsImages,
+    getSelectedModelSendsImages,
+    getSelectedModelSendsImages,
   );
-  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
-  const readsPdf = React.useSyncExternalStore(
+  const sendsPdf = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelReadsPdf,
-    getSelectedModelReadsPdf,
+    getSelectedModelSendsPdf,
+    getSelectedModelSendsPdf,
   );
   const notice =
-    file && isImageMime(file.type) && acceptsImages === false
-      ? t("composer.imageNotSeen")
-      : file?.type === "application/pdf" && readsPdf === false
-        ? t("composer.pdfNotRead")
+    file && isImageMime(file.type) && !sendsImages
+      ? t("composer.imageNotSent")
+      : file?.type === "application/pdf" && !sendsPdf
+        ? t("composer.pdfNotSent")
         : undefined;
   const preview =
     openFile && file && localPreviewKind(file.type)
@@ -456,13 +455,13 @@ function DraftContextNotice() {
   const attachments = useAuiState((s) => s.composer.attachments);
   const readsImages = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelAcceptsImages,
-    getSelectedModelAcceptsImages,
+    getSelectedModelSendsImages,
+    getSelectedModelSendsImages,
   );
   const readsPdf = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelReadsPdf,
-    getSelectedModelReadsPdf,
+    getSelectedModelSendsPdf,
+    getSelectedModelSendsPdf,
   );
   const draftTokens = React.useMemo(
     () =>

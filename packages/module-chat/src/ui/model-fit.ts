@@ -95,10 +95,17 @@ export type ModelFit = "window" | "threshold";
  * assumed window is never said exceeded: the model's real one is unknown. Its threshold still is,
  * since the engine summarizes at that fallback's threshold whatever the model's real window.
  */
-export function modelFit(tokens: number, sizing: ModelSizing | null): ModelFit | null {
+export function modelFit(
+  tokens: number,
+  sizing: ModelSizing | null,
+  crossModelEstimate = false,
+): ModelFit | null {
   if (!sizing) return null;
-  if (!sizing.windowAssumed && tokens > sizing.window) return "window";
-  if (tokens > sizing.compactAt) return "threshold";
+  // Different tokenizers can disagree near a boundary. Warn on a cross-model estimate at 5% over.
+  const exceeded = (limit: number) =>
+    tokens > limit && (!crossModelEstimate || tokens - limit >= Math.ceil(limit * 0.05));
+  if (!sizing.windowAssumed && exceeded(sizing.window)) return "window";
+  if (exceeded(sizing.compactAt)) return "threshold";
   return null;
 }
 

@@ -110,7 +110,7 @@ function useRunAgent(packageId: string) {
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const navigate = useNavigate();
-  const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
+  const [refusal, setRefusal] = useState<(LaunchRefusal & { attempt: number }) | null>(null);
   const replay = useRef<RunLaunch>({});
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
@@ -127,7 +127,7 @@ export function useRunLauncher(packageId: string) {
         onError: (err) => {
           const refused = launchRefusal(err);
           if (!refused) return;
-          setRefusal(refused);
+          setRefusal((previous) => ({ ...refused, attempt: (previous?.attempt ?? 0) + 1 }));
           replay.current = retryLaunch(launch, refused.errors);
         },
       },
@@ -136,8 +136,7 @@ export function useRunLauncher(packageId: string) {
 
   return {
     isPending,
-    missingErrors: refusal?.errors ?? null,
-    missingVersion: refusal?.version,
+    refusal,
     launch: send,
     retry: () => send(replay.current),
     dismiss: () => {

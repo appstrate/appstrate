@@ -46,6 +46,7 @@
     "./lucide-names": "./src/lucide-names.ts",
     "./use-copy-to-clipboard": "./src/use-copy-to-clipboard.ts",
     "./use-live-elapsed-ms": "./src/use-live-elapsed-ms.ts",
+    "./use-now-tick": "./src/use-now-tick.ts",
     "./use-keyboard-viewport": "./src/use-keyboard-viewport.ts",
     "./use-mobile": "./src/use-mobile.ts"
   },

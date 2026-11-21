@@ -149,7 +149,16 @@ describe("full persona invariants", () => {
     // caller-space `required_permissions` enrichment; claiming it would be false.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/so do NOT restart the connect flow/);
+    // The gate checks activation before connections: the integration may not be connected.
+    expect(FULL).toContain("not activated, whether or not it is connected,");
+    expect(FULL).not.toContain("is connected but not activated");
     expect(FULL).toContain("after a failed call, then re-run once");
+    // A configuration refusal: offered, never repaired or moved to another space silently.
+    expect(FULL).toContain("once the user agrees, call `activatePackage`");
+    expect(FULL).toContain(
+      "a space of the refusal's `active_in_spaces`, only with the user's agreement",
+    );
+    expect(FULL).toContain("a `required: true` one will refuse its launch there");
     expect(FULL).toContain("`activatePackage`");
     expect(FULL).toContain("`POST /api/spaces/{id}/packages`");
     expect(FULL).toContain('{ "packageId": "<that integration id>" }');
@@ -173,6 +182,9 @@ describe("full persona invariants", () => {
       expect(persona).toContain("`[]` runs without that integration");
       expect(persona).toContain("`integration_not_active`");
     }
+    // #2336: a named connection is resolved from get_me; every relied-on integration is `required`.
+    expect(FULL).toContain("resolve its id from `get_me`'s `connections` before launching");
+    expect(FULL).toContain("on every integration the request relies on");
     // The canonical example's task means nothing without Gmail.
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
@@ -716,8 +728,10 @@ describe("the persona and the spaces", () => {
     });
 
     describe("without an origin space (the overview)", () => {
-      const fallback = (id: string, label: string) =>
-        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`.`;
+      const CARVE_OUT =
+        " — except what a personal space refuses (an API key, an end-user, a space-level OIDC client), for which you offer team spaces first";
+      const fallback = (id: string, label: string, carveOut = "") =>
+        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`${carveOut}; when you create something there, name that space in your reply.`;
       const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };
       const DEFAULT = { ...SPACES[1]!, isDefault: true };
 
@@ -726,7 +740,8 @@ describe("the persona and the spaces", () => {
           ...CONTEXT_OPTS,
           spaces: [DEFAULT, PERSONAL],
         });
-        expect(out).toContain(fallback("spc_p", "Mine, your personal space"));
+        // The server instructions send what a personal space refuses to a team space: no conflict.
+        expect(out).toContain(fallback("spc_p", "Mine, your personal space", CARVE_OUT));
         expect(out).not.toContain("Ask the user which space");
       });
 
@@ -736,6 +751,7 @@ describe("the persona and the spaces", () => {
           spaces: [SPACES[0]!, DEFAULT],
         });
         expect(out).toContain(fallback("spc_b", "Beta, the organization's default space"));
+        expect(out).not.toContain(CARVE_OUT);
         expect(out).not.toContain("Ask the user which space");
       });
 
@@ -747,6 +763,8 @@ describe("the persona and the spaces", () => {
         });
         expect(out).toContain(sentence("Beta", "spc_b"));
         expect(out).not.toContain("When the user names no space, pass");
+        expect(out).not.toContain("name that space in your reply");
+        expect(out).not.toContain(CARVE_OUT);
       });
     });
 

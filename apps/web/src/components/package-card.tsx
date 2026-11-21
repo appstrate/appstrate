@@ -18,6 +18,7 @@ import { useSharedFromText } from "../hooks/use-shared-from-text";
 import { PackageSharedFrom } from "./package-shared-from";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { PackageSpaces } from "./package-spaces";
+import { IntegrationLogoStack, IntegrationLogoStackSkeleton } from "./integration-logo-stack";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -46,6 +47,8 @@ export function PackageCard({
   icon,
   identity,
   logo,
+  integrations,
+  inactiveIntegrations,
   status,
   meta,
   showSpace = false,
@@ -76,7 +79,9 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors">
+    // `--tile-ring`: the card's ground at rest and hovered, which its stacked tiles (spaces,
+    // integration logos) ring themselves in.
+    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors [--tile-ring:var(--color-card)] hover:[--tile-ring:color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
@@ -148,12 +153,15 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {(version || showSpace || sharedFrom || meta) && (
+          {(version || integrations?.length || showSpace || sharedFrom || meta) && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
               {version && (
                 <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
                   v{version}
                 </UIBadge>
+              )}
+              {integrations && (
+                <IntegrationLogoStack integrations={integrations} inactive={inactiveIntegrations} />
               )}
               {showSpace && <PackageSpaces item={{ homeSpaceId, spaceIds, source }} />}
               <PackageSharedFrom homeSpaceId={homeSpaceId} system={source === "system"} inline />
@@ -204,8 +212,11 @@ export function PackageCardSkeleton({
   meta = "version",
   spaceName = false,
   keywords = true,
+  integrations = false,
 }: {
   runnable?: boolean;
+  /** The stack of an agent's integration logos beside the version. */
+  integrations?: boolean;
   /** The card names its space beside the version (a list spanning spaces). */
   spaceName?: boolean;
   /** What the line under the description carries: a version badge, a line of text (the catalogue's origin), or both. */
@@ -225,6 +236,7 @@ export function PackageCardSkeleton({
           <SkeletonLine className="w-2/3 text-xs" />
           <div className="mt-2 flex min-w-0 items-center gap-2 text-xs">
             {meta !== "line" && <SkeletonBadge className="w-14 font-mono text-[10px]" />}
+            {integrations && <IntegrationLogoStackSkeleton />}
             {meta !== "version" && <SkeletonLine className="w-36" />}
             {spaceName && <SkeletonLine className="w-20" />}
           </div>

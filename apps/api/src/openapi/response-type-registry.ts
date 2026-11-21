@@ -274,8 +274,16 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "ProblemDetail with the `model_scheduled` extension; RFC 9457 envelope, never read through a shared-type",
   MissingIntegrationConnectionProblem:
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
+  AgentNotActiveInSpaceProblem:
+    "ProblemDetail narrowed to `agent_not_active_in_space`; RFC 9457 envelope, never read through a shared-type",
+  ActiveInSpaces:
+    "`active_in_spaces` extension of two launch refusals, built by lib/launch-spaces.ts; never read through a shared-type",
   LaunchWarnings:
     "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
+  ActivationWarnings:
+    "`warnings` envelope merged by allOf into the activation and share success bodies; its items are ActivationWarning, no shared-type",
+  ActivationWarning:
+    "ResolutionFieldError narrowed to `integration_not_active` plus the agent's `required` flag; built by activationWarnings in services/space-packages.ts, no shared-type",
   RunAndWaitResult:
     "MCP `run_and_wait` structuredContent and outputSchema; projected by @appstrate/core/run-and-wait-client, no shared-type",
   RunAndWaitPending: "RunAndWaitResult branch for `done: false`; no shared-type",
@@ -309,6 +317,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
   PackageShare:
     "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+  PackageOrgOffer:
+    "offer acknowledgement of `PUT …/org-offer`; no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   ShareTarget:
     "request-body value object of POST /packages/{scope}/{name}/shares; never a response",
   ShareTargetView:

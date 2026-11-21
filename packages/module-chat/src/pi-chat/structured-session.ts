@@ -25,6 +25,7 @@ import {
 import type { Api, Message, PiCodingAgentSdk } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
+import type { FileDelivery } from "../file-input.ts";
 import type { AttachmentImages, PiImageContent } from "./attachment-inputs.ts";
 import { offerScopeOf, splitJsonText, type OfferScope } from "../connect-offer.ts";
 import { logger } from "../logger.ts";
@@ -56,8 +57,8 @@ export interface BuildStructuredPiTurnOptions {
    */
   images?: AttachmentImages;
   pdfReceipts?: ReadonlyMap<string, string>;
-  /** Whether the model accepts image input, for the wording of the pointer lines. */
-  modelSeesImages?: boolean;
+  /** What this turn sends the model, for the wording of the pointer lines. */
+  fileDelivery: FileDelivery;
   /** The branch's summary, validated ({@link resolveSummaryCheckpoint}) and sized; none = the whole history. */
   checkpoint?: ReplayCheckpoint;
 }
@@ -425,14 +426,14 @@ export function buildStructuredPiTurn(
     estimateTokens,
     baseTokens,
     images,
-    modelSeesImages = false,
+    fileDelivery,
     pdfReceipts,
     checkpoint,
   }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
   const sentImages: AttachmentImages = images ?? new Map();
   const messages = messagesWithAttachmentsAsText(input, {
-    modelSeesImages,
+    fileDelivery,
     sent: sentImages,
     pdfReceipts,
   });

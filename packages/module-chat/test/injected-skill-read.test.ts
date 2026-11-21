@@ -306,6 +306,7 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
         { id: owner.defaultSpaceId, name: "Default", role: "admin", permissions: [] },
       ]),
       writeChunk: () => {},
+      fileDelivery: { image: false, pdf: false },
       signal: new AbortController().signal,
       turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>

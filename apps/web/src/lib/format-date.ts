@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  formatAge as formatAgeIn,
+  formatRelativeTime as formatRelativeTimeIn,
+} from "@appstrate/core/format";
 import i18n from "../i18n";
 
 type DateGranularity = "date" | "datetime";
@@ -35,4 +39,31 @@ export function formatDateField(
   } catch {
     return String(dateStr);
   }
+}
+
+/** `formatRelativeTime` of `@appstrate/core/format` on an ISO date, in the interface's language. */
+export function formatRelativeTime(
+  at: string,
+  now: number,
+  style?: Intl.RelativeTimeFormatStyle,
+): string {
+  return formatRelativeTimeIn(Date.parse(at), now, i18n.language, style);
+}
+
+/** `formatAge` of `@appstrate/core/format` on an ISO date, in the interface's language. */
+export function formatAge(at: string, now: number): string {
+  return formatAgeIn(Date.parse(at), now, i18n.language);
+}
+
+/**
+ * How soon a scheduled run fires. A time already past reads « maintenant »:
+ * the scheduler has not picked the run up yet, not missed it.
+ */
+export function formatTimeUntil(at: string, now: number): string {
+  return formatRelativeTimeIn(Math.max(Date.parse(at), now), now, i18n.language);
+}
+
+/** A scheduled run read both ways: « dans 3 h · 22/11/2026 09:00 UTC ». */
+export function formatScheduledAt(at: string, timeZone: string, now: number): string {
+  return `${formatTimeUntil(at, now)} · ${formatDateField(at, "datetime", timeZone)}`;
 }

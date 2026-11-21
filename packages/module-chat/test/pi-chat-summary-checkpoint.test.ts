@@ -38,7 +38,7 @@ const compaction = (await import(join(dirname(sdkEntry), "core/compaction/compac
 };
 
 const MODEL: PiHistoryModel = { api: "openai-completions" as Api, provider: "openai", model: "m" };
-const OPTIONS = { estimateTokens, baseTokens: 0 };
+const OPTIONS = { estimateTokens, baseTokens: 0, fileDelivery: { image: false, pdf: false } };
 
 const summary = (
   messageId: string,

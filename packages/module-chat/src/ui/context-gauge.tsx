@@ -77,11 +77,11 @@ export function ContextGauge({ className }: { className?: string }) {
     used: formatTokenFigure(context.tokens, readAgainstSelected, lang),
     max: formatTokenFigure(context.window, context.windowAssumed, lang),
   });
-  // Past a declared window, no summary saves the turn: say so, as the model picker does.
+  const fit = modelFit(context.tokens, context, readAgainstSelected);
   const sentence =
-    modelFit(context.tokens, context) === "window"
+    fit === "window"
       ? t("model.fit.window")
-      : t(LEVEL_SENTENCE[context.level], {
+      : t(LEVEL_SENTENCE[context.level === "full" && !fit ? "ok" : context.level], {
           threshold: formatCompactTokens(context.compactAt, lang),
         });
   const showShare = context.level !== "ok";

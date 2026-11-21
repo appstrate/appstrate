@@ -409,6 +409,10 @@ column org_models.provider_id text not null
 column org_models.reasoning boolean
 column org_models.source text not null default 'custom'::text
 column org_models.updated_at timestamp with time zone not null default now()
+column org_package_offers.created_at timestamp with time zone not null default now()
+column org_package_offers.offered_by text
+column org_package_offers.org_id uuid not null
+column org_package_offers.package_id text not null
 column org_proxies.created_at timestamp with time zone not null default now()
 column org_proxies.created_by text
 column org_proxies.enabled boolean not null default true
@@ -602,6 +606,7 @@ column space_packages.input_settings jsonb not null default '{"locked": [], "val
 column space_packages.installed_at timestamp with time zone not null default now()
 column space_packages.model_id text
 column space_packages.package_id text not null
+column space_packages.placed_by_offer boolean not null default false
 column space_packages.proxy_id text
 column space_packages.shared_by text
 column space_packages.space_id text not null
@@ -877,6 +882,10 @@ constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
+constraint org_package_offers org_package_offers_offered_by_user_id_fk FOREIGN KEY (offered_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint org_package_offers org_package_offers_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint org_package_offers org_package_offers_org_id_package_id_pk PRIMARY KEY (org_id, package_id)
+constraint org_package_offers org_package_offers_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint org_proxies org_proxies_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint org_proxies org_proxies_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
@@ -1095,6 +1104,8 @@ index CREATE INDEX idx_org_invitations_org_id ON public.org_invitations USING bt
 index CREATE INDEX idx_org_members_user_id ON public.org_members USING btree (user_id)
 index CREATE INDEX idx_org_models_created_by ON public.org_models USING btree (created_by)
 index CREATE INDEX idx_org_models_org_id ON public.org_models USING btree (org_id)
+index CREATE INDEX idx_org_package_offers_offered_by ON public.org_package_offers USING btree (offered_by)
+index CREATE INDEX idx_org_package_offers_package_id ON public.org_package_offers USING btree (package_id)
 index CREATE INDEX idx_org_proxies_created_by ON public.org_proxies USING btree (created_by)
 index CREATE INDEX idx_org_proxies_org_id ON public.org_proxies USING btree (org_id)
 index CREATE INDEX idx_organizations_created_by ON public.organizations USING btree (created_by)
@@ -1209,6 +1220,7 @@ index CREATE UNIQUE INDEX org_invitations_pkey ON public.org_invitations USING b
 index CREATE UNIQUE INDEX org_invitations_token_unique ON public.org_invitations USING btree (token)
 index CREATE UNIQUE INDEX org_members_org_id_user_id_pk ON public.org_members USING btree (org_id, user_id)
 index CREATE UNIQUE INDEX org_models_pkey ON public.org_models USING btree (id)
+index CREATE UNIQUE INDEX org_package_offers_org_id_package_id_pk ON public.org_package_offers USING btree (org_id, package_id)
 index CREATE UNIQUE INDEX org_proxies_pkey ON public.org_proxies USING btree (id)
 index CREATE UNIQUE INDEX organizations_pkey ON public.organizations USING btree (id)
 index CREATE UNIQUE INDEX organizations_slug_unique ON public.organizations USING btree (slug)

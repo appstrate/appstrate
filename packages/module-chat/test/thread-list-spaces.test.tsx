@@ -40,6 +40,7 @@ function render(filter: string | null, rows = sessions): string {
               t={(key) => key}
               can={() => true}
               renderSpaces={(ids) => <i data-spaces={ids.join(",")}>spaces</i>}
+              formatAge={() => "age"}
             />
           </ChatTransportProvider>
         </SidebarProvider>

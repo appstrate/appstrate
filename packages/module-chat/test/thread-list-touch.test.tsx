@@ -59,6 +59,7 @@ function render(granted: string[]): string {
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
               renderSpaces={(ids) => ids.join(", ")}
+              formatAge={() => "age"}
             />
           </ChatTransportProvider>
         </SidebarProvider>

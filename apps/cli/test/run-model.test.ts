@@ -69,12 +69,12 @@ describe("resolveModel — defaults + flags", () => {
     expect(model.provider).toBe("mistral");
   });
 
-  it("runs on the default limits, the window flagged assumed: env mode declares none", () => {
+  it("keeps the direct CLI output cap and window, flagged as assumed", () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-dev";
     const resolved = resolveModel({});
     expect(resolved.model).toMatchObject({
-      contextWindow: DEFAULT_CONTEXT_WINDOW,
-      maxTokens: DEFAULT_MAX_TOKENS,
+      contextWindow: 200_000,
+      maxTokens: 8_192,
     });
     expect(resolved.contextWindowAssumed).toBe(true);
   });

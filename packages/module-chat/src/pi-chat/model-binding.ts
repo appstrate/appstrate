@@ -23,8 +23,20 @@ import {
   type ExtensionFactory,
   type Model,
 } from "@appstrate/runner-pi";
+import type { ModelInputModality } from "@appstrate/core/module";
 import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
+import { UNKNOWN_INPUT_MODALITIES } from "../file-input.ts";
+
+/**
+ * Unknown modalities are not a refusal (`fileDelivery`): Pi drops every image of a text-only
+ * model, so the chat hands it text and image instead of `buildPiModel`'s text default.
+ */
+function chatInputModalities(
+  input: readonly ModelInputModality[] | null | undefined,
+): readonly ModelInputModality[] {
+  return input ?? UNKNOWN_INPUT_MODALITIES;
+}
 
 interface PiChatModelBindingBase {
   /** Fully resolved Pi model. No provider secret is ever stored on this object. */
@@ -113,7 +125,7 @@ export function createPiProxyModelBinding(args: {
     reasoning:
       args.model.reasoning ??
       (support && support !== "unknown" ? support === "supported" : undefined),
-    input: args.model.input,
+    input: chatInputModalities(args.model.input),
     cost: args.model.cost,
     contextWindow: args.model.contextWindow,
     maxTokens: args.model.maxTokens,
@@ -143,7 +155,7 @@ export function createPiOAuthModelBinding(
     piProvider: listed.pi_provider,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
-    input: model.input,
+    input: chatInputModalities(model.input),
     cost: model.cost,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,

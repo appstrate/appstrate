@@ -312,6 +312,11 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "assertPackageMutationAccess: <type>:write in home and in destination",
   },
+  offerPackageToOrg: {
+    category: "handler-guarded",
+    reason:
+      "assertPackageOfferAccess: owner/admin user session, unconfined credential, <type>:share in home space",
+  },
   restoreAgentVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: agents:write in home space",
@@ -336,6 +341,11 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   sharePackage: {
     category: "handler-guarded",
     reason: "assertPackageShareAccess: <type>:share in home space",
+  },
+  withdrawPackageOrgOffer: {
+    category: "handler-guarded",
+    reason:
+      "assertPackageOfferAccess: owner/admin user session, unconfined credential, <type>:share in home space",
   },
   streamAgentRuns: {
     category: "handler-guarded",

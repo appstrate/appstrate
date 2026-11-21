@@ -590,7 +590,7 @@ function CollectionBlocks({
   /** Inside a surface that is already framed (an overlay), the table draws no card of its own. */
   frameless?: boolean;
   cards?: boolean;
-  /** The cards carry a run button (agents). */
+  /** The cards are agents': a run button and the stack of their integrations. */
   runnable?: boolean;
   /** The cards name their space (a list spanning spaces). */
   spaceName?: boolean;
@@ -611,7 +611,12 @@ function CollectionBlocks({
         ) : (
           <CardGridSkeleton
             placeholder={
-              <PackageCardSkeleton runnable={runnable} meta={cardMeta} spaceName={spaceName} />
+              <PackageCardSkeleton
+                runnable={runnable}
+                integrations={runnable}
+                meta={cardMeta}
+                spaceName={spaceName}
+              />
             }
           />
         )
@@ -812,7 +817,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable spaceName={on} />
+              <PackageCardSkeleton runnable integrations spaceName={on} />
             </div>
           ))}
         </div>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PackageVersionInfoResponse } from "@appstrate/shared-types";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { eq, and, desc, count, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -417,6 +417,18 @@ export async function getVersionRow(
     artifactSize: row.artifactSize,
     createdAt: toISO(row.createdAt),
   };
+}
+
+/** The manifests of `versionIds` (ids of `package_versions`), in one query. */
+export async function getVersionManifests(
+  versionIds: readonly number[],
+): Promise<Map<number, Record<string, unknown>>> {
+  if (versionIds.length === 0) return new Map();
+  const rows = await db
+    .select({ id: packageVersions.id, manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .where(inArray(packageVersions.id, [...versionIds]));
+  return new Map(rows.map((row) => [row.id, asRecord(row.manifest)]));
 }
 
 /**

@@ -144,6 +144,7 @@ function buildTurn(
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: inertTurnSpaces([{ id: "spc_1", name: "One", role: "owner", permissions: [] }]),
     writeChunk: () => {},
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: transport.fetch,

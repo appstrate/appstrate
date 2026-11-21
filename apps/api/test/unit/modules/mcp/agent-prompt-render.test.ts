@@ -96,6 +96,16 @@ describe("renderAgentPrompt", () => {
     for (const code of CONNECTION_RESOLUTION_WARNING_CODES) expect(text).toContain(`\`${code}\``);
   });
 
+  it("treats a configuration refusal as repairable, not as one to stop on", () => {
+    const text = renderAgentPrompt(view());
+    const repair = text.indexOf("`agent_not_active_in_space`, or a `409`");
+    expect(repair).toBeGreaterThan(-1);
+    expect(repair).toBeLessThan(text.indexOf("Anything else: report it and stop."));
+    expect(text.slice(repair)).toMatch(/^[^\n]*`active_in_spaces`; act only once the user agrees/);
+    // #2336: an owner or admin can offer the integration to the whole organization instead.
+    expect(text.slice(repair)).toContain("`offerPackageToOrg`");
+  });
+
   it("includes the upload recipe only with an unlocked file field", () => {
     expect(renderAgentPrompt(view())).not.toContain("createUpload");
     const withFile = view({

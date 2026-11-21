@@ -10,6 +10,7 @@
  * "zero hops" cannot pass by going around the seam.
  */
 
+import type { FileDelivery } from "../src/file-input.ts";
 import { createTurnPdfInput } from "../src/pi-chat/native-pdf.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { describe, expect, it } from "bun:test";
@@ -230,7 +231,7 @@ function buildTurn(
   signal = new AbortController().signal,
   listsSkills = false,
   pdfInput?: ReturnType<typeof createTurnPdfInput>,
-  modelSeesImages = true,
+  fileDelivery: FileDelivery = { image: true, pdf: true },
 ) {
   return buildPlatformMcpTools({
     url: MCP_URL,
@@ -243,7 +244,7 @@ function buildTurn(
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
     listsSkills,
-    modelSeesImages,
+    fileDelivery,
     pdfInput,
   });
 }
@@ -403,6 +404,8 @@ describe("platform MCP surface cache", () => {
     );
     // A closed direct-access switch drops tools from that space's surface.
     expect(surfaceKey(org, perms, [alpha, { ...beta, credentialProxyOpen: false }])).not.toBe(both);
+    // `describeSpace` marks the caller's personal space in every `space_id` description.
+    expect(surfaceKey(org, perms, [alpha, { ...beta, personal: true }])).not.toBe(both);
   });
 
   it("surfaces a failed lazy connect as the tool call's error, retries it, and evicts the entry", async () => {
@@ -619,7 +622,7 @@ describe("inline images from remote integration tools", () => {
           errorText: expect.stringContaining("Preview failed"),
         }),
       );
-      expect(JSON.stringify(chunks)).toContain("supplied for this turn");
+      expect(JSON.stringify(chunks)).toContain("read for this turn]");
       for (const secret of [data, hiddenData, "private caption"]) {
         expect(JSON.stringify(chunks)).not.toContain(secret);
       }
@@ -642,15 +645,10 @@ describe("inline images from remote integration tools", () => {
   ] as const) {
     it(`explains a skipped image for ${name}`, async () => {
       const stub = mcpStub([block]);
-      const turn = await buildTurn(
-        stub,
-        "file-reader",
-        undefined,
-        undefined,
-        false,
-        undefined,
-        seesImages,
-      );
+      const turn = await buildTurn(stub, "file-reader", undefined, undefined, false, undefined, {
+        image: seesImages,
+        pdf: seesImages,
+      });
       try {
         const call = register(turn.extensionFactories).find(
           (t) => t.name === "call_integration_tool",
@@ -668,7 +666,7 @@ describe("inline images from remote integration tools", () => {
 
 describe("temporary connector files", () => {
   it("hands the PDF to the current tool call, streams a receipt, and ignores relayed resource blocks", async () => {
-    const pdf = createTurnPdfInput({ api: "openai-responses", input: ["text", "image"] });
+    const pdf = createTurnPdfInput({ api: "openai-responses" }, { image: true, pdf: true });
     const added: string[] = [];
     const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, false, {
       ...pdf,
@@ -685,7 +683,7 @@ describe("temporary connector files", () => {
       const args = { arguments: { read_as_file: true } };
       const result = await call.execute("download-id", { ...args, tool: "crm__api_call" });
       expect(added).toEqual(["download-id"]);
-      expect(JSON.stringify(result.content)).toContain("PDF supplied");
+      expect(JSON.stringify(result.content)).toMatch(/\[pdf:[0-9a-f-]{36}\]/);
       const chunks = new PiChatUiStreamMapper().map({
         type: "tool_execution_end",
         toolName: call.name,
