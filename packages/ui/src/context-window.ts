@@ -16,22 +16,46 @@ export function fractionOfWindow(tokens: number, window: number): number {
 }
 
 /**
- * A token count as the compact figure the gauge shows (`128k`, `1.0M`).
- * Decimal thousands (not `formatBytes` tiers). The tier is chosen AFTER rounding,
- * so `999_600` becomes `1.0M` rather than `1000k`.
+ * A token count as the compact figure the gauge shows, in the UI language (`128K` / `1.5M` in
+ * English, `128 k` / `1,5 M` in French — a no-break space, as `Intl` puts it). The tier is chosen
+ * by `Intl` after rounding, so `999_600` is `1M`, not `1000K`.
  */
-export function formatCompactTokens(tokens: number): string {
+export function formatCompactTokens(tokens: number, lang: string): string {
   if (!Number.isFinite(tokens) || tokens < 0) return "0";
-  if (tokens < 1000) return String(Math.round(tokens));
-  const thousands = Math.round(tokens / 1000);
-  if (thousands < 1000) return `${thousands}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}M`;
+  return formatter(COMPACT, lang, { notation: "compact" }).format(tokens);
+}
+
+/**
+ * A count as {@link formatCompactTokens} does, marked `≈` when it is approximate: a fallback
+ * window, not a declared one, or a measure read against another model than the one that took it.
+ */
+export function formatTokenFigure(
+  tokens: number,
+  approximate: boolean | undefined,
+  lang: string,
+): string {
+  const figure = formatCompactTokens(tokens, lang);
+  return approximate ? `≈\u00a0${figure}` : figure;
 }
 
 /** A 0..1 share as a localized percentage (`Intl`: French puts a narrow no-break space before the sign). */
 export function formatWindowPercent(fraction: number, lang: string): string {
-  return new Intl.NumberFormat(lang, {
-    style: "percent",
-    maximumFractionDigits: 0,
-  }).format(fraction);
+  return formatter(PERCENT, lang, { style: "percent", maximumFractionDigits: 0 }).format(fraction);
+}
+
+/** One formatter per language and style: gauges format on every render. */
+const COMPACT = new Map<string, Intl.NumberFormat>();
+const PERCENT = new Map<string, Intl.NumberFormat>();
+
+function formatter(
+  cache: Map<string, Intl.NumberFormat>,
+  lang: string,
+  options: Intl.NumberFormatOptions,
+): Intl.NumberFormat {
+  let format = cache.get(lang);
+  if (!format) {
+    format = new Intl.NumberFormat(lang, options);
+    cache.set(lang, format);
+  }
+  return format;
 }

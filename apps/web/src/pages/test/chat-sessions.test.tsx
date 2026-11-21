@@ -18,6 +18,10 @@ import {
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
 import { render } from "../../test/render.tsx";
+import { ConversationUsage } from "../../modules/chat/conversation-sidebar.tsx";
+import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
+import chatFr from "../../locales/fr/chat.json";
+import i18n, { i18nReady } from "../../i18n.ts";
 
 function conversation(id: string, title: string, unread: boolean): SessionSummary {
   return {
@@ -91,6 +95,7 @@ function hostWith(granted: string[]): ChatHost {
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
+    lang: "en",
     onPackagesChanged: () => {},
     renderSpaces: () => null,
     linkInSpace: (path, spaceId) => linkedSpacePath(path, spaceId, "spc_a"),
@@ -187,5 +192,51 @@ describe("chat surfaces held to the caller's grants", () => {
     expect(granted).toContain("run.starting");
     expect(granted).toContain('title="run.openPage"');
     expect(granted).toContain("?enterSpace=spc_b");
+  });
+});
+
+describe("conversation sidebar usage", () => {
+  const session = (windowAssumed: boolean) =>
+    ({
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [{ type: "text", text: "ok" }],
+          metadata: mergeTurnMetadata(undefined, {
+            finishReason: "stop",
+            stepCount: 1,
+            maxSteps: 16,
+            maxStepsReached: false,
+            modelId: "mdl_a",
+            modelLabel: "Model A",
+            context: {
+              tokens: 64_000,
+              window: 128_000,
+              compactAt: 100_000,
+              ...(windowAssumed ? { windowAssumed: true as const } : {}),
+            },
+          }),
+        },
+      ],
+      usage: {},
+    }) as unknown as Parameters<typeof ConversationUsage>[0]["session"];
+
+  it("marks an assumed window with ≈ and says why", async () => {
+    await i18nReady;
+    await i18n.changeLanguage("fr");
+    await i18n.loadNamespaces("chat");
+    const html = render(<ConversationUsage session={session(true)} />);
+    expect(html).toContain("≈");
+    expect(html).toContain(chatFr["contextUsage.windowAssumed"].split("{{window}}")[0]!.trim());
+  });
+
+  it("states nothing about the window when the model declared it", async () => {
+    await i18nReady;
+    await i18n.changeLanguage("fr");
+    await i18n.loadNamespaces("chat");
+    const html = render(<ConversationUsage session={session(false)} />);
+    expect(html).not.toContain("≈");
+    expect(html).not.toContain(chatFr["contextUsage.windowAssumed"].split("{{window}}")[0]!.trim());
   });
 });

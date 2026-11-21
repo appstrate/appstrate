@@ -49,7 +49,8 @@ import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { integrationOf } from "./tool-integration.ts";
 import type { ToolIntegration } from "@appstrate/core/integration";
-import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
+import { addRequestUsage } from "./pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
@@ -297,6 +298,8 @@ export interface PiRunnerOptions {
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
   modelCompaction?: boolean;
+  /** {@link model}'s window is `DEFAULT_CONTEXT_WINDOW`, the launcher declared none: turns say so. */
+  contextWindowAssumed?: true;
   /** Per-tool-result byte cap on the event sink. Default `DEFAULT_TOOL_RESULT_BYTE_LIMIT`. */
   toolResultByteLimit?: number;
 }
@@ -322,7 +325,7 @@ type ContextModel = { contextWindow?: number | null; maxTokens?: number | null }
  *
  * | Knob               | Mapping                                | Why                                                                                                                                                                              |
  * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
- * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Honours `max_tokens` so the first call post-compaction does not underflow into the upstream 400 ("prompt is too long") — critical for Claude Sonnet thinking mode (`maxTokens: 64000`). An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
+ * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Room kept for a reply and the summary trigger (`contextWindow - reserve`): honours a usable `max_tokens` up to an absolute 64k ceiling (pi-ai clamps the `max_tokens` it sends, so this is not an upstream-400 guard); 1M window / 384k max output → 64k. An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * `enabled: false` turns compaction off entirely — useful when stacking
@@ -359,7 +362,7 @@ export function derivePiCompactionSettings(
     return { compaction: { enabled: false }, contextWindow };
   }
   // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
-  // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
+  // `maxTokens` up to RESERVE_CEILING_TOKENS, but treats an impossible `maxTokens >= contextWindow`
   // (corrupt catalog/override data) as unset and derives a sane reserve —
   // otherwise the compaction threshold `contextWindow - reserveTokens`
   // collapses to ≤0 and the agent compacts on every turn.
@@ -768,6 +771,7 @@ export class PiRunner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       outputRequired,
       contextWindow: budget.contextWindow,
+      ...(this.opts.contextWindowAssumed ? { contextWindowAssumed: true as const } : {}),
       cost: sessionModel.cost,
       ...(this.opts.unpriced ? { unpriced: true } : {}),
       ...(this.opts.toolResultByteLimit !== undefined
@@ -1439,6 +1443,8 @@ interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
+  /** {@link contextWindow} is the fallback, not a window the model declared. */
+  contextWindowAssumed?: true;
   /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
   /** The session model's rate card: its tiers band the cumulative usage. */
@@ -1632,6 +1638,7 @@ export function installSessionBridge(
                   ...(options.contextWindow !== undefined
                     ? { contextWindow: options.contextWindow }
                     : {}),
+                  ...(options.contextWindowAssumed ? { contextWindowAssumed: true } : {}),
                 },
               ),
             );
@@ -1711,8 +1718,8 @@ export function installSessionBridge(
           runId,
           message:
             before !== undefined && after !== undefined
-              ? `Context compacted — ${before} → ${after} tokens`
-              : "Context compacted",
+              ? `Context summarized — ${before} → ${after} tokens`
+              : "Context summarized",
           data: {
             event: COMPACTION_EVENT,
             ...(e.reason !== undefined ? { reason: e.reason } : {}),

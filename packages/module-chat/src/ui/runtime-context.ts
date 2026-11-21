@@ -31,6 +31,7 @@
 
 import { createContext, useContext, type ComponentType, type ReactNode } from "react";
 import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
+import type { ModelSizing } from "./model-fit.ts";
 
 export type GetHeaders = () => Record<string, string>;
 
@@ -216,6 +217,8 @@ export interface ChatHost {
   modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
+  /** The host's UI language (BCP 47), for the numbers the module formats itself (`Intl`). */
+  lang: string;
   /**
    * The assistant created or imported a package: the host refreshes what lists
    * packages, as its own editor and import dialog do after a write.
@@ -224,6 +227,8 @@ export interface ChatHost {
   /** The selected model's id, and its display name from the current organization’s catalog. */
   modelId?: string | null;
   modelLabel?: string | null;
+  /** The selected model's window and threshold, `null` when the browser cannot know them (an alias). */
+  modelSizing?: ModelSizing | null;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
   /** Names spaces. */

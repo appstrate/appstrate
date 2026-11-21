@@ -3,19 +3,25 @@
 /**
  * The composer's context gauge: a ring beside the send button, filled toward the size past which
  * the engine summarizes the history, its detail in a popover (which a touch screen opens, unlike a
- * tooltip). Nothing renders until a turn has measured something.
+ * tooltip). Nothing renders until a turn has measured something. After a switch to a model whose
+ * sizing the catalog gives, the last measure is read against that model's window and threshold.
  */
 
 import * as React from "react";
-import { useAuiState } from "@assistant-ui/react";
 import { cn } from "@appstrate/ui/cn";
-import { formatCompactTokens } from "@appstrate/ui/context-window";
+import {
+  formatCompactTokens,
+  formatTokenFigure,
+  formatWindowPercent,
+} from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Progress } from "@appstrate/ui/components/progress";
 import { useChatHost } from "./runtime-context.ts";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
-import { latestConversationContext, type ContextLevel } from "./turn-context.ts";
+import { thresholdShare, type ContextLevel } from "./turn-context.ts";
+import { modelFit } from "./model-fit.ts";
+import { useConversationContext } from "./use-conversation-context.ts";
 
 const LEVEL_TEXT: Record<ContextLevel, string> = {
   ok: "text-muted-foreground",
@@ -32,6 +38,10 @@ const LEVEL_SENTENCE: Record<ContextLevel, string> = {
   near: "contextUsage.compactNear",
   full: "contextUsage.compactNext",
 };
+
+// With the share beside the ring the button widens: a height and a minimum width, no `size-*`.
+const SHARE_CLASS =
+  "h-10 min-w-10 shrink-0 gap-1 rounded-lg px-2 desktop-pointer:h-8 desktop-pointer:min-w-8";
 
 const RING_RADIUS = 6;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -56,35 +66,47 @@ function Ring({ ratio }: { ratio: number }) {
 }
 
 export function ContextGauge({ className }: { className?: string }) {
-  const { t, modelId } = useChatHost();
+  const { t, lang, modelLabel } = useChatHost();
   const titleId = React.useId();
-  const messages = useAuiState((s) => s.thread.messages);
-  const context = React.useMemo(() => latestConversationContext(messages), [messages]);
-  if (!context) return null;
+  const reading = useConversationContext();
+  if (!reading) return null;
+  const { context, measuredWith, readAgainstSelected } = reading;
 
+  // Read against another model, the measure is the measuring model's tokenizer: approximate.
   const counts = t("contextUsage.counts", {
-    used: formatCompactTokens(context.tokens),
-    max: formatCompactTokens(context.window),
+    used: formatTokenFigure(context.tokens, readAgainstSelected, lang),
+    max: formatTokenFigure(context.window, context.windowAssumed, lang),
   });
-  const sentence = t(LEVEL_SENTENCE[context.level], {
-    threshold: formatCompactTokens(context.compactAt),
-  });
-  const measuredWith =
-    context.modelId !== null && modelId != null && context.modelId !== modelId
-      ? context.modelLabel
-      : null;
+  const fit = modelFit(context.tokens, context, readAgainstSelected);
+  const sentence =
+    fit === "window"
+      ? t("model.fit.window")
+      : t(LEVEL_SENTENCE[context.level === "full" && !fit ? "ok" : context.level], {
+          threshold: formatCompactTokens(context.compactAt, lang),
+        });
+  const showShare = context.level !== "ok";
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
           type="button"
-          size="icon"
+          size={showShare ? "sm" : "icon"}
           variant="ghost"
-          className={cn(COMPOSER_BUTTON_CLASS, LEVEL_TEXT[context.level], className)}
+          className={cn(
+            showShare ? SHARE_CLASS : COMPOSER_BUTTON_CLASS,
+            LEVEL_TEXT[context.level],
+            className,
+          )}
           aria-label={t("contextUsage.label", { counts, sentence })}
         >
           <Ring ratio={context.ratio} />
+          {/* aria-hidden: the label already says the level. */}
+          {showShare ? (
+            <span aria-hidden="true" className="text-xs tabular-nums">
+              {formatWindowPercent(thresholdShare(context), lang)}
+            </span>
+          ) : null}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -103,11 +125,32 @@ export function ContextGauge({ className }: { className?: string }) {
           className="h-1.5"
           indicatorClassName={LEVEL_FILL[context.level]}
         />
-        <p className="tabular-nums">{counts}</p>
+        <p className="whitespace-nowrap tabular-nums">{counts}</p>
         <p className="text-muted-foreground">{sentence}</p>
+        {context.summarized ? (
+          <p className="text-muted-foreground">{t("contextUsage.summarized")}</p>
+        ) : null}
+        {context.windowAssumed ? (
+          <p className="text-muted-foreground">
+            {/* Read against the measuring model, "this model" would be the selected one: name it. */}
+            {measuredWith && !readAgainstSelected
+              ? t("contextUsage.windowAssumedOf", {
+                  model: measuredWith,
+                  window: formatCompactTokens(context.window, lang),
+                })
+              : t("contextUsage.windowAssumed", {
+                  window: formatCompactTokens(context.window, lang),
+                })}
+          </p>
+        ) : null}
         {measuredWith ? (
           <p className="text-muted-foreground">
-            {t("contextUsage.measuredWith", { model: measuredWith })}
+            {readAgainstSelected && modelLabel
+              ? t("contextUsage.measuredWithReadAgainst", {
+                  model: measuredWith,
+                  selected: modelLabel,
+                })
+              : t("contextUsage.measuredWith", { model: measuredWith })}
           </p>
         ) : null}
       </PopoverContent>

@@ -63,6 +63,7 @@ import {
 import { createRuntimePiRunner } from "./pi-runner.ts";
 import { makeProcessNonDumpable } from "./non-dumpable.ts";
 import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
+import { resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import { fetchIntegrationBootReport } from "./mcp/integration-boot-report.ts";
 import {
@@ -632,6 +633,9 @@ function buildPiRunner(): PiRunner {
     // No rates reached this container (unpriced model, or a withheld alias
     // rate card). Report no cost rather than a placeholder $0.
     ...(env.modelCost === undefined ? { unpriced: true } : {}),
+    ...(resolvePiContextWindow(env.modelContextWindow).assumed
+      ? { contextWindowAssumed: true as const }
+      : {}),
     apiKey: env.modelApiKey,
     systemPrompt,
     ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),

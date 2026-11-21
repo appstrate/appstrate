@@ -81,6 +81,8 @@ interface ListProps {
   /** A first row that clears the choice: names what it falls back to. */
   inherit?: { label: string; modelId: string | null };
   renderIcon?: (model: PickerModel) => ReactNode;
+  /** A secondary line under a model's name, as its reason (the chat flags a model its conversation outgrows). */
+  renderNote?: (model: PickerModel) => ReactNode;
   /** The host's link to where the person adds or reconnects a key of their own. */
   fixLink?: (label: string) => ReactNode;
   /**
@@ -99,6 +101,7 @@ export function ModelPickerList({
   labels,
   inherit,
   renderIcon,
+  renderNote,
   fixLink,
   selectable,
   className,
@@ -169,6 +172,7 @@ export function ModelPickerList({
                           {labels.reasons[blocked]}
                         </div>
                       )}
+                      {renderNote?.(model)}
                     </div>
                     <Check
                       className={cn("mt-0.5", model.id === value ? "opacity-100" : "opacity-0")}

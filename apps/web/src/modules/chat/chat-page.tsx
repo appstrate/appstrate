@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   ChatConversationSettingsButton,
   ChatPage,
@@ -105,6 +106,7 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
+  const { i18n } = useTranslation();
   const { known } = useChatFilter();
   // What the chat may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
@@ -220,6 +222,7 @@ export function ChatModulePage() {
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
+              lang={i18n.language}
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
               renderSpaces={renderSpaces}

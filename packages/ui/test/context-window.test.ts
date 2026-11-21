@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   formatCompactTokens,
+  formatTokenFigure,
   formatWindowPercent,
   fractionOfWindow,
 } from "../src/context-window.ts";
@@ -23,31 +24,31 @@ describe("fractionOfWindow", () => {
 });
 
 describe("formatCompactTokens", () => {
-  it("keeps sub-thousand counts exact and rounds thousands to `k`", () => {
-    expect(formatCompactTokens(0)).toBe("0");
-    expect(formatCompactTokens(999)).toBe("999");
-    expect(formatCompactTokens(128_430)).toBe("128k");
-    expect(formatCompactTokens(200_000)).toBe("200k");
+  const nbsp = "\u00a0";
+
+  it("keeps sub-thousand counts exact and rounds thousands, in the UI language", () => {
+    expect(formatCompactTokens(0, "en")).toBe("0");
+    expect(formatCompactTokens(999, "en")).toBe("999");
+    expect(formatCompactTokens(128_430, "en")).toBe("128K");
+    expect(formatCompactTokens(128_430, "fr")).toBe(`128${nbsp}k`);
   });
 
-  it("switches to `M` at a million — 1M windows are shipping models", () => {
-    expect(formatCompactTokens(1_000_000)).toBe("1.0M");
-    expect(formatCompactTokens(1_500_000)).toBe("1.5M");
+  it("switches to a million, with the language's decimal separator", () => {
+    expect(formatCompactTokens(1_000_000, "en")).toBe("1M");
+    expect(formatCompactTokens(1_500_000, "en")).toBe("1.5M");
+    expect(formatCompactTokens(1_000_000, "fr")).toBe(`1${nbsp}M`);
+    expect(formatCompactTokens(1_500_000, "fr")).toBe(`1,5${nbsp}M`);
   });
 
-  it("promotes at the ROUNDING boundary, never emitting the `1000k` it rejects", () => {
-    // On a 1 048 576-token window a run at 999 600 would otherwise render
-    // `1000k / 1.0M` — two magnitudes side by side, and the exact string the
-    // function's own docstring calls unreadable.
-    expect(formatCompactTokens(999_400)).toBe("999k");
-    expect(formatCompactTokens(999_500)).toBe("1.0M");
-    expect(formatCompactTokens(999_600)).toBe("1.0M");
-    expect(formatCompactTokens(1_048_576)).toBe("1.0M");
+  it("promotes at the ROUNDING boundary, never emitting `1000K`", () => {
+    expect(formatCompactTokens(999_400, "en")).toBe("999K");
+    expect(formatCompactTokens(999_600, "en")).toBe("1M");
+    expect(formatCompactTokens(1_048_576, "en")).toBe("1M");
   });
 
   it("never renders a misleading figure for malformed input", () => {
-    expect(formatCompactTokens(Number.NaN)).toBe("0");
-    expect(formatCompactTokens(-5)).toBe("0");
+    expect(formatCompactTokens(Number.NaN, "en")).toBe("0");
+    expect(formatCompactTokens(-5, "en")).toBe("0");
   });
 });
 
@@ -63,5 +64,16 @@ describe("formatWindowPercent", () => {
     expect(fr).toContain("64");
     expect(fr).toEndWith("%");
     expect(fr).not.toBe(formatWindowPercent(0.64, "en"));
+  });
+});
+
+describe("formatTokenFigure", () => {
+  it("marks an assumed window and leaves a declared one as is", () => {
+    expect(formatTokenFigure(128_000, false, "en")).toBe("128K");
+    expect(formatTokenFigure(128_000, undefined, "en")).toBe("128K");
+    expect(formatTokenFigure(128_000, true, "en")).toBe("≈\u00a0128K");
+    expect(formatTokenFigure(128_000, true, "fr")).toBe(
+      `≈\u00a0${formatCompactTokens(128_000, "fr")}`,
+    );
   });
 });

@@ -7,7 +7,8 @@ import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
 import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { cn } from "@appstrate/ui/cn";
-import { formatCompactTokens } from "@appstrate/ui/context-window";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
+import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -301,22 +302,12 @@ function ConversationId({ id }: { id: string }) {
   );
 }
 
-/** One `dt`/`dd` pair of the Infos panel, on the panel's label column. */
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
-    </div>
-  );
-}
-
 /** The details while they load, row for row; a date row is two lines (age, then date). */
 function ConversationDetailsSkeleton() {
   const row = (key: string, width: string, lines = 1) => (
-    <div key={key} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
-      <SkeletonLine className="w-20 text-sm" />
-      <div>
+    <div key={key}>
+      <SkeletonLine className="w-20 text-xs" />
+      <div className="mt-1">
         {Array.from({ length: lines }, (_, i) => (
           <SkeletonLine key={i} className={i ? "w-16 text-xs" : cn("text-sm", width)} />
         ))}
@@ -349,12 +340,12 @@ function ConversationDetailsSkeleton() {
  * The models that closed the conversation's turns and the context it carries, from the turns' own
  * metadata, beside the tokens every metered call consumed, from the server's ledger sum.
  */
-function ConversationUsage({
+export function ConversationUsage({
   session,
 }: {
   session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
 }) {
-  const { t } = useTranslation("chat");
+  const { t, i18n } = useTranslation("chat");
   const { models, context } = conversationStats(session.messages);
   const { usage } = session;
   const read =
@@ -371,17 +362,30 @@ function ConversationUsage({
         <p className="text-muted-foreground text-sm">{t("context.info.noTurn")}</p>
       ) : (
         <>
-          <dl className="flex flex-col gap-3 text-sm">
+          <FactGrid columns={1}>
             {context ? (
-              <InfoRow label={t("context.info.currentContext")}>
-                {t("contextUsage.counts", {
-                  used: formatCompactTokens(context.tokens),
-                  max: formatCompactTokens(context.window),
-                })}
-              </InfoRow>
+              <Fact label={t("context.info.currentContext")}>
+                <span className="whitespace-nowrap tabular-nums">
+                  {t("contextUsage.counts", {
+                    used: formatCompactTokens(context.tokens, i18n.language),
+                    max: formatTokenFigure(
+                      context.window,
+                      context.windowAssumed === true,
+                      i18n.language,
+                    ),
+                  })}
+                </span>
+                {context.windowAssumed === true ? (
+                  <span className="text-muted-foreground block text-xs">
+                    {t("contextUsage.windowAssumed", {
+                      window: formatCompactTokens(context.window, i18n.language),
+                    })}
+                  </span>
+                ) : null}
+              </Fact>
             ) : null}
             {models.length > 0 ? (
-              <InfoRow label={t("context.info.models", { count: models.length })}>
+              <Fact label={t("context.info.models", { count: models.length })}>
                 <ul className="flex flex-col gap-0.5">
                   {models.map((model) => (
                     <li key={model.modelId}>
@@ -395,17 +399,17 @@ function ConversationUsage({
                     </li>
                   ))}
                 </ul>
-              </InfoRow>
+              </Fact>
             ) : null}
             {metered ? (
-              <InfoRow label={t("context.info.tokens")}>
+              <Fact label={t("context.info.tokens")}>
                 {t("context.info.tokensReadGenerated", {
-                  read: formatCompactTokens(read),
-                  generated: formatCompactTokens(generated),
+                  read: formatCompactTokens(read, i18n.language),
+                  generated: formatCompactTokens(generated, i18n.language),
                 })}
-              </InfoRow>
+              </Fact>
             ) : null}
-          </dl>
+          </FactGrid>
           {metered ? (
             <p className="text-muted-foreground text-xs">{t("context.info.tokensScope")}</p>
           ) : null}
@@ -449,13 +453,13 @@ function ConversationDetails({
       <h3 className="text-base font-semibold break-words">
         {session.title || t("context.info.untitled")}
       </h3>
-      <dl className="flex flex-col gap-3 text-sm">
+      <FactGrid columns={1}>
         {rows.map(([label, value]) => (
-          <InfoRow key={label} label={label}>
+          <Fact key={label} label={label}>
             {value}
-          </InfoRow>
+          </Fact>
         ))}
-      </dl>
+      </FactGrid>
       <ConversationUsage session={session} />
     </>
   );

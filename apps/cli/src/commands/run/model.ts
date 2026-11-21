@@ -24,7 +24,7 @@
 import type { Api, Model } from "../../lib/pi-sdk.ts";
 import { deriveProviderFromApi, llmProxyBaseUrl, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import type { ModelInputModality } from "@appstrate/core/module";
 import { isPiModelDialect } from "@appstrate/core/sidecar-types";
 import {
@@ -45,6 +45,8 @@ interface ModelFlags {
 interface ResolvedModel {
   model: Model<Api>;
   apiKey: string;
+  /** The model runs with a fallback window. */
+  contextWindowAssumed?: true;
 }
 
 interface PresetResolutionInputs {
@@ -140,11 +142,12 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     // One spelling of those zeros; `ZERO_MODEL_COST` carries both reasons the
     // record exists, and the `compat` exemption above does NOT extend to it.
     cost: { ...ZERO_MODEL_COST },
+    // Direct CLI runs keep their historical limits when the model declares none.
     contextWindow: 200_000,
-    maxTokens: 8192,
+    maxTokens: 8_192,
   };
 
-  return { model, apiKey };
+  return { model, apiKey, contextWindowAssumed: true };
 }
 
 /**
@@ -219,7 +222,13 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // Placeholder for anthropic — never reaches upstream (see comment above).
   // For other APIs, pi-ai's SDK sends `Authorization: Bearer <apiKey>` natively.
   const apiKey = isAnthropic ? "x-platform-bearer-injected-via-headers" : inputs.bearerToken;
-  return { model, apiKey };
+  return {
+    model,
+    apiKey,
+    ...(resolvePiContextWindow(preset.contextWindow).assumed
+      ? { contextWindowAssumed: true as const }
+      : {}),
+  };
 }
 
 /**

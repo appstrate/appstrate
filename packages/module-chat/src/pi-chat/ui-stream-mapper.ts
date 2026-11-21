@@ -25,12 +25,11 @@
  */
 
 import type { UIMessageChunk } from "ai";
-import type { ModelCost } from "@appstrate/core/module";
-import type { TokenUsage } from "@appstrate/core/token-usage";
-import { addRequestUsage } from "@appstrate/runner-pi/pi-model";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
+  PiCompactionEndEvent,
+  PiCompactionResult,
   PiUsage,
   PiFinishReason,
 } from "./pi-events.ts";
@@ -60,25 +59,27 @@ interface OpenBlock {
   toolName?: string;
 }
 
-/**
- * Terminal metadata accumulated across the turn.
- *
- * Deliberately carries NO dollar figure. Metering is the ledger writer's job:
- * the engine hands the platform seam the raw token counts + the model's catalog
- * rates and lets it apply the shared ledger price (Pi's `calculateCost`), so the
- * chat, proxy, and runner producers can't drift (see `ChatUsageRecord.cost` in
- * `@appstrate/core/chat-contract` and `engine.ts`'s `recordUsage` call).
- * `usage` carries the tier bands of its model calls (`TokenUsage.tiers`).
- */
+/** Session state for closing the turn. Provider usage is metered in the engine. */
 interface PiChatResultMeta {
-  usage: TokenUsage;
   finishReason: PiFinishReason;
   errorText?: string;
-  /** Usage of the turn's last settled call, which `usage` (a sum over calls) cannot give back. */
+  /** Context usage of the last settled chat call. */
   lastSettledUsage?: PiUsage;
-  /** Pi summarized the history during the turn. */
-  compacted: boolean;
+  /** The turn's last summary of the history, absent when Pi made none. */
+  compaction?: PiCompaction;
+  /**
+   * Pi's estimate of the context left by a summary no settled call followed (its threshold
+   * summary runs after the turn's last reply): the next request's size, which the last settled
+   * call, measured before the summary, overstates.
+   */
+  contextAfterCompaction?: number;
 }
+
+/** What Pi's `compaction_end` result says about the summary it appended. */
+export type PiCompaction = Pick<
+  PiCompactionResult,
+  "summary" | "firstKeptEntryId" | "tokensBefore"
+>;
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
   switch (stop) {
@@ -107,8 +108,6 @@ interface PiChatUiStreamMapperOptions {
    * is not it.
    */
   onFirstModelEvent?: () => void;
-  /** Rate card whose tiers band each model call's usage; none → no bands. */
-  cost?: ModelCost | null;
   /**
    * The ids of the turn's spaces. A call naming one of them (`dispatchSpace`) is stamped with it
    * as `providerMetadata.appstrate.spaceId`, the one record every card reads where the call
@@ -124,13 +123,11 @@ interface PiChatUiStreamMapperOptions {
  */
 export class PiChatUiStreamMapper {
   private readonly onFirstModelEvent: (() => void) | undefined;
-  private readonly cost: ModelCost | null;
   private readonly turnSpaces: ReadonlySet<string>;
 
   constructor(options: PiChatUiStreamMapperOptions = {}) {
     this.turnSpaces = options.turnSpaces ?? new Set();
     this.onFirstModelEvent = options.onFirstModelEvent;
-    this.cost = options.cost ?? null;
   }
 
   /**
@@ -149,17 +146,12 @@ export class PiChatUiStreamMapper {
    */
   private modelCalls = 0;
   private readonly open = new Map<number, OpenBlock>();
-  private accUsage: TokenUsage = {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_creation_input_tokens: 0,
-  };
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
   private lastSettledUsage: PiUsage | undefined;
-  private compacted = false;
+  private compaction: PiCompaction | undefined;
+  private contextAfterCompaction: number | undefined;
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -179,7 +171,6 @@ export class PiChatUiStreamMapper {
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
-      aborted?: boolean;
     };
     switch (e.type) {
       case "message_start":
@@ -227,9 +218,19 @@ export class PiChatUiStreamMapper {
         // only assistant entry in its list, so it is still captured.
         this.captureFailure(lastAssistantMessage(e.messages ?? []));
         return [];
-      case "compaction_end":
-        if (!e.aborted && e.result !== undefined) this.compacted = true;
+      case "compaction_end": {
+        // The catch-all member defeats narrowing; the view is pinned to Pi's (`pi-events.ts`).
+        const { result, aborted } = event as PiCompactionEndEvent;
+        if (aborted || !result) return [];
+        // A later summary in the same turn starts from the earlier one, so it replaces it.
+        const { summary, firstKeptEntryId, tokensBefore, estimatedTokensAfter } = result;
+        this.compaction = { summary, firstKeptEntryId, tokensBefore };
+        this.contextAfterCompaction =
+          estimatedTokensAfter !== undefined && estimatedTokensAfter > 0
+            ? estimatedTokensAfter
+            : undefined;
         return [];
+      }
       default:
         return [];
     }
@@ -338,10 +339,10 @@ export class PiChatUiStreamMapper {
   private captureMessageEnd(message: unknown): void {
     const m = assistantView(message);
     if (!m) return;
-    if (m.usage) this.accUsage = addRequestUsage(this.accUsage, m.usage, this.cost);
     // Pi's own rule for a call that measured something (`getLastAssistantUsage`).
     if (m.usage && m.stopReason !== "aborted" && m.stopReason !== "error") {
       this.lastSettledUsage = m.usage;
+      this.contextAfterCompaction = undefined;
     }
     this.finishReason = mapStopReason(m.stopReason);
     // A model call that SETTLED retires the previous failure. Pi retries inside
@@ -394,11 +395,13 @@ export class PiChatUiStreamMapper {
   /** Terminal metadata accumulated over the turn. */
   result(): PiChatResultMeta {
     return {
-      usage: this.accUsage,
       finishReason: this.finishReason,
       ...(this.lastError ? { errorText: this.lastError } : {}),
       ...(this.lastSettledUsage ? { lastSettledUsage: this.lastSettledUsage } : {}),
-      compacted: this.compacted,
+      ...(this.compaction ? { compaction: this.compaction } : {}),
+      ...(this.contextAfterCompaction !== undefined
+        ? { contextAfterCompaction: this.contextAfterCompaction }
+        : {}),
     };
   }
 }

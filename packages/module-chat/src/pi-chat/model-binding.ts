@@ -24,7 +24,7 @@ import {
   type Model,
 } from "@appstrate/runner-pi";
 import type { ModelInputModality } from "@appstrate/core/module";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
 import { UNKNOWN_INPUT_MODALITIES } from "../file-input.ts";
 
@@ -43,6 +43,8 @@ interface PiChatModelBindingBase {
   model: Model<Api>;
   /** AuthStorage key: the model's Pi provider key. */
   provider: string;
+  /** The row declares no window: {@link model} runs on `buildPiModel`'s fallback. */
+  windowAssumed?: true;
 }
 
 export interface PiProxyModelBinding extends PiChatModelBindingBase {
@@ -132,6 +134,9 @@ export function createPiProxyModelBinding(args: {
   return {
     authMode: "proxy",
     model,
+    ...(resolvePiContextWindow(args.model.contextWindow).assumed
+      ? { windowAssumed: true as const }
+      : {}),
     provider: model.provider,
     runtimeApiKey: "proxy",
     authExtension: createPiProxyAuthExtension(args.mintBearer),
@@ -158,6 +163,9 @@ export function createPiOAuthModelBinding(
   return {
     authMode: "oauth2",
     model: piModel,
+    ...(resolvePiContextWindow(model.contextWindow).assumed
+      ? { windowAssumed: true as const }
+      : {}),
     provider: piModel.provider,
     runtimeApiKey: model.accessToken,
     metering: { kind: "inline", cost: model.cost },

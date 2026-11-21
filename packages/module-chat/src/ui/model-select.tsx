@@ -7,7 +7,8 @@
  * header. The list itself is the dashboard's: `ModelPickerList` from
  * `@appstrate/ui`, models grouped by who pays, the unusable ones greyed with
  * their reason. Only a dead model is disabled: one nothing pays for yet stays
- * pickable, the server answering its turn with the "add your key" path.
+ * pickable, the server answering its turn with the "add your key" path. A model the
+ * conversation's last measure already outgrows carries a marker (`model-fit.ts`).
  */
 
 import { useMemo, useState } from "react";
@@ -24,7 +25,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/componen
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
 import { useChatHost } from "./runtime-context.ts";
+import { modelFit, modelSizing, type ModelFit } from "./model-fit.ts";
+import { useConversationContext } from "./use-conversation-context.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+
+const FIT_KEY: Record<ModelFit, string> = {
+  window: "model.fit.window",
+  threshold: "model.fit.threshold",
+};
+
+/** Under the name, as the picker's reason line: legible on touch, no tooltip needed. */
+function FitNote({ fit }: { fit: ModelFit }) {
+  const { t } = useChatHost();
+  return (
+    <div className="text-muted-foreground flex items-start gap-1 text-xs">
+      <TriangleAlertIcon aria-hidden className="text-warning mt-px size-3 shrink-0" />
+      <span>{t(FIT_KEY[fit])}</span>
+    </div>
+  );
+}
 
 interface Props {
   models: OrgModelOption[];
@@ -61,6 +80,21 @@ export function ModelSelect({
         canConnect: can("model-provider-credentials:connect"),
       }),
     [models, modelCredentials, personalModelCredentials, can],
+  );
+  const reading = useConversationContext();
+  const tokens = reading?.context.tokens;
+  const measuredModelId = reading?.context.modelId;
+  const fits = useMemo(
+    () =>
+      tokens === undefined
+        ? null
+        : new Map(
+            models.map((model) => [
+              model.id,
+              modelFit(tokens, modelSizing(model), model.id !== measuredModelId),
+            ]),
+          ),
+    [models, tokens, measuredModelId],
   );
   const hasOverrides = generation.temperature != null || generation.reasoning_level != null;
   const hasNoGenerationControls =
@@ -141,6 +175,10 @@ export function ModelSelect({
               value={selectedId}
               onSelect={(id) => id !== null && onSelect(id)}
               selectable={isModelSelectable}
+              renderNote={(model) => {
+                const fit = fits?.get(model.id);
+                return fit ? <FitNote fit={fit} /> : null;
+              }}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
               labels={buildModelPickerLabels(translateSettings)}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { sanitizeFilename } from "@appstrate/core/naming";
-import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
+import { TURN_PDF_MAX_BYTES } from "../attachment-limits.ts";
 import type { ExtensionFactory } from "@appstrate/runner-pi";
 import { WIRE_PARTS, type FileDelivery, type PdfWireApi } from "../file-input.ts";
 import { logger } from "../logger.ts";
@@ -251,7 +251,7 @@ export function createTurnPdfInput(
       ? PDF_NOT_SENT.format
       : PDF_NOT_SENT.textOnly;
   const files: StoredFile[] = [];
-  let remainingBytes = RESOURCE_BLOB_MAX_BYTES;
+  let remainingBytes = TURN_PDF_MAX_BYTES;
   let warned = false;
 
   const strip: Strip = (blocks, source) => {

@@ -38,13 +38,15 @@ import {
   type PiCodingAgentSdk,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
+import type { TokenUsage } from "@appstrate/core/token-usage";
+import { addRequestUsage, piTokenCounts } from "@appstrate/runner-pi/pi-model";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
-import type { AgentSessionEvent } from "./pi-events.ts";
+import type { AgentSessionEvent, PiUsage } from "./pi-events.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
@@ -52,13 +54,23 @@ import {
   DEFAULT_MODEL_REASONING_LEVEL,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { ChatTurnDeadlineError, closePiTurn, turnContextOf } from "./pi-turn-closure.ts";
+import {
+  ChatTurnDeadlineError,
+  closePiTurn,
+  turnContextOf,
+  type TurnAnchors,
+} from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
 import { createFileRefusal } from "./file-refusal.ts";
 import { fileDelivery } from "../file-input.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
-import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
+import {
+  buildStructuredPiTurn,
+  piSummaryTokens,
+  reconstructPiSession,
+  resolveSummaryCheckpoint,
+} from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiChatInput {
@@ -240,8 +252,6 @@ export function runPiChat(input: PiChatInput): Response {
     onFirstModelEvent: () => {
       timings.firstModelEventMs = Date.now() - startedAt;
     },
-    // Bands each call by its tier for the platform to price; a proxy-metered turn needs none.
-    cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
     // Every call records the space it was dispatched in, for the cards that show it later.
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
@@ -324,8 +334,47 @@ export function runPiChat(input: PiChatInput): Response {
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
       /** The sizing handed to Pi and stamped on the turn's context, and Pi's measure; set with the model. */
       let contextMeasure: Parameters<typeof turnContextOf>[1];
+      /** Where the session's entries came from, for the summary Pi may make; set with the session. */
+      let anchors: TurnAnchors | undefined;
       /** Detach handle for the Pi event subscription — released in `finally`. */
       let unsubscribe: (() => void) | undefined;
+      // Meter the turn (fire-and-forget by the caller): the token counts + the model's catalog
+      // rates, priced by the platform seam with the shared formula. Called once, from `finally`, so
+      // a turn that fails after settled calls or a summary still pays for them; a turn that spent
+      // nothing writes nothing.
+      const providerCalls: Promise<PiUsage>[] = [];
+      const meterTurn = async (): Promise<void> => {
+        const { metering } = modelBinding;
+        if (metering.kind !== "inline" || !providerCalls.length) return;
+        // A stopped turn can close before its last provider stream settles. Only the ledger waits.
+        let usage: TokenUsage = {};
+        for (const call of await Promise.allSettled(providerCalls)) {
+          if (call.status === "fulfilled")
+            usage = addRequestUsage(usage, call.value, metering.cost);
+        }
+        const {
+          input: inputTokens,
+          output: outputTokens,
+          cacheRead,
+          cacheWrite,
+        } = piTokenCounts(usage);
+        if (inputTokens + outputTokens + cacheRead + cacheWrite === 0) return;
+        input.recordUsage({
+          orgId: input.orgId,
+          userId: input.userId,
+          chatSessionId: input.chatSessionId,
+          presetId: input.presetId,
+          modelId: model.id,
+          apiShape: model.api as ChatUsageRecord["apiShape"],
+          inputTokens,
+          outputTokens,
+          cacheReadTokens: cacheRead,
+          cacheWriteTokens: cacheWrite,
+          ...(usage.tiers ? { tiers: usage.tiers } : {}),
+          cost: metering.cost,
+          durationMs: Date.now() - startedAt,
+        });
+      };
       try {
         // Open the stream NOW, before any of the turn's construction work. This
         // chunk carries nothing but a message id, and it is what flips the
@@ -414,7 +463,11 @@ export function runPiChat(input: PiChatInput): Response {
 
         const piModel = model;
         const sizing = derivePiCompactionSettings(piModel);
-        contextMeasure = { sizing, contextTokens: sdk.calculateContextTokens };
+        contextMeasure = {
+          sizing,
+          contextTokens: sdk.calculateContextTokens,
+          ...(modelBinding.windowAssumed ? { windowAssumed: true as const } : {}),
+        };
         const requestedThinkingLevel =
           input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {
@@ -448,11 +501,22 @@ export function runPiChat(input: PiChatInput): Response {
         // pointer lines it always had.
         const read = input.readAttachment;
         const signal = turnAbort.signal;
+        // Messages before a summary's kept history are not sent: their images are not read.
+        const historyModel = {
+          api: sessionModel.api,
+          provider: sessionModel.provider,
+          model: sessionModel.id,
+        };
+        const found = resolveSummaryCheckpoint(input.messages, historyModel);
+        const checkpoint = found && {
+          ...found,
+          summaryTokens: piSummaryTokens(sdk, found.summary.text),
+        };
         const images =
           delivery.image && read
             ? await untilAborted(
                 loadAttachmentImages(
-                  input.messages,
+                  input.messages.slice(checkpoint?.anchorIndex ?? 0),
                   (uri, maxBytes) => read(uri, { kind: "image", maxBytes, signal }),
                   signal,
                 ),
@@ -461,32 +525,45 @@ export function runPiChat(input: PiChatInput): Response {
         const pdfReceipts = await untilAborted(
           readPromptPdfs(input.messages.at(-1), pdfInput, read, signal),
         );
-        const projectedTurn = buildStructuredPiTurn(
-          input.messages,
-          {
-            api: sessionModel.api,
-            provider: sessionModel.provider,
-            model: sessionModel.id,
-          },
-          {
-            estimateTokens,
-            images,
-            pdfReceipts,
-            fileDelivery: delivery,
-            // The system prompt is part of every request Pi sends, so it counts
-            // toward the context the compaction threshold is measured against.
-            // Still a floor, not a measurement: tool schemas and this turn's own
-            // prompt text are not in it (`projectedTurn.prompt` is not history).
-            // That gap is pre-existing — do not close it silently, `contextTokens`
-            // seeds Pi's compaction threshold via `historyUsage`.
-            baseTokens: estimateTokens({
-              role: "user",
-              content: [{ type: "text", text: system }],
-              timestamp: 0,
-            }),
-          },
-        );
-        const sessionManager = reconstructPiSession(SessionManager, projectedTurn.history);
+        const baseTokens = estimateTokens({
+          role: "user",
+          content: [{ type: "text", text: system }],
+          timestamp: 0,
+        });
+        const projectedTurn = buildStructuredPiTurn(input.messages, historyModel, {
+          estimateTokens,
+          images,
+          pdfReceipts,
+          fileDelivery: delivery,
+          checkpoint,
+          // The system prompt is part of every request Pi sends, so it counts
+          // toward the context the compaction threshold is measured against.
+          // Still a floor, not a measurement: tool schemas and this turn's own
+          // prompt text are not in it (`projectedTurn.prompt` is not history).
+          // That gap is pre-existing — do not close it silently, `contextTokens`
+          // seeds Pi's compaction threshold via `historyUsage`.
+          baseTokens,
+        });
+        const reconstruction = reconstructPiSession(SessionManager, projectedTurn);
+        const sessionManager = reconstruction.session;
+        const { origins } = reconstruction;
+        anchors = {
+          origins,
+          branchHeadId: projectedTurn.branchHeadId,
+          // The turn's own entries are the ones the projection did not append.
+          estimateRestart: (summary) =>
+            sessionManager
+              .getBranch()
+              .reduce(
+                (sum, entry) =>
+                  entry.type === "message" &&
+                  entry.message.role !== "system" &&
+                  !origins.has(entry.id)
+                    ? sum + estimateTokens(entry.message)
+                    : sum,
+                baseTokens + piSummaryTokens(sdk, summary),
+              ),
+        };
         timings.projectionMs = Date.now() - projectionStartedAt;
         logger.info("Pi chat session reconstructed", {
           chatSessionId: input.chatSessionId,
@@ -496,6 +573,7 @@ export function runPiChat(input: PiChatInput): Response {
           toolCallCount: projectedTurn.toolCallCount,
           toolResultCount: projectedTurn.toolResultCount,
           contextTokens: projectedTurn.contextTokens,
+          summarized: projectedTurn.summary !== undefined,
           sessionFile: sessionManager.getSessionFile() ?? null,
         });
 
@@ -513,6 +591,16 @@ export function runPiChat(input: PiChatInput): Response {
         // OBSERVED — none of these calls takes a signal of its own.
         const runtimeStartedAt = Date.now();
         const modelRuntime = await untilAborted(ModelRuntime.create(piChatModelRuntimeOptions()));
+        if (modelBinding.metering.kind === "inline") {
+          // This runtime belongs to the turn. Observe the normalized provider result before Pi
+          // merges split-summary calls or discards a truncated summary. The stream has one consumer.
+          const streamSimple = modelRuntime.streamSimple.bind(modelRuntime);
+          modelRuntime.streamSimple = (...args) => {
+            const stream = streamSimple(...args);
+            providerCalls.push(stream.result().then((message) => message.usage));
+            return stream;
+          };
+        }
         await untilAborted(
           setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
         );
@@ -692,7 +780,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelId: input.presetId,
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
-          ...turnContextOf(meta, contextMeasure),
+          ...turnContextOf(meta, contextMeasure, anchors),
         });
         // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
@@ -716,28 +804,6 @@ export function runPiChat(input: PiChatInput): Response {
           });
         }
         for (const chunk of closing.chunks) write(chunk);
-
-        // Meter the turn (fire-and-forget by the caller). We hand the platform
-        // seam the token counts + the model's catalog rates and let it compute
-        // the equivalent cost with the shared formula (consistent with the
-        // proxy/runner paths) rather than forwarding pi-ai's own `meta.costUsd`.
-        if (modelBinding.metering.kind === "inline") {
-          input.recordUsage({
-            orgId: input.orgId,
-            userId: input.userId,
-            chatSessionId: input.chatSessionId,
-            presetId: input.presetId,
-            modelId: model.id,
-            apiShape: model.api as ChatUsageRecord["apiShape"],
-            inputTokens: meta.usage.input_tokens ?? 0,
-            outputTokens: meta.usage.output_tokens ?? 0,
-            cacheReadTokens: meta.usage.cache_read_input_tokens ?? 0,
-            cacheWriteTokens: meta.usage.cache_creation_input_tokens ?? 0,
-            ...(meta.usage.tiers ? { tiers: meta.usage.tiers } : {}),
-            cost: modelBinding.metering.cost,
-            durationMs: Date.now() - startedAt,
-          });
-        }
       } catch (err) {
         // `createUIMessageStream` turns an escaped exception into a transient
         // error chunk. Without a start + finish boundary there is no assistant
@@ -760,7 +826,7 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
-            ...turnContextOf(mapper.result(), contextMeasure),
+            ...turnContextOf(mapper.result(), contextMeasure, anchors),
           });
           logger.error("Pi chat turn failed", {
             err: String(err),
@@ -774,6 +840,9 @@ export function runPiChat(input: PiChatInput): Response {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
         unsubscribe?.();
+        void meterTurn().catch((err: unknown) => {
+          logger.warn("chat usage metering failed", { err: String(err) });
+        });
         // Files a replay withheld, once per turn and whatever the outcome; the turn records none.
         const withheld = fileRefusal.withheldKinds();
         if (withheld.length) {

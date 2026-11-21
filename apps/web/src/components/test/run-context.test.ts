@@ -62,6 +62,15 @@ describe("readRunContext — where the denominator comes from", () => {
     expect(reading?.currentFraction).toBeCloseTo(0.128, 10);
   });
 
+  it("says the window is assumed when the turn stating it says so", () => {
+    expect(readRunContext([turn(0, 10_000)])?.windowAssumed).toBe(false);
+    const swapped = [turn(0, 10_000, { contextWindowAssumed: true }), turn(1, 12_000)];
+    expect(readRunContext(swapped)?.windowAssumed).toBe(false);
+    expect(readRunContext([turn(0, 10_000, { contextWindowAssumed: true })])?.windowAssumed).toBe(
+      true,
+    );
+  });
+
   it("uses the LAST stated window when the model was swapped mid-run", () => {
     // Swap DOWN, the case that decides the rule: the first window would size
     // `current` against a model that is no longer running, and the max would

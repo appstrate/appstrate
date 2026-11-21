@@ -71,6 +71,7 @@ export type {
 export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
+import { modelSizing } from "./model-fit.ts";
 import { fetchModelsEnvelope, selectChatModels, type OrgModelOption } from "./models-data.ts";
 import {
   markSessionRead,
@@ -201,6 +202,8 @@ export interface ChatPageProps {
   modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
+  /** The host's UI language (see `ChatHost`). */
+  lang: ChatHost["lang"];
   /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
   onPackagesChanged: ChatHost["onPackagesChanged"];
   /** The user's first name, greeted on a new conversation (see `ChatHost`). */
@@ -233,6 +236,7 @@ export function ChatPage({
   personalModelCredentials,
   modelCredentials,
   formatBytes,
+  lang,
   onPackagesChanged,
   firstName,
   renderSpaces,
@@ -331,6 +335,10 @@ export function ChatPage({
   // between renders and consumers re-render no more than with a context each.
   const selectedPreset = models.find((model) => model.id === selectedModel);
   const modelLabel = selectedPreset?.label ?? selectedPreset?.modelId ?? null;
+  const selectedSizing = useMemo(
+    () => (selectedPreset ? modelSizing(selectedPreset) : null),
+    [selectedPreset],
+  );
   const host = useMemo<ChatHost>(
     () => ({
       openFile: onOpenFile ?? null,
@@ -344,10 +352,12 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      lang,
       onPackagesChanged,
       firstName,
       modelId: selectedModel,
       modelLabel,
+      modelSizing: selectedSizing,
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
@@ -365,10 +375,12 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      lang,
       onPackagesChanged,
       firstName,
       selectedModel,
       modelLabel,
+      selectedSizing,
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,

@@ -11,7 +11,6 @@ import {
 import { createTurnPdfInput } from "../src/pi-chat/native-pdf.ts";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import { INLINE_IMAGE_BUDGET_BYTES } from "@appstrate/runner-pi";
-import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 
 function user(id: string, ...uris: string[]): UIMessage {
   return {

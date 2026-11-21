@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError } from "../env.ts";
 
 const VALID = {

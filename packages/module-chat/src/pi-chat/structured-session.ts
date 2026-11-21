@@ -3,8 +3,10 @@
 /**
  * Deterministically project Appstrate's canonical active UIMessage branch into
  * a disposable Pi session. Appstrate remains the only durable history. Every
- * turn rebuilds SessionManager.inMemory(), so a server restart, branch switch
- * or model change cannot reuse stale derived state and no Pi JSONL is written.
+ * turn rebuilds SessionManager.inMemory() and no Pi JSONL is written. The one
+ * derived state replayed is a summary Pi made on an earlier turn of the branch,
+ * read back from that turn's metadata (`AppstrateTurnSummary`): the session
+ * then starts with it and the history it kept, as Pi left it.
  *
  * The projection stays deliberately thin: where Pi's own request transform
  * already normalizes something, this file hands it the raw shape rather than
@@ -14,13 +16,19 @@
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
+import { z } from "zod";
 import { FILE_URI_PREFIX } from "@appstrate/core/file-uri";
-import type { Api, Message } from "@appstrate/runner-pi";
+import {
+  turnMetadataFromMessage,
+  type AppstrateTurnSummary,
+} from "@appstrate/core/chat-turn-metadata";
+import type { Api, Message, PiCodingAgentSdk } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
 import type { FileDelivery } from "../file-input.ts";
 import type { AttachmentImages, PiImageContent } from "./attachment-inputs.ts";
 import { offerScopeOf, splitJsonText, type OfferScope } from "../connect-offer.ts";
+import { logger } from "../logger.ts";
 import { uiMessageText } from "../message-text.ts";
 import { PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -51,10 +59,43 @@ export interface BuildStructuredPiTurnOptions {
   pdfReceipts?: ReadonlyMap<string, string>;
   /** What this turn sends the model, for the wording of the pointer lines. */
   fileDelivery: FileDelivery;
+  /** The branch's summary, validated ({@link resolveSummaryCheckpoint}) and sized; none = the whole history. */
+  checkpoint?: ReplayCheckpoint;
+}
+
+/** The branch message a projected Pi message comes from, and its rank in that message's projection. */
+export interface MessageOrigin {
+  messageId: string;
+  offset: number;
+}
+
+/** A summary found on the branch, and the branch index of the message its kept history starts in. */
+export interface SummaryCheckpoint {
+  summary: AppstrateTurnSummary;
+  anchorIndex: number;
+}
+
+/** A checkpoint with the tokens its summary occupies as Pi sends it ({@link piSummaryTokens}). */
+export interface ReplayCheckpoint extends SummaryCheckpoint {
+  summaryTokens: number;
+}
+
+/** Tokens of a summary as Pi sends it: the user message its `convertToLlm` wraps the summary in. */
+export function piSummaryTokens(
+  pi: Pick<PiCodingAgentSdk, "convertToLlm" | "estimateTokens">,
+  summary: string,
+): number {
+  return pi
+    .convertToLlm([{ role: "compactionSummary", summary, tokensBefore: 0, timestamp: 0 }])
+    .reduce((sum, message) => sum + pi.estimateTokens(message), 0);
 }
 
 interface StructuredPiTurn {
   history: Message[];
+  /** The origin of each `history` message, index for index. */
+  origins: MessageOrigin[];
+  /** The summary the history starts after; absent = the whole branch is projected. */
+  summary?: AppstrateTurnSummary;
   prompt: string;
   /** The images of the prompt message itself; the history ones ride their own messages. */
   promptImages: PiImageContent[];
@@ -67,6 +108,8 @@ interface StructuredPiTurn {
 
 interface SessionManagerLike {
   appendMessage(message: Message): string;
+  appendCompaction(summary: string, firstKeptEntryId: string | null, tokensBefore: number): string;
+  getEntry(id: string): { timestamp: string } | undefined;
   getSessionFile(): string | undefined;
 }
 
@@ -114,7 +157,8 @@ function historyUsage(contextTokens: number): AssistantMessage["usage"] {
  * timestamps against its own compaction entries. The canonical branch carries
  * no per-message time, so mint a monotonic sequence at projection time — the
  * same thing Pi does for the tool results it synthesizes. Ordering inside the
- * disposable session comes from the entry tree, not from these values.
+ * disposable session comes from the entry tree; {@link reconstructPiSession}
+ * restamps what follows a summary, which Pi compares against.
  */
 function projectionClock(): () => number {
   let next = Date.now();
@@ -291,6 +335,74 @@ function assistantMessages(
   return { messages: output, toolCallCount, toolResultCount };
 }
 
+// The summary rides client-sent history (JSONB): narrow it before trusting it.
+const turnSummarySchema = z.object({
+  text: z.string().min(1),
+  keptFrom: z.object({ messageId: z.string().min(1), offset: z.int().nonnegative() }),
+  tokensBefore: z.number().nonnegative(),
+});
+
+/**
+ * The Pi messages one branch message projects to, the range a `keptFrom.offset` ranks in. The model
+ * only stamps the assistants' `api`/`provider`; it is the projection's own argument.
+ */
+function projectAnchor(message: UIMessage, model: PiHistoryModel): Message[] {
+  if (message.role === "assistant") return assistantMessages(message, model, () => 0).messages;
+  if (message.role !== "user") return [];
+  const [converted] = messagesWithAttachmentsAsText([message]);
+  const user = converted && userMessage(converted, () => 0);
+  return user ? [user] : [];
+}
+
+/** The checkpoint a branch message's summary gives, or why it gives none. */
+function checkpointAt(
+  branch: readonly UIMessage[],
+  carrier: number,
+  summary: unknown,
+  model: PiHistoryModel,
+): { reason: string } | SummaryCheckpoint {
+  const parsed = turnSummarySchema.safeParse(summary);
+  if (!parsed.success) return { reason: "malformed summary metadata" };
+  const { messageId, offset } = parsed.data.keptFrom;
+  const anchorIndex = branch.findLastIndex(
+    (message, index) => index <= carrier && message.id === messageId,
+  );
+  if (anchorIndex < 0) {
+    return branch.some((message, index) => index > carrier && message.id === messageId)
+      ? { reason: "its kept history starts after the turn that made it" }
+      : { reason: "its kept history is not on the branch" };
+  }
+  const projected = projectAnchor(branch[anchorIndex]!, model);
+  if (offset > 0 && offset >= projected.length) {
+    return { reason: "its anchor offset is past the message's projection" };
+  }
+  // Pi never starts kept history on a tool result (`isCutPointMessage`, compaction.js): replayed
+  // first, it would answer a call the request no longer carries.
+  if (projected[offset]?.role === "toolResult") {
+    return { reason: "its anchor offset lands on a tool result" };
+  }
+  return { summary: parsed.data, anchorIndex };
+}
+
+/**
+ * The newest summary on the branch whose kept history starts on the branch, at or before the
+ * turn that made it. A summary whose start is not there (the branch was edited under it) is
+ * skipped for an older one; none = the whole history is projected.
+ */
+export function resolveSummaryCheckpoint(
+  branch: readonly UIMessage[],
+  model: PiHistoryModel,
+): SummaryCheckpoint | undefined {
+  for (let carrier = branch.length - 1; carrier >= 0; carrier -= 1) {
+    const summary = turnMetadataFromMessage(branch[carrier])?.summary;
+    if (summary === undefined) continue;
+    const found = checkpointAt(branch, carrier, summary, model);
+    if ("summary" in found) return found;
+    logger.warn(`chat summary ignored: ${found.reason}`, { carrierId: branch[carrier]!.id });
+  }
+  return undefined;
+}
+
 /**
  * Convert the active branch history and keep its final user message as the new
  * prompt.
@@ -303,11 +415,21 @@ function assistantMessages(
  * constraint. Anthropic combines consecutive same-role turns into one
  * (`@anthropic-ai/sdk` `MessageCreateParams.messages`), and the Responses API
  * takes a flat item list with no alternation rule at all.
+ *
+ * With a checkpoint, only what follows the summary's start is converted: Pi never sends
+ * what the summary replaces.
  */
 export function buildStructuredPiTurn(
   input: UIMessage[],
   model: PiHistoryModel,
-  { estimateTokens, baseTokens, images, fileDelivery, pdfReceipts }: BuildStructuredPiTurnOptions,
+  {
+    estimateTokens,
+    baseTokens,
+    images,
+    fileDelivery,
+    pdfReceipts,
+    checkpoint,
+  }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
   const sentImages: AttachmentImages = images ?? new Map();
   const messages = messagesWithAttachmentsAsText(input, {
@@ -320,23 +442,32 @@ export function buildStructuredPiTurn(
     throw new Error("The active Pi chat branch must end with a user message.");
   }
 
+  const start = checkpoint?.anchorIndex ?? 0;
   const nextTimestamp = projectionClock();
   const history: Message[] = [];
+  const origins: MessageOrigin[] = [];
   let toolCallCount = 0;
   let toolResultCount = 0;
-  for (const message of messages.slice(0, -1)) {
+  for (let index = start; index < messages.length - 1; index += 1) {
+    const message = messages[index]!;
+    let converted: Message[] = [];
     if (message.role === "user") {
-      const converted = userMessage(message, nextTimestamp, [
+      const user = userMessage(message, nextTimestamp, [
         ...(sentImages.get(message.id)?.values() ?? []),
       ]);
-      if (converted) history.push(converted);
-      continue;
+      if (user) converted = [user];
+    } else if (message.role === "assistant") {
+      const assistant = assistantMessages(message, model, nextTimestamp);
+      converted = assistant.messages;
+      toolCallCount += assistant.toolCallCount;
+      toolResultCount += assistant.toolResultCount;
     }
-    if (message.role !== "assistant") continue;
-    const converted = assistantMessages(message, model, nextTimestamp);
-    history.push(...converted.messages);
-    toolCallCount += converted.toolCallCount;
-    toolResultCount += converted.toolResultCount;
+    const skip = index === start && checkpoint ? checkpoint.summary.keptFrom.offset : 0;
+    converted.forEach((piMessage, offset) => {
+      if (offset < skip) return;
+      history.push(piMessage);
+      origins.push({ messageId: message.id, offset });
+    });
   }
 
   // Pi reads its compaction threshold off the usage carried by the newest
@@ -345,7 +476,7 @@ export function buildStructuredPiTurn(
   // arbitrarily long thread look empty to that check, so each assistant
   // carries the running estimate of everything up to it. The real usage of
   // this turn's own responses overwrites it as soon as it arrives.
-  let contextTokens = baseTokens;
+  let contextTokens = baseTokens + (checkpoint?.summaryTokens ?? 0);
   for (const message of history) {
     contextTokens += estimateTokens(message);
     if (message.role === "assistant") message.usage = historyUsage(contextTokens);
@@ -353,22 +484,49 @@ export function buildStructuredPiTurn(
 
   return {
     history,
+    origins,
+    ...(checkpoint ? { summary: checkpoint.summary } : {}),
     prompt: uiMessageText(last.parts),
     promptImages: [...(sentImages.get(last.id)?.values() ?? [])],
     branchHeadId: last.id,
-    sourceMessageCount: messages.length - 1,
+    sourceMessageCount: messages.length - 1 - start,
     toolCallCount,
     toolResultCount,
     contextTokens,
   };
 }
 
-/** Reconstruct a disposable Pi session without creating a second durable history. */
+/**
+ * Reconstruct a disposable Pi session without creating a second durable history, and map each
+ * entry it appended to the branch message it came from.
+ *
+ * A summary goes right after the first kept message, so every later assistant follows it and Pi
+ * reads their estimated usage. Pi ignores an assistant stamped at or before its summary entry,
+ * which it stamps with the current time: what follows is restamped past that.
+ */
 export function reconstructPiSession<T extends SessionManagerLike>(
   SessionManager: SessionManagerFactory<T>,
-  history: Message[],
-): T {
+  turn: Pick<StructuredPiTurn, "history" | "origins" | "summary">,
+): { session: T; origins: Map<string, MessageOrigin> } {
   const session = SessionManager.inMemory(PI_CHAT_CWD);
-  for (const message of history) session.appendMessage(message);
-  return session;
+  const origins = new Map<string, MessageOrigin>();
+  const append = (message: Message, index: number) => {
+    origins.set(session.appendMessage(message), turn.origins[index]!);
+  };
+  if (!turn.summary) {
+    turn.history.forEach(append);
+    return { session, origins };
+  }
+  const [first, ...rest] = turn.history;
+  const firstKeptId = first ? session.appendMessage(first) : undefined;
+  if (firstKeptId) origins.set(firstKeptId, turn.origins[0]!);
+  const compactionId = session.appendCompaction(
+    turn.summary.text,
+    firstKeptId ?? null,
+    turn.summary.tokensBefore,
+  );
+  const summarizedAt = Date.parse(session.getEntry(compactionId)!.timestamp);
+  // One stamp for all of them: later ones would run ahead of a summary Pi makes during the turn.
+  rest.forEach((message, index) => append({ ...message, timestamp: summarizedAt + 1 }, index + 1));
+  return { session, origins };
 }

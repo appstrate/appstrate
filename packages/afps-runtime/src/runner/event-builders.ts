@@ -179,6 +179,8 @@ export function buildTurnProgress(
      * by zero and a guess would misreport saturation.
      */
     contextWindow?: number;
+    /** `contextWindow` is the runner's fallback: the launcher declared none. */
+    contextWindowAssumed?: true;
   },
 ): RunEvent {
   const contextTokens = input.inputTokens + input.cacheReadTokens + input.cacheWriteTokens;
@@ -197,6 +199,7 @@ export function buildTurnProgress(
       cacheWriteTokens: input.cacheWriteTokens,
       contextTokens,
       ...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
+      ...(input.contextWindowAssumed ? { contextWindowAssumed: true } : {}),
     },
   };
 }

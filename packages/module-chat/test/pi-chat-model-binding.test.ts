@@ -256,6 +256,16 @@ describe("Pi chat model binding", () => {
     expect(model.compat).toEqual({ ...record.compat, ...PLATFORM_MODEL_COMPAT });
   });
 
+  it("flags a model that declares no window, on both credential modes", () => {
+    expect(proxyBinding(orgModel(), "openai")?.windowAssumed).toBeUndefined();
+    expect(proxyBinding(orgModel({ contextWindow: null }), "openai")?.windowAssumed).toBe(true);
+    const anthropic = listed("anthropic");
+    expect(createPiOAuthModelBinding(oauthModel(), anthropic).windowAssumed).toBeUndefined();
+    expect(
+      createPiOAuthModelBinding(oauthModel({ contextWindow: null }), anthropic).windowAssumed,
+    ).toBe(true);
+  });
+
   it("resolves auth mode before the engine branch", () => {
     const proxy = resolvePiChatModelBinding({
       model: orgModel(),

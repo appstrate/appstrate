@@ -24,14 +24,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the tool can repeat the operation. `ACTIVE_IN_SPACES_HINT` is the optional instruction
   accompanying those alternatives. `ACTIVE_SPACES_META_KEY` identifies the disclosed space IDs
   in MCP result metadata so a chat can record them before showing the result.
+- **`RESERVE_CEILING_TOKENS`** (`@appstrate/core/token-budget`, #2324): the absolute cap on the
+  response reserve (64 000), see the `### Changed` entry below.
+- **`DEFAULT_CONTEXT_WINDOW`, `DEFAULT_MAX_TOKENS`** (`@appstrate/core/token-budget`, #2324): the
+  limits of a model nothing else sizes (128 000 / 16 384), moved from `@appstrate/runner-pi` so
+  the chat's gauge sizes a catalog row as the runner does.
+- **`AppstrateTurnContext.windowAssumed`** (`@appstrate/core/chat-turn-metadata`, #2324): `true`
+  when the model declares no window and `window` is the engine's fallback. Optional and additive.
 - **`AppstrateTurnContext`, `AppstrateTurnMetadata.context`** (`@appstrate/core/chat-turn-metadata`,
   #2318): the context of a chat turn's last settled model call (`tokens`), the window the engine
-  ran against (`window`), its compaction threshold (`compactAt`) and whether the engine
-  summarized the history during the turn (`compacted`). Optional and additive: a
+  ran against (`window`) and its compaction threshold (`compactAt`). Optional and additive: a
   turn that measured nothing carries none.
 - **`NamedSpace.personal`** (`@appstrate/core/mcp-spaces`, #2328): optional flag for the
   caller's own personal space; `describeSpace` then appends `, your personal space`. Additive:
   a space without it is described exactly as before.
+
+- **`AppstrateTurnSummary`, `AppstrateTurnMetadata.summary`** (`@appstrate/core/chat-turn-metadata`,
+  #2324): the summary of the history a chat turn made (`text`), the first message kept beside it
+  (`keptFrom: { messageId, offset }`) and the context size before summarizing (`tokensBefore`).
+  Later turns on the branch start from it instead of summarizing the whole history again.
+  Optional and additive: a turn that summarized nothing carries none.
+
+### Changed
+
+- **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
+  (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room
+  for a reply plus the summary trigger, not the model's max output. On a 1M window, a 384k
+  `maxTokens` now summarizes at 936k instead of 616k, and a null `maxTokens` (reserve 20 % of the
+  window: 200k → 64k) at 936k instead of 800k. Reserves already below 64k are unchanged.
 
 ### Removed
 

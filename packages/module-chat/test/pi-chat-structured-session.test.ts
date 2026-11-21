@@ -105,8 +105,8 @@ describe("structured Pi session reconstruction", () => {
   it("reconstructs identical context after a simulated server restart without a Pi file", async () => {
     const { SessionManager } = await loadPiCodingAgentSdk();
     const turn = buildStructuredPiTurn(toolThread, MODEL, OPTIONS);
-    const beforeRestart = reconstructPiSession(SessionManager, turn.history);
-    const afterRestart = reconstructPiSession(SessionManager, turn.history);
+    const beforeRestart = reconstructPiSession(SessionManager, turn).session;
+    const afterRestart = reconstructPiSession(SessionManager, turn).session;
 
     expect(beforeRestart.getSessionFile()).toBeUndefined();
     expect(afterRestart.getSessionFile()).toBeUndefined();
