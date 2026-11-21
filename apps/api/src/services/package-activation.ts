@@ -4,7 +4,8 @@
  * "Is this package ACTIVE in this space?" — THE definition, stated twice and
  * nowhere else: once as a SQL expression for the queries that filter or project
  * it, once as a pure in-memory predicate for the callers that already hold the
- * rows.
+ * rows. Where a placement comes FROM ({@link placementVia}) is stated here too,
+ * once.
  *
  *   activeHere = the placement row's `enabled`, when there IS a row
  *              = the deployment's default OR an offer to the space's
@@ -77,6 +78,31 @@ export function isActiveHere(
   row: { enabled: boolean } | null | undefined,
 ): boolean {
   return row ? row.enabled : isActiveWithoutRow(pkg);
+}
+
+/**
+ * How a package reaches a space: `system`, its home, a row outside it
+ * (`shared`), or an offer to the organization with no row of the space's own
+ * (`organization`). A system integration activated solely by the offer also
+ * reports `organization` (§6.8).
+ */
+export type PlacementVia = "home" | "shared" | "system" | "organization";
+
+/**
+ * Where a package's presence in a space comes from, or `null` when it is not
+ * placed there. `row` is the space's placement row, or `undefined` when it has
+ * none; `pkg.offeredToOrg` is the offer to that space's organization.
+ */
+export function placementVia(
+  pkg: ActivatablePackage & { homeSpaceId: string | null },
+  spaceId: string,
+  row: { placedByOffer: boolean } | null | undefined,
+): PlacementVia | null {
+  const activatedByOffer = pkg.offeredToOrg && !isActiveWithoutRow({ ...pkg, offeredToOrg: false });
+  if (pkg.source === "system" && (row || !activatedByOffer)) return "system";
+  if (pkg.homeSpaceId === spaceId) return "home";
+  if (row && !row.placedByOffer) return "shared";
+  return pkg.offeredToOrg ? "organization" : null;
 }
 
 /**

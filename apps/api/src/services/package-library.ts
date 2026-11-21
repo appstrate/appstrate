@@ -16,18 +16,11 @@ import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts
 import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
-import { isActiveHere, isActiveWithoutRow } from "./package-activation.ts";
+import { isActiveHere, placementVia, type PlacementVia } from "./package-activation.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
 import { listOrgOffers } from "./package-placement.ts";
-
-/**
- * How a package reaches a space: `system`, its home, a row outside it
- * (`shared`), or an offer to the organization with no row of the space's own
- * (`organization`). A system integration activated solely by the offer also reports `organization` (§6.8).
- */
-type PlacementVia = "home" | "shared" | "system" | "organization";
 
 /** Whether the space RUNS what it was placed. */
 type PlacementState = "active" | "inactive" | "none";
@@ -240,20 +233,10 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const rowsBySpace = placementRows.get(row.id);
 
     const offered = offeredIds.has(row.id);
-    const activatedByOffer = offered && !isActiveWithoutRow({ ...row, offeredToOrg: false });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
-      const via: PlacementVia | null =
-        row.source === "system" && (placementRow || !activatedByOffer)
-          ? "system"
-          : row.homeSpaceId === space
-            ? "home"
-            : placementRow && !placementRow.placedByOffer
-              ? "shared"
-              : offered
-                ? "organization"
-                : null;
+      const via = placementVia({ ...row, offeredToOrg: offered }, space, placementRow);
       if (via === null) continue;
       placements.push({
         space_id: space,
