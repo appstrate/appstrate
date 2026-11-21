@@ -194,9 +194,9 @@ const isReadable = (tool: CallableTool) => !(tool.kind === "remote" && tool.cata
  * The listings of the spaces of an org-wide call, or the one of a pinned connection, as one: a
  * tool listed in several spaces once, under `granted_in`, with the union of its connection ids
  * and missing scopes and the readable descriptor if any space read it; a connection, `not_ready`
- * or `unlisted` entry the same in several spaces once, under `granted_in`; a truncated catalog or
- * an uncached integration once, under the spaces that report it. A space whose listing was refused
- * is reported apart; all refused answers the first.
+ * or `unlisted` entry the same in several spaces once, under `granted_in`; an uncached integration
+ * once, under the spaces that report it. Each truncated catalog keeps its space and count.
+ * A space whose listing was refused is reported apart; all refused answers the first.
  */
 async function readAcrossSpaces(
   spaces: readonly McpSpace[] | undefined,
@@ -217,19 +217,15 @@ async function readAcrossSpaces(
   if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
 
   const tools = new Map<string, Merged<CallableTool>>();
+  const truncatedCatalogs: Merged<CallableListing["truncated_catalogs"][number]>[] = [];
   const entries = {
     connections: new Map<string, Merged<CallableListing["connections"][number]>>(),
     not_ready: new Map<string, Merged<CallableListing["not_ready"][number]>>(),
     unlisted: new Map<string, Merged<CallableListing["unlisted"][number]>>(),
-    truncated_catalogs: new Map<string, Merged<CallableListing["truncated_catalogs"][number]>>(),
     uncached: new Map<string, Merged<{ integration_package_id: string }>>(),
   };
-  const add = <T extends object>(
-    into: Map<string, Merged<T>>,
-    entry: T,
-    space?: McpSpace,
-    key = JSON.stringify(entry),
-  ) => {
+  const add = <T extends object>(into: Map<string, Merged<T>>, entry: T, space?: McpSpace) => {
+    const key = JSON.stringify(entry);
     const found = into.get(key);
     if (found?.granted_in && space) found.granted_in.push(space.id);
     else into.set(key, space ? { ...entry, granted_in: [space.id] } : entry);
@@ -257,7 +253,7 @@ async function readAcrossSpaces(
     for (const entry of read.not_ready) add(entries.not_ready, entry, space);
     for (const entry of read.unlisted) add(entries.unlisted, entry, space);
     for (const entry of read.truncated_catalogs) {
-      add(entries.truncated_catalogs, entry, space, entry.integration_package_id);
+      truncatedCatalogs.push(space ? { ...entry, granted_in: [space.id] } : entry);
     }
     for (const name of read.uncached)
       add(entries.uncached, { integration_package_id: name }, space);
@@ -267,7 +263,7 @@ async function readAcrossSpaces(
     connections: [...entries.connections.values()],
     not_ready: [...entries.not_ready.values()],
     unlisted: [...entries.unlisted.values()],
-    truncated_catalogs: [...entries.truncated_catalogs.values()],
+    truncated_catalogs: truncatedCatalogs,
     uncached: [...entries.uncached.values()],
     refusedSpaces: refused,
   };
@@ -346,11 +342,16 @@ export async function searchIntegrationTools(
         '`kinds: ["integration_tool"]` to read them.',
     );
   }
-  for (const entry of truncatedShown) {
+  for (const [id, catalogs] of Map.groupBy(
+    truncatedShown,
+    (entry) => entry.integration_package_id,
+  )) {
+    const count = catalogs[0]!.listed_tools;
+    const detail = catalogs.every((entry) => entry.listed_tools === count)
+      ? `only the first ${count} tool(s) were read from each truncated catalog`
+      : "the number of tools read varies by space";
     notes.push(
-      `${entry.integration_package_id}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
-        "tool(s) its server lists were read, and a tool listed after them is not offered. " +
-        "Narrow with `integration`, or search the tool by name.",
+      `${id}'s catalog is incomplete: ${detail}. Narrow with \`integration\`, or search the tool by name.`,
     );
   }
   if (
