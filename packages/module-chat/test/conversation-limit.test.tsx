@@ -407,20 +407,24 @@ describe("the composer's limit chip", () => {
     );
   });
 
-  it("hides every tool after attach while a phone's composer rests", () => {
+  it('keeps the desktop\'s tools out of a phone and gives it one "+"', () => {
     const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true }));
-    // The markup escapes the `&` and `>` of the arbitrary variant.
-    expect(out).toContain("max-md:group-data-[rest]/composer:[&amp;&gt;:not(:first-child)]:hidden");
-    // Chips wrap inside the cluster rather than squeezing each other.
-    expect(out).toContain("max-md:flex-wrap");
-    // Attach is the cluster's first child; settings and the chip come after it.
-    const cluster = out.slice(out.indexOf("max-md:group-data-[rest]/composer"));
-    expect(cluster.indexOf('aria-label="composer.attach"')).toBeLessThan(
-      cluster.indexOf('data-testid="composer-settings-trigger"'),
+    // The cluster (attach, settings, chips) is hidden below md; the "+" is hidden from md.
+    expect(out).toMatch(/class="flex min-w-0 items-center gap-1\.5 max-md:hidden"/);
+    expect(out).toContain('data-testid="composer-plus"');
+    expect(out).toMatch(
+      /class="[^"]*md:hidden[^"]*"[^>]*aria-label="composer\.tools"|aria-label="composer\.tools"[^>]*class="[^"]*md:hidden/,
     );
-    expect(cluster.indexOf('data-testid="composer-settings-trigger"')).toBeLessThan(
-      cluster.indexOf('data-testid="composer-limit-chip"'),
-    );
+    // One line: nothing wraps the cluster.
+    expect(out).not.toContain("flex-wrap");
+    // The limit is on whenever a space is selected: it does not give the "+" a dot.
+    expect(out).not.toContain("composer-plus-dot");
+  });
+
+  it('shows no dot on the "+" while every setting is at its default', () => {
+    const out = html(conversationScope({ originSpaceId: "spc_a" }));
+    expect(out).toContain('data-testid="composer-plus"');
+    expect(out).not.toContain("composer-plus-dot");
   });
 
   it("cannot be lifted while a turn generates or a change is in flight", () => {

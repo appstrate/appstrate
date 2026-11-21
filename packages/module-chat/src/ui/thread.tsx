@@ -82,10 +82,16 @@ import {
   ICON_BUTTON_CLASS,
   QUEUE_ICON_BUTTON_CLASS,
   CHIP_REMOVE_CLASS,
+  USER_ACTION_BAR_CLASS,
 } from "./touch-targets.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
+  COMPOSER_FIELD_CLASS,
   COMPOSER_INPUT_CLASS,
+  COMPOSER_ROW_CLASS,
+  COMPOSER_SEND_CLASS,
+  COMPOSER_SLOT_CLASS,
+  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
@@ -557,11 +563,7 @@ function Composer({
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
-  // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
-  // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
   const autofocus = shouldAutofocusComposer();
-  const [touched, setTouched] = React.useState(false);
-  const rest = !touched && composer.value === "" && !hasAttachments && !running;
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
@@ -588,9 +590,7 @@ function Composer({
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
-      className="group/composer bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
-      data-rest={rest ? "" : undefined}
-      onClick={() => setTouched(true)}
+      className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
       onSubmit={(e) => {
         if (limitPending) e.preventDefault();
       }}
@@ -607,16 +607,15 @@ function Composer({
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
-      <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
-        <div className="min-w-0 [grid-area:tools]">{tools}</div>
+      <div className={COMPOSER_ROW_CLASS}>
+        <div className={COMPOSER_TOOLS_CLASS}>{tools}</div>
         <ComposerPrimitive.Input
           rows={1}
-          // A phone would open its keyboard on arrival and never show the resting composer.
+          // A phone would open its keyboard on arrival, before anything was asked for.
           autoFocus={autofocus}
           unstable_focusOnRunStart={autofocus}
           unstable_focusOnScrollToBottom={autofocus}
           unstable_focusOnThreadSwitched={autofocus}
-          onFocus={() => setTouched(true)}
           aria-label={t("composer.placeholder")}
           enterKeyHint="send"
           addAttachmentOnPaste
@@ -632,13 +631,11 @@ function Composer({
             e.preventDefault();
             enqueue();
           }}
-          className={COMPOSER_INPUT_CLASS}
+          className={cn(COMPOSER_INPUT_CLASS, COMPOSER_FIELD_CLASS)}
         />
-        <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
-          {slot}
-        </div>
-        <div className="flex items-center gap-2 [grid-area:send]">
-          <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
+        <div className={COMPOSER_SLOT_CLASS}>{slot}</div>
+        <div className={COMPOSER_SEND_CLASS}>
+          <ContextGauge className="max-md:hidden" />
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild disabled={limitPending}>
               <Button
@@ -743,6 +740,20 @@ function UserMessage() {
         <div className={USER_MESSAGE_CLASS}>
           <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
         </div>
+        {/* Under the bubble, as on every chat: copy, always there on a phone. Edit, retry and the
+            time are not features of this product yet. */}
+        <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
+          <ActionBarPrimitive.Copy asChild>
+            <IconButton label={t("common:btn.copy")}>
+              <MessagePrimitive.If copied>
+                <CheckIcon />
+              </MessagePrimitive.If>
+              <MessagePrimitive.If copied={false}>
+                <CopyIcon />
+              </MessagePrimitive.If>
+            </IconButton>
+          </ActionBarPrimitive.Copy>
+        </ActionBarPrimitive.Root>
       </MessagePrimitive.If>
     </MessagePrimitive.Root>
   );

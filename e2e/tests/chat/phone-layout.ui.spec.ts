@@ -51,6 +51,8 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   await expect(code).toHaveCSS("font-size", "14px");
   await page.locator('header [data-sidebar="trigger"]:visible').click();
   const sheet = page.getByRole("dialog");
+  // Below md the search is a magnifier that unfolds the field.
+  await page.getByTestId("chat-search-toggle").click();
   await search.fill("Search destination");
   // Desktop Chromium has no on-screen keyboard. Feed a resize through the mounted hook.
   await page.evaluate(() => {
@@ -86,35 +88,37 @@ test("chat fields stay legible in both orientations and the search sheet fits th
     .toBe("");
 });
 
-test("a fresh phone composer keeps attach, input and send on one line until the first interaction", async ({
+test('a phone composer is one line for good: the "+", the input and send', async ({
   authedPage: page,
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/chat");
   const input = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
-  const attach = page.getByRole("button", { name: /^Joindre des fichiers/ });
+  const plus = page.getByTestId("composer-plus");
   const send = page.getByRole("button", { name: "Envoyer", exact: true });
-  const grid = page.locator(".chat-composer-grid").filter({ has: input });
   await expect(input).toBeVisible();
   await expect(input).not.toBeFocused();
-  await expect(grid).toHaveAttribute("data-rest", "");
-  const [left, field, right] = await Promise.all([
-    attach.boundingBox(),
-    input.boundingBox(),
-    send.boundingBox(),
-  ]);
-  if (!left || !field || !right) throw new Error("Missing resting controls");
-  expect(Math.max(left.y, field.y, right.y)).toBeLessThan(
-    Math.min(left.y + left.height, field.y + field.height, right.y + right.height),
-  );
-  expect(left.x + left.width).toBeLessThanOrEqual(field.x + 1);
-  expect(field.x + field.width).toBeLessThanOrEqual(right.x + 1);
-  const choosing = page.waitForEvent("filechooser");
-  await attach.tap();
-  await (await choosing).setFiles([]);
-  await expect(grid).not.toHaveAttribute("data-rest", "");
+  const line = async () => {
+    const [left, field, right] = await Promise.all([
+      plus.boundingBox(),
+      input.boundingBox(),
+      send.boundingBox(),
+    ]);
+    if (!left || !field || !right) throw new Error("Missing composer controls");
+    expect(Math.max(left.y, field.y, right.y)).toBeLessThan(
+      Math.min(left.y + left.height, field.y + field.height, right.y + right.height),
+    );
+    expect(left.x + left.width).toBeLessThanOrEqual(field.x + 1);
+    expect(field.x + field.width).toBeLessThanOrEqual(right.x + 1);
+  };
+  await line();
+  // The tools are behind the "+", and the line does not change once the composer is used.
+  await plus.tap();
+  await expect(page.getByRole("button", { name: /^Joindre des fichiers/ })).toBeVisible();
+  await page.keyboard.press("Escape");
   await input.tap();
   await expect(input).toBeFocused();
   await input.fill("Bonjour");
   await expect(send).toBeEnabled();
+  await line();
 });

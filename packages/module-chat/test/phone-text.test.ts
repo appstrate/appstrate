@@ -4,13 +4,17 @@ import { describe, expect, it } from "bun:test";
 import {
   ASSISTANT_MESSAGE_CLASS,
   COMPOSER_INPUT_CLASS,
+  COMPOSER_FIELD_CLASS,
+  COMPOSER_ROW_CLASS,
+  COMPOSER_SLOT_CLASS,
+  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
+  NEW_CONVERSATION_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
   READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
-  THREAD_FOOTER_CLASS,
   THREAD_VIEWPORT_CLASS,
   USER_MESSAGE_CLASS,
 } from "../src/ui/phone-text.ts";
@@ -50,9 +54,8 @@ describe("thread layout on a phone", () => {
     expect(THREAD_VIEWPORT_CLASS.split(/\s+/)).toContain("overscroll-contain");
   });
 
-  it("the disclaimer steps aside while the composer has the focus, below md only", () => {
-    expect(THREAD_FOOTER_CLASS.split(/\s+/)).toContain("group/footer");
-    expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:group-focus-within/footer:hidden");
+  it('has no disclaimer under the composer on a phone: it is in the "+" panel', () => {
+    expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:hidden");
   });
 });
 
@@ -61,5 +64,35 @@ describe("secondary text", () => {
     expect(NOTE_TEXT_CLASS.split(" ")).toContain("text-sm");
     expect(READING_TEXT_DENSE_CLASS.split(" ")).toEqual(["text-base", "md:text-xs"]);
     expect(NOTE_TEXT_CLASS.split(/\s+/)).toContain("md:text-xs");
+  });
+});
+
+describe("composer row", () => {
+  it("is one line on a phone, always, and two from md up", () => {
+    const row = COMPOSER_ROW_CLASS.split(/\s+/);
+    expect(row).toContain("max-md:flex-nowrap");
+    expect(row).toContain("md:flex-wrap");
+    // The field is the line's stretchy cell on a phone and a line of its own from md.
+    expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:flex-1");
+    expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("md:basis-full");
+    // Empty, a narrow screen's placeholder is one line, never two.
+    expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:[&:placeholder-shown]:max-h-10");
+  });
+
+  it('leaves the model out of a phone\'s line: it is in the "+" panel and the placeholder', () => {
+    expect(COMPOSER_SLOT_CLASS.split(/\s+/)).toContain("max-md:hidden");
+    expect(COMPOSER_TOOLS_CLASS.split(/\s+/)).toContain("max-md:flex-none");
+  });
+});
+
+describe("the sidebar's search and new-conversation row on a phone", () => {
+  it("shows the search as a filled field with no border", () => {
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:bg-muted");
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:border-transparent");
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:h-11");
+  });
+
+  it("aligns the new-conversation row to the left, as the conversations are", () => {
+    expect(NEW_CONVERSATION_CLASS).toContain("max-md:justify-start");
   });
 });

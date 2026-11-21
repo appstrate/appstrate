@@ -60,10 +60,12 @@ test.describe("chat actions on a touchscreen", () => {
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toContain("Budget vérifié.");
+    const menu = page.getByTestId("sheet-menu");
     const trigger = page.getByRole("button", { name: "Actions de « Budget »" });
     await expect(trigger).toHaveCSS("width", "44px");
     await trigger.tap();
-    await page.getByRole("menuitem", { name: "Paramètres de la conversation" }).tap();
+    // The "…" opens a panel from the bottom: its rows are buttons.
+    await menu.getByRole("button", { name: "Renommer", exact: true }).tap();
     const name = page.getByRole("textbox", { name: "Nom", exact: true });
     await expect(name).toBeFocused();
     await name.fill("Budget validé");
@@ -75,8 +77,8 @@ test.describe("chat actions on a touchscreen", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('header [data-sidebar="trigger"]:visible').tap();
     await renamed.tap();
-    const remove = page.getByRole("menuitem", { name: "Supprimer" });
-    await expect(remove).toHaveCSS("min-height", "44px");
+    const remove = menu.getByRole("button", { name: "Supprimer", exact: true });
+    await expect(remove).toHaveCSS("min-height", "48px");
     await page.screenshot({ path: testInfo.outputPath("menu.png"), animations: "disabled" });
     await remove.tap();
     const dialog = page.getByRole("alertdialog");

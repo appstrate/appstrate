@@ -85,3 +85,53 @@ describe("the sidebar in « Tous les espaces »", () => {
     expect(sidebar(true, true)).toContain('href="/catalogue/agent"');
   });
 });
+
+describe("the notification bell on a phone", () => {
+  const render = (product: "studio" | "chat") =>
+    renderInSpace(
+      <SidebarProvider>
+        <AppSidebar product={product} />
+      </SidebarProvider>,
+      { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
+    );
+
+  it("is in the chat's drawer, which has no bell in its header to carry one, and only there", () => {
+    const chat = render("chat");
+    expect(chat).toContain('aria-label="Notifications"');
+    expect(chat).toMatch(/<div class="shrink-0 md:hidden"><[^>]*aria-label="Notifications"/);
+    // Studio's header keeps its own.
+    expect(render("studio")).not.toContain('aria-label="Notifications"');
+  });
+
+  it("goes with a close button, as the chat's drawer is the whole screen on a phone", () => {
+    expect(render("chat")).toContain('data-testid="sidebar-close"');
+    expect(render("studio")).not.toContain('data-testid="sidebar-close"');
+  });
+});
+
+describe("the chat drawer's footer on a phone", () => {
+  const render = (product: "studio" | "chat") =>
+    renderInSpace(
+      <SidebarProvider>
+        <AppSidebar product={product} />
+      </SidebarProvider>,
+      { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
+    );
+
+  it("carries Settings as an icon beside the account, in the chat only", () => {
+    const chat = render("chat");
+    expect(chat).toContain('data-testid="sidebar-settings"');
+    expect(chat).toMatch(/data-testid="sidebar-settings"[^>]*>/);
+    expect(render("studio")).not.toContain('data-testid="sidebar-settings"');
+  });
+
+  it("hides the Catalogue and Settings entries from the chat's phone drawer, not from Studio's", () => {
+    const entryMenu = (html: string, label: string) => {
+      const entry = html.indexOf(`<span>${label}</span>`);
+      const menu = html.slice(html.lastIndexOf("<ul", entry), entry);
+      return menu.slice(0, menu.indexOf(">"));
+    };
+    expect(entryMenu(render("chat"), "Paramètres")).toContain("max-md:hidden");
+    expect(entryMenu(render("studio"), "Paramètres")).not.toContain("max-md:hidden");
+  });
+});

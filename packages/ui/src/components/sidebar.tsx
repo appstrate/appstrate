@@ -19,6 +19,11 @@ const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
+
+/** The phone sheet's width: a drawer of 18 rem, or the whole screen (what a chat app's menu is). */
+function mobileSidebarWidth(fullScreen: boolean): string {
+  return fullScreen ? "100vw" : SIDEBAR_WIDTH_MOBILE;
+}
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
@@ -153,6 +158,8 @@ const Sidebar = React.forwardRef<
     side?: "left" | "right";
     variant?: "sidebar" | "floating" | "inset";
     collapsible?: "offcanvas" | "icon" | "none";
+    /** On a phone the sheet takes the whole screen instead of a drawer of 18 rem. */
+    mobileFullScreen?: boolean;
   }
 >(
   (
@@ -160,6 +167,7 @@ const Sidebar = React.forwardRef<
       side = "left",
       variant = "sidebar",
       collapsible = "offcanvas",
+      mobileFullScreen = false,
       className,
       children,
       ...props
@@ -190,11 +198,15 @@ const Sidebar = React.forwardRef<
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            className={cn("bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0", className)}
+            className={cn(
+              "bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0",
+              mobileFullScreen && "max-w-none",
+              className,
+            )}
             showCloseButton={false}
             style={
               {
-                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                "--sidebar-width": mobileSidebarWidth(mobileFullScreen),
               } as React.CSSProperties
             }
             side={side}
@@ -718,6 +730,7 @@ const SidebarMenuSubButton = React.forwardRef<
 SidebarMenuSubButton.displayName = "SidebarMenuSubButton";
 
 export {
+  mobileSidebarWidth,
   Sidebar,
   SidebarContent,
   SidebarFooter,

@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   EllipsisIcon,
   MessagesSquareIcon,
+  PencilIcon,
   PlusIcon,
   SearchIcon,
   Settings2Icon,
@@ -35,13 +36,8 @@ import { relativeAge } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
+import { SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
@@ -85,7 +81,12 @@ import {
 } from "./sessions.ts";
 import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
-import { NOTE_TEXT_CLASS, READING_TEXT_DENSE_CLASS, SEARCH_INPUT_CLASS } from "./phone-text.ts";
+import {
+  NEW_CONVERSATION_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_DENSE_CLASS,
+  SEARCH_INPUT_CLASS,
+} from "./phone-text.ts";
 import { useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -175,6 +176,10 @@ export function ChatConversationList({
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
+  // On a phone the search is a magnifier beside "New conversation" that unfolds the field; from
+  // `md` up the field is always there.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
   const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
   const searching = term !== "";
   // The plain list always runs (same key as the nav badge): it decides whether
@@ -217,46 +222,88 @@ export function ChatConversationList({
         <SidebarGroup className="pb-0">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("threads.new")}>
-                <PlusIcon />
+              <SidebarMenuButton
+                onClick={() => select?.(null)}
+                tooltip={t("threads.new")}
+                className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
+              >
+                {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
+                <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
+                  <PlusIcon />
+                </span>
                 <span>{t("threads.new")}</span>
               </SidebarMenuButton>
+              {showSearch && (
+                <button
+                  type="button"
+                  aria-label={t("threads.search.open")}
+                  aria-expanded={searchOpen || input !== ""}
+                  data-testid="chat-search-toggle"
+                  onClick={() => {
+                    setSearchOpen(true);
+                    // The field is mounted but hidden until this state lands: focus it after.
+                    requestAnimationFrame(() => searchField.current?.focus());
+                  }}
+                  className="text-sidebar-foreground/70 active:bg-sidebar-accent absolute top-0 right-0 flex size-11 items-center justify-center rounded-md md:hidden"
+                >
+                  <SearchIcon className="size-5" />
+                </button>
+              )}
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       )}
-      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        {showSearch && (
-          <div className="relative mb-1">
-            <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
-            <SidebarInput
-              type="search"
-              value={input}
-              maxLength={SEARCH_MAX_LENGTH}
-              placeholder={t("threads.search.placeholder")}
-              aria-label={t("threads.search.placeholder")}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && input !== "") {
-                  event.preventDefault();
-                  setInput("");
-                }
+      {showSearch && (
+        <div
+          className={cn(
+            "relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden",
+            !searchOpen && input === "" && "max-md:hidden",
+          )}
+        >
+          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 max-md:left-6 max-md:size-4" />
+          <SidebarInput
+            ref={searchField}
+            type="search"
+            value={input}
+            maxLength={SEARCH_MAX_LENGTH}
+            placeholder={t("threads.search.placeholder")}
+            aria-label={t("threads.search.placeholder")}
+            onChange={(event) => setInput(event.target.value)}
+            // An empty field folds back into its magnifier on a phone.
+            onBlur={() => input === "" && setSearchOpen(false)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && input !== "") {
+                event.preventDefault();
+                setInput("");
+              }
+            }}
+            className={SEARCH_INPUT_CLASS}
+          />
+          {/* Clears the field; on a phone it also folds it back into its magnifier, and stays there
+              to close an empty one. */}
+          {(input !== "" || searchOpen) && (
+            <button
+              type="button"
+              aria-label={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+              title={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+              data-testid="chat-search-clear"
+              onClick={() => {
+                setInput("");
+                setSearchOpen(false);
               }}
-              className={SEARCH_INPUT_CLASS}
-            />
-            {input !== "" && (
-              <button
-                type="button"
-                aria-label={t("threads.search.clear")}
-                title={t("threads.search.clear")}
-                onClick={() => setInput("")}
-                className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md p-0.5"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            )}
-          </div>
-        )}
+              className={cn(
+                "text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5 max-md:right-2 max-md:p-2.5",
+                input === "" && "md:hidden",
+              )}
+            >
+              <XIcon className="size-3.5 max-md:size-4" />
+            </button>
+          )}
+        </div>
+      )}
+      <SidebarGroup
+        className={cn("min-h-0 flex-1 group-data-[collapsible=icon]:hidden", showSearch && "pt-0")}
+      >
         {(searching || groups.length === 0) && (
           <SidebarGroupLabel className={NOTE_TEXT_CLASS}>
             {t(searching ? "threads.results" : "threads.title")}
@@ -364,9 +411,10 @@ function ConversationRow({
   const queryClient = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
-  const menuAction = useRef<"settings" | "delete" | null>(null);
   const restoreDialogFocus = (event: Event) => {
     if (dialogTrigger.current?.isConnected) {
       event.preventDefault();
@@ -410,21 +458,31 @@ function ConversationRow({
           "[--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]",
         )}
       >
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 max-md:flex-row max-md:items-center max-md:gap-2">
           <span
             className={cn(
-              "block truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              "block truncate text-left leading-4 max-md:min-w-0 max-md:flex-1 max-md:text-base max-md:leading-5",
               unread && "font-semibold",
             )}
           >
             {session.title ?? t("threads.new")}
           </span>
+          {/* From `md` up the spaces are named on a line of their own... */}
           <span
             data-testid="chat-session-spaces"
-            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:h-5 ${NOTE_TEXT_CLASS}`}
+            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:hidden ${NOTE_TEXT_CLASS}`}
           >
             {sessionSpaces(session, renderSpaces, t)}
           </span>
+          {/* ...and on a phone their tiles close the title's line (the names are in the "…" panel). */}
+          {session.space_ids.length > 0 && (
+            <span
+              data-testid="chat-session-space-tiles"
+              className="hidden shrink-0 items-center max-md:flex"
+            >
+              {renderSpaces(session.space_ids, { tilesOnly: true })}
+            </span>
+          )}
         </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
@@ -491,55 +549,57 @@ function ConversationRow({
         )}
       </div>
       {canWrite && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("threads.actions.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              ref={menuTrigger}
-              className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
-            >
-              <EllipsisIcon className="size-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-48"
-            onCloseAutoFocus={(event) => {
-              const action = menuAction.current;
-              if (!action) return;
-              event.preventDefault();
-              menuAction.current = null;
-              dialogTrigger.current = menuTrigger.current;
-              if (action === "settings") setSettingsOpen(true);
-              else {
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
-              }
-            }}
+        <>
+          <button
+            type="button"
+            aria-label={t("threads.actions.openFor", {
+              title: session.title ?? t("threads.new"),
+            })}
+            aria-haspopup="dialog"
+            ref={menuTrigger}
+            onClick={() => setMenuOpen(true)}
+            className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
           >
-            <DropdownMenuItem
-              className="min-h-11"
-              onSelect={() => {
-                menuAction.current = "settings";
+            <EllipsisIcon className="size-5" />
+          </button>
+          {/* A phone's menu is a panel from the bottom: rename, then delete in red (which asks). */}
+          <SheetMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            title={t("threads.actions.openFor", { title: session.title ?? t("threads.new") })}
+            header={
+              <div
+                data-testid="chat-menu-spaces"
+                className={`text-muted-foreground flex min-w-0 items-center px-5 pt-3 [--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
+              >
+                {sessionSpaces(session, renderSpaces, t)}
+              </div>
+            }
+          >
+            <SheetMenuRow
+              onClick={() => {
+                dialogTrigger.current = menuTrigger.current;
+                setMenuOpen(false);
+                setSettingsOpen(true);
               }}
             >
-              <Settings2Icon />
-              {t("threads.settings.title")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive min-h-11"
-              onSelect={() => {
-                menuAction.current = "delete";
+              <PencilIcon />
+              {t("threads.rename")}
+            </SheetMenuRow>
+            <SheetMenuRow
+              destructive
+              onClick={() => {
+                dialogTrigger.current = menuTrigger.current;
+                setMenuOpen(false);
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
               }}
             >
               <Trash2Icon />
               {t("common:btn.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </SheetMenuRow>
+          </SheetMenu>
+        </>
       )}
       <AlertDialog
         open={confirmingDelete}
@@ -593,6 +653,27 @@ export function ChatConversationSettingsButton(props: {
   can: ChatCan;
 }) {
   return <ConversationSettingsButton key={props.activeId} {...props} />;
+}
+
+/**
+ * The settings dialog of the open conversation, opened by a control of the host's own (the phone
+ * header's pencil): `ChatConversationSettingsButton` is the same dialog behind its icon button.
+ */
+export function ChatConversationSettingsDialog({
+  activeId,
+  t,
+  can,
+  onClose,
+}: {
+  activeId: string | null;
+  t: ChatTranslate;
+  can: ChatCan;
+  onClose: () => void;
+}) {
+  const { data: sessions } = useSessions();
+  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
+  if (!session || !can("chat:write")) return null;
+  return <ConversationSettingsDialog session={session} t={t} onClose={onClose} />;
 }
 
 function ConversationSettingsButton({
