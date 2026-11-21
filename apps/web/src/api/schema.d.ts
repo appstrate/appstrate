@@ -5971,6 +5971,8 @@ export interface components {
             effective_timeout_seconds: number;
             /** @description Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted. */
             active: boolean;
+            /** @description The library's projection for the space this detail was read from (`PackageAvailability`): why the agent is placed here, whether the space runs it, and whether this caller may offer it to the organization. Emitted by `GET` alone; a summary read (`agents:run` without `agents:read`) omits it, as does the resource a write echoes. */
+            availability?: components["schemas"]["PackageAvailability"];
             /** @description The reached spaces where the caller can open this package detail, including inactive placements. */
             read_space_ids: string[];
             /** @description The spaces the caller reaches where the agent is ACTIVE (spc_ prefix), as the agent's row of `GET /api/orgs/{orgId}/agents` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted. */
@@ -6948,6 +6950,8 @@ export interface components {
             updatedAt: string;
         };
         OrgPackageItemDetail: {
+            /** @description The library's projection for the space this detail was read from (`PackageAvailability`): why the package is placed here, whether the space runs it, and whether this caller may offer it to the organization. Emitted by `GET` alone; the resource a write echoes omits it. */
+            availability?: components["schemas"]["PackageAvailability"];
             id: string;
             /** @description Owning organization ID (null for system packages) */
             orgId?: string | null;
@@ -7048,7 +7052,7 @@ export interface components {
              */
             deleting_at: string | null;
         };
-        /** @description What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation. */
+        /** @description What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation, carried by the detail of every package type (`getIntegration`, `getAgentPackage`, `getSkill`, `getIntegrationPackage`). */
         PackageAvailability: {
             /**
              * @description WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.

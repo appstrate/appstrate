@@ -24,6 +24,7 @@ import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
 import { SkeletonBadge, SkeletonLine } from "../skeleton-line";
+import { AvailabilityCard, AvailabilityCardSkeleton } from "../package-detail/availability-card";
 
 /** A figure read from a query: a placeholder while it loads, « unknown » when the read failed. */
 function QueryValue({
@@ -123,6 +124,15 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
 
   return (
     <div className="flex flex-col gap-8" data-agent-operational-overview>
+      {/* The working space's: « Tous les espaces » has none to say. */}
+      {!spanning && detail.availability && (
+        <AvailabilityCard
+          type="agent"
+          packageId={packageId}
+          name={detail.display_name ?? packageId}
+          availability={detail.availability}
+        />
+      )}
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
           {/* A container for the compact status below: it follows the card's width. */}
@@ -289,9 +299,12 @@ function StatValueSkeleton({ size = "md" }: { size?: "md" | "sm" }) {
  */
 export function AgentOverviewSkeleton() {
   const { t } = useTranslation("agents");
+  const { on: spanning } = useOverviewMode();
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-8">
+        {/* Drawn out of « Tous les espaces », where the card exists. */}
+        {!spanning && <AvailabilityCardSkeleton />}
         <div className="grid gap-6 xl:grid-cols-3">
           <DetailSectionCard
             title={t("detail.overview.runs")}

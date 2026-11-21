@@ -618,6 +618,22 @@ export interface AgentListItem extends BasePackageListItem {
   scope: string | null;
 }
 
+/**
+ * What the library says about one package in the space a detail was read from:
+ * why it is placed there (`via`), whether the space runs it (`state`), who
+ * shared it, and the organization offer. A projection of the library's cell,
+ * never a second computation (`packageAvailabilityIn`).
+ */
+export interface PackageAvailability {
+  via: "home" | "shared" | "system" | "organization";
+  state: "active" | "inactive" | "none";
+  shared_by: { user_id: string; name: string } | null;
+  offered_to_org: boolean;
+  org_offerable: boolean;
+  /** A system package the deployment activates in every space: it takes no offer. */
+  active_by_default: boolean;
+}
+
 export interface AgentDetail {
   id: string;
   /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
@@ -760,6 +776,8 @@ export interface AgentDetail {
    * answer there would only ever be `true`.
    */
   active: boolean;
+  /** `GET` only; a summary read and a write's echo omit it. */
+  availability?: PackageAvailability;
   /**
    * The spaces the caller reaches where the agent is active, as its row of the
    * org agent index names them: its home first when it is one of them, then in
@@ -871,6 +889,8 @@ export interface OrgPackageItemDetail extends Omit<
    */
   definition: "draft" | "published";
   read_space_ids: string[];
+  /** `GET` only; a write's echo omits it. */
+  availability?: PackageAvailability;
   /**
    * Present but nullable — the `draft_content` column is nullable, and a
    * published projection reads the archive entry this type is authored around.

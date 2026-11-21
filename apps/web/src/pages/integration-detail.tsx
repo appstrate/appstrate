@@ -33,7 +33,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
-import { availabilityLabel } from "../lib/integration-availability";
+import { AvailabilityBadge } from "../components/package-detail/availability-card";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
@@ -454,7 +454,6 @@ export function IntegrationDetailPage() {
   const source = pkg?.source;
   const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
   const isOwned = isOwnedSource(source);
-  const availability = availabilityLabel(detail.availability);
 
   const tabs: DetailTab<(typeof INTEGRATION_TABS)[number]>[] = [
     { value: "overview", label: t("integration.tabs.overview"), icon: LayoutGrid },
@@ -483,9 +482,7 @@ export function IntegrationDetailPage() {
             {pkgLoading && <Skeleton className="h-5 w-16" />}
             {/* The working space's switch: in « Tous les espaces » the spaces it is active in say it. */}
             {!overview && (
-              <Badge variant={active ? "success" : "warning"}>
-                {t(availability.key, availability.params)}
-              </Badge>
+              <AvailabilityBadge type="integration" availability={detail.availability} />
             )}
           </>
         }

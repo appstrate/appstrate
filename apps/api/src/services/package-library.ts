@@ -14,7 +14,11 @@ import {
 } from "@appstrate/db/schema";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
+import {
+  packagePermission,
+  spacePackagePermission,
+  type CorePermission,
+} from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import {
   isActiveEverywhereByDefault,
@@ -91,15 +95,20 @@ export function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   return readPackageLibrary(c, spaceId);
 }
 
-type IntegrationDetailSelection = { integrationId: string; permission: "read" | "configure" };
+/**
+ * One package's detail read: the library narrowed to `packageId`, its placements judged under
+ * `grant` — the permission the calling route checked (`integrations:configure` for the settings
+ * PATCH, which does not imply `integrations:read`), in place of the type's read grant.
+ */
+type PackageDetailSelection = { packageId: string; grant: CorePermission };
 
 async function readPackageLibrary(
   c: Context<AppEnv>,
   spaceId?: string,
-  detail?: IntegrationDetailSelection,
+  detail?: PackageDetailSelection,
 ) {
   const orgId = c.get("orgId");
-  const packageIds = detail ? [detail.integrationId] : undefined;
+  const packageIds = detail ? [detail.packageId] : undefined;
 
   const accessible = await packageAccessSpaces(c);
   // The caller's own personal space takes no activation grant: ownership authorizes
@@ -155,11 +164,7 @@ async function readPackageLibrary(
             (space) =>
               (!target?.ownerUserId || space.id === target.id) &&
               visibleIds.has(space.id) &&
-              space.permissions.has(
-                detail && type === "integration"
-                  ? `integrations:${detail.permission}`
-                  : packagePermission(type, "read"),
-              ),
+              space.permissions.has(detail?.grant ?? packagePermission(type, "read")),
           )
           .map((space) => space.id),
       ),
@@ -202,7 +207,7 @@ async function readPackageLibrary(
       and(
         orgOrSystemFilter(orgId),
         notEphemeralFilter(),
-        detail ? eq(packages.id, detail.integrationId) : undefined,
+        detail ? eq(packages.id, detail.packageId) : undefined,
       ),
     )
     .orderBy(packages.id);
@@ -361,15 +366,19 @@ function placementState(
   return isActiveHere(pkg, row) ? "active" : row ? "inactive" : "none";
 }
 
-/** A single integration's library cell under the permission required by the calling route. */
-export async function integrationAvailabilityIn(
+/**
+ * What the library says about ONE package in ONE space, for every package type — a projection of
+ * {@link getPackageLibrary}, never a second computation. A package the library does not place
+ * there for this caller is a 404, like the detail route's own placement check.
+ */
+export async function packageAvailabilityIn(
   c: Context<AppEnv>,
   packageId: string,
   spaceId: string,
-  permission: IntegrationDetailSelection["permission"],
+  grant: CorePermission,
 ) {
-  const library = await readPackageLibrary(c, spaceId, { integrationId: packageId, permission });
-  const entry = library.packages.integration?.[0];
+  const library = await readPackageLibrary(c, spaceId, { packageId, grant });
+  const entry = Object.values(library.packages).flat()[0];
   const placement = entry?.placements.find((p) => p.space_id === spaceId);
   if (!entry || !placement) {
     throw notFound(`Package '${packageId}' not found in this organization`);
