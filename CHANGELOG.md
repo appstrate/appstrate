@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Billing
+
+The billing module now uses Stripe API version `2026-10-28.endive` with stripe-node 23.1. Configure the billing webhook endpoint in Stripe to deliver events at the same API version.
+
 ### MCP clients
 
 The platform MCP server replaces `search_operations`, `search_integration_tools` and `describe_operation` with `search` and `describe`, and `read_file` with `read` (#2315). An MCP client re-lists its tools on its next connection; a call to a retired name answers `-32602 Unknown tool`.

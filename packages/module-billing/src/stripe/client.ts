@@ -13,7 +13,7 @@ import { getBillingEnv } from "../env.ts";
  * instead of restating the literal in a file that would keep agreeing with an
  * API version production no longer speaks.
  */
-export const STRIPE_API_VERSION = "2026-09-30.endive" satisfies Stripe.LatestApiVersion;
+export const STRIPE_API_VERSION = "2026-10-28.endive" satisfies Stripe.LatestApiVersion;
 
 let _stripe: Stripe | null = null;
 
