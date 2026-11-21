@@ -181,7 +181,9 @@ describe("MCP server instructions — connect bullet", () => {
     const text = instructionsFor(permissions);
     expect(text).toContain("an entry with `active: false` is a connection the user holds");
     expect(text).toContain("`activatePackage`, or `offerPackageToOrg` for an owner or admin");
-    expect(text).toContain("never move it to another space where the integration is active without asking first");
+    expect(text).toContain(
+      "never move it to another space where the integration is active without asking first",
+    );
   });
 
   it("says a schedule write wants the user's one connection named too", () => {
