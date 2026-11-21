@@ -778,7 +778,7 @@ describe("handleChatStream", () => {
       const turn = buildStructuredPiTurn(
         input.messages,
         { api, provider, model: id },
-        { estimateTokens: () => 1, baseTokens: 0 },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
       );
       const result = turn.history.find((message) => message.role === "toolResult");
       expect(JSON.stringify(result?.content)).toContain(uri);

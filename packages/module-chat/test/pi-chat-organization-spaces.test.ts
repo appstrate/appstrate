@@ -258,6 +258,7 @@ async function tools(transport: ReturnType<typeof transcript>, failingTouch?: st
       transport.events.push("chunk");
       transport.chunks.push(chunk);
     },
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: transport.fetch,

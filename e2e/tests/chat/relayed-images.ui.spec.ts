@@ -8,7 +8,7 @@ import { pickModel, withLocalChatModel } from "../../helpers/chat-model.ts";
 for (const [scenario, title] of [
   ["success", "reads a remote tool image for the current turn and reloads only its receipt"],
   ["diagnostic", "reads an error screenshot and preserves the remote failure"],
-  ["corrupt", "shows a provider refusal for a truncated image and reloads only its receipt"],
+  ["corrupt", "replays a refused truncated image without it and reloads only its receipt"],
 ] as const) {
   test(title, async ({ authedPage: page, apiClient, browserCtx }, testInfo) => {
     test.slow();
@@ -20,6 +20,10 @@ for (const [scenario, title] of [
     const privateImage =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNg+M8AAAICAQB7CYF4AAAAAElFTkSuQmCC";
     const rawRefusal = "Cannot decode PNG: incomplete image data";
+    // What replaces an image the provider refused (`pi-chat/file-refusal.ts`).
+    const withheld = "[image withheld: the provider rejected the request carrying it]";
+    // The receipt history keeps of a relayed image (`pi-chat/mcp-tools.ts`).
+    const receipt = "bytes, read for this turn]";
     let refusals = 0;
     let reads = 0;
     const mcp = legacyMcpHandler({
@@ -89,14 +93,14 @@ for (const [scenario, title] of [
       const modelId = "local-relay-vision";
       const answer =
         scenario === "corrupt"
-          ? "Le modèle a refusé la demande. Modifiez-la avant de réessayer."
+          ? "Image illisible, réponse sans elle."
           : "Image du connecteur reçue.";
       const followup = "Le reçu est disponible.";
       const reply: Parameters<typeof withLocalChatModel>[1]["reply"] = (body) => {
         const messages = JSON.stringify(body.messages);
         if (messages.includes(privateImage)) return "User-only image reached the provider";
         if (messages.includes("Relis le reçu")) {
-          return messages.includes("supplied for this turn") &&
+          return messages.includes(receipt) &&
             !messages.includes(data) &&
             !messages.includes("data:image/")
             ? followup
@@ -129,6 +133,16 @@ for (const [scenario, title] of [
               )
             : [],
         );
+        // The replay of the refused request: the image gives way to its pointer.
+        if (
+          scenario === "corrupt" &&
+          refusals === 1 &&
+          !imageUrls.length &&
+          !messages.includes(data) &&
+          messages.includes(withheld)
+        ) {
+          return answer;
+        }
         if (imageUrls.length !== 1 || imageUrls[0] !== `data:image/png;base64,${data}`) {
           return "Missing typed image input";
         }
@@ -165,33 +179,27 @@ for (const [scenario, title] of [
               r.headers()["content-type"]?.includes("text/event-stream") === true,
           );
           await page.getByRole("button", { name: "Envoyer", exact: true }).click();
-          const outcome =
-            scenario === "corrupt"
-              ? page.getByRole("alert").filter({ hasText: answer })
-              : page.getByText(answer, { exact: true });
+          const outcome = page.getByText(answer, { exact: true });
           await expect(outcome).toBeVisible();
+          // The answer has rendered, so a failed turn would already show its alert: read once.
+          expect(await page.getByRole("alert").count()).toBe(0);
           const response = await streamResponse;
           expect(response.ok()).toBe(true);
-          if (scenario === "corrupt") {
-            // The client closes the SSE reader on a terminal error. Verify its rendered outcome.
-            await expect(outcome).toContainText("Identifiant de requête");
-            await expect(outcome).not.toContainText(rawRefusal);
-          } else {
-            const stream = await response.text();
-            expect(stream).toContain("supplied for this turn");
-            expect(stream).not.toContain(data);
-            expect(stream).not.toContain(privateImage);
-            if (scenario === "diagnostic") expect(stream).toContain("tool-output-error");
-          }
+          const stream = await response.text();
+          expect(stream).toContain(receipt);
+          expect(stream).not.toContain(data);
+          expect(stream).not.toContain(privateImage);
+          expect(stream).not.toContain(rawRefusal);
+          if (scenario === "diagnostic") expect(stream).toContain("tool-output-error");
           const sessionId = new URL(page.url()).pathname.split("/").at(-1);
           const session = await apiClient.get(`/orgs/${orgId}/chat/sessions/${sessionId}`);
           expect(session.status()).toBe(200);
           const history = await session.text();
-          expect(history).toContain("supplied for this turn");
+          expect(history).toContain(receipt);
           expect(history).not.toContain(data);
           expect(history).not.toContain(privateImage);
           expect(history).not.toContain(rawRefusal);
-          if (scenario === "corrupt") expect(history).toContain("invalid_request");
+          expect(history).not.toContain("invalid_request");
           await page.reload();
           await expect(outcome).toBeVisible();
           await message.fill("Relis le reçu de cette image.");

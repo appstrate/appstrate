@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { UIMessage } from "ai";
-import { PDF_INPUT_UNSUPPORTED, type TurnPdfInput } from "./native-pdf.ts";
+import { INLINE_RUN_HINT, type TurnPdfInput } from "./native-pdf.ts";
 import type { ChatAttachmentRead, ChatAttachmentContent } from "@appstrate/core/chat-contract";
 import { isRasterImageMime } from "@appstrate/core/mime";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
@@ -99,13 +99,12 @@ export async function readPromptPdfs(
     if (part.type !== "file" || part.mediaType !== "application/pdf" || receipts.has(part.url))
       continue;
     signal.throwIfAborted();
-    let note =
-      "PDF content unavailable (unreadable or over the inline limit). Use an inline run to inspect larger files.";
+    let note = `PDF content unavailable (unreadable or over the inline limit). ${INLINE_RUN_HINT}`;
     // A model that reads no PDF says so for every one; the per-message cap applies only when it does.
-    if (!pdfInput.supported) {
-      note = PDF_INPUT_UNSUPPORTED;
+    if (pdfInput.unsupported) {
+      note = pdfInput.unsupported;
     } else if (receipts.size >= FILES_PER_KIND_PER_MESSAGE) {
-      note = `PDF omitted: at most ${FILES_PER_KIND_PER_MESSAGE} PDFs are read per message. Use an inline run to inspect it.`;
+      note = `PDF omitted: at most ${FILES_PER_KIND_PER_MESSAGE} per message. ${INLINE_RUN_HINT}`;
     } else if (read) {
       try {
         const file = await read(part.url, {
@@ -118,7 +117,7 @@ export async function readPromptPdfs(
             name: part.filename ?? "attachment.pdf",
             data: Buffer.from(file.bytes).toString("base64"),
           });
-          note = pdf.reference ?? pdf.note;
+          note = "reference" in pdf ? pdf.reference : pdf.note;
         }
       } catch (error) {
         signal.throwIfAborted();
