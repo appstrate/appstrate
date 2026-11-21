@@ -518,6 +518,9 @@ describe("MCP server instructions — org-wide space choice", () => {
     expect(proxy.surface.runs).toBe(false);
     expect(team.surface.proxies).toBe(false);
     const text = spaceContext(orgWideInstructionsFor([mine, proxy, team]));
+    expect(text).toContain(
+      "with `not_connected`, even with a link, search for its tool before replying",
+    );
     expect(text).toContain("team spaces allowing `call_integration_tool`: spc_proxy.");
     expect(text).toContain("ONLY spaces with launch permission are: spc_mine, spc_team.");
     expect(text).not.toContain("Options, both to state: running in a named team space");
