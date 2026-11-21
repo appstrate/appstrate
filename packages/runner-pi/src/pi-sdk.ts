@@ -22,6 +22,9 @@
 // JSON Schemas, so it stays a static export. `InMemoryCredentialStore` backs the
 // chat's per-turn ModelRuntime.
 export { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+// The chat tells a refused file from a context overflow or a transient failure with Pi's own
+// verdicts.
+export { isContextOverflow, isRetryableAssistantError } from "@earendil-works/pi-ai";
 export { unsafe as unsafeSchema } from "@earendil-works/pi-schema";
 // NOTHING TEST-ONLY BELONGS IN THIS FILE: the `no-restricted-imports` guard
 // covers `src/**` only, so tests import the vendor entrypoints directly. Pi's

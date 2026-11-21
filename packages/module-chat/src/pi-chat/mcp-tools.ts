@@ -51,6 +51,7 @@ import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
@@ -174,11 +175,11 @@ type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
 
 async function liveRelayedImage(
   block: Extract<RemoteToolResult["content"][number], { type: "image" }>,
-  modelSeesImages: boolean,
+  sendsImages: boolean,
 ): Promise<PiToolResult["content"][number]> {
   const mimeType = normalizeMime(block.mimeType);
   if (!isRasterImageMime(mimeType)) return { type: "text", text: "Unsupported image format." };
-  if (!modelSeesImages) return { type: "text", text: "The current model cannot read images." };
+  if (!sendsImages) return { type: "text", text: "The current model cannot read images." };
   if (Buffer.byteLength(block.data, "base64") > RESOURCE_BLOB_MAX_BYTES) {
     return { type: "text", text: RESOURCE_OVERSIZED_NOTE };
   }
@@ -199,7 +200,7 @@ async function liveRelayedImage(
 async function relayedToolResult(
   result: RemoteToolResult,
   scope: OfferScope,
-  modelSeesImages: boolean,
+  sendsImages: boolean,
 ): Promise<PiToolResult> {
   const blocks = result.content.map((block) => {
     const audience = block.annotations?.audience;
@@ -216,14 +217,14 @@ async function relayedToolResult(
   if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
   for (const [index, block] of blocks.entries()) {
-    if (block.type === "image") content[index] = await liveRelayedImage(block, modelSeesImages);
+    if (block.type === "image") content[index] = await liveRelayedImage(block, sendsImages);
   }
   const persistedContent = content.map((block) =>
     block.type === "text"
       ? block
       : {
           type: "text" as const,
-          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, supplied for this turn]`,
+          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, read for this turn]`,
         },
   );
   return { ...projected, content, persistedContent };
@@ -317,7 +318,7 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
-  modelSeesImages?: boolean;
+  fileDelivery: FileDelivery;
   pdfInput?: TurnPdfInput;
 };
 
@@ -615,7 +616,7 @@ function makeForwardExtension(
         }
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
-            await relayedToolResult(result, scope, opts.modelSeesImages === true),
+            await relayedToolResult(result, scope, opts.fileDelivery.image),
             turnBudget,
           );
         }
@@ -793,7 +794,7 @@ function makeListSkillsExtension(
 /** One projection for both MCP resource reads and embedded resources from governed tool calls. */
 async function liveResources(
   resources: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"],
-  opts: Pick<BuildPlatformMcpToolsOptions, "modelSeesImages" | "pdfInput">,
+  opts: Pick<BuildPlatformMcpToolsOptions, "fileDelivery" | "pdfInput">,
   toolCallId: string,
 ) {
   const content: PiToolResult["content"] = [];
@@ -814,9 +815,9 @@ async function liveResources(
         { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
         toolCallId,
       );
-      note = pdf.note;
-      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
-    } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
+      if ("reference" in pdf) content.push({ type: "text", text: pdf.reference });
+      else note = pdf.note;
+    } else if (isRasterImageMime(mimeType) && opts.fileDelivery.image) {
       content.push({ type: "image", mimeType, data: blob });
     } else {
       note = "This file format cannot be read by the current model.";

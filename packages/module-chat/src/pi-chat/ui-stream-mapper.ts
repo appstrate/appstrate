@@ -357,11 +357,9 @@ export class PiChatUiStreamMapper {
     //    settled nothing — an earlier failure is still the last thing that
     //    actually went wrong and must keep reaching the user.
     //
-    // Nothing genuine is silenced on the `error`-chunk path in `engine.ts`
-    // (`meta.errorText ?? (finishReason === "error" ? … )`): the two fields move
-    // together here — the same `message_end` that clears the text also moves
-    // `finishReason` off "error", so a turn still reporting "error" always has
-    // its text (or falls back to "unknown model error").
+    // Nothing genuine is silenced on the engine's `error`-chunk path: the same
+    // `message_end` that clears the text also moves `finishReason` off "error",
+    // and `clearFailure()` retires both at once before a file-refusal replay.
     if (m.stopReason !== "error" && m.stopReason !== "aborted") this.lastError = undefined;
     this.captureFailure(message);
   }
@@ -376,6 +374,12 @@ export class PiChatUiStreamMapper {
     if (!m?.errorMessage || m.stopReason !== "error") return;
     this.finishReason = "error";
     this.lastError = m.errorMessage;
+  }
+
+  /** Retire the recorded failure: the engine replays the failed call (`file-refusal.ts`). */
+  clearFailure(): void {
+    if (this.finishReason === "error") this.finishReason = "stop";
+    this.lastError = undefined;
   }
 
   /** Model calls completed so far in this turn (see {@link modelCalls}). */

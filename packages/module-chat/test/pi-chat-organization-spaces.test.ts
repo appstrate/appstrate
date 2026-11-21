@@ -220,6 +220,7 @@ async function tools(transport: ReturnType<typeof transcript>, failingTouch?: st
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: organizationOf(transport, failingTouch),
     writeChunk: () => {},
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: transport.fetch,

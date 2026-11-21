@@ -54,6 +54,8 @@ export {
 // here only when something outside the package imports it.
 export {
   InMemoryCredentialStore,
+  isContextOverflow,
+  isRetryableAssistantError,
   unsafeSchema,
   loadPiCodingAgentSdk,
   type PiCodingAgentSdk,
