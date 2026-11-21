@@ -16,7 +16,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { $api } from "../../api/client";
-import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { FileArtifact } from "../../components/file-artifact";
 import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
@@ -43,7 +42,7 @@ import type {
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
-import { usePanelWidth } from "./use-panel-width";
+import { usePanelWidth, type PanelView } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
@@ -80,9 +79,26 @@ export function ConversationContextToggle({
   );
 }
 
+/**
+ * One floating surface of the panel: the panel itself is transparent, over the
+ * conversation's own canvas, and its contents sit on cards like the thread's.
+ */
+function PanelCard({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "bg-card text-card-foreground overflow-hidden rounded-2xl border shadow-xs",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 function PanelState({ children }: { children: ReactNode }) {
   return (
-    <div className="text-muted-foreground flex h-full items-center justify-center p-6 text-center text-sm">
+    <div className="text-muted-foreground rounded-2xl border border-dashed px-4 py-8 text-center text-sm">
       {children}
     </div>
   );
@@ -134,7 +150,7 @@ function ShownStoredFile({
       error={error}
       fallbackName={file.name || t("context.file.untitled")}
       onClose={onClose}
-      className="h-full rounded-none border-0"
+      className="h-full rounded-2xl shadow-xs"
     />
   );
 }
@@ -157,7 +173,7 @@ function ShownLocalFile({
       error={null}
       fallbackName={file.local.name || t("context.file.untitled")}
       onClose={onClose}
-      className="h-full rounded-none border-0"
+      className="h-full rounded-2xl shadow-xs"
     />
   );
 }
@@ -192,13 +208,19 @@ export function ConversationRuns({
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <TextSkeleton className="p-4" />;
+  if (query.isLoading) {
+    return (
+      <PanelCard>
+        <TextSkeleton className="p-4" />
+      </PanelCard>
+    );
+  }
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
   const runs = query.data?.data ?? [];
   if (runs.length === 0) return <PanelState>{t("context.runs.empty")}</PanelState>;
 
   return (
-    <div className="divide-y">
+    <PanelCard className="divide-y">
       {runs.map((run) => (
         <RunRow
           key={run.id}
@@ -212,7 +234,7 @@ export function ConversationRuns({
           className="px-3"
         />
       ))}
-    </div>
+    </PanelCard>
   );
 }
 
@@ -236,18 +258,24 @@ export function ConversationFiles({
   });
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <TextSkeleton className="p-4" />;
+  if (query.isLoading) {
+    return (
+      <PanelCard>
+        <TextSkeleton className="p-4" />
+      </PanelCard>
+    );
+  }
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
   const files = query.data?.data ?? [];
   if (files.length === 0) return <PanelState>{t("context.files.empty")}</PanelState>;
 
   return (
-    <div className="divide-y">
+    <PanelCard className="divide-y">
       {files.map((file) => (
         <button
           key={file.id}
           type="button"
-          className="hover:bg-muted/40 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
+          className="hover:bg-muted/50 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
           onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
         >
           <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
@@ -268,7 +296,7 @@ export function ConversationFiles({
           {named && <RowSpaceName spaceId={file.spaceId} />}
         </button>
       ))}
-    </div>
+    </PanelCard>
   );
 }
 
@@ -315,15 +343,17 @@ function ConversationDetailsSkeleton() {
     </div>
   );
   return (
-    <Waiting className="flex flex-col gap-5">
-      <SkeletonLine className="w-2/3 text-base font-semibold" />
-      <div className="flex flex-col gap-3">
-        {row("created", "w-24", 2)}
-        {row("activity", "w-24", 2)}
-        {row("messages", "w-8")}
-        {row("status", "w-16")}
+    <Waiting className="divide-y">
+      <div className="flex flex-col gap-4 p-4">
+        <SkeletonLine className="w-2/3 text-base font-semibold" />
+        <div className="flex flex-col gap-3">
+          {row("created", "w-24", 2)}
+          {row("activity", "w-24", 2)}
+          {row("messages", "w-8")}
+          {row("status", "w-16")}
+        </div>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 p-4">
         <SkeletonLine className="w-32 text-sm font-medium" />
         <div className="flex flex-col gap-3">
           {row("context", "w-28")}
@@ -430,11 +460,11 @@ function ConversationDetails({
   const query = useSessionDetail(active ? conversationId : null);
 
   if (!conversationId) {
-    return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;
+    return <p className="text-muted-foreground p-4 text-sm">{t("context.unsaved")}</p>;
   }
   if (query.isLoading) return <ConversationDetailsSkeleton />;
   if (query.error || !query.data) {
-    return <p className="text-muted-foreground text-sm">{t("context.error")}</p>;
+    return <p className="text-muted-foreground p-4 text-sm">{t("context.error")}</p>;
   }
 
   const session = query.data;
@@ -450,17 +480,21 @@ function ConversationDetails({
 
   return (
     <>
-      <h3 className="text-base font-semibold break-words">
-        {session.title || t("context.info.untitled")}
-      </h3>
-      <FactGrid columns={1}>
-        {rows.map(([label, value]) => (
-          <Fact key={label} label={label}>
-            {value}
-          </Fact>
-        ))}
-      </FactGrid>
-      <ConversationUsage session={session} />
+      <div className="flex flex-col gap-4 p-4">
+        <h3 className="text-base font-semibold break-words">
+          {session.title || t("context.info.untitled")}
+        </h3>
+        <FactGrid columns={1}>
+          {rows.map(([label, value]) => (
+            <Fact key={label} label={label}>
+              {value}
+            </Fact>
+          ))}
+        </FactGrid>
+      </div>
+      <div className="p-4">
+        <ConversationUsage session={session} />
+      </div>
     </>
   );
 }
@@ -480,11 +514,17 @@ function ConversationInfo({
       ? undefined
       : (detail.data ?? null);
   return (
-    <div className="flex flex-col gap-5 p-4">
+    <PanelCard className="divide-y">
       <ConversationDetails conversationId={conversationId} active={active} />
-      <ChatAccessSummary conversation={conversation} />
-      {conversationId ? <ConversationId id={conversationId} /> : null}
-    </div>
+      <div className="p-4">
+        <ChatAccessSummary conversation={conversation} />
+      </div>
+      {conversationId ? (
+        <div className="px-4 py-2">
+          <ConversationId id={conversationId} />
+        </div>
+      ) : null}
+    </PanelCard>
   );
 }
 
@@ -497,10 +537,13 @@ function ConversationContext({
   conversationId,
   state,
   dispatch,
+  closable,
 }: {
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
+  /** The phone's sheet has no header toggle beside it: it carries its own close. */
+  closable: boolean;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
   // reads wait until it is open.
@@ -513,11 +556,13 @@ function ConversationContext({
 
   if (previewedFile) {
     return (
-      <ShownFile
-        file={previewedFile}
-        backToList={state.fileFromList}
-        onClose={() => dispatch({ type: "close-file" })}
-      />
+      <div className="h-full p-3">
+        <ShownFile
+          file={previewedFile}
+          backToList={state.fileFromList}
+          onClose={() => dispatch({ type: "close-file" })}
+        />
+      </div>
     );
   }
 
@@ -527,27 +572,36 @@ function ConversationContext({
       onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
       className="flex h-full min-h-0 flex-col"
     >
-      <AgentDetailPaneHeader className="gap-2">
-        <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
+      <div className="flex h-14 min-h-14 shrink-0 items-center justify-end gap-2 px-3">
+        <TabsList
+          className="bg-muted/70 h-9 min-w-0 rounded-full p-1 backdrop-blur"
+          aria-label={t("context.label")}
+        >
           {tabs.map(({ id, Icon, label }) => (
-            <TabsTrigger key={id} value={id} className="gap-1.5">
+            <TabsTrigger key={id} value={id} className="gap-1.5 rounded-full px-3">
               <Icon className="size-4 shrink-0" />
               <span className="truncate">{label}</span>
             </TabsTrigger>
           ))}
         </TabsList>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto size-8 shrink-0"
-          aria-label={t("context.collapse")}
-          onClick={() => dispatch({ type: "toggle" })}
-        >
-          <XIcon />
-        </Button>
-      </AgentDetailPaneHeader>
+        {closable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0 rounded-full"
+            aria-label={t("context.collapse")}
+            onClick={() => dispatch({ type: "toggle" })}
+          >
+            <XIcon />
+          </Button>
+        ) : null}
+      </div>
       {tabs.map(({ id }) => (
-        <TabsContent key={id} value={id} className="mt-0 min-h-0 flex-1 overflow-auto">
+        <TabsContent
+          key={id}
+          value={id}
+          className="mt-0 min-h-0 flex-1 overflow-auto px-3 pt-1 pb-3"
+        >
           {id === "runs" ? (
             <ConversationRuns conversationId={conversationId} active={active} />
           ) : null}
@@ -580,7 +634,14 @@ export function ConversationSidebar({
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
-  const size = usePanelWidth(panelRef);
+  const { activeTab } = useConversationTabs(state.activeTab);
+  const view: PanelView =
+    state.activeTab === "files" && state.selectedFile
+      ? "file"
+      : activeTab.id === "info"
+        ? "info"
+        : "list";
+  const size = usePanelWidth(panelRef, view);
 
   if (!desktop) {
     return (
@@ -592,12 +653,17 @@ export function ConversationSidebar({
           id={CONVERSATION_CONTEXT_PANEL_ID}
           side="right"
           aria-describedby={undefined}
-          // The panel's header carries the one close control, as on desktop.
+          // The panel's header carries the one close control.
           showCloseButton={false}
-          className="bg-card flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+          className="bg-background flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
         >
           <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
-          <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
+          <ConversationContext
+            conversationId={conversationId}
+            state={state}
+            dispatch={dispatch}
+            closable
+          />
         </SheetContent>
       </Sheet>
     );
@@ -605,7 +671,9 @@ export function ConversationSidebar({
 
   // The column keeps its place in the layout and animates its width: closed,
   // it is 0 wide and `inert` (out of the tab order and the accessibility tree).
-  // Its content keeps the full width so nothing reflows mid-transition.
+  // Its content keeps the full width so nothing reflows mid-transition, and is
+  // anchored right: switching views (list, details, file) widens or narrows
+  // the column from its left edge, toward the thread.
   return (
     <aside
       ref={panelRef}
@@ -618,7 +686,14 @@ export function ConversationSidebar({
       )}
       style={{ width: state.expanded ? size.width : 0 }}
     >
-      <div className="bg-card absolute inset-y-0 right-0 border-l" style={{ width: size.width }}>
+      <div
+        className={cn(
+          "absolute inset-y-0 right-0",
+          "duration-base ease-surface transition-[opacity,translate] motion-reduce:transition-none",
+          state.expanded ? "translate-x-0 opacity-100" : "translate-x-6 opacity-0",
+        )}
+        style={{ width: size.width }}
+      >
         <PanelResizeHandle
           controls={CONVERSATION_CONTEXT_PANEL_ID}
           label={t("context.resize")}
@@ -630,7 +705,12 @@ export function ConversationSidebar({
           onCommit={size.commit}
           onDraggingChange={setDragging}
         />
-        <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
+        <ConversationContext
+          conversationId={conversationId}
+          state={state}
+          dispatch={dispatch}
+          closable={false}
+        />
       </div>
     </aside>
   );
