@@ -672,7 +672,7 @@ const integrationDetailSchema = {
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
-    // The library's projection for the current space (`packageAvailabilityIn`).
+    // The library's projection for the current space (`integrationAvailabilityIn`).
     availability: { $ref: "#/components/schemas/PackageAvailability" },
     auths: { type: "array", items: authStatusSchema },
     // Effective agent-facing tool catalog. Resolved server-side from the
@@ -714,8 +714,15 @@ const integrationDetailSchema = {
       required: ["status", "imposed"],
       additionalProperties: false,
       description:
-        "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
-      properties: proxyConnectionVerdictProperties,
+        "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. A ready verdict identifies the selected account when it is listed in this response. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
+      properties: {
+        ...proxyConnectionVerdictProperties,
+        connection_id: {
+          type: "string",
+          description:
+            "Selected connection from auths[].connections when the unnamed call is ready.",
+        },
+      },
     },
   },
 } as const;

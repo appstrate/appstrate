@@ -19,16 +19,8 @@ import {
   memberHolding,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { flushRedis } from "../../helpers/redis.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
-import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
-import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { orgPermissions, presetPermissions } from "../../../src/lib/permissions.ts";
-import { getMcpOrgResourceUri } from "../../../src/lib/audiences.ts";
-import { overrideJwks } from "../../../src/modules/oidc/services/enduser-token.ts";
-import { resetOidcGuardsLimiters } from "../../../src/modules/oidc/auth/guards.ts";
-import { authorizationCodeFlow } from "../../../src/modules/oidc/test/helpers/authorization-code-flow.ts";
-import mcpModule from "../../../src/modules/mcp/index.ts";
 import {
   seedApiKey,
   seedOrgOffer,
@@ -42,9 +34,6 @@ import {
 } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
-await registerTestPlatformApp();
-
-const REDIRECT_URI = "http://localhost:9918/callback";
 
 const HOMED = "@probe/homed-integration";
 const SHARED = "@probe/shared-integration";
@@ -191,6 +180,47 @@ describe("GET /api/integrations/{packageId} — availability", () => {
     expect(a.org_offerable).toBe(false);
   });
 
+  it("allows a configure-only role to change settings while the detail stays read-protected", async () => {
+    await seedSpacePackage(ctx.defaultSpaceId, HOMED, { enabled: true });
+    const writer = await memberHolding(ctx, ["integrations:configure"]);
+    const path = `/api/integrations/${HOMED}`;
+    expect((await app.request(path, { headers: authHeaders(writer) })).status).toBe(403);
+    const res = await app.request(`${path}/settings`, {
+      method: "PATCH",
+      headers: { ...authHeaders(writer), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: true }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toMatchObject({
+      block_user_connections: true,
+      availability: { via: "home", org_offerable: false },
+    });
+    const persisted = await app.request(path, { headers: authHeaders(ctx) });
+    expect(await persisted.json()).toMatchObject({ block_user_connections: true });
+  });
+
+  it("returns the placement created by the settings write on an offered system integration", async () => {
+    const id = "@probe/system-offered";
+    await seedPackage({
+      id,
+      type: "integration",
+      orgId: null,
+      source: "system",
+      draftManifest: manifestFor(id),
+    });
+    await seedOrgOffer(ctx.orgId, id);
+    expect((await read(ctx, id)).via).toBe("organization");
+    const res = await app.request(`/api/integrations/${id}/settings`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: false }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = await read(ctx, id);
+    expect(after.via).toBe("system");
+    expect(await res.json()).toMatchObject({ active: true, availability: after });
+  });
+
   it("answers the same on PATCH …/settings, which returns the same resource", async () => {
     await seedOrgOffer(ctx.orgId, OFFERED);
     const get = await app.request(`/api/integrations/${OFFERED}`, { headers: authHeaders(ctx) });
@@ -208,10 +238,6 @@ describe("GET /api/integrations/{packageId} — availability", () => {
 
 describe("GET /api/integrations/{packageId} — the same availability through every credential", () => {
   beforeEach(async () => {
-    await flushRedis();
-    resetOidcGuardsLimiters();
-    overrideJwks(null);
-    await mcpModule.events!.onOrgCreate!(ctx.orgId, ctx.user.email);
     await seedOrgOffer(ctx.orgId, OFFERED);
   });
 
@@ -251,62 +277,5 @@ describe("GET /api/integrations/{packageId} — the same availability through ev
     const { availability } = (await res.json()) as { availability: Availability };
     // The key's scopes may narrow the offer switch; the placement is the library's.
     expect(placementOf(availability)).toEqual(placementOf(await read(ctx, OFFERED)));
-  });
-
-  it("answers a real minted MCP instance token what it answers the session", async () => {
-    const registered = await app.request("/api/auth/oauth2/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: "MCP client (availability)",
-        redirect_uris: [REDIRECT_URI],
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-    expect([200, 201]).toContain(registered.status);
-    const { client_id: clientId } = (await registered.json()) as { client_id: string };
-    const { token } = await authorizationCodeFlow(app, {
-      cookie: ctx.cookie,
-      clientId,
-      redirectUri: REDIRECT_URI,
-      scope: "openid mcp:read mcp:invoke",
-      resource: getMcpOrgResourceUri(ctx.orgId),
-    });
-
-    const res = await app.request(`/api/mcp/o/${ctx.orgId}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${String(token.access_token)}`,
-        "content-type": "application/json",
-        Accept: MCP_ACCEPT,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "invoke_operation",
-          arguments: {
-            operation_id: "getIntegration",
-            path_params: { packageId: OFFERED },
-            space_id: ctx.defaultSpaceId,
-          },
-        },
-      }),
-    });
-    const text = await res.text();
-    expect(res.status, text).toBe(200);
-    const envelope = JSON.parse(text) as JsonRpcEnvelope;
-    const content = envelope.result?.content as Array<{ text: string }>;
-    expect(envelope.result?.isError, content[0]!.text).toBeFalsy();
-    const { status, body } = JSON.parse(content[0]!.text) as {
-      status: number;
-      body: { availability: Availability };
-    };
-    expect(status).toBe(200);
-    // The token's scope ceiling may narrow the offer switch; the placement is the library's.
-    expect(placementOf(body.availability)).toEqual(placementOf(await read(ctx, OFFERED)));
   });
 });

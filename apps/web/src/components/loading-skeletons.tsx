@@ -200,7 +200,7 @@ function SpaceLineBlocks() {
 }
 
 /** An integration's « Connexion utilisée par défaut », under its connections table: a group heading, the default's row, then the exceptions (sub-heading, table, add button). */
-function DefaultConnectionBlocks() {
+function DefaultConnectionBlocks({ canConfigure }: { canConfigure: boolean }) {
   return (
     <div className="mt-8 flex flex-col gap-6">
       <header>
@@ -209,20 +209,25 @@ function DefaultConnectionBlocks() {
           <SkeletonLine className="w-full text-sm leading-relaxed" />
         </div>
       </header>
-      <SettingsSkeleton rows={1} />
-      {/* The exceptions: their sub-heading, the table's card, then « Ajouter ». */}
-      <div>
-        <header className="mb-3">
-          <SkeletonLine className="w-44 text-sm font-semibold" />
-          <div className="mt-1 max-w-2xl">
-            <SkeletonLine className="w-full text-sm leading-relaxed" />
+      <SkeletonLine className="w-64 text-sm" />
+      {canConfigure && (
+        <>
+          <SettingsSkeleton rows={1} />
+          {/* The exceptions: their sub-heading, the table's card, then « Ajouter ». */}
+          <div>
+            <header className="mb-3">
+              <SkeletonLine className="w-44 text-sm font-semibold" />
+              <div className="mt-1 max-w-2xl">
+                <SkeletonLine className="w-full text-sm leading-relaxed" />
+              </div>
+            </header>
+            <div className="mb-4">
+              <TableBlocks framed />
+            </div>
+            <Skeleton className="h-8 w-32" />
           </div>
-        </header>
-        <div className="mb-4">
-          <TableBlocks framed />
-        </div>
-        <Skeleton className="h-8 w-32" />
-      </div>
+        </>
+      )}
     </div>
   );
 }
@@ -431,10 +436,10 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
           <RailPanelBlocks spaceLine={spaceLine} rows={opensAccess ? 1 : undefined} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
-        ) : type === "integration" && tab === "connections" && can("integrations:configure") ? (
+        ) : type === "integration" && tab === "connections" ? (
           <>
             <ListTabBlocks spaceLine={spaceLine} />
-            <DefaultConnectionBlocks />
+            <DefaultConnectionBlocks canConfigure={can("integrations:configure")} />
           </>
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
           <ListTabBlocks spaceLine={spaceLine} />

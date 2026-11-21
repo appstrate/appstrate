@@ -77,16 +77,19 @@ interface LibraryPackage {
  * still listed when the caller could place it (`<type>:share` in its home), but
  * never into a personal destination.
  */
-export async function getPackageLibrary(
+export function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
+  return readPackageLibrary(c, spaceId);
+}
+
+type IntegrationDetailSelection = { integrationId: string; permission: "read" | "configure" };
+
+async function readPackageLibrary(
   c: Context<AppEnv>,
   spaceId?: string,
-  options: {
-    /** Narrow the catalogue to these packages; the offers and published reads follow. */
-    packageIds?: readonly string[];
-  } = {},
+  detail?: IntegrationDetailSelection,
 ) {
   const orgId = c.get("orgId");
-  const { packageIds } = options;
+  const packageIds = detail ? [detail.integrationId] : undefined;
 
   const accessible = await packageAccessSpaces(c);
   // The caller's own personal space takes no activation grant: ownership authorizes
@@ -139,7 +142,11 @@ export async function getPackageLibrary(
             (space) =>
               (!target?.ownerUserId || space.id === target.id) &&
               visibleIds.has(space.id) &&
-              space.permissions.has(packagePermission(type, "read")),
+              space.permissions.has(
+                detail && type === "integration"
+                  ? `integrations:${detail.permission}`
+                  : packagePermission(type, "read"),
+              ),
           )
           .map((space) => space.id),
       ),
@@ -182,7 +189,7 @@ export async function getPackageLibrary(
       and(
         orgOrSystemFilter(orgId),
         notEphemeralFilter(),
-        packageIds ? inArray(packages.id, [...packageIds]) : undefined,
+        detail ? eq(packages.id, detail.integrationId) : undefined,
       ),
     )
     .orderBy(packages.id);
@@ -328,21 +335,15 @@ function placementState(
   return isActiveHere(pkg, row) ? "active" : row ? "inactive" : "none";
 }
 
-/**
- * What the library says about ONE package in ONE space — a projection of
- * {@link getPackageLibrary}, never a second computation. A package the library
- * does not place there for this caller is a 404, like the detail route's own
- * placement check.
- */
-export async function packageAvailabilityIn(
+/** A single integration's library cell under the permission required by the calling route. */
+export async function integrationAvailabilityIn(
   c: Context<AppEnv>,
   packageId: string,
   spaceId: string,
+  permission: IntegrationDetailSelection["permission"],
 ) {
-  const library = await getPackageLibrary(c, spaceId, { packageIds: [packageId] });
-  const entry = Object.values(library.packages)
-    .flat()
-    .find((candidate) => candidate.id === packageId);
+  const library = await readPackageLibrary(c, spaceId, { integrationId: packageId, permission });
+  const entry = library.packages.integration?.[0];
   const placement = entry?.placements.find((p) => p.space_id === spaceId);
   if (!entry || !placement) {
     throw notFound(`Package '${packageId}' not found in this organization`);

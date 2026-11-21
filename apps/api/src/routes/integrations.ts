@@ -105,7 +105,7 @@ import {
   reachOutsideRunIfPermitted,
 } from "../services/credential-proxy/access.ts";
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
-import { packageAvailabilityIn } from "../services/package-library.ts";
+import { integrationAvailabilityIn } from "../services/package-library.ts";
 import { getActor } from "../lib/actor.ts";
 import {
   assertConnectionBelongsToActor,
@@ -819,6 +819,28 @@ async function beginHostedOAuth(
 // Router
 // ─────────────────────────────────────────────
 
+async function integrationDetail(
+  c: Context<AppEnv>,
+  scope: SpaceScope,
+  packageId: string,
+  permission: "read" | "configure",
+) {
+  const [status, availability] = await Promise.all([
+    getIntegrationAuthStatuses(
+      scope,
+      packageId,
+      ...spaceListCaller(c),
+      reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
+    ),
+    integrationAvailabilityIn(c, packageId, scope.spaceId, permission),
+  ]);
+  return {
+    ...withRunToolDescriptions(status),
+    active: availability.state === "active",
+    availability,
+  };
+}
+
 export function createIntegrationsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -1109,16 +1131,7 @@ export function createIntegrationsRouter() {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const [status, availability] = await Promise.all([
-      getIntegrationAuthStatuses(
-        scope,
-        packageId,
-        ...spaceListCaller(c),
-        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
-      ),
-      packageAvailabilityIn(c, packageId, scope.spaceId),
-    ]);
-    return c.json({ ...withRunToolDescriptions(status), availability });
+    return c.json(await integrationDetail(c, scope, packageId, "read"));
   });
 
   // ─── OAuth client registration (admin) ─────
@@ -1662,10 +1675,6 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       await assertIsIntegration(scope, packageId);
       const body = await readJsonBody(c, updateSettingsSchema);
-      // Before the write: `integrations:configure` does not imply the `integrations:read` the
-      // library asks, and a refusal after a committed write would report a failure for it.
-      // The toggled gate does not change availability.
-      const availability = await packageAvailabilityIn(c, packageId, scope.spaceId);
       const result = await setBlockUserConnections(scope, packageId, body.block_user_connections);
       await recordAuditFromContext(c, {
         action: "integration.block_user_connections.updated",
@@ -1673,16 +1682,7 @@ export function createIntegrationsRouter() {
         resourceId: packageId,
         after: { blocked: result.blocked },
       });
-      // 200 + the bare integration resource — same serializer as
-      // GET /integrations/:packageId; the toggled gate is part of the
-      // resource (`block_user_connections`), not an operation scrap.
-      const detail = await getIntegrationAuthStatuses(
-        scope,
-        packageId,
-        ...spaceListCaller(c),
-        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
-      );
-      return c.json({ ...withRunToolDescriptions(detail), availability });
+      return c.json(await integrationDetail(c, scope, packageId, "configure"));
     },
   );
 

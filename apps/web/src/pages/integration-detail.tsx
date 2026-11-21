@@ -60,7 +60,6 @@ import { ConfigAuthBlock } from "../components/integration-detail/config-auth-bl
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { DefaultConnectionSection } from "../components/integration-detail/default-connection-section";
-import { showsDefaultConnection } from "../lib/default-connection";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
 import { spaceLabel } from "../lib/space-label";
@@ -573,11 +572,13 @@ export function IntegrationDetailPage() {
             onConfigure={openAuthentication}
           />
         )}
-        {showsDefaultConnection({
-          canConfigure,
-          fromWorkingSpace: connectionsFromWorkingSpace,
-          authCount: detail.auths.length,
-        }) && <DefaultConnectionSection packageId={packageId} />}
+        {connectionsFromWorkingSpace && (
+          <DefaultConnectionSection
+            packageId={packageId}
+            detail={detail}
+            canConfigure={canConfigure}
+          />
+        )}
       </DetailTabPanel>
 
       {/* Configuration is admin-only; package files stay readable for every member. */}

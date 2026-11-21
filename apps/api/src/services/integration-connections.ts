@@ -571,7 +571,7 @@ async function selectConnection(
  * The connection an unnamed credential-proxy call outside a run gets for the caller, as one status:
  * {@link selectAccessibleConnection}'s outcome under `reach`, judged against `manifest` — the one
  * the integration detail serves (its latest published version, else the draft while none is), which
- * the proxy authorizes against. It names no connection and no colleague; `active` reports the
+ * the proxy authorizes against. Only a connection visible on the detail may be named; `active` reports the
  * other condition the proxy checks.
  *
  *   - `ready`: one connection binds and passes its health checks.
@@ -599,17 +599,20 @@ export type ProxyConnectionStatus =
   | "proxy_closed"
   | "not_required";
 
-export async function proxyConnectionVerdict(
+async function proxyConnectionVerdict(
   packageId: string,
   manifest: IntegrationManifest,
   context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
-): Promise<{ status: ProxyConnectionStatus; imposed: boolean }> {
-  const { status, imposed } = await proxyConnectionOutcome(packageId, manifest, {
+  auths: IntegrationAuthStatus[],
+): Promise<{ status: ProxyConnectionStatus; imposed: boolean; connection_id?: string }> {
+  const { status, imposed, connectionId } = await proxyConnectionOutcome(packageId, manifest, {
     ...context,
     // Read once, for `imposed` and for the selection.
     orgDefaults: await listOrgDefaultsForResolver(context.spaceId),
   });
-  return { status, imposed };
+  const visible =
+    connectionId && auths.some((auth) => auth.connections.some((c) => c.id === connectionId));
+  return { status, imposed, ...(visible ? { connection_id: connectionId } : {}) };
 }
 
 /**
@@ -626,7 +629,12 @@ async function proxyConnectionOutcome(
     reach: ReachOutsideRun;
     orgDefaults: Record<string, OrgDefaultPick>;
   },
-): Promise<{ status: ProxyConnectionStatus; imposed: boolean; refusal?: ResolutionFieldError }> {
+): Promise<{
+  status: ProxyConnectionStatus;
+  imposed: boolean;
+  connectionId?: string;
+  refusal?: ResolutionFieldError;
+}> {
   const { orgDefaults, reach } = context;
   const imposed = orgDefaults[packageId]?.enforce === true;
   if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
@@ -637,7 +645,7 @@ async function proxyConnectionOutcome(
   return selectConnection(packageId, manifest, null, selection).then(
     ({ row, notConnected }) =>
       row
-        ? { status: "ready" as const, imposed }
+        ? { status: "ready" as const, imposed, connectionId: row.id }
         : { status: "none" as const, imposed, ...(notConnected ? { refusal: notConnected } : {}) },
     (err: unknown) => {
       if (!(err instanceof ApiError)) throw err;
@@ -3295,8 +3303,6 @@ export async function getIntegrationAuthStatuses(
   default_tools: readonly string[] | "*" | undefined;
   /** AFPS §7.8, verbatim: gates the editor's "include all upstream tools" toggle. */
   allow_undeclared_tools: boolean;
-  /** Whether the integration is active in this space (the list endpoint's `active`). */
-  active: boolean;
   /** Only org admins may create personal connections here (`false` when not active). */
   block_user_connections: boolean;
   /**
@@ -3306,7 +3312,7 @@ export async function getIntegrationAuthStatuses(
    */
   platform_redirect_uri: string;
   /** What an unnamed proxy call outside a run gets for this caller ({@link proxyConnectionVerdict}). */
-  proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
+  proxy_connection: Awaited<ReturnType<typeof proxyConnectionVerdict>>;
 }> {
   await assertSpaceInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -3317,10 +3323,10 @@ export async function getIntegrationAuthStatuses(
   });
 
   const allConnections = await listIntegrationConnections(scope, packageId, caller, orgRole);
-  // The settings list's precedence: env-backed system integrations stay active.
-  const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
-    packageId,
-  )!;
+  const [settings] = await db
+    .select({ blocked: spacePackages.blockUserConnections })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, scope.spaceId)));
   const oauthClients = await db
     .select({
       authKey: integrationOauthClients.authKey,
@@ -3365,14 +3371,18 @@ export async function getIntegrationAuthStatuses(
     tool_catalog: toolCatalog,
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools: allowsUndeclaredTools(manifest),
-    active: activation.active,
-    block_user_connections: activation.blockUserConnections,
+    block_user_connections: settings?.blocked === true,
     platform_redirect_uri: integrationCallbackUrl(),
-    proxy_connection: await proxyConnectionVerdict(packageId, manifest, {
-      spaceId: scope.spaceId,
-      actor: caller.principal.actor,
-      reach,
-    }),
+    proxy_connection: await proxyConnectionVerdict(
+      packageId,
+      manifest,
+      {
+        spaceId: scope.spaceId,
+        actor: caller.principal.actor,
+        reach,
+      },
+      auths,
+    ),
   };
 }
 
