@@ -1722,6 +1722,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
+            " — set it when the request names a connection, resolving its id from `get_me`'s " +
+            "`connections` before launching" +
             ': `{ "@scope/integration": ' +
             `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
@@ -2270,7 +2272,8 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "the space the request resolved to (every list returned is scoped to it), " +
       "and the integrations the caller already has connected and could attach to an agent: one " +
       "entry per integration active in that space with a connection the caller may bind there, " +
-      "its own or shared into the space. An entry flagged `needs_reconnection` has no healthy " +
+      "its own or shared into the space, each listing those `connections` (`id`, `label`, " +
+      "`account_id`, `owned_by_actor`, `needs_reconnection`). An entry flagged `needs_reconnection` has no healthy " +
       "connection: its owner must reconnect it before use. " +
       (surface.proxies
         ? "The integration tools you can call with them are listed by `search` (`integration_tool` " +

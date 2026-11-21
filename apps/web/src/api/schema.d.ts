@@ -17551,12 +17551,30 @@ export interface operations {
                      *         {
                      *           "integration_package_id": "@appstrate/gmail",
                      *           "name": "Gmail",
-                     *           "source": "own"
+                     *           "source": "own",
+                     *           "connections": [
+                     *             {
+                     *               "id": "conn_1",
+                     *               "label": "ada@acme.com",
+                     *               "account_id": "ada@acme.com",
+                     *               "owned_by_actor": true,
+                     *               "needs_reconnection": false
+                     *             }
+                     *           ]
                      *         },
                      *         {
                      *           "integration_package_id": "@appstrate/clickup",
                      *           "name": "ClickUp",
-                     *           "source": "shared"
+                     *           "source": "shared",
+                     *           "connections": [
+                     *             {
+                     *               "id": "conn_2",
+                     *               "label": "Acme workspace",
+                     *               "account_id": "acme",
+                     *               "owned_by_actor": false,
+                     *               "needs_reconnection": false
+                     *             }
+                     *           ]
                      *         }
                      *       ],
                      *       "recent_runs": [
@@ -17636,6 +17654,16 @@ export interface operations {
                             name: string;
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
+                            /** @description The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`. */
+                            connections: {
+                                id: string;
+                                label: string;
+                                account_id: string;
+                                /** @description False: a colleague's connection shared into the space. Use it only when the user named it. */
+                                owned_by_actor: boolean;
+                                /** @description True: the credentials died; a run naming it fails until its owner reconnects it. */
+                                needs_reconnection: boolean;
+                            }[];
                             /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
                             version?: string;
                             /**

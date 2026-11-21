@@ -2654,6 +2654,18 @@ interface UsableIntegration {
   default_tools?: readonly string[] | "*";
   /** Present (true) when none of the actor's usable connections of it is healthy. */
   needs_reconnection?: true;
+  /** The connections the actor may bind there, oldest first: a label resolves to an id here. */
+  connections: UsableConnection[];
+}
+
+/** One connection the actor may bind in the space (what `connection_overrides` names). */
+interface UsableConnection {
+  id: string;
+  label: string;
+  account_id: string;
+  /** False: a colleague's connection shared into the space, never bound without being named. */
+  owned_by_actor: boolean;
+  needs_reconnection: boolean;
 }
 
 /**
@@ -2668,22 +2680,42 @@ export async function listUsableIntegrationsForActor(
   await assertSpaceInScope(scope);
   const rows = await db
     .select({
+      id: integrationConnections.id,
       integrationId: integrationConnections.integrationId,
+      label: integrationConnections.label,
+      accountId: integrationConnections.accountId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
       shared: sql<boolean>`${sharedInto(scope.spaceId)}`,
       needsReconnection: integrationConnections.needsReconnection,
     })
     .from(integrationConnections)
-    .where(usableInSpace(scope.spaceId, actor));
+    .where(usableInSpace(scope.spaceId, actor))
+    .orderBy(...OLDEST_FIRST);
   if (rows.length === 0) return [];
 
-  const acc = new Map<string, { own: boolean; shared: boolean; healthy: boolean }>();
+  const acc = new Map<
+    string,
+    { own: boolean; shared: boolean; healthy: boolean; connections: UsableConnection[] }
+  >();
   for (const row of rows) {
-    const entry = acc.get(row.integrationId) ?? { own: false, shared: false, healthy: false };
-    entry.own ||= actorOwns(actor, row);
+    const entry = acc.get(row.integrationId) ?? {
+      own: false,
+      shared: false,
+      healthy: false,
+      connections: [],
+    };
+    const owned = actorOwns(actor, row);
+    entry.own ||= owned;
     entry.shared ||= row.shared;
     entry.healthy ||= !row.needsReconnection;
+    entry.connections.push({
+      id: row.id,
+      label: row.label,
+      account_id: row.accountId,
+      owned_by_actor: owned,
+      needs_reconnection: row.needsReconnection,
+    });
     acc.set(row.integrationId, entry);
   }
 
@@ -2710,7 +2742,7 @@ export async function listUsableIntegrationsForActor(
   );
 
   return ids.map((integrationId) => {
-    const { own, shared, healthy } = acc.get(integrationId)!;
+    const { own, shared, healthy, connections } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
     return {
       integration_package_id: integrationId,
@@ -2719,6 +2751,7 @@ export async function listUsableIntegrationsForActor(
       version: versionMap.get(integrationId),
       default_tools: defaultToolsMap.get(integrationId),
       ...(healthy ? {} : { needs_reconnection: true as const }),
+      connections,
     };
   });
 }

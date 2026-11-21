@@ -168,6 +168,15 @@ describe("MCP server instructions — connect bullet", () => {
     expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
   });
 
+  // #2336: a named connection is resolved from get_me and passed before launching.
+  it("tells the model to resolve a named connection from get_me before launching", () => {
+    const text = instructionsFor(permissions);
+    expect(text).toContain("When the request names a connection");
+    expect(text).toContain("each integration lists its `connections`");
+    expect(text).toContain("BEFORE launching");
+    expect(text).toContain("never launch without the integration the user asked for");
+  });
+
   it("says a schedule write wants the user's one connection named too", () => {
     const bullet = instructionsFor(permissions)
       .split("\n")

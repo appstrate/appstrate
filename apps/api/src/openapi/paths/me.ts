@@ -890,11 +890,41 @@ export const mePaths = {
                     description: "Integrations the caller could attach to an agent.",
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "name", "source"],
+                      required: ["integration_package_id", "name", "source", "connections"],
                       properties: {
                         integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
+                        connections: {
+                          type: "array",
+                          description:
+                            "The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`.",
+                          items: {
+                            type: "object",
+                            required: [
+                              "id",
+                              "label",
+                              "account_id",
+                              "owned_by_actor",
+                              "needs_reconnection",
+                            ],
+                            properties: {
+                              id: { type: "string" },
+                              label: { type: "string" },
+                              account_id: { type: "string" },
+                              owned_by_actor: {
+                                type: "boolean",
+                                description:
+                                  "False: a colleague's connection shared into the space. Use it only when the user named it.",
+                              },
+                              needs_reconnection: {
+                                type: "boolean",
+                                description:
+                                  "True: the credentials died; a run naming it fails until its owner reconnects it.",
+                              },
+                            },
+                          },
+                        },
                         version: {
                           type: "string",
                           description:
@@ -1048,11 +1078,33 @@ export const mePaths = {
                   personal: false,
                 },
                 connections: [
-                  { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+                  {
+                    integration_package_id: "@appstrate/gmail",
+                    name: "Gmail",
+                    source: "own",
+                    connections: [
+                      {
+                        id: "conn_1",
+                        label: "ada@acme.com",
+                        account_id: "ada@acme.com",
+                        owned_by_actor: true,
+                        needs_reconnection: false,
+                      },
+                    ],
+                  },
                   {
                     integration_package_id: "@appstrate/clickup",
                     name: "ClickUp",
                     source: "shared",
+                    connections: [
+                      {
+                        id: "conn_2",
+                        label: "Acme workspace",
+                        account_id: "acme",
+                        owned_by_actor: false,
+                        needs_reconnection: false,
+                      },
+                    ],
                   },
                 ],
                 recent_runs: [

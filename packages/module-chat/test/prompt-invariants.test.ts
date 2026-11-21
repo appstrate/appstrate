@@ -182,6 +182,9 @@ describe("full persona invariants", () => {
       expect(persona).toContain("`[]` runs without that integration");
       expect(persona).toContain("`integration_not_active`");
     }
+    // #2336: a named connection is resolved from get_me; every relied-on integration is `required`.
+    expect(FULL).toContain("resolve its id from `get_me`'s `connections` before launching");
+    expect(FULL).toContain("on every integration the request relies on");
     // The canonical example's task means nothing without Gmail.
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });

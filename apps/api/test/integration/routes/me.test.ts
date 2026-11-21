@@ -75,7 +75,7 @@ async function seedConnectionFor(opts: {
     orgId: opts.orgId,
     type: "integration",
     source: "local",
-  });
+  }).catch(() => undefined); // already seeded by an earlier connection of the integration
   const [row] = await db
     .insert(integrationConnections)
     .values({
@@ -313,6 +313,75 @@ describe("Me API (/api/me)", () => {
       expect(byId.get("@ctx/broken")?.needs_reconnection).toBe(true);
       expect("needs_reconnection" in byId.get("@ctx/mixed")!).toBe(false);
       expect("needs_reconnection" in byId.get("@ctx/healthy")!).toBe(false);
+    });
+
+    describe("each integration lists the connections the caller may bind", () => {
+      type Listed = {
+        id: string;
+        label: string;
+        account_id: string;
+        owned_by_actor: boolean;
+        needs_reconnection: boolean;
+      };
+      const read = async () => {
+        const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+        const body = (await res.json()) as {
+          connections: { integration_package_id: string; connections: Listed[] }[];
+        };
+        return body.connections;
+      };
+
+      it("lists two connections of one integration by label, oldest first, a colleague's unshared one excluded", async () => {
+        const first = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: ctx.user.id,
+          label: "Prod server",
+        });
+        const second = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: ctx.user.id,
+          label: "Staging server",
+        });
+        const colleague = await createTestUser();
+        await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: colleague.id,
+          label: "Colleague private",
+        });
+        const sharedByColleague = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: colleague.id,
+          label: "Colleague shared",
+          sharedWithSpace: true,
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/ssh");
+
+        const entry = (await read()).find((c) => c.integration_package_id === "@ctx/ssh")!;
+        expect(entry.connections.map((c) => c.label)).toEqual([
+          "Prod server",
+          "Staging server",
+          "Colleague shared",
+        ]);
+        expect(entry.connections.map((c) => c.id)).toEqual([first, second, sharedByColleague]);
+        expect(entry.connections.map((c) => c.owned_by_actor)).toEqual([true, true, false]);
+        expect(entry.connections[0]).toEqual({
+          id: first,
+          label: "Prod server",
+          account_id: expect.any(String),
+          owned_by_actor: true,
+          needs_reconnection: false,
+        });
+        // Identical calls, identical payload.
+        expect(await read()).toEqual(await read());
+      });
     });
 
     describe("connections lists only integrations active in the space", () => {
