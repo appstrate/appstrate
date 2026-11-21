@@ -11,9 +11,6 @@ import { cn } from "@appstrate/ui/cn";
  */
 const TILE_RING = "ring-2 ring-(--tile-ring,var(--background))";
 
-/** The same surface as a tile's own ground, for a tile whose content is transparent (a logo). */
-export const TILE_SURFACE = "bg-(--tile-ring,var(--background))";
-
 /** The box of a stacked tile in a list's line (a cell, a card): every stack's, so they line up. */
 export const STACK_TILE = "size-4 rounded-[4px]";
 

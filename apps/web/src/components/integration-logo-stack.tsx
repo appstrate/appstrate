@@ -6,16 +6,15 @@ import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { PackageIcon } from "./package-icon";
-import { STACK_TILE, TILE_SURFACE, TileStack } from "./tile-stack";
+import { STACK_TILE, TileStack } from "./tile-stack";
 
 /** Logos drawn before the rest is counted. */
 const MAX_LOGOS = 4;
 
 /**
  * The integrations an agent uses, as their logos stacked ({@link TileStack}) with their names in a
- * tooltip, one a line. The tile is a space tile's ({@link STACK_TILE}); the logo fills it edge to
- * edge, clipped to its corners, on the surface the stack sits on ({@link TILE_SURFACE}): most are
- * transparent glyphs, which would show through each other once they overlap. One named in `inactive` (a required integration not
+ * tooltip, one a line. The tile is a space tile's ({@link STACK_TILE}), filled by the logo on its
+ * white ground (`PackageIcon`), clipped to the tile's corners. One named in `inactive` (a required integration not
  * active in the space, which refuses the launch) is dimmed and said so in the tooltip. Nothing
  * when the agent uses none.
  */
@@ -47,7 +46,7 @@ export function IntegrationLogoStack({
             render={(integration, className) => (
               <span
                 data-testid="integration-logo"
-                className={cn("flex shrink-0 overflow-hidden", TILE_SURFACE, STACK_TILE, className)}
+                className={cn("flex shrink-0 overflow-hidden", STACK_TILE, className)}
               >
                 <PackageIcon
                   type="integration"

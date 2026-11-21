@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState, type ReactNode } from "react";
-import { getIcon, Icon, iconLoaded, loadIcon } from "@iconify/react";
+import { Icon, iconLoaded, loadIcon } from "@iconify/react";
 import { DynamicIcon } from "lucide-react/dynamic";
 import type { AppearanceIcon } from "@appstrate/core/appearance";
 import { cn } from "../cn.ts";
 import { isLucideName } from "../lucide-names.ts";
-import { isDarkMonochromeSvg } from "../dark-glyph.ts";
 
 type LoadState = "loading" | "ok" | "error";
 
@@ -18,8 +17,7 @@ function GlyphSkeleton({ className }: { className: string }) {
 /**
  * An Iconify id other than a Lucide one. The SVG is fetched from the Iconify
  * API the first time an id is seen and cached by Iconify for the session, so a
- * second tile with the same id draws at once. A logo painted in black only
- * (`isDarkMonochromeSvg`) is inverted on the dark theme, where it would vanish.
+ * second tile with the same id draws at once.
  */
 function IconifyGlyph({
   id,
@@ -44,8 +42,7 @@ function IconifyGlyph({
   }, [id]);
   if (state === "loading") return <GlyphSkeleton className={className} />;
   if (state === "error") return fallback;
-  const dark = isDarkMonochromeSvg(getIcon(id)?.body ?? "");
-  return <Icon icon={id} className={cn(className, dark && "dark:invert")} />;
+  return <Icon icon={id} className={className} />;
 }
 
 function UrlGlyph({
