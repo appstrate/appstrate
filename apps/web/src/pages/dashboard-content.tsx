@@ -2,9 +2,9 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { usePermissions } from "../hooks/use-permissions";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
@@ -30,7 +30,7 @@ import { useSpaces } from "../hooks/use-spaces";
 import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
-import { formatDateField } from "../lib/format-date";
+import { ScheduledAt } from "../components/scheduled-at";
 import { dashboardSections } from "../lib/dashboard-sections";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
@@ -178,7 +178,7 @@ function MetricCard({
 }: {
   label: string;
   value: string | number;
-  detail: string;
+  detail: ReactNode;
   className?: string;
 }) {
   return (
@@ -275,7 +275,11 @@ function DashboardScheduleRow({
       <div className="shrink-0 text-right">
         <ScheduleStateBadges schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
-          {nextRunAt ? formatDateField(nextRunAt, "datetime", schedule.timezone) : "—"}
+          {nextRunAt ? (
+            <ScheduledAt at={nextRunAt} timeZone={schedule.timezone} variant="relative" />
+          ) : (
+            "—"
+          )}
         </p>
       </div>
     </Link>
@@ -355,15 +359,23 @@ function dashboardMetrics(
       sections.schedules && {
         label: t("dashboard.metric.schedules"),
         value: activeSchedules.length,
-        detail: upcomingSchedules[0]?.next_run_at
-          ? t("dashboard.metric.schedulesNext", {
-              date: formatDateField(
-                upcomingSchedules[0].next_run_at,
-                "datetime",
-                upcomingSchedules[0].timezone,
+        detail: upcomingSchedules[0]?.next_run_at ? (
+          <Trans
+            ns="agents"
+            i18nKey="dashboard.metric.schedulesNext"
+            components={{
+              date: (
+                <ScheduledAt
+                  at={upcomingSchedules[0].next_run_at}
+                  timeZone={upcomingSchedules[0].timezone}
+                  variant="relative"
+                />
               ),
-            })
-          : t("dashboard.metric.schedulesNone"),
+            }}
+          />
+        ) : (
+          t("dashboard.metric.schedulesNone")
+        ),
       },
     ].filter((card) => card !== false),
   };

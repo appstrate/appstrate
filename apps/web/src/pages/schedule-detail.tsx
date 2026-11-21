@@ -39,7 +39,8 @@ import {
   scheduleSettingsHref,
   type ScheduleSettingsSection,
 } from "../lib/schedule-options";
-import { formatDateField } from "../lib/format-date";
+import { formatDateField, formatScheduledAt } from "../lib/format-date";
+import { useNowTick } from "../hooks/use-now-tick";
 import { parseCron } from "../lib/cron-frequency";
 import { describeFrequency } from "../lib/frequency-summary";
 import {
@@ -206,6 +207,7 @@ function ScheduleParams({
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
   const nextRunAt = scheduleNextRunAt(schedule);
+  const now = useNowTick();
   const agentDisplayName = schedule.agent_name;
   const input = schedule.input;
   const navigate = useNavigate();
@@ -274,7 +276,7 @@ function ScheduleParams({
             {
               labelKey: "schedule.paramNextRun",
               value: nextRunAt
-                ? formatDateField(nextRunAt, "datetime", schedule.timezone)
+                ? formatScheduledAt(nextRunAt, schedule.timezone, now)
                 : t("schedule.noNextRun"),
             },
             {

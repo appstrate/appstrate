@@ -220,10 +220,11 @@ describe("the overview's figures", () => {
     expect(figure(html, t("detail.overview.archivedItems"))).toBe("2");
     expect(figure(html, t("detail.overview.pinnedItems"))).toBe("2");
     // The soonest fire among them: Coffre's, on 1 December — not Studio's (2nd), nor the hidden
-    // working space's (3rd).
+    // working space's (3rd). The figure leads with how soon, which moves with the clock: the date
+    // it ends on is the one that names the schedule.
     const nextRun = figure(html, t("schedule.paramNextRun"));
-    expect(nextRun).toBe(formatDateField("2026-12-01T09:00:00Z", "datetime", "UTC"));
-    expect(nextRun).not.toBe(formatDateField("2026-12-02T09:00:00Z", "datetime", "UTC"));
+    expect(nextRun).toEndWith(formatDateField("2026-12-01T09:00:00Z", "datetime", "UTC"));
+    expect(nextRun).not.toEndWith(formatDateField("2026-12-02T09:00:00Z", "datetime", "UTC"));
   });
 
   it("CONTROL: count the working space's out of the mode", () => {
@@ -232,7 +233,7 @@ describe("the overview's figures", () => {
       <AgentOverviewTab packageId={PACKAGE_ID} detail={DETAIL} isHistorical={false} />,
     );
     expect(figure(html, t("detail.overview.activeSchedules"))).toBe("1");
-    expect(figure(html, t("schedule.paramNextRun"))).toBe(
+    expect(figure(html, t("schedule.paramNextRun"))).toEndWith(
       formatDateField("2026-12-03T09:00:00Z", "datetime", "UTC"),
     );
     expect(figure(html, t("detail.overview.archivedItems"))).toBe("1");
