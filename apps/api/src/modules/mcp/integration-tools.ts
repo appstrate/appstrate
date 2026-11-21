@@ -27,7 +27,7 @@ import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
-import { readSpaces, unsearched } from "./discovery.ts";
+import { readSpaces, spacesShown, unsearched } from "./discovery.ts";
 import {
   MAX_LISTED_SCOPES,
   readIntegrationTools,
@@ -193,8 +193,9 @@ const isReadable = (tool: CallableTool) => !(tool.kind === "remote" && tool.cata
  * The listings of the spaces of an org-wide call, or the one of a pinned connection, as one: a
  * tool listed in several spaces once, under `granted_in`, with the union of its connection ids
  * and missing scopes and the readable descriptor if any space read it; a connection, `not_ready`
- * or `unlisted` entry the same in several spaces once, under `granted_in`. A space whose listing
- * was refused is reported apart; all refused answers the first.
+ * or `unlisted` entry the same in several spaces once, under `granted_in`; a truncated catalog or
+ * an uncached integration once, under the spaces that report it. A space whose listing was refused
+ * is reported apart; all refused answers the first.
  */
 async function readAcrossSpaces(
   spaces: readonly McpSpace[] | undefined,
@@ -215,15 +216,19 @@ async function readAcrossSpaces(
   if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
 
   const tools = new Map<string, Merged<CallableTool>>();
-  const truncated = new Map<string, CallableListing["truncated_catalogs"][number]>();
-  const uncached = new Set<string>();
   const entries = {
     connections: new Map<string, Merged<CallableListing["connections"][number]>>(),
     not_ready: new Map<string, Merged<CallableListing["not_ready"][number]>>(),
     unlisted: new Map<string, Merged<CallableListing["unlisted"][number]>>(),
+    truncated_catalogs: new Map<string, Merged<CallableListing["truncated_catalogs"][number]>>(),
+    uncached: new Map<string, Merged<{ integration_package_id: string }>>(),
   };
-  const add = <T extends object>(into: Map<string, Merged<T>>, entry: T, space?: McpSpace) => {
-    const key = JSON.stringify(entry);
+  const add = <T extends object>(
+    into: Map<string, Merged<T>>,
+    entry: T,
+    space?: McpSpace,
+    key = JSON.stringify(entry),
+  ) => {
     const found = into.get(key);
     if (found?.granted_in && space) found.granted_in.push(space.id);
     else into.set(key, space ? { ...entry, granted_in: [space.id] } : entry);
@@ -250,18 +255,20 @@ async function readAcrossSpaces(
     for (const connection of read.connections) add(entries.connections, connection, space);
     for (const entry of read.not_ready) add(entries.not_ready, entry, space);
     for (const entry of read.unlisted) add(entries.unlisted, entry, space);
-    for (const entry of read.truncated_catalogs) truncated.set(entry.integration_package_id, entry);
-    for (const name of read.uncached) uncached.add(name);
+    for (const entry of read.truncated_catalogs) {
+      add(entries.truncated_catalogs, entry, space, entry.integration_package_id);
+    }
+    for (const name of read.uncached)
+      add(entries.uncached, { integration_package_id: name }, space);
   }
   return {
     tools: [...tools.values()],
     connections: [...entries.connections.values()],
     not_ready: [...entries.not_ready.values()],
     unlisted: [...entries.unlisted.values()],
-    truncated_catalogs: [...truncated.values()],
-    uncached: [...uncached],
+    truncated_catalogs: [...entries.truncated_catalogs.values()],
+    uncached: [...entries.uncached.values()],
     refusedSpaces: refused,
-    searched: answered.flatMap(({ space }) => (space ? [space.id] : [])),
   };
 }
 
@@ -296,12 +303,20 @@ export async function searchIntegrationTools(
     about(entry.integration_package_id, entry.display_name),
   );
   const unlistedShown = read.unlisted.filter((entry) => about(entry.integration_package_id));
+  const truncatedShown = read.truncated_catalogs.filter((e) => about(e.integration_package_id));
   const matches = rankByKeywords(read.tools, tokens, (tool) => ({
     name: tool.name,
     text: `${tool.integration_package_id} ${tool.description}`,
   })).map(({ item }) => item);
   const shown = matches.slice(0, limit);
   const reached = new Set(shown.flatMap((tool) => tool.connection_ids));
+  // An uncached integration relates to the search by its id or by a tool of it shown.
+  const uncachedShown = read.uncached.filter(
+    (e) =>
+      about(e.integration_package_id) ||
+      shown.some((tool) => tool.integration_package_id === e.integration_package_id),
+  );
+  const connectionsShown = read.connections.filter((c) => reached.has(c.connection_id));
   const notes: string[] = [];
   if (notReadyShown.length > 0) {
     notes.push(
@@ -323,7 +338,7 @@ export async function searchIntegrationTools(
         (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
     );
   }
-  for (const entry of read.truncated_catalogs.filter((e) => about(e.integration_package_id))) {
+  for (const entry of truncatedShown) {
     notes.push(
       `${entry.integration_package_id}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
         "tool(s) its server lists were read, and a tool listed after them is not offered. " +
@@ -346,20 +361,23 @@ export async function searchIntegrationTools(
     section: {
       total: matches.length,
       items: shown.map(listedTool),
-      ...(reached.size > 0
-        ? {
-            connections: read.connections
-              .filter((c) => reached.has(c.connection_id))
-              .map(listedConnection),
-          }
-        : {}),
+      ...(reached.size > 0 ? { connections: connectionsShown.map(listedConnection) } : {}),
       ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
       ...(unlistedShown.length > 0 ? { unlisted: unlistedShown } : {}),
-      ...(read.uncached.length > 0 ? { uncached: read.uncached } : {}),
+      ...(uncachedShown.length > 0
+        ? { uncached: uncachedShown.map((e) => e.integration_package_id) }
+        : {}),
       ...unsearched(read.refusedSpaces),
       ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
     },
-    searched: read.searched,
+    searched: spacesShown(
+      shown,
+      connectionsShown,
+      notReadyShown,
+      unlistedShown,
+      truncatedShown,
+      uncachedShown,
+    ),
   };
 }
 
