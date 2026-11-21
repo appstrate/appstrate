@@ -472,8 +472,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       input: {},
     });
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { code?: string };
+    const body = (await res.json()) as { code?: string; detail: string };
     expect(body.code).toBe("package_not_active_in_space");
+    expect(body.detail).toEndWith(
+      `Activate it with POST /api/spaces/${ctx.defaultSpaceId}/packages {"packageId":"@acme/briefing"}.`,
+    );
   });
 
   it("rejects an unresolvable spec with 404", async () => {
@@ -640,6 +643,10 @@ describe("POST /api/runs/remote — kind: registry", () => {
         tools_policy: { search: {} },
       }),
     });
+    await seedPublishedVersion(INTEG, "1.0.0");
+    // The agent pins the published integration; its author's unfinished draft cannot change
+    // this refusal into an invalid-manifest error or remove the suggested active space.
+    await db.update(packages).set({ draftManifest: {} }).where(eq(packages.id, INTEG));
     // Switched off here, on in `Elsewhere` with the agent.
     await seedSpacePackage(ctx.defaultSpaceId, INTEG, { enabled: false });
     await seedRegistryAgent(
