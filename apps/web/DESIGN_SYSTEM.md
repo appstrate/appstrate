@@ -860,6 +860,11 @@ import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
 `ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
+The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
+canvas and floats beside the thread: its cards and its previewed file are `Card` /
+`FileArtifact` with `FLOATING_FRAME` (`rounded-2xl shadow-xs`), the one place a card
+takes a shadow outside what floats over the page. Its width follows what it shows (a
+list, the details, a file), each remembered per browser.
 
 ## 14. Modules and feature gating
 

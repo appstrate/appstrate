@@ -20,7 +20,6 @@
   "turn.stepLimitReached": "Réponse partielle : limite d'étapes atteinte.",
   "context.label": "Contexte de la conversation",
   "context.collapse": "Replier le contexte de la conversation",
-  "context.error": "Le contexte de la conversation n’a pas pu être chargé.",
   "context.unsaved": "Envoyez un premier message pour créer cette conversation.",
   "context.tabs.info": "Infos",
   "context.file.untitled": "Fichier",
