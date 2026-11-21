@@ -429,7 +429,7 @@ describe("MCP server instructions — org-wide space choice", () => {
       "1. Only one space is listed",
       "2. The user's request names a space",
       "3. For an inline run",
-      "4. For any other act: the space your context designates",
+      "4. For an act step 3 does not name",
       "5. A credential with no personal space",
     ].map(at);
     expect(order).toEqual([...order].sort((a, b) => a - b));
