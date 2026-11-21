@@ -962,6 +962,13 @@ interface AuthResolutionBase {
    * `c.get("credentialSpaceIds")`.
    */
   spaceIds?: readonly string[];
+  /**
+   * Whether {@link spaceIds} is a restriction the person chose. Default `true` (fail closed).
+   * `false`: the set is merely every space the person acts in this turn; the credential stays
+   * confined for every other rule, but acts on connections as the person does. Meaningful with
+   * `spaceIds` only. Propagated to `c.get("credentialSpaceIdsRestricted")` when `false`.
+   */
+  spaceIdsRestricted?: boolean;
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */

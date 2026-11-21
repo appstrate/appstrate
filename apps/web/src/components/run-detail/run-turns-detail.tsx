@@ -11,7 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { fractionOfWindow, formatWindowPercent, readRunContext } from "../run-context";
+import { formatWindowPercent, fractionOfWindow } from "@appstrate/ui/context-window";
+import { readRunContext } from "../run-context";
 import type { RunTurnRow } from "../log-utils";
 import { formatNumber } from "../../lib/format-number";
 

@@ -328,6 +328,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["GET", "POST"], "/api/packages/{scope}/{name}/shares"],
     [["DELETE"], "/api/packages/{scope}/{name}/shares/{target}"],
   ]),
+  ...rowDecided(
+    "`assertPackageOfferAccess`: an owner or admin session, plus `<type>:share` in the package's home",
+    [[["PUT", "DELETE"], "/api/packages/{scope}/{name}/org-offer"]],
+  ),
   ...rowDecided("`loadFileExplorerPackage`: placement and `<type>:read`; a draft asks its home", [
     [["GET"], "/api/packages/{scope}/{name}/files"],
     [["GET"], "/api/packages/{scope}/{name}/files/content"],

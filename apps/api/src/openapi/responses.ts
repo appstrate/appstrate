@@ -22,6 +22,18 @@ export const connectionConflictContent = {
   },
 } as const;
 
+/** The `content` of a 404 that may be `agent_not_active_in_space`: `anyOf`, as above. */
+export const agentNotActiveContent = {
+  "application/problem+json": {
+    schema: {
+      anyOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        { $ref: "#/components/schemas/AgentNotActiveInSpaceProblem" },
+      ],
+    },
+  },
+} as const;
+
 /** The `content` of a JSON-RPC 2.0 error with `id: null`. */
 export const jsonRpcErrorContent = {
   "application/json": {

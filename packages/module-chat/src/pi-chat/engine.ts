@@ -52,9 +52,11 @@ import {
   DEFAULT_MODEL_REASONING_LEVEL,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
+import { ChatTurnDeadlineError, closePiTurn, turnContextOf } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { loadAttachmentImages, readPromptPdfs, type ReadAttachment } from "./attachment-inputs.ts";
+import { createFileRefusal } from "./file-refusal.ts";
+import { fileDelivery } from "../file-input.ts";
 import { createTurnPdfInput } from "./native-pdf.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
@@ -243,6 +245,8 @@ export function runPiChat(input: PiChatInput): Response {
     // Every call records the space it was dispatched in, for the cards that show it later.
     turnSpaces: new Set(platformMcp.organization.spaces.map((space) => space.id)),
   });
+  // Replays a request refused with a file without it, up to twice; the failed attempt is forgotten.
+  const fileRefusal = createFileRefusal(model.api, () => mapper.clearFailure());
 
   const stream = createUIMessageStream({
     onError,
@@ -318,6 +322,8 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      /** The sizing handed to Pi and stamped on the turn's context, and Pi's measure; set with the model. */
+      let contextMeasure: Parameters<typeof turnContextOf>[1];
       /** Detach handle for the Pi event subscription — released in `finally`. */
       let unsubscribe: (() => void) | undefined;
       try {
@@ -346,13 +352,13 @@ export function runPiChat(input: PiChatInput): Response {
         // MCP client it goes on to open — `finally` cannot close what was never
         // assigned. Waiting for both outcomes keeps teardown total.
         const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
-        const pdfInput = createTurnPdfInput(model);
-        const modelSeesImages = model.input.includes("image");
+        const delivery = fileDelivery(model);
+        const pdfInput = createTurnPdfInput(model, delivery);
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
               ...platformMcp,
-              modelSeesImages,
+              fileDelivery: delivery,
               pdfInput,
               writeChunk: write,
               signal: turnAbort.signal,
@@ -407,6 +413,8 @@ export function runPiChat(input: PiChatInput): Response {
         } = sdk;
 
         const piModel = model;
+        const sizing = derivePiCompactionSettings(piModel);
+        contextMeasure = { sizing, contextTokens: sdk.calculateContextTokens };
         const requestedThinkingLevel =
           input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {
@@ -441,7 +449,7 @@ export function runPiChat(input: PiChatInput): Response {
         const read = input.readAttachment;
         const signal = turnAbort.signal;
         const images =
-          modelSeesImages && read
+          delivery.image && read
             ? await untilAborted(
                 loadAttachmentImages(
                   input.messages,
@@ -464,7 +472,7 @@ export function runPiChat(input: PiChatInput): Response {
             estimateTokens,
             images,
             pdfReceipts,
-            modelSeesImages,
+            fileDelivery: delivery,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
             // Still a floor, not a measurement: tool schemas and this turn's own
@@ -536,6 +544,8 @@ export function runPiChat(input: PiChatInput): Response {
                 ...authExtensions,
                 ...generationExtensions,
                 pdfInput.extension,
+                // Last: it judges and edits the payload exactly as it goes on the wire.
+                fileRefusal.extension,
               ],
               systemPrompt: system,
             }),
@@ -556,7 +566,7 @@ export function runPiChat(input: PiChatInput): Response {
             resourceLoader,
             sessionManager,
             settingsManager: SettingsManager.inMemory({
-              compaction: derivePiCompactionSettings(piModel).compaction,
+              compaction: sizing.compaction,
               thinkingBudgets,
               // The chat only passes bounded, supported rasters. Do not decode them in the API.
               images: { autoResize: false },
@@ -662,8 +672,11 @@ export function runPiChat(input: PiChatInput): Response {
         // localizes the stable category.
         const meta = mapper.result();
         const stepCount = mapper.stepCount();
+        // A replay refused the same way leaves the first failure as the turn's error.
         const turnError =
-          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
+          meta.finishReason === "error"
+            ? (fileRefusal.originalError() ?? meta.errorText ?? "unknown model error")
+            : meta.errorText;
         const closing = closePiTurn({
           error: turnError,
           finishReason: meta.finishReason,
@@ -679,6 +692,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelId: input.presetId,
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
+          ...turnContextOf(meta, contextMeasure),
         });
         // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
@@ -746,6 +760,7 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
+            ...turnContextOf(mapper.result(), contextMeasure),
           });
           logger.error("Pi chat turn failed", {
             err: String(err),
@@ -759,6 +774,17 @@ export function runPiChat(input: PiChatInput): Response {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
         unsubscribe?.();
+        // Files a replay withheld, once per turn and whatever the outcome; the turn records none.
+        const withheld = fileRefusal.withheldKinds();
+        if (withheld.length) {
+          logger.warn("chat turn withheld files after a provider refusal", {
+            orgId: input.orgId,
+            presetId: input.presetId,
+            chatSessionId: input.chatSessionId,
+            api: model.api,
+            withheld,
+          });
+        }
         // Once per turn, on every exit, so a turn that died in construction
         // still reports how far it got (`null` past that point).
         logger.info("chat turn construction", {

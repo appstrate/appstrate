@@ -51,8 +51,11 @@ import {
   seedPublishedVersion,
   seedPackageShare,
   seedPackageVersion,
+  seedSpace,
   seedSpaceMember,
+  seedSpacePackage,
   seedSpaceRole,
+  seedUnreachableSpace,
 } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationPins, spacePackages } from "@appstrate/db/schema";
@@ -546,6 +549,103 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
     expect(err!.code).toBe("integration_not_active");
+  });
+
+  it("names the activation door and the caller's spaces where the launch could run instead", async () => {
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(INTEGRATION),
+    });
+    // Ready: the agent and the integration are both active there.
+    const ready = await seedSpace({ orgId: ctx.orgId, name: "Ready" });
+    // The agent alone: the launch would be refused there too.
+    const agentOnly = await seedSpace({ orgId: ctx.orgId, name: "Agent only" });
+    // Both active, in a space the caller does not read.
+    const hidden = await seedUnreachableSpace(ctx.orgId);
+    for (const spaceId of [ready.id, agentOnly.id, hidden]) await seedSpacePackage(spaceId, AGENT);
+    for (const spaceId of [ready.id, hidden]) await seedSpacePackage(spaceId, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemDetails & { active_in_spaces?: unknown };
+    const remedy = `POST /api/spaces/${ctx.defaultSpaceId}/packages {"packageId":"${INTEGRATION}"}`;
+    expect(body.errors!.find((e) => e.code === "integration_not_active")!.message).toContain(
+      remedy,
+    );
+    expect(body.active_in_spaces).toEqual([{ id: ready.id, name: "Ready" }]);
+
+    // Readiness carries the same remedy, and no launch alternative: it is a read.
+    const readiness = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      headers: authHeaders(ctx),
+    });
+    expect(readiness.status).toBe(200);
+    const verdict = (await readiness.json()) as Record<string, unknown> & {
+      errors: ValidationFieldError[];
+    };
+    expect(verdict.errors.find((e) => e.code === "integration_not_active")!.message).toContain(
+      remedy,
+    );
+    expect(JSON.stringify(verdict)).not.toContain("active_in_spaces");
+  });
+
+  it("names no space where another required integration would refuse the launch", async () => {
+    // Required A and B; A active here, B off. S1 holds B but not A; S2 holds both.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION, SECOND_INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    for (const id of [INTEGRATION, SECOND_INTEGRATION]) {
+      await seedPackage({
+        id,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: buildIntegrationManifest(id),
+      });
+    }
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    const s1 = await seedSpace({ orgId: ctx.orgId, name: "S1" });
+    const s2 = await seedSpace({ orgId: ctx.orgId, name: "S2" });
+    for (const spaceId of [s1.id, s2.id]) {
+      await seedSpacePackage(spaceId, AGENT);
+      await seedSpacePackage(spaceId, SECOND_INTEGRATION);
+    }
+    await seedSpacePackage(s2.id, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemDetails & { active_in_spaces?: unknown };
+    expect(body.errors!.find((e) => e.code === "integration_not_active")!.field).toBe(
+      `integrations.${SECOND_INTEGRATION}`,
+    );
+    expect(body.active_in_spaces).toEqual([{ id: s2.id, name: "S2" }]);
   });
 
   it("reports an inactive integration ONCE — no downstream not_connected", async () => {

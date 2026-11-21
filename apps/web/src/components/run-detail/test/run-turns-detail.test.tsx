@@ -15,7 +15,7 @@ import { I18nextProvider } from "react-i18next";
 import agentsFr from "../../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import type { RunTurnRow } from "../../log-utils.ts";
-import { formatWindowPercent } from "../../run-context.ts";
+import { formatWindowPercent } from "@appstrate/ui/context-window";
 import { formatNumber } from "../../../lib/format-number.ts";
 import { RunTurnsDetail } from "../run-turns-detail.tsx";
 

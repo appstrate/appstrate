@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `search_integration_tools` and `call_integration_tool`: the tools of the integrations the caller
- * holds a connection of, outside a run, behind two discovery tools.
+ * The tools of the integrations the caller holds a connection of, outside a run: `search` lists
+ * them (its `integration_tool` kind), `describe` details one, and `call_integration_tool` calls
+ * one.
  *
- * Both read the tools from the proxy's listing route (`integration-tool-catalog.ts`), which names
- * each one (`{ns}__api_call`, `{ns}__api_call__{auth}`, `{ns}__{tool}`), describes it and lists its
- * connections; here a search only filters and ranks them, and a call resolves its tool by its full
- * name and runs it. Every upstream request is dispatched in-process to
+ * All three read the tools from the proxy's listing route (`integration-tool-catalog.ts`), which
+ * names each one (`{ns}__api_call`, `{ns}__api_call__{auth}`, `{ns}__{tool}`), describes it and
+ * lists its connections; here a search only filters and ranks them, and a call resolves its tool
+ * by its full name and runs it. Every upstream request is dispatched in-process to
  * the proxy routes (`routes/credential-proxy.ts`), so the guard, the rate limit and the access
  * rule (`services/credential-proxy/access.ts`) are the REST door's and none is restated here.
- * Those routes are kept out of the operation catalog (`isExcludedPath`): the two tools are the one
- * MCP path to them, with typed arguments where `/proxy` takes control headers and a bounded result
- * where it relays the upstream body.
+ * Those routes are kept out of the operation catalog (`isExcludedPath`): `call_integration_tool`
+ * and the `integration_tool` kind of `search` and `describe` are the one MCP path to them, with
+ * typed arguments where `/proxy` takes control headers and a bounded result where it relays the
+ * upstream body.
+ *
+ * Calling stays a tool of its own, not an operation of `invoke_operation`: it relays the upstream
+ * `CallToolResult` as is (content blocks, `isError`), which an operation's `{ status, body }`
+ * cannot carry.
  */
 
 import { z } from "zod";
@@ -21,24 +27,25 @@ import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
+import { readSpaces, unsearched } from "./discovery.ts";
 import {
   MAX_LISTED_SCOPES,
   readIntegrationTools,
+  type CallableListing,
   type CallableTool,
-  type ListingRefusal,
 } from "./integration-tool-catalog.ts";
+import { MAX_SEARCH_LIMIT, rankByKeywords, searchScore } from "./search.ts";
 import {
-  DEFAULT_SEARCH_LIMIT,
-  MAX_SEARCH_LIMIT,
-  rankByKeywords,
-  searchLimit,
-  searchScore,
-  searchTokens,
-} from "./search.ts";
-import { asRecord, jsonResult, refusalResult, type Refusal } from "./tool-results.ts";
+  asRecord,
+  jsonResult,
+  refusalResult,
+  type Refusal,
+  type RouteRefusal,
+} from "./tool-results.ts";
+import type { McpSpace } from "./spaces.ts";
 import type { McpObserver, McpToolName } from "./tools.ts";
 
-interface IntegrationToolContext extends DispatchContext {
+export interface IntegrationToolContext extends DispatchContext {
   observe: McpObserver;
   /** The caller is also offered `run_and_wait`, so the descriptions may name it. */
   runs: boolean;
@@ -99,13 +106,13 @@ function argumentsRefusal(error: z.ZodError, input: unknown, prefix: PropertyKey
   };
 }
 
-/** The listing route's refusal, as `invoke_operation` would relay it. */
-function listingRefused(
+/** The listing route's refusal, observed as `invoke_operation` observes a route's. */
+export function observeListingRefusal(
   ctx: IntegrationToolContext,
   tool: McpToolName,
   start: number,
-  refused: ListingRefusal,
-): CallToolResult {
+  refused: RouteRefusal,
+): RouteRefusal {
   ctx.observe({
     tool,
     durationMs: performance.now() - start,
@@ -114,7 +121,7 @@ function listingRefused(
     status: refused.status,
     outcome: "invoked",
   });
-  return jsonResult({ ...refused }, true);
+  return refused;
 }
 
 /** A connection as a search lists it: a long `scopes_granted` cut, its total beside it. */
@@ -129,12 +136,13 @@ function listedConnection<C extends { scopes_granted: string[] }>(connection: C)
     : connection;
 }
 
-/** A tool as a search lists it, its connections among the result's `connections`. */
-function listedTool(tool: CallableTool): Record<string, unknown> {
+/** A tool as a search lists it, its connections among the section's `connections`. */
+function listedTool(tool: Merged<CallableTool>): Record<string, unknown> {
   return {
-    tool: tool.name,
+    id: tool.name,
     integration_package_id: tool.integration_package_id,
     description: tool.description,
+    ...(tool.granted_in ? { granted_in: tool.granted_in } : {}),
     ...(tool.kind === "remote" && tool.catalog_unreadable ? { catalog_unreadable: true } : {}),
     connection_ids: tool.connection_ids,
     ...(tool.kind === "remote" && tool.missing_scopes
@@ -143,134 +151,201 @@ function listedTool(tool: CallableTool): Record<string, unknown> {
   };
 }
 
-function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): AppstrateToolDefinition {
-  const descriptor: Tool = {
-    name: "search_integration_tools",
-    description:
-      "Search the tools of the integrations you hold a connection of, or that need none, in " +
-      "this space, by keyword and/or integration; with neither, list them, `limit` at a " +
-      "time. They are each integration's `api_call` tools and, for an integration backed by " +
-      "a remote MCP server, the typed tools that server offers. Each result has the `tool` " +
-      "name to pass to call_integration_tool, its `integration_package_id`, a `description` " +
-      "and the `connection_ids` it reaches among the result's `connections`, each with the " +
-      "`connection_id` to pass (empty: omit `connection_id`); `catalog_unreadable: true` " +
-      "marks a typed tool whose server could not be listed, named without description or " +
-      "schema. A cold catalog listed through a connection sends its credential: it is " +
-      "journaled as the connection's call, a 401 triggers the forced refresh, which can " +
-      "rotate its OAuth tokens, and a refusal can flag the connection to reconnect; " +
-      "listing an integration that binds no connection is journaled with no connection. " +
-      "`total` counts every match; `note` says when more matched than are shown, or when a " +
-      "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
-      "`not_ready`, the integrations active here you have no usable connection of and whose " +
-      "tools can be called outside a run, each with " +
-      "its `proxy_connection` verdict (`status`, `imposed`) and, when a selection refusal " +
-      "explains it, that `refusal`, whose `connect_url` is a single-use link to hand to the " +
-      "user, which connects the integration as them; `unlisted`, the remote integrations whose " +
-      "server the platform refused to list, with that `refusal`: their typed tools are missing " +
-      "until it is cleared. With `credential-proxy:call-own` alone, a connection another " +
-      "member shared is reached through " +
-      (ctx.runs ? "a run (run_and_wait). " : "an agent run only. ") +
-      "With `query` or `integration`, `best_match` adds to the top result (a tool's exact " +
-      "name ranks first) its `input_schema`, a typed tool's `output_schema` when its server " +
-      "declares one, and its `usage`: how to call it, how to read its result and what its " +
-      "connections' fields mean.",
-    annotations: {
-      title: "Search integration tools",
-      // A listing writes a call-journal row, can rotate OAuth tokens and flag the connection;
-      // none destroys data, and each listing reaching a server writes one more row: not idempotent.
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      // It queries third-party servers and relays their text.
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        query: {
-          type: "string",
-          description: "Free-text keywords matched against tool name, integration and description.",
-        },
-        integration: {
-          type: "string",
-          description: "Restrict to one integration, by package id (`@scope/name`).",
-        },
-        limit: {
-          type: "integer",
-          description: `Max results (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
-          minimum: 1,
-          maximum: MAX_SEARCH_LIMIT,
-        },
-      },
-    },
+/** A tool as `describe` details it: how to call it and read its result, and its schemas. */
+function describedTool(tool: Merged<CallableTool>): Record<string, unknown> {
+  return {
+    kind: "integration_tool",
+    ...listedTool(tool),
+    usage: tool.usage,
+    input_schema: tool.input_schema,
+    ...(tool.kind === "remote" && tool.output_schema ? { output_schema: tool.output_schema } : {}),
   };
+}
 
-  const handler = async (
-    args: Record<string, unknown>,
-    extra: AppstrateRequestExtra,
-  ): Promise<CallToolResult> => {
-    const start = performance.now();
-    const integration = typeof args.integration === "string" ? args.integration : undefined;
-    const limit = searchLimit(args.limit);
-    const tokens = searchTokens(args.query);
-    const read = await readIntegrationTools(ctx, integration ? { integration } : {}, extra.signal);
-    if ("refused" in read)
-      return listingRefused(ctx, "search_integration_tools", start, read.refused);
+/**
+ * What `search` and `describe` do when they declare the kind: they may query third-party servers
+ * with a connection's credential, which journals a call and can rotate its OAuth tokens.
+ */
+export const INTEGRATION_KIND_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
 
-    const about = (id: string, text = "") =>
-      tokens.length === 0 || searchScore(`${id} ${text}`, tokens) > 0;
-    const notReadyShown = read.not_ready.filter((entry) =>
-      about(entry.integration_package_id, entry.display_name),
+/** What `search` says of the integration tools, for its description: what is listed and how to call one. */
+export const INTEGRATION_TOOLS_DESCRIPTION =
+  " Integration tools are the tools of the integrations you hold a connection of, or that need " +
+  "none, in the space: each integration's `api_call` tools and the typed tools of a remote MCP " +
+  "server; call one with call_integration_tool, passing its `id` as `tool`. Naming " +
+  "`integration_tool` in `kinds` reads remote catalogs from their servers (the connection's " +
+  "credential is sent, journaled as its call); otherwise, an `integration` included, remote " +
+  "catalogs are read from the cache alone, a cold one's tools are listed by name only " +
+  "(`catalog_unreadable: true`) and the integration is named in `uncached`.";
+
+/** A listed entry, and the spaces of an org-wide call it is listed in (none when pinned). */
+type Merged<T> = T & { granted_in?: string[] };
+
+/** Whether a tool's descriptor is its server's own (its catalog was read), not a name alone. */
+const isReadable = (tool: CallableTool) => !(tool.kind === "remote" && tool.catalog_unreadable);
+
+/**
+ * The listings of the spaces of an org-wide call, or the one of a pinned connection, as one: a
+ * tool listed in several spaces once, under `granted_in`, with the union of its connection ids
+ * and missing scopes and the readable descriptor if any space read it; a connection, `not_ready`
+ * or `unlisted` entry the same in several spaces once, under `granted_in`. A space whose listing
+ * was refused is reported apart; all refused answers the first.
+ */
+async function readAcrossSpaces(
+  spaces: readonly McpSpace[] | undefined,
+  contextIn: (space: McpSpace | undefined) => IntegrationToolContext,
+  query: { integration?: string; cachedOnly: boolean },
+  signal: AbortSignal | undefined,
+) {
+  const { answered, refused } = await readSpaces(spaces, (space) =>
+    readIntegrationTools(
+      contextIn(space),
+      {
+        ...(query.integration ? { integration: query.integration } : {}),
+        ...(query.cachedOnly ? { cachedOnly: true } : {}),
+      },
+      signal,
+    ),
+  );
+  if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
+
+  const tools = new Map<string, Merged<CallableTool>>();
+  const truncated = new Map<string, CallableListing["truncated_catalogs"][number]>();
+  const uncached = new Set<string>();
+  const entries = {
+    connections: new Map<string, Merged<CallableListing["connections"][number]>>(),
+    not_ready: new Map<string, Merged<CallableListing["not_ready"][number]>>(),
+    unlisted: new Map<string, Merged<CallableListing["unlisted"][number]>>(),
+  };
+  const add = <T extends object>(into: Map<string, Merged<T>>, entry: T, space?: McpSpace) => {
+    const key = JSON.stringify(entry);
+    const found = into.get(key);
+    if (found?.granted_in && space) found.granted_in.push(space.id);
+    else into.set(key, space ? { ...entry, granted_in: [space.id] } : entry);
+  };
+  for (const { space, value: read } of answered) {
+    for (const tool of read.tools) {
+      const key = `${tool.integration_package_id}\0${tool.name}`;
+      const found = tools.get(key);
+      const base = found && (isReadable(found) || !isReadable(tool)) ? found : tool;
+      const merged: Merged<CallableTool> = {
+        ...base,
+        connection_ids: [...new Set([...(found?.connection_ids ?? []), ...tool.connection_ids])],
+        ...(space ? { granted_in: [...(found?.granted_in ?? []), space.id] } : {}),
+      };
+      if (merged.kind === "remote") {
+        const scopes = {
+          ...(found?.kind === "remote" ? found.missing_scopes : {}),
+          ...(tool.kind === "remote" ? tool.missing_scopes : {}),
+        };
+        if (Object.keys(scopes).length > 0) merged.missing_scopes = scopes;
+      }
+      tools.set(key, merged);
+    }
+    for (const connection of read.connections) add(entries.connections, connection, space);
+    for (const entry of read.not_ready) add(entries.not_ready, entry, space);
+    for (const entry of read.unlisted) add(entries.unlisted, entry, space);
+    for (const entry of read.truncated_catalogs) truncated.set(entry.integration_package_id, entry);
+    for (const name of read.uncached) uncached.add(name);
+  }
+  return {
+    tools: [...tools.values()],
+    connections: [...entries.connections.values()],
+    not_ready: [...entries.not_ready.values()],
+    unlisted: [...entries.unlisted.values()],
+    truncated_catalogs: [...truncated.values()],
+    uncached: [...uncached],
+    refusedSpaces: refused,
+    searched: answered.flatMap(({ space }) => (space ? [space.id] : [])),
+  };
+}
+
+/** The `connections` a tool reaches among `listed`, as a search lists them. */
+function reachedBy<C extends { connection_id: string; scopes_granted: string[] }>(
+  tool: CallableTool,
+  listed: readonly C[],
+): { connections?: unknown[] } {
+  const reached = new Set(tool.connection_ids);
+  return reached.size > 0
+    ? { connections: listed.filter((c) => reached.has(c.connection_id)).map(listedConnection) }
+    : {};
+}
+
+/**
+ * The integration tools section of a search, ranked by `tokens`, the remote catalogs read from the
+ * cache alone when `cachedOnly`; one read per space (one for a pinned connection), concurrently.
+ */
+export async function searchIntegrationTools(
+  spaces: readonly McpSpace[] | undefined,
+  contextIn: (space: McpSpace | undefined) => IntegrationToolContext,
+  query: { tokens: readonly string[]; integration?: string; limit: number; cachedOnly: boolean },
+  signal: AbortSignal | undefined,
+): Promise<{ section: Record<string, unknown>; searched: string[] } | { refused: RouteRefusal }> {
+  const { tokens, integration, limit, cachedOnly } = query;
+  const read = await readAcrossSpaces(spaces, contextIn, { integration, cachedOnly }, signal);
+  if (read.refused) return { refused: read.refused };
+
+  const about = (id: string, text = "") =>
+    tokens.length === 0 || searchScore(`${id} ${text}`, tokens) > 0;
+  const notReadyShown = read.not_ready.filter((entry) =>
+    about(entry.integration_package_id, entry.display_name),
+  );
+  const unlistedShown = read.unlisted.filter((entry) => about(entry.integration_package_id));
+  const matches = rankByKeywords(read.tools, tokens, (tool) => ({
+    name: tool.name,
+    text: `${tool.integration_package_id} ${tool.description}`,
+  })).map(({ item }) => item);
+  const shown = matches.slice(0, limit);
+  const reached = new Set(shown.flatMap((tool) => tool.connection_ids));
+  const notes: string[] = [];
+  if (notReadyShown.length > 0) {
+    notes.push(
+      "`not_ready` lists the integrations active in a space searched that you have no usable connection of, each " +
+        "with its `proxy_connection` verdict and, when a selection refusal explains it, that " +
+        "`refusal`, whose `connect_url` is a single-use link to hand to the user.",
     );
-    const unlistedShown = read.unlisted.filter((entry) => about(entry.integration_package_id));
-    const matches = rankByKeywords(read.tools, tokens, (tool) => ({
-      name: tool.name,
-      text: `${tool.integration_package_id} ${tool.description}`,
-    }));
-    const shown = matches.slice(0, limit);
-    const reached = new Set(shown.flatMap((tool) => tool.connection_ids));
-    ctx.observe({
-      tool: "search_integration_tools",
-      durationMs: performance.now() - start,
-      shownCount: shown.length,
-      outcome: "invoked",
-    });
-    const notes: string[] = [];
-    if (matches.length > shown.length) {
-      notes.push(
-        `${matches.length - shown.length} more tool(s) match than the ${limit} shown: narrow ` +
-          "with `query`, or pass `integration` to search one integration" +
-          (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
-      );
-    }
-    const truncated = read.truncated_catalogs.filter((entry) =>
-      about(entry.integration_package_id),
+  }
+  if (unlistedShown.length > 0) {
+    notes.push(
+      "`unlisted` lists the remote integrations whose server the platform refused to list, " +
+        "with that `refusal`.",
     );
-    for (const entry of truncated) {
-      notes.push(
-        `${entry.integration_package_id}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
-          "tool(s) its server lists were read, and a tool listed after them is not offered. " +
-          "Narrow with `integration`, or search the tool by name.",
-      );
-    }
-    if (
-      integration !== undefined &&
-      matches.length === 0 &&
-      notReadyShown.length === 0 &&
-      unlistedShown.length === 0
-    ) {
-      notes.push(
-        tokens.length > 0
-          ? `No tool of ${integration} matches \`query\`; search without it to list them all.`
-          : `${integration} offers you no tool to call in this space.`,
-      );
-    }
-    const top = shown[0];
-    const searched = tokens.length > 0 || integration !== undefined;
-    return jsonResult({
+  }
+  if (matches.length > shown.length) {
+    notes.push(
+      `${matches.length - shown.length} more tool(s) match than the ${limit} shown: narrow ` +
+        "with `query`, or pass `integration` to search one integration" +
+        (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
+    );
+  }
+  for (const entry of read.truncated_catalogs.filter((e) => about(e.integration_package_id))) {
+    notes.push(
+      `${entry.integration_package_id}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
+        "tool(s) its server lists were read, and a tool listed after them is not offered. " +
+        "Narrow with `integration`, or search the tool by name.",
+    );
+  }
+  if (
+    integration !== undefined &&
+    matches.length === 0 &&
+    notReadyShown.length === 0 &&
+    unlistedShown.length === 0
+  ) {
+    notes.push(
+      tokens.length > 0
+        ? `No tool of ${integration} matches \`query\`; search without it to list them all.`
+        : `${integration} offers you no tool to call in the spaces searched.`,
+    );
+  }
+  return {
+    section: {
       total: matches.length,
-      tools: shown.map(listedTool),
+      items: shown.map(listedTool),
       ...(reached.size > 0
         ? {
             connections: read.connections
@@ -280,23 +355,72 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
         : {}),
       ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
       ...(unlistedShown.length > 0 ? { unlisted: unlistedShown } : {}),
+      ...(read.uncached.length > 0 ? { uncached: read.uncached } : {}),
+      ...unsearched(read.refusedSpaces),
       ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
-      ...(searched && top
-        ? {
-            best_match: {
-              ...listedTool(top),
-              usage: top.usage,
-              input_schema: top.input_schema,
-              ...(top.kind === "remote" && top.output_schema
-                ? { output_schema: top.output_schema }
-                : {}),
-            },
-          }
-        : {}),
-    });
+    },
+    searched: read.searched,
   };
+}
 
-  return { descriptor, handler };
+/**
+ * The tool named `name` among a listing read for it, or why none is: the refusal of a name that
+ * lists none or several, or the problem of the remote server whose listing was refused.
+ * `argument` is the argument that carried the name.
+ */
+function resolveToolByName(
+  read: CallableListing,
+  name: string,
+  argument: string,
+): { tool: CallableTool } | { refusal: Refusal } | { unlisted: Record<string, unknown> } {
+  const candidates = read.tools.filter((t) => t.name === name);
+  const [tool] = candidates;
+  if (candidates.length === 1 && tool) return { tool };
+  const unlisted = read.unlisted[0];
+  if (!tool && unlisted)
+    return { unlisted: unlisted.refusal as unknown as Record<string, unknown> };
+  if (tool) {
+    // Names are unique in a space: two tools under one name are never chosen by a guess.
+    return {
+      refusal: {
+        code: "ambiguous_tool",
+        error: `${name} names ${candidates.length} tools of ${[
+          ...new Set(candidates.map((t) => t.integration_package_id)),
+        ].join(", ")}; none is chosen.`,
+        arguments: [argument],
+      },
+    };
+  }
+  return {
+    refusal: {
+      code: "unknown_tool",
+      error: `No integration tool named ${name} is callable by you in this space.`,
+      arguments: [argument],
+      hint: "Take the id from search.",
+    },
+  };
+}
+
+/**
+ * One integration tool, resolved by its name as `call_integration_tool` resolves it: its schemas
+ * and `usage`, or why it cannot be called.
+ */
+export async function describeIntegrationTool(
+  ctx: IntegrationToolContext,
+  name: string,
+  signal: AbortSignal | undefined,
+): Promise<CallToolResult> {
+  const start = performance.now();
+  const read = await readIntegrationTools(ctx, { name }, signal);
+  if ("refused" in read) {
+    return refusalResult(observeListingRefusal(ctx, "describe", start, read.refused));
+  }
+  ctx.observe({ tool: "describe", durationMs: performance.now() - start, outcome: "invoked" });
+  const found = resolveToolByName(read, name, "id");
+  if ("tool" in found) {
+    return jsonResult({ ...describedTool(found.tool), ...reachedBy(found.tool, read.connections) });
+  }
+  return "unlisted" in found ? jsonResult(found.unlisted, true) : refusalResult(found.refusal);
 }
 
 const callSchema = z.strictObject({
@@ -305,13 +429,13 @@ const callSchema = z.strictObject({
   connection_id: z.uuid().optional(),
 });
 
-function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToolDefinition {
+export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "call_integration_tool",
     description:
-      "Call a tool search_integration_tools returned, by its `tool` name, with `arguments` " +
-      "following its `input_schema`; its `usage` (in `best_match`, which a search by the " +
-      "tool's exact name returns) says how to read the result. A missing required argument is " +
+      "Call an integration tool search returned, by its `id` passed as `tool`, with `arguments` " +
+      "following its `input_schema`; its `usage` (from describe) " +
+      "says how to read the result. A missing required argument is " +
       "refused before anything is sent; an `api_call` tool refuses any other argument it does " +
       "not declare the same way, and so does a typed tool whose `input_schema` closes its " +
       "properties (`additionalProperties: false`); a typed tool's server validates the rest " +
@@ -339,7 +463,7 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       properties: {
         tool: {
           type: "string",
-          description: "The tool's name, as search_integration_tools returned it.",
+          description: "The tool's `id`, as search returned it.",
         },
         arguments: {
           type: "object",
@@ -383,37 +507,23 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       },
       extra.signal,
     );
-    if ("refused" in read) return listingRefused(ctx, "call_integration_tool", start, read.refused);
-    const candidates = read.tools.filter((t) => t.name === call.data.tool);
-    if (candidates.length > 1) {
-      // Names are unique in a space: two tools under one name are never called by a guess.
-      return refuse({
-        code: "ambiguous_tool",
-        error: `${call.data.tool} names ${candidates.length} tools of ${[
-          ...new Set(candidates.map((t) => t.integration_package_id)),
-        ].join(", ")}; none is called.`,
-        arguments: ["tool"],
-      });
+    if ("refused" in read) {
+      return refusalResult(
+        observeListingRefusal(ctx, "call_integration_tool", start, read.refused),
+      );
     }
-    const tool = candidates[0];
-    const unlisted = read.unlisted[0];
-    if (!tool && unlisted) {
+    const found = resolveToolByName(read, call.data.tool, "tool");
+    if ("unlisted" in found) {
       // A remote server's listing was refused (connection, permission): the refusal says why.
       ctx.observe({
         tool: "call_integration_tool",
         durationMs: performance.now() - start,
         outcome: "invoked",
       });
-      return jsonResult(unlisted.refusal as unknown as Record<string, unknown>, true);
+      return jsonResult(found.unlisted, true);
     }
-    if (!tool) {
-      return refuse({
-        code: "unknown_tool",
-        error: `No integration tool named ${call.data.tool} is callable by you in this space.`,
-        arguments: ["tool"],
-        hint: "Take the name from search_integration_tools.",
-      });
-    }
+    if ("refusal" in found) return refuse(found.refusal);
+    const { tool } = found;
 
     let toolArguments: unknown = call.data.arguments;
     if (tool.schema) {
@@ -466,9 +576,4 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
   };
 
   return { descriptor, handler };
-}
-
-/** Declared together, to a caller `McpSurface.proxies` holds for. */
-export function buildIntegrationTools(ctx: IntegrationToolContext): AppstrateToolDefinition[] {
-  return [buildSearchIntegrationToolsTool(ctx), buildCallIntegrationToolTool(ctx)];
 }

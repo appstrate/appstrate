@@ -163,6 +163,23 @@ export interface AppstrateTurnMetadata {
    */
   modelId?: string;
   modelLabel?: string;
+  /** The context of the turn's last settled model call; absent when no call settled. */
+  context?: AppstrateTurnContext;
+}
+
+/** The context a turn's last settled model call carried, never summed over the turn's calls. */
+export interface AppstrateTurnContext {
+  /** Pi's `calculateContextTokens` of that call (input, output and cache together). */
+  tokens: number;
+  /** Window the engine ran the turn against, its fallback included. */
+  window: number;
+  /** Size past which the engine summarizes the history (`window - reserveTokens`). */
+  compactAt: number;
+  /**
+   * The engine summarized the history during this turn. The summary is not kept: the history is
+   * past `compactAt`, and every later turn summarizes it again.
+   */
+  compacted?: boolean;
 }
 
 export interface ChatMessageMetadata {

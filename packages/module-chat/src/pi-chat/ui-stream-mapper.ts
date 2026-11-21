@@ -37,7 +37,7 @@ import type {
 
 /**
  * Strip an `mcp__<server>__` prefix so tool names match the bare MCP names
- * (`mcp__platform__search_operations` → `search_operations`). Tool names may
+ * (`mcp__platform__search` → `search`). Tool names may
  * themselves contain `__`, so we split on the delimiter and drop exactly the
  * `mcp` + server segments. Non-MCP names pass through.
  */
@@ -74,6 +74,10 @@ interface PiChatResultMeta {
   usage: TokenUsage;
   finishReason: PiFinishReason;
   errorText?: string;
+  /** Usage of the turn's last settled call, which `usage` (a sum over calls) cannot give back. */
+  lastSettledUsage?: PiUsage;
+  /** Pi summarized the history during the turn. */
+  compacted: boolean;
 }
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
@@ -154,6 +158,8 @@ export class PiChatUiStreamMapper {
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
+  private lastSettledUsage: PiUsage | undefined;
+  private compacted = false;
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -173,6 +179,7 @@ export class PiChatUiStreamMapper {
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
+      aborted?: boolean;
     };
     switch (e.type) {
       case "message_start":
@@ -219,6 +226,9 @@ export class PiChatUiStreamMapper {
         // a `handleRunFailure` message that never got a `message_end` is the
         // only assistant entry in its list, so it is still captured.
         this.captureFailure(lastAssistantMessage(e.messages ?? []));
+        return [];
+      case "compaction_end":
+        if (!e.aborted && e.result !== undefined) this.compacted = true;
         return [];
       default:
         return [];
@@ -329,6 +339,10 @@ export class PiChatUiStreamMapper {
     const m = assistantView(message);
     if (!m) return;
     if (m.usage) this.accUsage = addRequestUsage(this.accUsage, m.usage, this.cost);
+    // Pi's own rule for a call that measured something (`getLastAssistantUsage`).
+    if (m.usage && m.stopReason !== "aborted" && m.stopReason !== "error") {
+      this.lastSettledUsage = m.usage;
+    }
     this.finishReason = mapStopReason(m.stopReason);
     // A model call that SETTLED retires the previous failure. Pi retries inside
     // one turn, so an early 503 the next call recovered from is no longer this
@@ -343,11 +357,9 @@ export class PiChatUiStreamMapper {
     //    settled nothing — an earlier failure is still the last thing that
     //    actually went wrong and must keep reaching the user.
     //
-    // Nothing genuine is silenced on the `error`-chunk path in `engine.ts`
-    // (`meta.errorText ?? (finishReason === "error" ? … )`): the two fields move
-    // together here — the same `message_end` that clears the text also moves
-    // `finishReason` off "error", so a turn still reporting "error" always has
-    // its text (or falls back to "unknown model error").
+    // Nothing genuine is silenced on the engine's `error`-chunk path: the same
+    // `message_end` that clears the text also moves `finishReason` off "error",
+    // and `clearFailure()` retires both at once before a file-refusal replay.
     if (m.stopReason !== "error" && m.stopReason !== "aborted") this.lastError = undefined;
     this.captureFailure(message);
   }
@@ -362,6 +374,12 @@ export class PiChatUiStreamMapper {
     if (!m?.errorMessage || m.stopReason !== "error") return;
     this.finishReason = "error";
     this.lastError = m.errorMessage;
+  }
+
+  /** Retire the recorded failure: the engine replays the failed call (`file-refusal.ts`). */
+  clearFailure(): void {
+    if (this.finishReason === "error") this.finishReason = "stop";
+    this.lastError = undefined;
   }
 
   /** Model calls completed so far in this turn (see {@link modelCalls}). */
@@ -379,6 +397,8 @@ export class PiChatUiStreamMapper {
       usage: this.accUsage,
       finishReason: this.finishReason,
       ...(this.lastError ? { errorText: this.lastError } : {}),
+      ...(this.lastSettledUsage ? { lastSettledUsage: this.lastSettledUsage } : {}),
+      compacted: this.compacted,
     };
   }
 }

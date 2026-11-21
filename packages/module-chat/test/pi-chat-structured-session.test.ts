@@ -11,7 +11,11 @@ import {
 } from "../src/pi-chat/structured-session.ts";
 
 const { estimateTokens } = await loadPiCodingAgentSdk();
-const OPTIONS: BuildStructuredPiTurnOptions = { estimateTokens, baseTokens: 0 };
+const OPTIONS: BuildStructuredPiTurnOptions = {
+  estimateTokens,
+  baseTokens: 0,
+  fileDelivery: { image: false, pdf: false },
+};
 
 const MODEL: PiHistoryModel = {
   api: "openai-completions" as Api,
@@ -30,7 +34,7 @@ const toolThread: UIMessage[] = [
       { type: "step-start" },
       {
         type: "dynamic-tool",
-        toolName: "search_operations",
+        toolName: "search",
         toolCallId: "call_search",
         state: "output-available",
         input: { query: "agents" },
@@ -88,7 +92,7 @@ describe("structured Pi session reconstruction", () => {
     const results = turn.history.filter((message) => message.role === "toolResult");
     expect(results[0]).toMatchObject({
       toolCallId: "call_search",
-      toolName: "search_operations",
+      toolName: "search",
       isError: false,
     });
     expect(results[1]).toMatchObject({
@@ -211,7 +215,7 @@ describe("structured Pi session reconstruction", () => {
         parts: [
           {
             type: "dynamic-tool",
-            toolName: "search_operations",
+            toolName: "search",
             toolCallId: "call_cut",
             state: "input-available",
             input: { query: "x" },
@@ -403,7 +407,7 @@ describe("attachment images in the projected turn", () => {
   it("puts the prompt message's images on the prompt and the replayed ones on their own turn", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, {
       ...OPTIONS,
-      modelSeesImages: true,
+      fileDelivery: { image: true, pdf: true },
       images: new Map([
         ["u1", new Map([["appfile://file_old", image]])],
         ["u2", new Map([["appfile://file_new", image]])],
@@ -421,7 +425,7 @@ describe("attachment images in the projected turn", () => {
   it("tells a model that sees images which pixels were left out", () => {
     const turn = buildStructuredPiTurn(thread(), MODEL, {
       ...OPTIONS,
-      modelSeesImages: true,
+      fileDelivery: { image: true, pdf: true },
       images: new Map([["u2", new Map([["appfile://file_new", image]])]]),
     });
     const first = JSON.stringify(turn.history[0]);

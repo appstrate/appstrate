@@ -187,7 +187,11 @@ export function PackageCollection({
   );
 
   const placeholder = cardPlaceholder ?? (
-    <PackageCardSkeleton runnable={cardRun && holds === "agent"} spaceName={spanning} />
+    <PackageCardSkeleton
+      runnable={cardRun && holds === "agent"}
+      integrations={holds === "agent"}
+      spaceName={spanning}
+    />
   );
 
   return (

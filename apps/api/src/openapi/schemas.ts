@@ -131,7 +131,8 @@ export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
   "`/api/credential-proxy/connections`, `/api/credential-proxy/tools`, " +
   "`/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, " +
   "`POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP " +
-  "tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes " +
+  "tools' integration tools (`search` and `describe` of the `integration_tool` kind, " +
+  "`call_integration_tool`). `false` answers those routes " +
   "`403 credential_proxy_closed` and withholds those tools, for every role, organization owners " +
   "and admins included. Runs keep their connections: a run the platform executes reaches them " +
   "through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a " +
@@ -232,6 +233,10 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
  * schema object: verify-openapi's shared-type check reads only the properties
  * declared there, never through `allOf`.
  */
+/** An agent's `required` flag on one of its integrations (`AgentListItem`, connection readiness). */
+const AGENT_INTEGRATION_REQUIRED =
+  "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without it — the integration not active in the space, or no connection bound.";
+
 /** `space_ids` of an index row (`AgentListItem`, `OrgPackageItem`). */
 const INDEX_SPACE_IDS = {
   type: "array",
@@ -239,6 +244,14 @@ const INDEX_SPACE_IDS = {
   items: { type: "string", pattern: SPACE_ID_RE.source },
   description:
     "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
+};
+
+/** An agent's required integrations not active in the space (`AgentListItem`, `GET /api/me/context`). */
+export const INACTIVE_REQUIRED_INTEGRATIONS = {
+  type: "array",
+  items: { type: "string" },
+  description:
+    "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ.",
 };
 
 const ORG_PACKAGE_ITEM_SCHEMA = {
@@ -530,6 +543,42 @@ export const schemas = {
             description:
               "On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`.",
           },
+          active_in_spaces: {
+            $ref: "#/components/schemas/ActiveInSpaces",
+            description:
+              "On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the version it names, or its default published version) are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
+          },
+        },
+      },
+    ],
+  },
+  ActiveInSpaces: {
+    type: "array",
+    description:
+      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+    items: {
+      type: "object",
+      required: ["id", "name"],
+      properties: {
+        id: { type: "string", description: "Space id (`spc_…`)." },
+        name: {
+          type: "string",
+          description: "Space name, as a space listing shows it (not unique).",
+        },
+      },
+    },
+  },
+  AgentNotActiveInSpaceProblem: {
+    description:
+      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation.",
+    allOf: [
+      { $ref: "#/components/schemas/ProblemDetail" },
+      {
+        type: "object",
+        required: ["active_in_spaces"],
+        properties: {
+          code: { type: "string", enum: ["agent_not_active_in_space"] },
+          active_in_spaces: { $ref: "#/components/schemas/ActiveInSpaces" },
         },
       },
     ],
@@ -559,6 +608,37 @@ export const schemas = {
         items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
       },
     },
+  },
+  // `allOf`-merged into the success bodies of the two doors that switch a package on in a space.
+  ActivationWarnings: {
+    type: "object",
+    required: ["warnings"],
+    properties: {
+      warnings: {
+        type: "array",
+        description:
+          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+        items: { $ref: "#/components/schemas/ActivationWarning" },
+      },
+    },
+  },
+  ActivationWarning: {
+    description:
+      "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+    allOf: [
+      { $ref: "#/components/schemas/ResolutionFieldError" },
+      {
+        type: "object",
+        required: ["required"],
+        properties: {
+          code: { type: "string", enum: ["integration_not_active"] },
+          required: {
+            type: "boolean",
+            description: "Whether the agent declares the integration `required`.",
+          },
+        },
+      },
+    ],
   },
   // The `structuredContent` of the MCP `run_and_wait` tool, and its declared `outputSchema`.
   RunAndWaitResult: {
@@ -993,6 +1073,8 @@ export const schemas = {
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
     // There is no `active`: the listing IS the active set, so the field could
     // only ever say `true` — `AgentDetail.active` is where the switch is read.
+    // `inactive_required_integrations` is emitted by the single-space index only:
+    // an organization row spans spaces, each with its own activations.
     required: [
       "id",
       "icon",
@@ -1002,6 +1084,7 @@ export const schemas = {
       "running_runs",
       "unread_count",
       "dependencies",
+      "integrations",
       "scope",
       "keywords",
       "version",
@@ -1037,6 +1120,39 @@ export const schemas = {
         type: "string",
         description: "Package type from manifest",
         enum: [...packageTypeValues],
+      },
+      inactive_required_integrations: {
+        ...INACTIVE_REQUIRED_INTEGRATIONS,
+        description:
+          INACTIVE_REQUIRED_INTEGRATIONS.description +
+          " Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces.",
+      },
+      integrations: {
+        type: "array",
+        description:
+          "The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins (its draft when no published version satisfies the pin, as run readiness reads it) and whose manifest loads. Left out, as the run leaves them out: an inert one (declared optional, selecting no tool or scope) and, on `GET /api/agents`, an optional one not active in the space — a run there starts without it; a required one not active stays, and is named in `inactive_required_integrations`. The name and the icon are read off the integration manifest that version resolves to, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map.",
+        items: {
+          type: "object",
+          required: ["id", "name", "icon", "required", "authenticated"],
+          properties: {
+            id: { type: "string", description: "Integration package id (`@scope/name`)." },
+            name: {
+              type: "string",
+              description: "The manifest's `display_name`, the id when it declares none.",
+            },
+            icon: {
+              type: ["string", "null"],
+              description:
+                "The manifest's `icon`: an Iconify id (`<prefix>:<name>`) or an image URL, `null` when it declares none.",
+            },
+            required: { type: "boolean", description: AGENT_INTEGRATION_REQUIRED },
+            authenticated: {
+              type: "boolean",
+              description:
+                "Whether the integration declares `auths`, as on the integration index. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection.",
+            },
+          },
+        },
       },
       running_runs: { type: "integer" },
       unread_count: {
@@ -2575,8 +2691,7 @@ export const schemas = {
             integration_package_id: { type: "string" },
             required: {
               type: "boolean",
-              description:
-                "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here.",
+              description: AGENT_INTEGRATION_REQUIRED,
             },
             run_blocking: {
               type: "boolean",
@@ -3052,6 +3167,8 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
+        "offered_to_org",
+        "org_offerable",
         "placements",
         "activation",
       ],
@@ -3074,6 +3191,16 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
+        offered_to_org: {
+          type: "boolean",
+          description:
+            "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off).",
+        },
+        org_offerable: {
+          type: "boolean",
+          description:
+            "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home. Creating an offer also requires a published version for a homed package. The route stays the authority; this is its verdict served in advance.",
+        },
         activation: {
           type: "array",
           description:
@@ -3111,15 +3238,15 @@ export const schemas = {
       },
       via: {
         type: "string",
-        enum: ["home", "shared", "system"],
+        enum: ["home", "shared", "system", "organization"],
         description:
-          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space).",
+          "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`.",
       },
       state: {
         type: "string",
         enum: ["active", "inactive", "none"],
         description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it.",
       },
       shared_by: {
         type: ["object", "null"],
@@ -3202,6 +3329,17 @@ export const schemas = {
         format: "date-time",
         description: "When the placement row was created (`space_packages.installed_at`).",
       },
+    },
+  },
+  PackageOrgOffer: {
+    type: "object",
+    description:
+      "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
+    required: ["object", "packageId", "offered_to_org"],
+    properties: {
+      object: { type: "string", enum: ["package_org_offer"] },
+      packageId: { type: "string", description: "Package id (`@scope/name`)." },
+      offered_to_org: { type: "boolean", enum: [true] },
     },
   },
   PackageHome: {

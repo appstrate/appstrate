@@ -109,7 +109,7 @@ export async function resolveRegistryAgent(
       title: "Package Not Active",
       detail:
         `Package '${packageId}' exists in this organization but is not active in space '${spaceId}'. ` +
-        `Activate it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
+        `Activate it with POST /api/spaces/${spaceId}/packages {"packageId":"${packageId}"}.`,
     });
   }
 

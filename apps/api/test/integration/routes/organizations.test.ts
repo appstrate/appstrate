@@ -19,8 +19,11 @@ import {
   seedPackage,
   seedRun,
   seedSchedule,
+  seedSpace,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
+import { orgPermissions } from "../../../src/lib/permissions.ts";
 import { assertDbHas, assertDbMissing, expectProblem } from "../../helpers/assertions.ts";
 import {
   organizations,
@@ -1281,6 +1284,141 @@ describe("Organizations API", () => {
           and(eq(organizationMembers.userId, member.id), eq(organizationMembers.orgId, ctx.orgId)),
         );
       expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe("GET /api/orgs/:orgId/members/:userId/departure-impact", () => {
+    const preview = (cookie: string, orgId: string, userId: string) =>
+      app.request(`/api/orgs/${orgId}/members/${userId}/departure-impact`, {
+        headers: { Cookie: cookie },
+      });
+
+    it("lists the member's team-space schedules for an owner, writing nothing", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-owner-org" });
+      const member = await createTestUser({ name: "Leaving Member" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/impact-agent` });
+      const schedule = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        name: "Nightly",
+        enabled: true,
+      });
+
+      const res = await preview(ctx.cookie, ctx.orgId, member.id);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        object: "list",
+        hasMore: false,
+        data: [
+          {
+            id: schedule.id,
+            name: "Nightly",
+            space: { id: ctx.defaultSpaceId, name: "Default" },
+            packageId: pkg.id,
+            actor: { type: "user", id: member.id, name: "Leaving Member" },
+            cause: "actor_left_org",
+            lost_integrations: [],
+          },
+        ],
+      });
+      const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(row!.enabled).toBe(true);
+    });
+
+    it("refuses a plain member", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-member-org" });
+      const actor = await createTestUser();
+      const target = await createTestUser();
+      await addOrgMember(ctx.orgId, actor.id, "member");
+      await addOrgMember(ctx.orgId, target.id, "member");
+
+      const res = await preview(actor.cookie, ctx.orgId, target.id);
+
+      expect(res.status).toBe(403);
+    });
+
+    it("refuses an admin previewing an owner, as the removal would", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-admin-org" });
+      const admin = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+
+      const res = await preview(admin.cookie, ctx.orgId, ctx.user.id);
+
+      expect(res.status).toBe(403);
+    });
+
+    it("lets an owner on a session preview a co-owner", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-coowner-org" });
+      const coOwner = await createTestUser();
+      await addOrgMember(ctx.orgId, coOwner.id, "owner");
+
+      const res = await preview(ctx.cookie, ctx.orgId, coOwner.id);
+
+      expect(res.status).toBe(200);
+    });
+
+    it("answers an empty list for a member with nothing to stop", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-empty-org" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await preview(ctx.cookie, ctx.orgId, member.id);
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+    });
+
+    it("shows a credential confined to spaces only the items of the spaces it may name", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-confined-org" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+      const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/impact-agent` });
+      const inDefault = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        enabled: true,
+      });
+      const inOther = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: other.id,
+        userId: member.id,
+        enabled: true,
+      });
+      const idsSeenBy = async (headers: Record<string, string>) => {
+        const res = await app.request(
+          `/api/orgs/${ctx.orgId}/members/${member.id}/departure-impact`,
+          { headers },
+        );
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { data: { id: string }[] }).data.map((item) => item.id);
+      };
+
+      expect((await idsSeenBy({ Cookie: ctx.cookie })).sort()).toEqual(
+        [inDefault.id, inOther.id].sort(),
+      );
+      const confined = loopbackHeaders(ctx, ctx.orgId, {
+        orgRole: "owner",
+        permissions: [...orgPermissions("owner")],
+        spaceIds: [ctx.defaultSpaceId],
+      });
+      expect(await idsSeenBy(confined)).toEqual([inDefault.id]);
+    });
+
+    it("answers 404 for a user who is not a member", async () => {
+      const ctx = await createTestContext({ orgSlug: "impact-unknown-org" });
+      const stranger = await createTestUser();
+
+      const res = await preview(ctx.cookie, ctx.orgId, stranger.id);
+
+      expect(res.status).toBe(404);
     });
   });
 

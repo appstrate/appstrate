@@ -12,7 +12,10 @@ import { describe, expect, it } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import type { ConnectionChoice } from "../../lib/connection-choice.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import type { components } from "../../api/schema";
 import { ScheduleActorConnectionChoice } from "../schedule-actor-connection-choice.tsx";
+import { sharedChoices } from "../schedule-shared-choices.ts";
 import { elementsByTestId, type TestIdProps } from "../../test/testid-walker.tsx";
 
 await i18nReady;
@@ -254,5 +257,149 @@ describe("ScheduleActorConnectionChoice", () => {
     );
     expect(html).not.toContain(`sched-choice-pick-none-${GMAIL}`);
     expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
+  });
+});
+
+// ─── sharedChoices: what a viewer may offer another actor ───────────────────
+
+type Readiness = components["schemas"]["AgentConnectionReadiness"]["integrations"][number];
+type Cand = Readiness["resolution"]["candidates"][number];
+
+function cand(id: string, over: Partial<Cand> = {}): Cand {
+  return {
+    id,
+    auth_key: "oauth",
+    account_id: `${id}@acme.test`,
+    label: id,
+    owner_user_id: "usr_other",
+    owner_end_user_id: null,
+    owner_name: null,
+    scopes_granted: [],
+    scope: "org",
+    spaceId: null,
+    shared_here: true,
+    origin_space_id: null,
+    needs_reconnection: false,
+    missing_scopes: [],
+    scope_fit: "unjudged",
+    is_own: false,
+    ...over,
+  };
+}
+
+function entry(
+  candidates: Cand[],
+  over: Partial<Readiness> = {},
+  resolution: Partial<Readiness["resolution"]> = {},
+): Readiness {
+  return {
+    integration_package_id: GMAIL,
+    required: false,
+    run_blocking: false,
+    inert: false,
+    connection_required: true,
+    resolution: {
+      source: null,
+      error_code: null,
+      warning: null,
+      resolved_connection_ids: [],
+      resolved_missing_scopes: [],
+      admin_pinned_connection_ids: null,
+      member_pinned_connection_ids: null,
+      org_default_connection_ids: null,
+      org_default_enforced: false,
+      additional_connections_allowed: false,
+      can_add_connection: true,
+      candidates,
+      ...resolution,
+    },
+    ...over,
+  };
+}
+
+const ACTOR = { userId: "usr_bob" };
+const ids = (entries: Readiness[], picks: Record<string, string[]> = {}) =>
+  sharedChoices(entries, ACTOR, picks).flatMap((g) => g.candidates.map((c) => c.id));
+
+describe("sharedChoices", () => {
+  it("offers only the connections shared in this space", () => {
+    expect(ids([entry([cand("a"), cand("b", { shared_here: false })])])).toEqual(["a"]);
+  });
+
+  it("leaves out the connections an admin pin or enforced default locks", () => {
+    const pinned = entry(
+      [cand("a"), cand("b")],
+      {},
+      { admin_pinned_connection_ids: ["a"], additional_connections_allowed: true },
+    );
+    expect(ids([pinned])).toEqual(["b"]);
+  });
+
+  it("leaves out a connection needing reconnection", () => {
+    expect(ids([entry([cand("a"), cand("b", { needs_reconnection: true })])])).toEqual(["a"]);
+  });
+
+  it("leaves out a connection missing scopes", () => {
+    expect(ids([entry([cand("a"), cand("b", { missing_scopes: ["mail.send"] })])])).toEqual(["a"]);
+  });
+
+  it("caps the choice at the per-integration maximum less the locked ones", () => {
+    const [free] = sharedChoices([entry([cand("a")])], ACTOR, {});
+    expect(free!.max).toBe(MAX_CONNECTIONS_PER_INTEGRATION);
+    const [locked] = sharedChoices(
+      [
+        entry(
+          [cand("a")],
+          {},
+          { admin_pinned_connection_ids: ["x", "y"], additional_connections_allowed: true },
+        ),
+      ],
+      ACTOR,
+      {},
+    );
+    expect(locked!.max).toBe(MAX_CONNECTIONS_PER_INTEGRATION - 2);
+  });
+
+  it("offers 'no connection' only where nothing requires or locks one", () => {
+    const allow = (e: Readiness) => sharedChoices([e], ACTOR, {})[0]!.allowNone;
+    expect(allow(entry([cand("a")]))).toBe(true);
+    expect(allow(entry([cand("a")], { required: true }))).toBe(false);
+    expect(
+      allow(
+        entry(
+          [cand("a")],
+          {},
+          { admin_pinned_connection_ids: ["x"], additional_connections_allowed: true },
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("offers nothing on an integration needing no connection, inert, inactive or locked shut", () => {
+    const noCandidates = (e: Readiness) => sharedChoices([e], ACTOR, {})[0]!.candidates;
+    expect(noCandidates(entry([cand("a")], { connection_required: false }))).toEqual([]);
+    expect(noCandidates(entry([cand("a")], { inert: true }))).toEqual([]);
+    expect(noCandidates(entry([cand("a")], {}, { error_code: "integration_not_active" }))).toEqual(
+      [],
+    );
+    expect(noCandidates(entry([cand("a")], {}, { admin_pinned_connection_ids: ["x"] }))).toEqual(
+      [],
+    );
+  });
+
+  it("drops the whole group while a stored pick is not among the offered ones", () => {
+    const e = entry([cand("a")]);
+    expect(sharedChoices([e], ACTOR, { [GMAIL]: ["a"] })).toHaveLength(1);
+    expect(sharedChoices([e], ACTOR, { [GMAIL]: ["a", "stale"] })).toEqual([]);
+    expect(sharedChoices([e], ACTOR, { [GMAIL]: [] })).toHaveLength(1);
+  });
+
+  it("flags the actor's own connections", () => {
+    const [g] = sharedChoices(
+      [entry([cand("a", { owner_user_id: "usr_bob" }), cand("b")])],
+      ACTOR,
+      {},
+    );
+    expect(g!.candidates.map((c) => c.owned_by_actor)).toEqual([true, false]);
   });
 });

@@ -31,7 +31,8 @@ export function RunLaunchRecovery({
   integrationEntries: AgentIntegrationEntry[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
-  if (launcher.missingErrors === null) return null;
+  const refusal = launcher.refusal;
+  if (refusal === null) return null;
   return (
     // Mounted only while the 409 modal is open — that mount is what triggers
     // the dynamic import. The fallback keeps the same modal frame so the
@@ -44,10 +45,11 @@ export function RunLaunchRecovery({
       }
     >
       <MissingConnectionsModal
+        key={refusal.attempt}
         onClose={launcher.dismiss}
-        errors={launcher.missingErrors}
+        errors={refusal.errors}
         agentPackageId={packageId}
-        version={launcher.missingVersion}
+        version={refusal.version}
         integrationEntries={integrationEntries}
         retrying={launcher.isPending}
         // The modal stays open until the retry lands, so the pickers are still

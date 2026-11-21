@@ -39,6 +39,8 @@ function packageRow(
     home_space_id: null,
     home_writable: false,
     home_shareable: false,
+    offered_to_org: false,
+    org_offerable: false,
     home_deletable: false,
     placements,
     activation: [],
@@ -91,6 +93,8 @@ describe("catalogueDeeds", () => {
           home_space_id: "spc_home",
           home_writable: true,
           home_shareable: true,
+          offered_to_org: false,
+          org_offerable: false,
         }),
         "spc_home",
       ),
@@ -120,6 +124,8 @@ describe("catalogueDeeds", () => {
   it("does not list the current space twice for a sharer who is also its recipient", () => {
     const row = packageRow("agent", placements, {
       home_shareable: true,
+      offered_to_org: false,
+      org_offerable: false,
       activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" }],
     });
     expect(catalogueDeeds(row, "spc_guest").revokeFrom).toEqual(["spc_guest"]);

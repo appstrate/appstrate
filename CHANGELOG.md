@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### MCP clients
+
+The platform MCP server replaces `search_operations`, `search_integration_tools` and `describe_operation` with `search` and `describe`, and `read_file` with `read` (#2315). An MCP client re-lists its tools on its next connection; a call to a retired name answers `-32602 Unknown tool`.
+
+| beta.70                                                  | Now                                                                                                   |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `search_operations { query, tag, limit }`                | `search { query, kinds: ["operation"], tag, limit }`, result under `operations`                       |
+| `search_integration_tools { query, integration, limit }` | `search { query, kinds: ["integration_tool"], integration, limit }`, result under `integration_tools` |
+| `describe_operation { operation_id }`                    | `describe { kind: "operation", id }`                                                                  |
+| `read_file { uri }`                                      | `read { uri }`, which also reads `skill://` URIs                                                      |
+
+- `search` also finds the agents the caller can read (`agents`; on the organization endpoint `granted_in` names the spaces where each is listed) and the skills it can read (`skills`). Every item carries the `id` that `describe` takes; an item's `operation_id` and an integration tool's `tool` are now `id`.
+- `describe` also details an integration tool (its schemas, `usage` and connections), an agent (its launch contract at the definition a launch with `version` omitted runs, the `space` it was read in and a ready `run_and_wait` call) and a skill (its frontmatter and files, in the space the call enters; `read` of a `skill://` URI of another space answers `space_mismatch`).
+- A kind a `search` names and the caller may not read in the space (integration tools in a closed or unauthorised space, the agents route refusing) is refused with an error result; a search that names no kind leaves it out. `tag` and `integration` narrow an omitted `kinds` to operations and integration tools, and are `invalid_argument` beside `kinds` that exclude their kind.
+- On the organization endpoint `search` takes `space_id` as optional: without it, it searches every space the connection reaches, and each item carries `granted_in`, the spaces where it is usable (a skill keeps one item per `skill://` URI). Every other tool keeps a required `space_id`; a connection, `not_ready` or `unlisted` entry of an integration tool listed identically in several spaces is one entry whose `granted_in` names them (entries that differ stay apart, each with its own), a space whose read was refused (a skill archive unavailable included) is named in the section's `unsearched`, and a search without `space_id` that read some space's agents, skills or integration tools lists those spaces in a top-level `searched_spaces`. The chat records, before the result reaches the model, the spaces a call that names none says it read; a result naming a space outside the turn, or one that cannot be recorded, is withheld.
+- Where `search` and `describe` declare the `integration_tool` kind they are annotated open-world, not read-only (a listing reaches third-party servers with the connection's credential); otherwise they stay read-only.
+- A search whose `kinds` does not list `integration_tool` (an `integration` filter alone included) reads remote MCP catalogs from the cache only, so it contacts no server and sends no credential. A cold catalog's tools are listed by name, and the integration is named in `uncached`. `GET /api/credential-proxy/tools` takes the same choice as `catalogs=live|cached` (default `live`) and answers an `uncached` array.
+- `invoke_operation`, `call_integration_tool`, `run_and_wait`, `list_files`, `validate_package_file`, `import_package_file`, `get_runtime_capabilities` and `get_me` keep their names and arguments.
+
+## [1.0.0-beta.70] - 2026-11-19
+
+The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.
+
 ## [1.0.0-beta.69] - 2026-11-18
 
 ### Client upgrade from beta.68

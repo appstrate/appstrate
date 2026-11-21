@@ -299,8 +299,8 @@ export interface RemoteToolCatalog {
   tools: ServerTool[];
   listed: boolean;
   /**
-   * Unlisted, why when known: the proxy's problem code, or `timeout` when the catalog was not read
-   * before the listing's wait or its own timeout ended.
+   * Unlisted, why when known: the proxy's problem code, `timeout`, or `not_cached` (a cache-only
+   * listing found nothing).
    */
   listingFailure?: string;
   /** How many tools were read when the server lists more; `null` when all were. */
@@ -315,7 +315,12 @@ export interface RemoteToolCatalog {
  * ({@link isCatalogRefusal}) is thrown.
  */
 export async function listRemoteTools(
-  input: RemoteToolsInput & { manifest: IntegrationManifest; connectionId?: string },
+  input: RemoteToolsInput & {
+    manifest: IntegrationManifest;
+    connectionId?: string;
+    /** Read the cached `tools/list` only; nothing is sent. */
+    cachedOnly?: boolean;
+  },
 ): Promise<RemoteToolCatalog> {
   const manifest = streamableRemote(input.integrationId, input.manifest);
   const unauthenticated = isUnauthenticatedIntegration(manifest);
@@ -328,8 +333,9 @@ export async function listRemoteTools(
     url,
   });
   let described = catalogCache.peek(key);
-  let listingFailure: string | undefined = described === undefined ? "timeout" : undefined;
-  if (described === undefined && !input.signal.aborted) {
+  let listingFailure: string | undefined =
+    described === undefined ? (input.cachedOnly ? "not_cached" : "timeout") : undefined;
+  if (described === undefined && !input.signal.aborted && !input.cachedOnly) {
     const load = () =>
       withClient(
         { ...input, connectionId, timeoutMs: timeouts.listMs, signal: null },

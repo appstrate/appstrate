@@ -224,7 +224,11 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
-function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
+export function useAgentConnectionReadinessOptions(
+  agentPackageId: string | undefined,
+  version?: string,
+  scheduleId?: string,
+) {
   const orgScope = useOrgScope();
   const { can } = usePermissions();
   const { scope, name } = agentPackageId
@@ -237,7 +241,7 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
     {
       params: {
         path: { scope, name },
-        ...(version ? { query: { version } } : {}),
+        ...(version || scheduleId ? { query: { version, scheduleId } } : {}),
         header: orgScope.header,
       },
     },
@@ -250,8 +254,12 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
  * `blocks_run`/`errors` mirror the run-kickoff 409; `integrations[]` carries every declared
  * integration's management verdict plus a `run_blocking` flag.
  */
-export function useAgentConnectionReadiness(agentPackageId: string | undefined, version?: string) {
-  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version));
+export function useAgentConnectionReadiness(
+  agentPackageId: string | undefined,
+  version?: string,
+  scheduleId?: string,
+) {
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version, scheduleId));
 }
 
 type AgentConnectionReadiness =
@@ -270,9 +278,10 @@ export function useReadIntegrationResolution(
   integrationId: string,
   agentPackageId: string,
   version?: string,
+  scheduleId?: string,
 ) {
   const qc = useQueryClient();
-  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version);
+  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version, scheduleId);
   return () => {
     const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
     if (state?.status === "error") throw state.error;
@@ -288,8 +297,9 @@ export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
   version?: string,
+  scheduleId?: string,
 ) {
-  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
+  const options = useAgentConnectionReadinessOptions(agentPackageId, version, scheduleId);
   return useQuery({
     ...options,
     enabled: options.enabled && !!integrationId,

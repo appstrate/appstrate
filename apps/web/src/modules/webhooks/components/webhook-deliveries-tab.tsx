@@ -5,7 +5,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
-import { relativeAge } from "@appstrate/core/format";
+import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { ItemList } from "@/components/item-list";
 import { KeysetListFooter } from "@/components/list-toolbar";
@@ -13,23 +13,7 @@ import { SkeletonBadge, SkeletonLine } from "@/components/skeleton-line";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
-
-const AGE_KEY = {
-  now: "webhooks.lessThanMinute",
-  minute: "webhooks.minutesAgo",
-  hour: "webhooks.hoursAgo",
-  day: "webhooks.daysAgo",
-  month: "webhooks.monthsAgo",
-  year: "webhooks.yearsAgo",
-} as const;
-
-function formatRelativeTime(
-  dateStr: string,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): string {
-  const age = relativeAge(dateStr, Date.now());
-  return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
-}
+import { formatDateField, formatRelativeTime } from "../../../lib/format-date";
 
 function deliveryStatusVariant(d: WebhookDelivery): "success" | "failed" | "pending" {
   if (d.status === "pending") return "pending";
@@ -60,6 +44,7 @@ export function WebhookDeliverySkeleton() {
 
 export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   const { t } = useTranslation(["settings", "common"]);
+  const now = useNowTick();
   const deliveriesQuery = useWebhookDeliveries(webhookId);
   const { data, isLoading, error } = deliveriesQuery;
   const deliveries = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data]);
@@ -92,7 +77,9 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
                 <Badge variant={variant}>{deliveryStatusLabel(d)}</Badge>
                 {d.latency != null && <span>{d.latency}ms</span>}
                 <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
-                <span>{formatRelativeTime(d.createdAt, t)}</span>
+                <time dateTime={d.createdAt} title={formatDateField(d.createdAt)}>
+                  {formatRelativeTime(d.createdAt, now)}
+                </time>
               </div>
               {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
             </Card>

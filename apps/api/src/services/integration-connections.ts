@@ -50,7 +50,11 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import {
+  listOfferedToSpaceOrg,
+  placementReadFilter,
+  placementRowJoin,
+} from "./package-placement.ts";
 import {
   setExactlyOneDefault,
   isUniqueViolation,
@@ -93,7 +97,11 @@ import {
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
-import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import {
+  boundSpacesOf,
+  writesDelegated,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { readReconnectTarget } from "./integration-scope-resolver.ts";
 import {
@@ -270,7 +278,7 @@ export async function assertConnectionBelongsToActor(
 ): Promise<ReconnectTarget> {
   const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
   if (!target) throw notFound("Connection not found");
-  assertDelegatedReconnect(principal.binding !== null, target.spaceId, input.spaceId);
+  assertDelegatedReconnect(writesDelegated(principal), target.spaceId, input.spaceId);
   return target;
 }
 
@@ -811,11 +819,15 @@ export async function resolveIntegrationActivations(
       ),
     );
   const byId = new Map(rows.map((r) => [r.packageId, r]));
+  const offered = await listOfferedToSpaceOrg(spaceId, packageIds);
   for (const id of packageIds) {
     const row = byId.get(id);
     result.set(id, {
-      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the offer.
-      active: isActiveHere({ id, type: "integration", source: null }, row),
+      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the deployment's offer.
+      active: isActiveHere(
+        { id, type: "integration", source: null, offeredToOrg: offered.has(id) },
+        row,
+      ),
       blockUserConnections: row?.blockUserConnections === true,
     });
   }
@@ -2636,18 +2648,36 @@ interface UsableIntegration {
   integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
+  /**
+   * Whether the integration is active in the space. False: the actor holds a connection usable here
+   * but a run could bind nothing of it until the integration is switched on (or offered) here.
+   */
+  active: boolean;
   /** The integration's own manifest version, so a caller pins a satisfiable range. */
   version?: string;
   /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
   default_tools?: readonly string[] | "*";
   /** Present (true) when none of the actor's usable connections of it is healthy. */
   needs_reconnection?: true;
+  /** The connections the actor may bind there, oldest first: a label resolves to an id here. */
+  connections: UsableConnection[];
+}
+
+/** One connection the actor may bind in the space (what `connection_overrides` names). */
+interface UsableConnection {
+  id: string;
+  label: string;
+  account_id: string;
+  /** False: a colleague's connection shared into the space, never bound without being named. */
+  owned_by_actor: boolean;
+  needs_reconnection: boolean;
 }
 
 /**
- * The integrations the actor could attach to an agent here, one per integration with a connection
- * it may bind ({@link usableInSpace}) and active in the space, as a run or a proxy call requires;
- * `source`: own, shared, or both.
+ * The integrations the actor holds a connection it may bind ({@link usableInSpace}) for, one per
+ * integration; `source`: own, shared, or both. `active` says whether the integration is switched on
+ * in the space, as a run or a proxy call requires: an inactive one binds nothing here, and is listed
+ * so the actor can be told its connection exists and why a run does not use it.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2656,29 +2686,48 @@ export async function listUsableIntegrationsForActor(
   await assertSpaceInScope(scope);
   const rows = await db
     .select({
+      id: integrationConnections.id,
       integrationId: integrationConnections.integrationId,
+      label: integrationConnections.label,
+      accountId: integrationConnections.accountId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
       shared: sql<boolean>`${sharedInto(scope.spaceId)}`,
       needsReconnection: integrationConnections.needsReconnection,
     })
     .from(integrationConnections)
-    .where(usableInSpace(scope.spaceId, actor));
+    .where(usableInSpace(scope.spaceId, actor))
+    .orderBy(...OLDEST_FIRST);
   if (rows.length === 0) return [];
 
-  const acc = new Map<string, { own: boolean; shared: boolean; healthy: boolean }>();
+  const acc = new Map<
+    string,
+    { own: boolean; shared: boolean; healthy: boolean; connections: UsableConnection[] }
+  >();
   for (const row of rows) {
-    const entry = acc.get(row.integrationId) ?? { own: false, shared: false, healthy: false };
-    entry.own ||= actorOwns(actor, row);
+    const entry = acc.get(row.integrationId) ?? {
+      own: false,
+      shared: false,
+      healthy: false,
+      connections: [],
+    };
+    const owned = actorOwns(actor, row);
+    entry.own ||= owned;
     entry.shared ||= row.shared;
     entry.healthy ||= !row.needsReconnection;
+    entry.connections.push({
+      id: row.id,
+      label: row.label,
+      account_id: row.accountId,
+      owned_by_actor: owned,
+      needs_reconnection: row.needsReconnection,
+    });
     acc.set(row.integrationId, entry);
   }
 
   // Sorted on purpose: an unordered SELECT may permute it between identical calls.
   const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
-  const ids = [...active].sort();
-  if (ids.length === 0) return [];
+  const ids = [...acc.keys()].sort();
   const pkgRows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
@@ -2698,15 +2747,23 @@ export async function listUsableIntegrationsForActor(
   );
 
   return ids.map((integrationId) => {
-    const { own, shared, healthy } = acc.get(integrationId)!;
+    const { own, shared, healthy, connections } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
+    const isActive = active.has(integrationId);
     return {
       integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
-      version: versionMap.get(integrationId),
-      default_tools: defaultToolsMap.get(integrationId),
+      active: isActive,
+      // What a run would bind: nothing of an inactive integration.
+      ...(isActive
+        ? {
+            version: versionMap.get(integrationId),
+            default_tools: defaultToolsMap.get(integrationId),
+          }
+        : {}),
       ...(healthy ? {} : { needs_reconnection: true as const }),
+      connections,
     };
   });
 }

@@ -1140,7 +1140,7 @@ describe("Run read state (per-recipient)", () => {
       expect(body.data[0]!.userId).toBe(ctx.user.id);
     });
 
-    it("pages by keyset: limit + startingAfter", async () => {
+    it("pages through runs sharing a timestamp with PostgreSQL microsecond precision", async () => {
       await seedAgent({ id: "@notiforg/page-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       for (let i = 0; i < 5; i++) {
         await seedRun({
@@ -1151,6 +1151,12 @@ describe("Run read state (per-recipient)", () => {
           status: "success",
         });
       }
+
+      // The DB default can produce a timestamp that a JavaScript Date cannot represent.
+      await db
+        .update(runs)
+        .set({ startedAt: sql`'2026-01-01T00:00:00.123456Z'::timestamptz` })
+        .where(eq(runs.orgId, ctx.orgId));
 
       const seen: string[] = [];
       let cursor = "";
@@ -1164,6 +1170,7 @@ describe("Run read state (per-recipient)", () => {
         };
         expect(body.total).toBe(5);
         expect(body.hasMore).toBe(page < 2);
+        expect(body.data).toHaveLength(page < 2 ? 2 : 1);
         seen.push(...body.data.map((r) => r.id));
         cursor = `&startingAfter=${body.data.at(-1)!.id}`;
       }

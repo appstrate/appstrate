@@ -16,6 +16,7 @@ import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connec
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { seedApiKey, seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   httpHeaderDelivery,
@@ -427,5 +428,34 @@ describe("an org-scoped row reconnects through an org or system client", () => {
     });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("connection_scope_narrowing");
+  });
+});
+
+describe("a chat bearer creates a connection as wide as its conversation", () => {
+  const bearer = (restricted: boolean) =>
+    loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "owner",
+      permissions: ["integrations:connect", "integrations:read"],
+      spaceIds: [ctx.defaultSpaceId],
+      restricted,
+    });
+
+  const create = async (restricted: boolean) => {
+    const res = await post(
+      "api/connect/fields",
+      { ...bearer(restricted), "X-Space-Id": ctx.defaultSpaceId },
+      { credentials: { api_key: "k" } },
+    );
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(integrationConnections);
+    return row!;
+  };
+
+  it("an unlimited conversation writes an organization connection", async () => {
+    expect((await create(false)).spaceId).toBeNull();
+  });
+
+  it("a limited conversation writes a connection of its space", async () => {
+    expect((await create(true)).spaceId).toBe(ctx.defaultSpaceId);
   });
 });

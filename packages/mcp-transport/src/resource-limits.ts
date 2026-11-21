@@ -2,7 +2,7 @@
 
 /**
  * How much of a resource's bytes a tool or `resources/read` result inlines:
- * the platform's file reads (`read_file`, `resources/read` on `appfile://`) and
+ * the platform's file reads (`read`, `resources/read` on `appfile://`) and
  * the chat's `read_resource` tool apply the same bounds, so a model reads the
  * same amount of a resource whichever path it takes. Above a bound, the result
  * carries the resource's metadata and {@link RESOURCE_OVERSIZED_NOTE}.

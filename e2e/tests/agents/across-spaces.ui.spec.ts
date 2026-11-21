@@ -69,7 +69,7 @@ test("in « Tous les espaces », « Lancer » asks the space and launches there,
     await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
     // The header names both spaces it runs in: its home, and Beta behind the count.
     await expect(page.getByText(alpha.name, { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole("img", { name: `Partagé avec ${beta.name}` })).toBeVisible();
+    await expect(page.getByRole("img", { name: `Actif aussi dans ${beta.name}` })).toBeVisible();
 
     // « Lancer dans… » is the menu of the two spaces it runs in.
     await page.getByRole("button", { name: "Lancer dans…", exact: true }).click();

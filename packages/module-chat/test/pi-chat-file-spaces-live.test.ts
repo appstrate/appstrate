@@ -67,7 +67,7 @@ async function runOutput(owner: TestContext): Promise<string> {
   return `appfile://${row.id}`;
 }
 
-/** `read_file` and `read_resource` of a turn over the caller's personal space and the shared space. */
+/** `read` and `read_resource` of a turn over the caller's personal space and the shared space. */
 async function fileTools(touched: string[]) {
   const personal = (await ensurePersonalSpaceFor(caller.orgId, caller.user.id)).id;
   const organization: TurnSpaces = {
@@ -99,6 +99,7 @@ async function fileTools(touched: string[]) {
     headers: { Authorization: `Bearer ${token}`, "x-org-id": caller.orgId },
     organization,
     writeChunk: () => {},
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
     fetch: platformFetch,
@@ -111,7 +112,7 @@ async function fileTools(touched: string[]) {
   return {
     built,
     readFile: (uri: string, spaceId: string) =>
-      registered.get("read_file")!.execute("c1", { uri, space_id: spaceId }),
+      registered.get("read")!.execute("c1", { uri, space_id: spaceId }),
     readResource: (uri: string) => registered.get("read_resource")!.execute("c2", { uri }),
     personal,
   };

@@ -329,6 +329,16 @@ column oauth_consents.resources text[]
 column oauth_consents.scopes text[] not null
 column oauth_consents.updated_at timestamp with time zone default now()
 column oauth_consents.user_id text
+column oauth_grant_states.client_id text not null
+column oauth_grant_states.created_at timestamp with time zone not null default now()
+column oauth_grant_states.last_issued_at timestamp with time zone
+column oauth_grant_states.last_used_at timestamp with time zone
+column oauth_grant_states.last_used_ip text
+column oauth_grant_states.org_id uuid not null
+column oauth_grant_states.resource text not null
+column oauth_grant_states.space_id text
+column oauth_grant_states.tokens_valid_after timestamp with time zone
+column oauth_grant_states.user_id text not null
 column oauth_refresh_tokens.auth_time timestamp with time zone
 column oauth_refresh_tokens.authorization_code_id text
 column oauth_refresh_tokens.client_id text not null
@@ -399,6 +409,10 @@ column org_models.provider_id text not null
 column org_models.reasoning boolean
 column org_models.source text not null default 'custom'::text
 column org_models.updated_at timestamp with time zone not null default now()
+column org_package_offers.created_at timestamp with time zone not null default now()
+column org_package_offers.offered_by text
+column org_package_offers.org_id uuid not null
+column org_package_offers.package_id text not null
 column org_proxies.created_at timestamp with time zone not null default now()
 column org_proxies.created_by text
 column org_proxies.enabled boolean not null default true
@@ -592,6 +606,7 @@ column space_packages.input_settings jsonb not null default '{"locked": [], "val
 column space_packages.installed_at timestamp with time zone not null default now()
 column space_packages.model_id text
 column space_packages.package_id text not null
+column space_packages.placed_by_offer boolean not null default false
 column space_packages.proxy_id text
 column space_packages.shared_by text
 column space_packages.space_id text not null
@@ -838,6 +853,11 @@ constraint oauth_clients oauth_clients_user_id_user_id_fk FOREIGN KEY (user_id) 
 constraint oauth_consents oauth_consents_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_consents oauth_consents_pkey PRIMARY KEY (id)
 constraint oauth_consents oauth_consents_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_user_id_client_id_resource_pk PRIMARY KEY (user_id, client_id, resource)
+constraint oauth_grant_states oauth_grant_states_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint oauth_refresh_tokens oauth_refresh_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_refresh_tokens oauth_refresh_tokens_pkey PRIMARY KEY (id)
 constraint oauth_refresh_tokens oauth_refresh_tokens_session_id_session_id_fk FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE SET NULL
@@ -862,6 +882,10 @@ constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
+constraint org_package_offers org_package_offers_offered_by_user_id_fk FOREIGN KEY (offered_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint org_package_offers org_package_offers_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint org_package_offers org_package_offers_org_id_package_id_pk PRIMARY KEY (org_id, package_id)
+constraint org_package_offers org_package_offers_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint org_proxies org_proxies_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint org_proxies org_proxies_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
@@ -1066,6 +1090,9 @@ index CREATE INDEX idx_oauth_clients_space ON public.oauth_clients USING btree (
 index CREATE INDEX idx_oauth_clients_user ON public.oauth_clients USING btree (user_id)
 index CREATE INDEX idx_oauth_consents_client ON public.oauth_consents USING btree (client_id)
 index CREATE INDEX idx_oauth_consents_user ON public.oauth_consents USING btree (user_id)
+index CREATE INDEX idx_oauth_grant_states_client ON public.oauth_grant_states USING btree (client_id)
+index CREATE INDEX idx_oauth_grant_states_org ON public.oauth_grant_states USING btree (org_id)
+index CREATE INDEX idx_oauth_grant_states_space ON public.oauth_grant_states USING btree (space_id)
 index CREATE INDEX idx_oauth_refresh_tokens_auth_code ON public.oauth_refresh_tokens USING btree (authorization_code_id)
 index CREATE INDEX idx_oauth_refresh_tokens_client ON public.oauth_refresh_tokens USING btree (client_id)
 index CREATE INDEX idx_oauth_refresh_tokens_session ON public.oauth_refresh_tokens USING btree (session_id)
@@ -1077,6 +1104,8 @@ index CREATE INDEX idx_org_invitations_org_id ON public.org_invitations USING bt
 index CREATE INDEX idx_org_members_user_id ON public.org_members USING btree (user_id)
 index CREATE INDEX idx_org_models_created_by ON public.org_models USING btree (created_by)
 index CREATE INDEX idx_org_models_org_id ON public.org_models USING btree (org_id)
+index CREATE INDEX idx_org_package_offers_offered_by ON public.org_package_offers USING btree (offered_by)
+index CREATE INDEX idx_org_package_offers_package_id ON public.org_package_offers USING btree (package_id)
 index CREATE INDEX idx_org_proxies_created_by ON public.org_proxies USING btree (created_by)
 index CREATE INDEX idx_org_proxies_org_id ON public.org_proxies USING btree (org_id)
 index CREATE INDEX idx_organizations_created_by ON public.organizations USING btree (created_by)
@@ -1181,6 +1210,7 @@ index CREATE UNIQUE INDEX oauth_client_resources_pkey ON public.oauth_client_res
 index CREATE UNIQUE INDEX oauth_clients_client_id_unique ON public.oauth_clients USING btree (client_id)
 index CREATE UNIQUE INDEX oauth_clients_pkey ON public.oauth_clients USING btree (id)
 index CREATE UNIQUE INDEX oauth_consents_pkey ON public.oauth_consents USING btree (id)
+index CREATE UNIQUE INDEX oauth_grant_states_user_id_client_id_resource_pk ON public.oauth_grant_states USING btree (user_id, client_id, resource)
 index CREATE UNIQUE INDEX oauth_refresh_tokens_pkey ON public.oauth_refresh_tokens USING btree (id)
 index CREATE UNIQUE INDEX oauth_refresh_tokens_token_unique ON public.oauth_refresh_tokens USING btree (token)
 index CREATE UNIQUE INDEX oauth_resources_identifier_unique ON public.oauth_resources USING btree (identifier)
@@ -1190,6 +1220,7 @@ index CREATE UNIQUE INDEX org_invitations_pkey ON public.org_invitations USING b
 index CREATE UNIQUE INDEX org_invitations_token_unique ON public.org_invitations USING btree (token)
 index CREATE UNIQUE INDEX org_members_org_id_user_id_pk ON public.org_members USING btree (org_id, user_id)
 index CREATE UNIQUE INDEX org_models_pkey ON public.org_models USING btree (id)
+index CREATE UNIQUE INDEX org_package_offers_org_id_package_id_pk ON public.org_package_offers USING btree (org_id, package_id)
 index CREATE UNIQUE INDEX org_proxies_pkey ON public.org_proxies USING btree (id)
 index CREATE UNIQUE INDEX organizations_pkey ON public.organizations USING btree (id)
 index CREATE UNIQUE INDEX organizations_slug_unique ON public.organizations USING btree (slug)

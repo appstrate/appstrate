@@ -32,7 +32,7 @@ export interface TurnCapabilities {
    */
   readonly readsConnections: boolean;
   /**
-   * `search_integration_tools` / `call_integration_tool` are offered: in at least one of the
+   * The integration tools (`search`'s `integration_tool` kind, `call_integration_tool`) are offered: in at least one of the
    * turn's spaces, `mcp:invoke` and a credential-proxy permission hold and the space leaves the
    * proxy open (`credentialProxyOpen`) — the MCP server's per-space `proxies`, unioned org-wide.
    */

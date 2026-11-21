@@ -249,4 +249,27 @@ describe("the spaces a bearer is bound to", () => {
       (await resolve(mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"] })))!.spaceIds,
     ).toBeUndefined();
   });
+
+  it("lifts the restriction only for an explicit `false`; absent or `true` stays restricted", async () => {
+    const mint = (restricted?: boolean) =>
+      resolve(
+        mintMcpLoopbackToken({
+          ...claims,
+          permissions: ["mcp:read"],
+          spaceIds: ["spc_a"],
+          restricted,
+        }),
+      );
+    expect((await mint(false))!.spaceIdsRestricted).toBe(false);
+    expect((await mint(true))!.spaceIdsRestricted).toBeUndefined();
+    expect((await mint(undefined))!.spaceIdsRestricted).toBeUndefined();
+  });
+
+  it("carries no restriction signal without an allowlist", async () => {
+    const res = await resolve(
+      mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"], restricted: false }),
+    );
+    expect(res!.spaceIds).toBeUndefined();
+    expect(res!.spaceIdsRestricted).toBeUndefined();
+  });
 });

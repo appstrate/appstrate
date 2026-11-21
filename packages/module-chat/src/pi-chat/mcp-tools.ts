@@ -3,9 +3,8 @@
 /**
  * Build the Pi extension factories that expose the platform's own MCP tools
  * to the in-process Pi chat session — exactly the tools the platform MCP server
- * declares to the caller (`search_operations` / `describe_operation` /
- * `invoke_operation`, `run_and_wait`, `search_integration_tools` /
- * `call_integration_tool`, and whatever it adds later), so the assistant pilots
+ * declares to the caller (`search` / `describe` / `invoke_operation`,
+ * `run_and_wait`, `call_integration_tool`, and whatever it adds later), so the assistant pilots
  * the platform with the caller's own permissions, through the one door every
  * MCP client uses.
  *
@@ -21,12 +20,19 @@
  */
 
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
-import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
+import {
+  ACTIVE_SPACES_META_KEY,
+  projectActiveInSpaces,
+  spaceIdRefusal,
+  type NamedSpace,
+} from "@appstrate/core/mcp-spaces";
+import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import {
   parseSkillUri,
   parseSkillUriPackage,
   SKILL_DEFINITION_META_KEY,
+  SKILL_URI_PREFIX,
 } from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
@@ -51,6 +57,7 @@ import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
+import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
@@ -174,11 +181,11 @@ type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
 
 async function liveRelayedImage(
   block: Extract<RemoteToolResult["content"][number], { type: "image" }>,
-  modelSeesImages: boolean,
+  sendsImages: boolean,
 ): Promise<PiToolResult["content"][number]> {
   const mimeType = normalizeMime(block.mimeType);
   if (!isRasterImageMime(mimeType)) return { type: "text", text: "Unsupported image format." };
-  if (!modelSeesImages) return { type: "text", text: "The current model cannot read images." };
+  if (!sendsImages) return { type: "text", text: "The current model cannot read images." };
   if (Buffer.byteLength(block.data, "base64") > RESOURCE_BLOB_MAX_BYTES) {
     return { type: "text", text: RESOURCE_OVERSIZED_NOTE };
   }
@@ -199,7 +206,7 @@ async function liveRelayedImage(
 async function relayedToolResult(
   result: RemoteToolResult,
   scope: OfferScope,
-  modelSeesImages: boolean,
+  sendsImages: boolean,
 ): Promise<PiToolResult> {
   const blocks = result.content.map((block) => {
     const audience = block.annotations?.audience;
@@ -216,14 +223,14 @@ async function relayedToolResult(
   if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
   for (const [index, block] of blocks.entries()) {
-    if (block.type === "image") content[index] = await liveRelayedImage(block, modelSeesImages);
+    if (block.type === "image") content[index] = await liveRelayedImage(block, sendsImages);
   }
   const persistedContent = content.map((block) =>
     block.type === "text"
       ? block
       : {
           type: "text" as const,
-          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, supplied for this turn]`,
+          text: `[image ${block.mimeType}, ${Buffer.byteLength(block.data, "base64")} bytes, read for this turn]`,
         },
   );
   return { ...projected, content, persistedContent };
@@ -317,7 +324,7 @@ type BuildPlatformMcpToolsOptions = {
    * launch client, never declared on the tool, so the model cannot set it.
    */
   inlineRunModel?: InlineRunModel;
-  modelSeesImages?: boolean;
+  fileDelivery: FileDelivery;
   pdfInput?: TurnPdfInput;
 };
 
@@ -508,6 +515,66 @@ async function enterNamedSpace(
   return undefined;
 }
 
+/** Whether a tool declares a `space_id` it does not require, and the call omits it. */
+function omitsOptionalSpace(inputSchema: unknown, args: Record<string, unknown>): boolean {
+  const schema = (inputSchema ?? {}) as {
+    properties?: Record<string, unknown>;
+    required?: unknown;
+  };
+  return (
+    args.space_id === undefined &&
+    schema.properties?.space_id !== undefined &&
+    !(Array.isArray(schema.required) && schema.required.includes("space_id"))
+  );
+}
+
+/**
+ * Record the spaces a platform result says it read (a search or a configuration refusal),
+ * before the result is returned. The refusal that withholds the result when a listed space is not
+ * the turn's or cannot be recorded; `undefined` when every one is recorded.
+ */
+async function recordResultSpaces(
+  organization: TurnSpaces,
+  listed: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  if (listed === undefined) return undefined;
+  const turnSpaces = new Set(organization.spaces.map((space) => space.id));
+  const ids: unknown[] = Array.isArray(listed) ? listed : [null];
+  const recorded =
+    ids.every((id) => typeof id === "string" && turnSpaces.has(id)) &&
+    (await Promise.all(ids.map((id) => organization.touch(id as string))).then(
+      () => true,
+      () => false,
+    ));
+  return recorded
+    ? undefined
+    : {
+        code: "spaces_not_recorded",
+        error: "The spaces this call read could not be recorded on the conversation.",
+      };
+}
+
+/** A refusal rendered as a tool result, as the platform renders its own (`refusalResult`). */
+function refusalToolResult(
+  refusal: Record<string, unknown>,
+  scope: OfferScope,
+  turnBudget: PiTurnBudget,
+) {
+  return withTurnBudgetNote(
+    mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] }, scope),
+    turnBudget,
+  );
+}
+
+/** A read of a skill's text, kept whole in the replay so its procedure still applies on later turns. */
+function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
+  return (
+    typeof uri === "string" &&
+    uri.startsWith(SKILL_URI_PREFIX) &&
+    resources.every((resource) => "text" in resource)
+  );
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -531,12 +598,9 @@ function makeForwardExtension(
         if (spaceId !== undefined) {
           const refusal = await enterNamedSpace(organization, spaceId);
           if (refusal) {
-            // Rendered as the platform renders its own refusals (`refusalResult`).
-            return withTurnBudgetNote(
-              mcpResultToPi(
-                { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] },
-                offerScopeOf(toolName, { arguments: args }),
-              ),
+            return refusalToolResult(
+              refusal,
+              offerScopeOf(toolName, { arguments: args }),
               turnBudget,
             );
           }
@@ -550,16 +614,24 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
+        const readSpaces =
+          toolName === "invoke_operation" && result.isError
+            ? result._meta?.[ACTIVE_SPACES_META_KEY]
+            : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
+              ? result.structuredContent?.searched_spaces
+              : undefined;
+        const unrecorded = await recordResultSpaces(organization, readSpaces);
+        if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
-            await relayedToolResult(result, scope, opts.modelSeesImages === true),
+            await relayedToolResult(result, scope, opts.fileDelivery.image),
             turnBudget,
           );
         }
         // Only platform file reads may interpret embedded resources as governed files.
         const arg = args.arguments;
         if (
-          toolName === "read_file" ||
+          toolName === "read" ||
           (toolName === "call_integration_tool" &&
             arg &&
             typeof arg === "object" &&
@@ -579,10 +651,14 @@ function makeForwardExtension(
               {
                 ...meta,
                 content: [...meta.content, ...file.content],
-                persistedContent: [
-                  ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
-                  ...file.receipts,
-                ],
+                ...(keepsSkillText(args.uri, resources)
+                  ? {}
+                  : {
+                      persistedContent: [
+                        ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                        ...file.receipts,
+                      ],
+                    }),
               },
               turnBudget,
             );
@@ -598,7 +674,7 @@ function makeForwardExtension(
  * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
  * only server it reaches — how the model reads a skill's `SKILL.md` or one of
  * its files by its `skill://` URI. The same live projection serves embedded resources
- * from `read_file` and governed connector reads.
+ * from `read` and governed connector reads.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
@@ -650,10 +726,12 @@ function makeReadResourceExtension(
           await organization.touch(fileSpace);
         }
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
-        // Keep the text of skills in the replay so their procedures still apply on later turns.
-        const keepSkill = uri.startsWith("skill://") && result.contents.every((c) => "text" in c);
         return withTurnBudgetNote(
-          { content, details: { uri }, ...(keepSkill ? {} : { persistedContent: receipts }) },
+          {
+            content,
+            details: { uri },
+            ...(keepsSkillText(uri, result.contents) ? {} : { persistedContent: receipts }),
+          },
           turnBudget,
         );
       },
@@ -724,7 +802,7 @@ function makeListSkillsExtension(
 /** One projection for both MCP resource reads and embedded resources from governed tool calls. */
 async function liveResources(
   resources: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"],
-  opts: Pick<BuildPlatformMcpToolsOptions, "modelSeesImages" | "pdfInput">,
+  opts: Pick<BuildPlatformMcpToolsOptions, "fileDelivery" | "pdfInput">,
   toolCallId: string,
 ) {
   const content: PiToolResult["content"] = [];
@@ -745,9 +823,9 @@ async function liveResources(
         { name: typeof name === "string" && name ? name : "document.pdf", data: blob },
         toolCallId,
       );
-      note = pdf.note;
-      if (pdf.reference) content.push({ type: "text", text: pdf.reference });
-    } else if (isRasterImageMime(mimeType) && opts.modelSeesImages) {
+      if ("reference" in pdf) content.push({ type: "text", text: pdf.reference });
+      else note = pdf.note;
+    } else if (isRasterImageMime(mimeType) && opts.fileDelivery.image) {
       content.push({ type: "image", mimeType, data: blob });
     } else {
       note = "This file format cannot be read by the current model.";
@@ -836,13 +914,38 @@ function makeRunAndWaitExtension(
           },
         })) {
           finalPayload = step.payload;
+          if (step.isError) {
+            // This tool launches over REST. Restrict its alternatives to the same tool and
+            // record them before any preliminary card, tool result or history can reveal them.
+            const projected = projectActiveInSpaces(step.payload.body, () =>
+              ctx.organization.spaces.filter(({ permissions }) => {
+                const has = (permission: string) => permissions.includes(permission);
+                return (
+                  has("mcp:read") &&
+                  has("mcp:invoke") &&
+                  canRunAgents(has) &&
+                  (args.kind !== "inline" || canComposeInline(has))
+                );
+              }),
+            );
+            if (projected) {
+              const unrecorded = await recordResultSpaces(ctx.organization, projected.ids);
+              if (unrecorded) {
+                return withTurnBudgetNote(
+                  toPiToolResult(unrecorded, runAndWaitScope),
+                  ctx.turnBudget,
+                );
+              }
+              finalPayload = { ...step.payload, body: projected.body };
+            }
+          }
           // Live card: push each step's payload under this tool call id so the
           // UI reflects launch → progress → terminal before execute resolves.
           // `preliminary` (AI SDK): the call is not settled until the result below.
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
-            output: toPiToolResult(step.payload, runAndWaitScope),
+            output: toPiToolResult(finalPayload, runAndWaitScope),
             preliminary: true,
           });
         }

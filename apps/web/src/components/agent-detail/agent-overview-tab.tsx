@@ -15,6 +15,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { RunStatusBadge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
+import { ScheduledAt } from "../scheduled-at";
 import { latestMemoryDate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
 import { linkedSpacePath } from "../../lib/across-spaces";
@@ -169,7 +170,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                 schedulesLoading ? (
                   <SkeletonLine className="w-32" />
                 ) : nextSchedule?.next_run_at ? (
-                  formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
+                  <ScheduledAt at={nextSchedule.next_run_at} timeZone={nextSchedule.timezone} />
                 ) : (
                   <span className="text-muted-foreground">
                     {t(schedulesError ? "detail.overview.unknown" : "detail.overview.noSchedule")}

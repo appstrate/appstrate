@@ -37,9 +37,10 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSpaces, llmUsage } from "@appstrate/db/schema";
 import {
   PERMISSION_REQUIREMENT_MARKER,
   reportPermissionDenial,
@@ -193,6 +194,25 @@ async function loadMessages(sessionId: string): Promise<MessageRow[]> {
     .from(chatMessages)
     .where(eq(chatMessages.sessionId, sessionId))
     .orderBy(asc(chatMessages.seq));
+}
+
+/**
+ * What the conversation's turns consumed: every ledger row metered for it, summed. A run launched
+ * from it is metered to the run, and the conversation's Runs tab presents it.
+ */
+async function loadSessionUsage(sessionId: string, orgId: string): Promise<TokenUsage> {
+  const sum = (column: AnyColumn) =>
+    sql<number>`coalesce(sum(${column}), 0)::bigint`.mapWith(Number);
+  const [row] = await db
+    .select({
+      input_tokens: sum(llmUsage.inputTokens),
+      output_tokens: sum(llmUsage.outputTokens),
+      cache_read_input_tokens: sum(llmUsage.cacheReadTokens),
+      cache_creation_input_tokens: sum(llmUsage.cacheWriteTokens),
+    })
+    .from(llmUsage)
+    .where(and(eq(llmUsage.chatSessionId, sessionId), eq(llmUsage.orgId, orgId)));
+  return row!;
 }
 
 // ---------------------------------------------------------------------------
@@ -401,9 +421,12 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
     // GET …/sessions/:id — the conversation's messages, in seq order (history load)
     get: async (c: Context<ChatEnv>) => {
       const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
-      const [dto] = await toSessionDtos([session]);
-      const messages = await loadMessages(session.id);
-      return c.json({ ...dto, messages: messages.map(toMessageDto) });
+      const [[dto], messages, usage] = await Promise.all([
+        toSessionDtos([session]),
+        loadMessages(session.id),
+        loadSessionUsage(session.id, session.orgId),
+      ]);
+      return c.json({ ...dto, messages: messages.map(toMessageDto), usage });
     },
 
     // PATCH …/sessions/:id — rename, limit to the origin space (giving one to a conversation

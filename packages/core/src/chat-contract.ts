@@ -45,7 +45,7 @@ export interface SubscriptionChatModel {
   contextWindow: number | null;
   maxTokens: number | null;
   reasoning: boolean;
-  /** Modality flags (`["text","image"]`), or `null` (defaults to text-only). */
+  /** Modality flags (`["text","image"]`), or `null` when not known; each consumer picks its default. */
   input: ModelInputModality[] | null;
   /**
    * The personal `model_provider_credentials` row this token belongs to — the
