@@ -295,11 +295,11 @@ async function expectTokensRevoked(access: SignedInEverywhere): Promise<void> {
   await expectGrantRefused(await refreshCli(access.cliRefreshToken));
   await expectGrantRefused(await exchangeDeviceCode(access.approvedDeviceCode));
   await expectGrantRefused(await refreshMcp(access.mcp));
-  const [opaque] = await db
-    .select({ revoked: oauthAccessToken.revoked })
+  const opaque = await db
+    .select({ id: oauthAccessToken.id })
     .from(oauthAccessToken)
     .where(eq(oauthAccessToken.id, access.opaqueAccessTokenId));
-  expect(opaque?.revoked).toBeInstanceOf(Date);
+  expect(opaque).toHaveLength(0);
 }
 
 /** Reset `email`'s password on the hosted page of a space client with its own transport. */

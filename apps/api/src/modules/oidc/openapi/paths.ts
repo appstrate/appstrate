@@ -627,7 +627,19 @@ export const oidcPaths = {
         },
       },
       responses: {
-        "200": { description: "Revocation succeeded (even on unknown token, per RFC 7009)." },
+        "200": {
+          description:
+            "Revoked, or the token was invalid: unknown, expired or already revoked (RFC 7009 §2.2). The two answers are identical.",
+        },
+        "400": {
+          description:
+            "`invalid_request` — a missing token or malformed client authentication. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`.",
+          content: oauthError,
+        },
+        "401": {
+          description: "`invalid_client` — missing or invalid client credentials.",
+          content: oauthError,
+        },
       },
     },
   },
@@ -1266,7 +1278,7 @@ export const oidcPaths = {
       operationId: "revokeMyAccessGrant",
       summary: "End one of the caller's access grants",
       description:
-        "End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are revoked, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.",
+        "End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are deleted, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.",
       security: [{ cookieAuth: [] }],
       requestBody: {
         required: true,

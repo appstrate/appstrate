@@ -57,7 +57,7 @@
   "dashboard.metric.successDetail_one": "{{successful}}/{{count}} finished run",
   "dashboard.metric.successDetail_other": "{{successful}}/{{count}} finished runs",
   "dashboard.metric.schedules": "Active schedules",
-  "dashboard.metric.schedulesNext": "Next {{date}}",
+  "dashboard.metric.schedulesNext": "Next run <date/>",
   "dashboard.metric.schedulesNone": "Nothing scheduled",
   "dashboard.unreadRuns_one": "{{count}} unread run",
   "dashboard.unreadRuns_other": "{{count}} unread runs",
