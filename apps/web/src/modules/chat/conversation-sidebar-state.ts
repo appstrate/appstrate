@@ -77,6 +77,11 @@ export function conversationSidebarReducer(
   }
 }
 
+/** The file the panel shows over the Files tab, null while it shows a tab's content. */
+export function shownFile(state: ConversationSidebarState): SidebarFile | null {
+  return state.activeTab === "files" ? state.selectedFile : null;
+}
+
 /**
  * The object URL of the picked file the panel holds, revoked once it holds another or none. A
  * collapsed panel still holds it: it stays drawn while the panel slides out.

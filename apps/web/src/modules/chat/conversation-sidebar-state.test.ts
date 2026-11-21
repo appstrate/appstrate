@@ -5,6 +5,7 @@ import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
   heldLocalUrl,
+  shownFile,
   type ConversationSidebarState,
 } from "./conversation-sidebar-state";
 
@@ -126,5 +127,15 @@ describe("conversation sidebar state", () => {
     expect(heldLocalUrl(conversationSidebarReducer(shown, { type: "close-file" }))).toBeNull();
     const replaced = conversationSidebarReducer(shown, { type: "show-file", file: file("file_a") });
     expect(heldLocalUrl(replaced)).toBeNull();
+  });
+
+  it("shows a file only over the Files tab", () => {
+    const withFile = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-file",
+      file: file("file_a"),
+    });
+    expect(shownFile(withFile)).toEqual(file("file_a"));
+    expect(shownFile({ ...withFile, activeTab: "info" })).toBeNull();
+    expect(shownFile(conversationSidebarReducer(withFile, { type: "close-file" }))).toBeNull();
   });
 });
