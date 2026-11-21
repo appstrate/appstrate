@@ -92,12 +92,22 @@ const withdraw = (headers: Headers, packageId: string) =>
 const offerRows = (packageId: string) =>
   db.select().from(orgPackageOffers).where(eq(orgPackageOffers.packageId, packageId));
 
-/** Integration ids the caller's `GET /api/me/context` lists in `spaceId`. */
-async function contextIntegrations(p: Principal, spaceId: string): Promise<string[]> {
+interface ContextEntry {
+  integration_package_id: string;
+  active: boolean;
+  connections: { id: string }[];
+}
+
+/** The integration entry the caller's `GET /api/me/context` lists in `spaceId`, active or not. */
+async function contextEntry(
+  p: Principal,
+  spaceId: string,
+  integrationId: string,
+): Promise<ContextEntry | undefined> {
   const res = await app.request("/api/me/context", { headers: p.headers(spaceId) });
   expect(res.status, await res.clone().text()).toBe(200);
-  const body = (await res.json()) as { connections: { integration_package_id: string }[] };
-  return body.connections.map((c) => c.integration_package_id);
+  const body = (await res.json()) as { connections: ContextEntry[] };
+  return body.connections.find((c) => c.integration_package_id === integrationId);
 }
 
 /** An org-scoped connection of `userId`, reachable from every space of its owner. */
@@ -229,18 +239,22 @@ describe("PUT/DELETE /api/packages/{scope}/{name}/org-offer", () => {
 describe("an offered package is placed and active where no row says otherwise", () => {
   it("activates a catalog integration in a member's personal space, and lists it with a reachable connection", async () => {
     await seedOrgConnection(member.userId, CATALOG_SSH);
-    expect(await contextIntegrations(member, member.personalSpaceId)).not.toContain(CATALOG_SSH);
+    expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).not.toBe(
+      true,
+    );
 
     expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(200);
 
-    expect(await contextIntegrations(member, member.personalSpaceId)).toContain(CATALOG_SSH);
+    const entry = await contextEntry(member, member.personalSpaceId, CATALOG_SSH);
+    expect(entry?.active).toBe(true);
+    expect(entry?.connections).toHaveLength(1);
   });
 
   it("keeps a space that holds an enabled=false row off", async () => {
     await seedOrgConnection(member.userId, CATALOG_SSH);
     await seedSpacePackage(member.personalSpaceId, CATALOG_SSH, { enabled: false });
     expect((await offer(authHeaders(ctx), CATALOG_SSH)).status).toBe(200);
-    expect(await contextIntegrations(member, member.personalSpaceId)).not.toContain(CATALOG_SSH);
+    expect((await contextEntry(member, member.personalSpaceId, CATALOG_SSH))?.active).toBe(false);
   });
 
   it("shows via organization in a space library, active, and the offer flags to an admin", async () => {
