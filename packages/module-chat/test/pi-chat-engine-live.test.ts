@@ -30,7 +30,10 @@ import {
   CHAT_TOOL_STEP_BUDGET,
 } from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
-import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
+import {
+  createPiOAuthModelBinding,
+  createPiProxyModelBinding,
+} from "../src/pi-chat/model-binding.ts";
 import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
@@ -421,6 +424,7 @@ async function runTurn(
   platformFetch?: typeof fetch,
   turn: {
     model?: OrgModel;
+    binding?: PiChatInput["modelBinding"];
     generation?: PiChatInput["generation"];
     messages?: UIMessage[];
     readAttachment?: PiChatInput["readAttachment"];
@@ -428,11 +432,13 @@ async function runTurn(
     requestId?: string;
   } = {},
 ) {
-  const binding = createPiProxyModelBinding({
-    model: turn.model ?? orgModel(),
-    origin: ORIGIN,
-    mintBearer,
-  })!;
+  const binding =
+    turn.binding ??
+    createPiProxyModelBinding({
+      model: turn.model ?? orgModel(),
+      origin: ORIGIN,
+      mintBearer,
+    })!;
   const slot = acquirePiChatSlot();
   expect(slot).not.toBeNull();
 
@@ -1064,6 +1070,78 @@ describe("runPiChat against a stub provider", () => {
       },
       30_000,
     );
+
+    it("keeps a partial answer when Pi retries and the retry is refused before any content", async () => {
+      capture.bodies.length = 0;
+      providerStreamFailure = (_body, n) =>
+        n === 1 ? { text: PARTIAL, message: "temporarily unavailable: server error" } : undefined;
+      providerRefusal = (body, n) => (n > 1 ? refusing(pdfData)(body) : undefined);
+      const { chunks } = await runTurn(() => "partial-retry", undefined, undefined, {
+        model: vision(),
+        messages: attaching("pdf"),
+        readAttachment: readFiles,
+      });
+      expect(capture.bodies.map((body) => body.includes(pdfData))).toEqual([true, true]);
+      expect(answered(chunks)).toBe(PARTIAL);
+      expect(chunks.some((chunk) => chunk.type === "error")).toBe(true);
+      expect(finishTurn(chunks)).toMatchObject({ finishReason: "error" });
+    }, 30_000);
+
+    it("keeps the PDF when the Codex WebSocket reports a quota error", async () => {
+      const requests: string[] = [];
+      const codex = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(req, server) {
+          if (server.upgrade(req)) return;
+          return new Response(null, { status: 404 });
+        },
+        websocket: {
+          message(socket, body) {
+            requests.push(body.toString());
+            socket.send(
+              JSON.stringify({
+                type: "error",
+                status: 429,
+                error: {
+                  code: "usage_limit_reached",
+                  message: "You have hit your ChatGPT usage limit.",
+                },
+              }),
+            );
+          },
+        },
+      });
+      try {
+        const claims = btoa(
+          JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "test" } }),
+        );
+        const binding = createPiOAuthModelBinding(
+          {
+            modelId: "codex-test",
+            apiShape: "openai-codex-responses",
+            baseUrl: codex.url.origin,
+            accessToken: `test.${claims}.test`,
+            credentialId: "test",
+            cost: null,
+            contextWindow: 128000,
+            maxTokens: 4096,
+            reasoning: false,
+            input: ["text", "image"],
+          },
+          { pi_provider: "openai-codex", pi_dialect: null },
+        );
+        const { chunks } = await runTurn(() => "unused", undefined, undefined, {
+          binding,
+          messages: attaching("pdf"),
+          readAttachment: readFiles,
+        });
+        expect(requests.map((body) => body.includes(pdfData))).toEqual([true]);
+        expect(finishTurn(chunks)).toMatchObject({ finishReason: "error" });
+      } finally {
+        await codex.stop(true);
+      }
+    }, 30_000);
 
     it.each(STREAMED)(
       "still replays a $apiShape attempt that failed mid-stream before any content",

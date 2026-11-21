@@ -16,6 +16,7 @@ import {
   describeModelFailure,
   type ModelErrorCategory,
 } from "@appstrate/core/model-error";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { wireParts, type WireParts } from "../file-input.ts";
 
 type FileKind = "image" | "pdf";
@@ -87,11 +88,18 @@ type AssistantMessage = Extract<Message, { role: "assistant" }>;
 /** A request timeout and a conflict are 4xx a retry can clear: not a verdict on the file. */
 const TRANSIENT_REQUEST_STATUSES = new Set([408, 409]);
 
-/** A failed attempt, with the HTTP error status its response carried when Pi saw one. */
-interface Attempt {
-  message: AssistantMessage;
-  status?: number;
-}
+/** Responses error frames can carry a code without an HTTP status. */
+const NON_FILE_ERROR_CODES = new Set([
+  "authentication_error",
+  "invalid_api_key",
+  "permission_denied",
+  "insufficient_quota",
+  "usage_limit_reached",
+  "usage_not_included",
+  "rate_limit_exceeded",
+  "server_error",
+  "context_length_exceeded",
+]);
 
 /**
  * The category a failed call is a refusal candidate under, or undefined when it is not one.
@@ -100,15 +108,19 @@ interface Attempt {
  * quota, throttling, a 5xx, Pi's own transient or overflow verdicts — the llm-proxy's 413 body
  * limit among them.
  */
-function refusalCategory({ message, status: observed }: Attempt): ModelErrorCategory | undefined {
+function refusalCategory(
+  message: AssistantMessage,
+  observed?: number,
+): ModelErrorCategory | undefined {
   const text = (message.errorMessage ?? "").trim();
   const status = observed ?? describeModelFailure(text).status;
+  if (status !== undefined && (status >= 500 || TRANSIENT_REQUEST_STATUSES.has(status)))
+    return undefined;
   const { category } = classifyModelError({
     message: text,
     ...(status !== undefined ? { status } : {}),
   });
   if (category !== "invalid_request" && category !== "unknown") return undefined;
-  if (status !== undefined && TRANSIENT_REQUEST_STATUSES.has(status)) return undefined;
   // A known 4xx is authoritative over its prose; Pi's transient patterns judge the rest.
   if (category === "unknown" && isRetryableAssistantError(message)) return undefined;
   return isContextOverflow(message) ? undefined : category;
@@ -152,7 +164,7 @@ interface Replay {
   /** The failed request's refusal category: a replay failing under it is refused the same way. */
   category: ModelErrorCategory;
   /** The latest replay's own failure, retries included. */
-  last?: Attempt;
+  lastCategory?: ModelErrorCategory;
 }
 
 /** `onReplay` runs when a replay is requested: the failed attempt is no longer the turn's error. */
@@ -166,6 +178,9 @@ export function createFileRefusal(
   const answeredWithout = new Set<FileKind>();
   let sent: FileKind[] = [];
   let responseStatus: number | undefined;
+  let nonFileStreamError = false;
+  // Pi can retry a failed attempt before settling the step. Its earlier output is still visible.
+  let stepStreamed = false;
   let suspect: Suspect | undefined;
   let replay: Replay | undefined;
   let original: string | undefined;
@@ -179,6 +194,7 @@ export function createFileRefusal(
         const sending = withheld.size ? withholdFiles(payload, withheld, parts) : payload;
         sent = [...fileKindsIn(sending, parts)];
         responseStatus = undefined;
+        nonFileStreamError = false;
         return withheld.size ? sending : undefined;
       });
       // Only some adapters report a refused response here (Codex does); a 2xx says nothing of a
@@ -186,22 +202,44 @@ export function createFileRefusal(
       pi.on("after_provider_response", ({ status }) => {
         responseStatus = status >= 400 ? status : undefined;
       });
+      if (api === "openai-codex-responses" || api === "openai-responses") {
+        pi.on("provider_stream_event", ({ data }) => {
+          const frame = asRecordOrNull(data);
+          if (frame?.type !== "error" && frame?.type !== "response.failed") return;
+          // WebSocket errors and failures inside HTTP 200 SSE streams carry their own verdict.
+          const error = asRecordOrNull(
+            frame.type === "error" ? frame.error : asRecordOrNull(frame.response)?.error,
+          );
+          if (typeof frame.status === "number" && frame.status >= 400 && frame.status < 600) {
+            responseStatus = frame.status;
+          }
+          nonFileStreamError = [frame.code, error?.code, error?.type].some(
+            (code) => typeof code === "string" && NON_FILE_ERROR_CODES.has(code),
+          );
+        });
+      }
       // Errors are judged where Pi settles a run, after its own retries.
       pi.on("turn_end", ({ message }) => {
         if (message.role !== "assistant") return;
         const m = message as AssistantMessage;
-        if (m.stopReason === "aborted") {
-          suspect = replay = undefined;
-        } else if (m.stopReason !== "error") {
-          for (const kind of replay?.kinds ?? []) answeredWithout.add(kind);
+        if (m.stopReason !== "error") {
+          if (m.stopReason !== "aborted") {
+            for (const kind of replay?.kinds ?? []) answeredWithout.add(kind);
+          }
+          stepStreamed = false;
           suspect = replay = original = undefined;
-        } else if (replay) {
-          replay.last = { message: m, status: responseStatus };
+          return;
+        }
+        stepStreamed ||= streamedContent(m);
+        const category =
+          stepStreamed || nonFileStreamError ? undefined : refusalCategory(m, responseStatus);
+        if (replay) {
+          replay.lastCategory = category;
         } else {
-          const category = sent.length
-            ? refusalCategory({ message: m, status: responseStatus })
-            : undefined;
-          suspect = category ? { kinds: sent, error: m.errorMessage ?? "", category } : undefined;
+          suspect =
+            sent.length && category
+              ? { kinds: sent, error: m.errorMessage ?? "", category }
+              : undefined;
         }
       });
       pi.on("agent_before_settle", ({ outcome, context }) => {
@@ -212,12 +250,7 @@ export function createFileRefusal(
         )?.sourceEntry;
         if (failed?.type !== "message" || failed.message.role !== "assistant") return;
         if (failed.message.stopReason !== "error") return;
-        if (streamedContent(failed.message)) {
-          suspect = replay = undefined;
-          return;
-        }
-        const refusedAgain =
-          replay?.last !== undefined && refusalCategory(replay.last) === replay.category;
+        const refusedAgain = replay !== undefined && replay.lastCategory === replay.category;
         if (replay && !(refusedAgain && replay.remaining.length)) {
           original = refusedAgain ? replay.error : undefined;
           replay = undefined;

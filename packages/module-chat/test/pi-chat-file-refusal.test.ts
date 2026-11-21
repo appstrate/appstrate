@@ -45,6 +45,7 @@ function harness(api = "anthropic-messages") {
       status,
       headers: {},
     });
+  const frame = (data: unknown) => handlers.get("provider_stream_event")?.({ data });
   const end = (stopReason: string, errorMessage?: string, provider = "anthropic") =>
     handlers.get("turn_end")!({
       message: { role: "assistant", content: [], stopReason, errorMessage, provider },
@@ -72,7 +73,7 @@ function harness(api = "anthropic-messages") {
     end("error", error, provider);
     return settle() !== undefined;
   };
-  return { refusal, send, respond, end, settle, fail, replays: () => replays };
+  return { refusal, send, respond, frame, end, settle, fail, replays: () => replays };
 }
 
 const REPLAY = {
@@ -104,8 +105,33 @@ describe("which failures are replayed", () => {
     ).toBe(false);
     expect(codex("Your session has expired. Please sign in again.", 401)).toBe(false);
     expect(codex("An error occurred while processing your request.", 500)).toBe(false);
+    expect(codex("Invalid request received by upstream worker", 503)).toBe(false);
     expect(codex("Invalid file data: 'file_data'.", 400)).toBe(true);
   });
+
+  it.each(["openai-codex-responses", "openai-responses"])(
+    "judges %s stream errors after HTTP 200 and resets their verdict on the next request",
+    (api) => {
+      const { send, respond, frame, end, settle } = harness(api);
+      for (const data of [
+        { type: "error", status: 503, message: "Invalid request" },
+        { type: "error", error: { code: "usage_limit_reached" } },
+        { type: "error", code: "invalid_api_key" },
+        { type: "response.failed", response: { error: { code: "server_error" } } },
+      ]) {
+        send(responsesImage);
+        respond(200);
+        frame(data);
+        end("error", "Request failed");
+        expect(settle()).toBeUndefined();
+      }
+      send(responsesImage);
+      respond(200);
+      frame({ type: "error", status: 400, error: { code: "invalid_image" } });
+      end("error", "Invalid file data");
+      expect(settle()).toEqual(REPLAY);
+    },
+  );
 
   it("does not take a successful response's status for the failure later in its stream", () => {
     const { send, respond, end, settle } = harness("openai-codex-responses");
