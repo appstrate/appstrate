@@ -30,7 +30,7 @@ export interface CardItem {
   identity?: { icon?: string | null; color?: string | null };
   /** The integrations an agent uses that take a connection, drawn as a stack of their logos. */
   integrations?: AgentListIntegration[];
-  /** Of those, the required ones not active in the space (single-space index only). */
+  /** The agent's required integrations not active in the space, which refuse its launch (single-space index only). */
   inactiveIntegrations?: string[];
   /** An integration's logo (its manifest `icon`). */
   logo?: string;

@@ -314,6 +314,8 @@ describe("Agents API", () => {
           type: "integration",
           draftManifest: { ...apiKeyIntegrationManifest(id), ...appearance },
         });
+        // Active here: what a row leaves out of an inactive one is its own case, below.
+        await activatePackage(spaceScope(), id);
       }
     });
 
@@ -392,6 +394,48 @@ describe("Agents API", () => {
       ).toEqual([
         { id: "@myorg/svc-open", authenticated: false },
         { id: "@myorg/svc-a", authenticated: true },
+      ]);
+    });
+
+    it("leaves out an optional integration not active in the space, keeps a required one", async () => {
+      for (const id of ["@myorg/svc-off", "@myorg/svc-off-required"]) {
+        // Homed here with no row: placed but not active.
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          draftManifest: apiKeyIntegrationManifest(id),
+        });
+      }
+      await seedActiveAgent({
+        id: "@myorg/partial",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: agentDeclaring("@myorg/partial", {
+          "@myorg/svc-a": false,
+          "@myorg/svc-off": false,
+          "@myorg/svc-off-required": true,
+        }),
+      });
+
+      const res = await app.request("/api/agents", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as {
+        data: { id: string; integrations: Listed[]; inactive_required_integrations: string[] }[];
+      };
+      const row = body.data.find((a) => a.id === "@myorg/partial")!;
+      // A run here starts without the optional one; the required one refuses it.
+      expect(row.integrations.map((i) => i.id)).toEqual([
+        "@myorg/svc-off-required",
+        "@myorg/svc-a",
+      ]);
+      expect(row.inactive_required_integrations).toEqual(["@myorg/svc-off-required"]);
+
+      // The organization index spans spaces, each with its own activations: it leaves none out.
+      const across = await listedIntegrations(`/api/orgs/${ctx.orgId}/agents`);
+      expect(across.get("@myorg/partial")?.map((i) => i.id)).toEqual([
+        "@myorg/svc-off-required",
+        "@myorg/svc-off",
+        "@myorg/svc-a",
       ]);
     });
 

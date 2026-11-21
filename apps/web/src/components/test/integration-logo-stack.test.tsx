@@ -25,7 +25,7 @@ const integration = (id: string, name: string): AgentListIntegration => ({
   authenticated: true,
 });
 
-const tiles = (html: string) => (html.match(/bg-background flex shrink-0/g) ?? []).length;
+const tiles = (html: string) => (html.match(/data-testid="integration-logo"/g) ?? []).length;
 
 describe("IntegrationLogoStack", () => {
   it("draws a tile per integration and names them all in the label", () => {

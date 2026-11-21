@@ -604,7 +604,7 @@ export interface AgentListItem extends BasePackageListItem {
     skills?: Record<string, string>;
     integrations: Record<string, string>;
   };
-  /** The integrations a launch with `version` omitted uses, as a list names them; inert ones left out. */
+  /** The integrations a launch with `version` omitted uses (inert ones, and on a single-space index optional inactive ones, left out). */
   integrations: AgentListIntegration[];
   /** Required integrations not active in the space (they refuse the launch); single-space index only. */
   inactive_required_integrations?: string[];

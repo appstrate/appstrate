@@ -79,7 +79,9 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors">
+    // `--tile-ring`: the card's ground at rest and hovered, which its stacked tiles (spaces,
+    // integration logos) ring themselves in.
+    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors [--tile-ring:var(--color-card)] hover:[--tile-ring:color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">

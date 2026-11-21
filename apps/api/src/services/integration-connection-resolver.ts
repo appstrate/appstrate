@@ -981,7 +981,7 @@ export async function requiredIntegrationIds(
 }
 
 /** A declared integration not active in the space, with the agent's `required` flag. */
-interface InactiveDeclaredIntegration {
+export interface InactiveDeclaredIntegration {
   integrationId: string;
   required: boolean;
 }
@@ -1033,10 +1033,12 @@ export async function inactiveRequiredIntegrationIds(
   agentManifests: readonly Record<string, unknown>[],
   scope: SpaceScope,
 ): Promise<string[][]> {
-  const inactive = await inactiveDeclaredIntegrations(agentManifests, scope);
-  return inactive.map((list) =>
-    list.filter((entry) => entry.required).map((entry) => entry.integrationId),
-  );
+  return (await inactiveDeclaredIntegrations(agentManifests, scope)).map(requiredIds);
+}
+
+/** The ids of the `required` ones among an agent's inactive integrations: they refuse its launch. */
+export function requiredIds(inactive: readonly InactiveDeclaredIntegration[]): string[] {
+  return inactive.filter((entry) => entry.required).map((entry) => entry.integrationId);
 }
 
 /**

@@ -420,9 +420,11 @@ export function DataTable<T>({
                   <TableRow
                     key={rowKey(row)}
                     className={cn(
-                      "group/row border-border/60 relative h-12",
+                      // `--tile-ring`: the row's ground, which stacked tiles in its cells ring
+                      // themselves in.
+                      "group/row border-border/60 relative h-12 [--tile-ring:var(--dt-surface)]",
                       interactive
-                        ? "cursor-pointer hover:bg-(--dt-surface-hover)"
+                        ? "cursor-pointer hover:bg-(--dt-surface-hover) hover:[--tile-ring:var(--dt-surface-hover)]"
                         : "hover:bg-transparent",
                     )}
                     onClick={interactive ? (e) => handOver(e, () => open(row, href)) : undefined}

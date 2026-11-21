@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
 
 /**
  * The colour of a stacked tile's ring: the container's `--tile-ring` (the colour of the surface
- * the stack sits on, which the container sets for each of its states: a conversation row or the
- * chat's top-bar trigger), else the page background. It keeps the overlapping edges readable.
+ * the stack sits on, which the container sets for each of its states: a card, a table row, a
+ * conversation row or the chat's top-bar trigger), else the page background. It keeps the
+ * overlapping edges readable.
  */
-const TILE_RING = "ring-(--tile-ring,var(--background))";
+const TILE_RING = "ring-2 ring-(--tile-ring,var(--background))";
+
+/** The same surface as a tile's own ground, for a tile whose content is transparent (a logo). */
+export const TILE_SURFACE = "bg-(--tile-ring,var(--background))";
 
 /** The box of a stacked tile in a list's line (a cell, a card): every stack's, so they line up. */
 export const STACK_TILE = "size-4 rounded-[4px]";
 
-/** How far each tile slides under the one before it, and how wide the ring cutting it is. */
-const OVERLAP = "-ml-0.5 ring-2";
+/** How far each tile slides under the one before it: little, so a logo keeps what it shows. */
+const OVERLAP = "-ml-0.5";
 
 /**
  * Each tile its own stacking context, so its background and its content are painted together, in
@@ -66,9 +70,9 @@ export function TileStack<T>({
       )}
       {shown
         .map((item, index) => (
-          <span key={keyOf(item)} className="contents">
-            {render(item, cn(TILE_LAYER, TILE_RING, OVERLAP, index === 0 && "ml-0"))}
-          </span>
+          <Fragment key={keyOf(item)}>
+            {render(item, cn(TILE_LAYER, TILE_RING, index > 0 && OVERLAP))}
+          </Fragment>
         ))
         .reverse()}
     </span>

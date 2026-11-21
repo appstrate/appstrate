@@ -37,4 +37,12 @@ describe("agentCardItem", () => {
     );
     expect(item.integrations?.map((i) => i.id)).toEqual(["@appstrate/gmail"]);
   });
+
+  it("carries the required integrations not active in the space, which refuse the launch", () => {
+    const item = agentCardItem({
+      ...agent([integration("@appstrate/gmail", true)]),
+      inactive_required_integrations: ["@appstrate/gmail"],
+    });
+    expect(item.inactiveIntegrations).toEqual(["@appstrate/gmail"]);
+  });
 });

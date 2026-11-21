@@ -231,7 +231,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts: a system agent, or one placed there (homed there, or holding a row there) and switched on. Active is not launchable: `inactive_required_integrations` names the required integrations not active in this space, each of which refuses the launch (`409`) until it is activated here; the agent stays listed so it can be repaired. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
+         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts: a system agent, or one placed there (homed there, or holding a row there) and switched on. Active is not launchable: `inactive_required_integrations` names the required integrations not active in this space, each of which refuses the launch (`409`) until it is activated here; the agent stays listed so it can be repaired. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` and `integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -5849,7 +5849,7 @@ export interface components {
             })[];
             integrations: {
                 integration_package_id: string;
-                /** @description The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here. */
+                /** @description The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without it — the integration not active in the space, or no connection bound. */
                 required: boolean;
                 /** @description True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning`). */
                 run_blocking: boolean;
@@ -5991,7 +5991,7 @@ export interface components {
             type: "agent" | "skill" | "integration";
             /** @description Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ. Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces. */
             inactive_required_integrations?: string[];
-            /** @description The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins, whose manifest loads, leaving out an inert one (declared optional, selecting no tool or scope) as the run does. The name and the icon are read off that version of the integration's manifest, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map. */
+            /** @description The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins (its draft when no published version satisfies the pin, as run readiness reads it) and whose manifest loads. Left out, as the run leaves them out: an inert one (declared optional, selecting no tool or scope) and, on `GET /api/agents`, an optional one not active in the space — a run there starts without it; a required one not active stays, and is named in `inactive_required_integrations`. The name and the icon are read off the integration manifest that version resolves to, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map. */
             integrations: {
                 /** @description Integration package id (`@scope/name`). */
                 id: string;
@@ -5999,7 +5999,7 @@ export interface components {
                 name: string;
                 /** @description The manifest's `icon`: an Iconify id (`<prefix>:<name>`) or an image URL, `null` when it declares none. */
                 icon: string | null;
-                /** @description `integrations_configuration.<id>.required`: where it is not active, a launch is refused. */
+                /** @description The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without it — the integration not active in the space, or no connection bound. */
                 required: boolean;
                 /** @description Whether the integration declares `auths`, as on the integration index. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection. */
                 authenticated: boolean;

@@ -233,6 +233,10 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
  * schema object: verify-openapi's shared-type check reads only the properties
  * declared there, never through `allOf`.
  */
+/** An agent's `required` flag on one of its integrations (`AgentListItem`, connection readiness). */
+const AGENT_INTEGRATION_REQUIRED =
+  "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without it — the integration not active in the space, or no connection bound.";
+
 /** `space_ids` of an index row (`AgentListItem`, `OrgPackageItem`). */
 const INDEX_SPACE_IDS = {
   type: "array",
@@ -1126,7 +1130,7 @@ export const schemas = {
       integrations: {
         type: "array",
         description:
-          "The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins, whose manifest loads, leaving out an inert one (declared optional, selecting no tool or scope) as the run does. The name and the icon are read off that version of the integration's manifest, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map.",
+          "The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins (its draft when no published version satisfies the pin, as run readiness reads it) and whose manifest loads. Left out, as the run leaves them out: an inert one (declared optional, selecting no tool or scope) and, on `GET /api/agents`, an optional one not active in the space — a run there starts without it; a required one not active stays, and is named in `inactive_required_integrations`. The name and the icon are read off the integration manifest that version resolves to, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map.",
         items: {
           type: "object",
           required: ["id", "name", "icon", "required", "authenticated"],
@@ -1141,11 +1145,7 @@ export const schemas = {
               description:
                 "The manifest's `icon`: an Iconify id (`<prefix>:<name>`) or an image URL, `null` when it declares none.",
             },
-            required: {
-              type: "boolean",
-              description:
-                "`integrations_configuration.<id>.required`: where it is not active, a launch is refused.",
-            },
+            required: { type: "boolean", description: AGENT_INTEGRATION_REQUIRED },
             authenticated: {
               type: "boolean",
               description:
@@ -2691,8 +2691,7 @@ export const schemas = {
             integration_package_id: { type: "string" },
             required: {
               type: "boolean",
-              description:
-                "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here.",
+              description: AGENT_INTEGRATION_REQUIRED,
             },
             run_blocking: {
               type: "boolean",
