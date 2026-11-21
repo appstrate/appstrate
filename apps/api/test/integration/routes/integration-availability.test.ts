@@ -29,7 +29,13 @@ import { overrideJwks } from "../../../src/modules/oidc/services/enduser-token.t
 import { resetOidcGuardsLimiters } from "../../../src/modules/oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../src/modules/oidc/test/helpers/authorization-code-flow.ts";
 import mcpModule from "../../../src/modules/mcp/index.ts";
-import { seedOrgOffer, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedOrgOffer,
+  seedPackage,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
@@ -167,6 +173,11 @@ describe("GET /api/integrations/{packageId} — availability", () => {
     expect(a).toMatchObject({ via: "shared", state: "active", offered_to_org: false });
   });
 
+  it("404s on an integration homed in another space and placed nowhere else", async () => {
+    const res = await app.request(`/api/integrations/${SHARED}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(404);
+  });
+
   it("gives an owner the offer verdict", async () => {
     // An offer already stands, so withdrawing it needs no published version.
     await seedOrgOffer(ctx.orgId, OFFERED);
@@ -224,6 +235,22 @@ describe("GET /api/integrations/{packageId} — the same availability through ev
     expect(res.status, await res.clone().text()).toBe(200);
     const { availability } = (await res.json()) as { availability: Availability };
     expect(availability).toEqual(await read(ctx, OFFERED));
+  });
+
+  it("answers a space-pinned API key what it answers the session", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:read"],
+    });
+    const res = await app.request(`/api/integrations/${OFFERED}`, {
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const { availability } = (await res.json()) as { availability: Availability };
+    // The key's scopes may narrow the offer switch; the placement is the library's.
+    expect(placementOf(availability)).toEqual(placementOf(await read(ctx, OFFERED)));
   });
 
   it("answers a real minted MCP instance token what it answers the session", async () => {

@@ -789,6 +789,8 @@ function resolutionConflict(error: ConnectionResolutionError): ApiError {
 /** An integration's activation in a space; `blockUserConnections` is `false` without a row. */
 interface IntegrationActivation {
   active: boolean;
+  /** Why the integration is placed in the space (`placementVia`); `null`: it is not placed there. */
+  via: PlacementVia | null;
   blockUserConnections: boolean;
 }
 
@@ -796,8 +798,9 @@ interface IntegrationActivation {
  * The activation of each integration of `packageIds` in the space, in one SELECT, by the rule
  * {@link isActiveHere} states for every package type: a `space_packages` row's `enabled` wins (a
  * deactivated system integration keeps an `enabled = false` row: the opt-out is sticky); without a
- * row, a system integration (`SYSTEM_INTEGRATIONS`) is active and any other is not. Every
- * requested id is in the map.
+ * row, a system integration (`SYSTEM_INTEGRATIONS`) is active and any other is not. Beside it, the
+ * provenance of the placement ({@link placementVia}), read off the same rows. Every requested id is
+ * in the map, a package the catalogue does not hold included.
  */
 export async function resolveIntegrationActivations(
   packageIds: readonly string[],
@@ -807,28 +810,36 @@ export async function resolveIntegrationActivations(
   if (packageIds.length === 0) return result;
   const rows = await db
     .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
       packageId: spacePackages.packageId,
       enabled: spacePackages.enabled,
+      placedByOffer: spacePackages.placedByOffer,
       blockUserConnections: spacePackages.blockUserConnections,
     })
-    .from(spacePackages)
-    .where(
-      and(
-        eq(spacePackages.spaceId, spaceId),
-        inArray(spacePackages.packageId, packageIds as string[]),
-      ),
-    );
-  const byId = new Map(rows.map((r) => [r.packageId, r]));
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+    .where(inArray(packages.id, packageIds as string[]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
   const offered = await listOfferedToSpaceOrg(spaceId, packageIds);
   for (const id of packageIds) {
-    const row = byId.get(id);
+    const found = byId.get(id);
+    const pkg = {
+      id,
+      type: found?.type ?? "integration",
+      source: found?.source ?? null,
+      homeSpaceId: found?.homeSpaceId ?? null,
+      offeredToOrg: offered.has(id),
+    };
+    const row = found?.packageId
+      ? { enabled: found.enabled!, placedByOffer: found.placedByOffer! }
+      : undefined;
     result.set(id, {
-      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the deployment's offer.
-      active: isActiveHere(
-        { id, type: "integration", source: null, offeredToOrg: offered.has(id) },
-        row,
-      ),
-      blockUserConnections: row?.blockUserConnections === true,
+      active: isActiveHere(pkg, row),
+      via: placementVia(pkg, spaceId, row),
+      blockUserConnections: found?.blockUserConnections === true,
     });
   }
   return result;
@@ -2729,40 +2740,11 @@ export async function listUsableIntegrationsForActor(
 
   // Sorted on purpose: an unordered SELECT may permute it between identical calls.
   const ids = [...acc.keys()].sort();
+  const activations = await resolveIntegrationActivations(ids, scope.spaceId);
   const pkgRows = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      source: packages.source,
-      homeSpaceId: packages.homeSpaceId,
-      draftManifest: packages.draftManifest,
-    })
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .where(inArray(packages.id, ids));
-  // `active` and `via` are read off the same rows: the space's placement rows and the org's offers.
-  const placementRows = new Map(
-    (
-      await db
-        .select({
-          packageId: spacePackages.packageId,
-          enabled: spacePackages.enabled,
-          placedByOffer: spacePackages.placedByOffer,
-        })
-        .from(spacePackages)
-        .where(and(eq(spacePackages.spaceId, scope.spaceId), inArray(spacePackages.packageId, ids)))
-    ).map((r) => [r.packageId, r]),
-  );
-  const offered = await listOfferedToSpaceOrg(scope.spaceId, ids);
-  const placementOf = new Map(
-    pkgRows.map((p) => {
-      const pkg = { ...p, offeredToOrg: offered.has(p.id) };
-      const row = placementRows.get(p.id);
-      return [
-        p.id,
-        { active: isActiveHere(pkg, row), via: placementVia(pkg, scope.spaceId, row) },
-      ] as const;
-    }),
-  );
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
   // The integration's own version, off the selected draft manifest: a caller pinning a
   // `dependencies.integrations` range needs no guess.
@@ -2780,13 +2762,13 @@ export async function listUsableIntegrationsForActor(
   return ids.map((integrationId) => {
     const { own, shared, healthy, connections } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
-    const isActive = placementOf.get(integrationId)?.active ?? false;
+    const { active: isActive, via } = activations.get(integrationId)!;
     return {
       integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
       active: isActive,
-      via: placementOf.get(integrationId)?.via ?? null,
+      via,
       // What a run would bind: nothing of an inactive integration.
       ...(isActive
         ? {

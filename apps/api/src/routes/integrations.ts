@@ -1662,6 +1662,10 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       await assertIsIntegration(scope, packageId);
       const body = await readJsonBody(c, updateSettingsSchema);
+      // Before the write: `integrations:configure` does not imply the `integrations:read` the
+      // library asks, and a refusal after a committed write would report a failure for it.
+      // The toggled gate does not change availability.
+      const availability = await packageAvailabilityIn(c, packageId, scope.spaceId);
       const result = await setBlockUserConnections(scope, packageId, body.block_user_connections);
       await recordAuditFromContext(c, {
         action: "integration.block_user_connections.updated",
@@ -1672,15 +1676,12 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap.
-      const [detail, availability] = await Promise.all([
-        getIntegrationAuthStatuses(
-          scope,
-          packageId,
-          ...spaceListCaller(c),
-          reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
-        ),
-        packageAvailabilityIn(c, packageId, scope.spaceId),
-      ]);
+      const detail = await getIntegrationAuthStatuses(
+        scope,
+        packageId,
+        ...spaceListCaller(c),
+        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
+      );
       return c.json({ ...withRunToolDescriptions(detail), availability });
     },
   );

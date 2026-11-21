@@ -3240,8 +3240,8 @@ export const schemas = {
             required: ["spaceId", "activate", "deactivate"],
             properties: {
               spaceId: { type: "string" },
-              activate: { $ref: "#/components/schemas/ActivationVerdict" },
-              deactivate: { $ref: "#/components/schemas/ActivationVerdict" },
+              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              deactivate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
             },
           },
         },
@@ -3255,12 +3255,6 @@ export const schemas = {
         },
       },
     },
-  },
-  ActivationVerdict: {
-    type: "string",
-    enum: ["allowed", "not_shareable", "forbidden"],
-    description:
-      "Whether the caller may switch a package on or off in a space: `allowed`; `not_shareable` — it is not placed there and its home grants no `<type>:share`; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space. The routes stay the authority.",
   },
   PackageAvailability: {
     type: "object",

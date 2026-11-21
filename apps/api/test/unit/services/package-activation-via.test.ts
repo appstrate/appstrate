@@ -45,6 +45,12 @@ const CELLS: Array<[string, Pkg, Row, PlacementVia | null]> = [
     "unlisted system integration, offered, a row",
     system({ type: "integration", offeredToOrg: true }),
     OFFER_ROW,
+    "organization",
+  ],
+  [
+    "unlisted system integration, offered, a share row",
+    system({ type: "integration", offeredToOrg: true }),
+    SHARE,
     "system",
   ],
   [

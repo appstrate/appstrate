@@ -5844,11 +5844,6 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        /**
-         * @description Whether the caller may switch a package on or off in a space: `allowed`; `not_shareable` — it is not placed there and its home grants no `<type>:share`; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space. The routes stay the authority.
-         * @enum {string}
-         */
-        ActivationVerdict: "allowed" | "not_shareable" | "forbidden";
         /** @description A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item). */
         ActivationWarning: components["schemas"]["ResolutionFieldError"] & {
             /** @enum {string} */
@@ -6601,8 +6596,10 @@ export interface components {
             /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
             activation: {
                 spaceId: string;
-                activate: components["schemas"]["ActivationVerdict"];
-                deactivate: components["schemas"]["ActivationVerdict"];
+                /** @enum {string} */
+                activate: "allowed" | "not_shareable" | "forbidden";
+                /** @enum {string} */
+                deactivate: "allowed" | "not_shareable" | "forbidden";
             }[];
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];

@@ -93,7 +93,8 @@ export type PlacementVia = "home" | "shared" | "system" | "organization";
  * placed there. `row` is the space's placement row, or `undefined` when it has
  * none; `pkg.offeredToOrg` is the offer to that space's organization. A row an
  * offer no longer explains (withdrawn) is a row outside the home: `shared`, as
- * `placementReadFilter` reads it.
+ * `placementReadFilter` reads it. A system package reports `system` unless the
+ * offer is what activates it and the space holds no row, or only an offer row.
  */
 export function placementVia(
   pkg: ActivatablePackage & { homeSpaceId: string | null },
@@ -101,7 +102,9 @@ export function placementVia(
   row: { placedByOffer: boolean } | null | undefined,
 ): PlacementVia | null {
   const activatedByOffer = pkg.offeredToOrg && !isActiveWithoutRow({ ...pkg, offeredToOrg: false });
-  if (pkg.source === "system" && (row || !activatedByOffer)) return "system";
+  // A system package the offer alone activates is `organization`, with no row or only an offer row.
+  const offerDecides = activatedByOffer && (!row || row.placedByOffer);
+  if (pkg.source === "system" && !offerDecides) return "system";
   if (pkg.homeSpaceId === spaceId) return "home";
   if (row && (!row.placedByOffer || !pkg.offeredToOrg)) return "shared";
   return pkg.offeredToOrg ? "organization" : null;
