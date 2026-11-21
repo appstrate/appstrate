@@ -14,7 +14,8 @@
  * The ROW ALWAYS WINS. That is why a system package can be switched off per
  * space like any other: an explicit `false` is an operator decision the
  * platform must not overrule, and the row survives every run, so the opt-out
- * is sticky. A row is a placement of its own (`placementReadFilter`,
+ * is sticky. The one exception is a runtime-bound system integration: it
+ * serves the run's own tools, so `deactivatePackage` refuses it. A row is a placement of its own (`placementReadFilter`,
  * `services/package-placement.ts`), so no placement conjunct is needed: a
  * package placed outside its home with `enabled = false` is placed and off.
  *
@@ -58,15 +59,22 @@ function activeWithoutRowIntegrationIds(): ReadonlySet<string> {
 }
 
 /**
+ * Is the package active in a space with no row and no offer: the deployment's
+ * default alone? An offer to it would change nothing.
+ */
+export function isActiveByDefault(pkg: Omit<ActivatablePackage, "offeredToOrg">): boolean {
+  if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
+  return pkg.source === "system";
+}
+
+/**
  * Is the package active in a space that holds NO placement row for it?
  *
  * The deployment's default or the organization's offer: the half of the rule
  * that looks at the package rather than at the space's decision.
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
-  if (pkg.offeredToOrg) return true;
-  if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
-  return pkg.source === "system";
+  return pkg.offeredToOrg || isActiveByDefault(pkg);
 }
 
 /**
@@ -101,7 +109,7 @@ export function placementVia(
   spaceId: string,
   row: { placedByOffer: boolean } | null | undefined,
 ): PlacementVia | null {
-  const activatedByOffer = pkg.offeredToOrg && !isActiveWithoutRow({ ...pkg, offeredToOrg: false });
+  const activatedByOffer = pkg.offeredToOrg && !isActiveByDefault(pkg);
   // A system package the offer alone activates is `organization`, with no row or only an offer row.
   const offerDecides = activatedByOffer && (!row || row.placedByOffer);
   if (pkg.source === "system" && !offerDecides) return "system";

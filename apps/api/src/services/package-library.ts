@@ -16,8 +16,14 @@ import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts
 import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
-import { isActiveHere, placementVia, type PlacementVia } from "./package-activation.ts";
+import {
+  isActiveByDefault,
+  isActiveHere,
+  placementVia,
+  type PlacementVia,
+} from "./package-activation.ts";
 import { notFound } from "../lib/errors.ts";
+import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
@@ -39,9 +45,11 @@ interface Placement {
  * Whether the caller may switch a package on/off in one space, as the
  * `…/packages` routes judge it: `not_shareable` = not placed there and no
  * `<type>:share` in its home; `forbidden` = the `activate`/`deactivate` grant is
- * missing (a personal space's owner needs none).
+ * missing (a personal space's owner needs none); `runtime_bound` = a deactivate
+ * of a system integration serving the run's own tools, which stays active
+ * everywhere whatever the role.
  */
-type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
+type ActivationVerdict = "allowed" | "not_shareable" | "forbidden" | "runtime_bound";
 
 /** The two verdicts of one (package, space) pair, for every space the library lists. */
 interface ActivationCell {
@@ -64,6 +72,8 @@ interface LibraryPackage {
   offered_to_org: boolean;
   /** Whether THIS caller may offer it or withdraw the offer (`PUT|DELETE …/org-offer`). */
   org_offerable: boolean;
+  /** Active in every space by the deployment's default: an offer would change nothing. */
+  active_by_default: boolean;
   placements: Placement[];
   activation: ActivationCell[];
 }
@@ -95,13 +105,16 @@ async function readPackageLibrary(
   // The caller's own personal space takes no activation grant: ownership authorizes
   // (`coarseSpacePackageGate`, `routes/spaces.ts`).
   const personalOwnerId = callerPersonalOwnerId(c);
+  const runtimeBound = new Set(listRuntimeBoundSystemIntegrationIds());
   const activationVerdict = (
     type: PackageType,
     space: (typeof accessible)[number],
     placed: boolean,
     shareable: boolean,
     next: boolean,
+    packageId: string,
   ): ActivationVerdict => {
+    if (!next && type === "integration" && runtimeBound.has(packageId)) return "runtime_bound";
     if (!placed && !shareable) return "not_shareable";
     const ownSpace = space.ownerUserId !== null && space.ownerUserId === personalOwnerId;
     if (ownSpace) return "allowed";
@@ -255,6 +268,7 @@ async function readPackageLibrary(
     const rowsBySpace = placementRows.get(row.id);
 
     const offered = offeredIds.has(row.id);
+    const activeByDefault = isActiveByDefault({ id: row.id, type, source: row.source });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
@@ -280,13 +294,21 @@ async function readPackageLibrary(
     const placedIn = new Set(placements.map((placement) => placement.space_id));
     const activation = visibleSpaces.map((space): ActivationCell => ({
       spaceId: space.id,
-      activate: activationVerdict(type, space, placedIn.has(space.id), home.home_shareable, true),
+      activate: activationVerdict(
+        type,
+        space,
+        placedIn.has(space.id),
+        home.home_shareable,
+        true,
+        row.id,
+      ),
       deactivate: activationVerdict(
         type,
         space,
         placedIn.has(space.id),
         home.home_shareable,
         false,
+        row.id,
       ),
     }));
 
@@ -301,10 +323,14 @@ async function readPackageLibrary(
       ...home,
       offered_to_org: offered,
       // The offer door's verdict (`assertPackageOfferAccess`): the role and ceiling, the home's
-      // `share` (`home_shareable`) and, when creating an offer for a homed package, a published version.
+      // `share` (`home_shareable`) and, when creating an offer for a homed package, a published
+      // version; a system package already active by default takes no new offer.
       org_offerable:
         callerMayOffer(c, type) &&
-        (row.source === "system" || (home.home_shareable && (offered || published.has(row.id)))),
+        (row.source === "system"
+          ? offered || !activeByDefault
+          : home.home_shareable && (offered || published.has(row.id))),
+      active_by_default: activeByDefault,
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
       placements,
@@ -353,5 +379,6 @@ export async function integrationAvailabilityIn(
     ...here,
     offered_to_org: entry.offered_to_org,
     org_offerable: entry.org_offerable,
+    active_by_default: entry.active_by_default,
   };
 }

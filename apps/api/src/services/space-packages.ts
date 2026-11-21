@@ -23,6 +23,7 @@ import {
 import {
   conflict,
   forbidden,
+  invalidRequest,
   notFound,
   parseBody,
   type ResolutionFieldError,
@@ -54,6 +55,7 @@ import {
   isActiveWithoutRow,
   type ActivatablePackage,
 } from "./package-activation.ts";
+import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 
 // ---------------------------------------------------------------------------
 // Activate / Deactivate
@@ -354,6 +356,11 @@ export async function deactivatePackage(
   packageId: string,
 ): Promise<{ changed: boolean }> {
   await assertSpaceInScope(scope);
+  if (listRuntimeBoundSystemIntegrationIds().includes(packageId)) {
+    throw invalidRequest(
+      `'${packageId}' serves the run's own tools and stays active in every space.`,
+    );
+  }
 
   return db.transaction(async (tx) => {
     const pkg = await loadPlaceablePackage(tx, scope, packageId);

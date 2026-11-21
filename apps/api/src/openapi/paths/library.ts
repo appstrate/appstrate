@@ -62,6 +62,7 @@ const PACKAGES_EXAMPLE = {
       home_shareable: true,
       offered_to_org: false,
       org_offerable: true,
+      active_by_default: false,
       placements: [
         {
           space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -104,6 +105,7 @@ const PACKAGES_EXAMPLE = {
       home_shareable: false,
       offered_to_org: false,
       org_offerable: false,
+      active_by_default: true,
       placements: [
         {
           space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",

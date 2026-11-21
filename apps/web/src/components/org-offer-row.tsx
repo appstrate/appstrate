@@ -7,6 +7,10 @@ import { cn } from "@appstrate/ui/cn";
 import { useSetOrgOffer } from "../hooks/use-library";
 import { ConfirmModal } from "./confirm-modal";
 
+/** Same box for the two rows. */
+const ROW_CLASS =
+  "border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm";
+
 /** The row's markup: the package's offer to the organization and its switch. */
 function OrgOfferSwitchRow({
   name,
@@ -24,12 +28,7 @@ function OrgOfferSwitchRow({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div
-      className={cn(
-        "border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm",
-        className,
-      )}
-    >
+    <div className={cn(ROW_CLASS, className)}>
       <div className="min-w-0">
         <p className="font-medium">{t("catalogue.orgOffer.label")}</p>
         <p className="text-muted-foreground mt-0.5 text-xs">{t("catalogue.orgOffer.help")}</p>
@@ -45,7 +44,8 @@ function OrgOfferSwitchRow({
 }
 
 /**
- * Offers a package to the whole organization, or withdraws it. Shown to a reader who may change
+ * Offers a package to the whole organization, or withdraws it. A package the deployment already
+ * activates everywhere takes no offer: a plain row says so. Shown to a reader who may change
  * the offer (`org_offerable`) and, read-only, to anyone else when it stands. Withdrawing asks
  * first: every space without a row of its own stops running it and loses its schedules.
  */
@@ -53,12 +53,30 @@ export function OrgOfferRow({
   item,
   className,
 }: {
-  item: { id: string; name: string; offered_to_org: boolean; org_offerable: boolean };
+  item: {
+    id: string;
+    name: string;
+    offered_to_org: boolean;
+    org_offerable: boolean;
+    active_by_default: boolean;
+  };
   className?: string;
 }) {
   const { t } = useTranslation("settings");
   const setOffer = useSetOrgOffer();
   const [confirming, setConfirming] = useState(false);
+  if (item.active_by_default && !item.offered_to_org) {
+    return (
+      <div className={cn(ROW_CLASS, className)}>
+        <div className="min-w-0">
+          <p className="font-medium">{t("catalogue.orgOffer.defaultActive")}</p>
+          <p className="text-muted-foreground mt-0.5 text-xs">
+            {t("catalogue.orgOffer.defaultActiveHelp")}
+          </p>
+        </div>
+      </div>
+    );
+  }
   if (!item.offered_to_org && !item.org_offerable) return null;
   const name = item.name || item.id;
   return (

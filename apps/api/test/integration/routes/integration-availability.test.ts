@@ -66,6 +66,7 @@ interface Availability {
   shared_by: { user_id: string; name: string } | null;
   offered_to_org: boolean;
   org_offerable: boolean;
+  active_by_default: boolean;
 }
 
 /** The detail's `availability` and `active`, plus the library's cell for the same caller. */
@@ -84,6 +85,7 @@ async function read(as: TestContext, id: string) {
         id: string;
         offered_to_org: boolean;
         org_offerable: boolean;
+        active_by_default: boolean;
         placements: {
           space_id: string;
           via: string;
@@ -101,6 +103,7 @@ async function read(as: TestContext, id: string) {
     shared_by: placement.shared_by,
     offered_to_org: entry.offered_to_org,
     org_offerable: entry.org_offerable,
+    active_by_default: entry.active_by_default,
   };
 
   expect(detail.availability).toEqual(fromLibrary);

@@ -24256,7 +24256,7 @@
         "operationId": "offerPackageToOrg",
         "tags": ["Packages"],
         "summary": "Offer a package to the organization",
-        "description": "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
+        "description": "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -24289,6 +24289,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -26130,7 +26133,7 @@
         "operationId": "deactivatePackage",
         "tags": ["Space Packages"],
         "summary": "Deactivate a package in this space",
-        "description": "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.",
+        "description": "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -26153,6 +26156,9 @@
         "responses": {
           "204": {
             "description": "Switched off here, or already off. No audit entry when nothing changed."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -34543,6 +34549,7 @@
                         "home_shareable": true,
                         "offered_to_org": false,
                         "org_offerable": true,
+                        "active_by_default": false,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34588,6 +34595,7 @@
                         "home_shareable": false,
                         "offered_to_org": false,
                         "org_offerable": false,
+                        "active_by_default": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34736,6 +34744,7 @@
                         "home_shareable": true,
                         "offered_to_org": false,
                         "org_offerable": true,
+                        "active_by_default": false,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34781,6 +34790,7 @@
                         "home_shareable": false,
                         "offered_to_org": false,
                         "org_offerable": false,
+                        "active_by_default": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -39276,6 +39286,7 @@
             "home_shareable",
             "offered_to_org",
             "org_offerable",
+            "active_by_default",
             "placements",
             "activation"
           ],
@@ -39324,9 +39335,13 @@
               "type": "boolean",
               "description": "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home. Creating an offer also requires a published version for a homed package. The route stays the authority; this is its verdict served in advance."
             },
+            "active_by_default": {
+              "type": "boolean",
+              "description": "Active in every space by the deployment's default alone (a system package, or a system integration the deployment switches on): an offer would change nothing, so `PUT …/org-offer` refuses to create one (400) while an existing offer can still be withdrawn."
+            },
             "activation": {
               "type": "array",
-              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+              "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none); `runtime_bound` — `deactivate` only: a system integration serving the run's own tools stays active in every space, whatever the role. The routes stay the authority; this is their verdict served in advance.",
               "items": {
                 "type": "object",
                 "required": ["spaceId", "activate", "deactivate"],
@@ -39340,7 +39355,7 @@
                   },
                   "deactivate": {
                     "type": "string",
-                    "enum": ["allowed", "not_shareable", "forbidden"]
+                    "enum": ["allowed", "not_shareable", "forbidden", "runtime_bound"]
                   }
                 }
               }
@@ -39358,7 +39373,14 @@
       "PackageAvailability": {
         "type": "object",
         "description": "What the library says about one package in the current space: the placement of that space (`PackagePlacement` without `space_id`) and the package's offer fields. A projection of `GET /api/spaces/{id}/library`, never a second computation.",
-        "required": ["via", "state", "shared_by", "offered_to_org", "org_offerable"],
+        "required": [
+          "via",
+          "state",
+          "shared_by",
+          "offered_to_org",
+          "org_offerable",
+          "active_by_default"
+        ],
         "properties": {
           "via": {
             "type": "string",
@@ -39390,6 +39412,10 @@
           "org_offerable": {
             "type": "boolean",
             "description": "Whether THIS caller may offer it or withdraw the offer (`org_offerable` of the library entry)."
+          },
+          "active_by_default": {
+            "type": "boolean",
+            "description": "Active in every space by the deployment's default (`active_by_default` of the library entry)."
           }
         }
       },

@@ -44,6 +44,7 @@ function pkg(overrides: Partial<LibraryPackageItem> = {}): LibraryPackageItem {
     home_shareable: true,
     offered_to_org: false,
     org_offerable: true,
+    active_by_default: false,
     activation: [],
     placements: [{ space_id: "spc_a", via: "home", state: "active", shared_by: null }],
     ...overrides,
@@ -63,6 +64,24 @@ describe("the organization offer switch", () => {
     expect(html).toBe("");
   });
 
+  it("shows a plain row, without a switch, on a package the deployment already activates", () => {
+    const html = render(
+      <OrgOfferRow item={pkg({ org_offerable: false, active_by_default: true })} />,
+    );
+    expect(html).toContain(settingsFr["catalogue.orgOffer.defaultActive"]);
+    expect(html).not.toContain('role="switch"');
+  });
+
+  it("keeps the switch on an existing offer of such a package, so it can be withdrawn", () => {
+    const html = render(
+      <OrgOfferRow
+        item={pkg({ offered_to_org: true, org_offerable: true, active_by_default: true })}
+      />,
+    );
+    expect(html).toContain('role="switch"');
+    expect(html).not.toContain(settingsFr["catalogue.orgOffer.defaultActiveHelp"]);
+  });
+
   it("shows a standing offer read-only to a reader who may not change it", () => {
     const html = render(<OrgOfferRow item={pkg({ org_offerable: false, offered_to_org: true })} />);
     expect(html).toContain(settingsFr["catalogue.orgOffer.label"]);
@@ -75,7 +94,13 @@ describe("the offer switch of another page", () => {
   it("takes the minimal shape, not a library entry", () => {
     const html = render(
       <OrgOfferRow
-        item={{ id: "@acme/gmail", name: "Gmail", offered_to_org: true, org_offerable: true }}
+        item={{
+          id: "@acme/gmail",
+          name: "Gmail",
+          offered_to_org: true,
+          org_offerable: true,
+          active_by_default: false,
+        }}
       />,
     );
     expect(html).toContain(settingsFr["catalogue.orgOffer.label"]);

@@ -1381,6 +1381,8 @@
   "catalogue.sheet.viaOrganization": "Actif · offert à l'organisation",
   "catalogue.orgOffer.label": "Offert à l'organisation",
   "catalogue.orgOffer.help": "Actif par défaut dans tous les espaces, espaces personnels compris. Chaque espace peut le désactiver.",
+  "catalogue.orgOffer.defaultActive": "Actif par défaut dans tous les espaces",
+  "catalogue.orgOffer.defaultActiveHelp": "Fourni par la plateforme : aucune offre à faire.",
   "catalogue.orgOffer.switch": "Offrir « {{package}} » à l'organisation",
   "catalogue.orgOffer.withdrawTitle": "Retirer l'offre ?",
   "catalogue.orgOffer.withdrawConfirm": "« {{name}} » s'arrêtera dans tous les espaces qui ne l'ont pas placé eux-mêmes, et leurs planifications seront désactivées. Les espaces qui l'ont placé eux-mêmes ne changent pas.",

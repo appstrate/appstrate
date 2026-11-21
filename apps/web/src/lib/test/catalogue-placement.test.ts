@@ -31,6 +31,7 @@ function pkg(
     home_shareable: true,
     offered_to_org: false,
     org_offerable: false,
+    active_by_default: false,
     activation: [],
     placements: placements.map((p) => ({
       space_id: p.space_id,

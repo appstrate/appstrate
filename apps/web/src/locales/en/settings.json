@@ -1380,6 +1380,8 @@
   "catalogue.sheet.viaOrganization": "Active · offered to the organization",
   "catalogue.orgOffer.label": "Offered to the organization",
   "catalogue.orgOffer.help": "Active by default in every space, personal spaces included. Each space can switch it off.",
+  "catalogue.orgOffer.defaultActive": "Active by default in every space",
+  "catalogue.orgOffer.defaultActiveHelp": "Provided by the platform: no offer to make.",
   "catalogue.orgOffer.switch": "Offer “{{package}}” to the organization",
   "catalogue.orgOffer.withdrawTitle": "Withdraw the offer?",
   "catalogue.orgOffer.withdrawConfirm": "“{{name}}” will stop in every space that has not placed it itself, and their schedules will be disabled. Spaces that placed it themselves are unchanged.",

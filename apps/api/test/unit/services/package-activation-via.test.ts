@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { placementVia, type PlacementVia } from "../../../src/services/package-activation.ts";
+import {
+  isActiveByDefault,
+  isActiveWithoutRow,
+  placementVia,
+  type PlacementVia,
+} from "../../../src/services/package-activation.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -89,4 +94,27 @@ describe("placementVia", () => {
       expect(placementVia(pkg, SPACE, row)).toBe(expected);
     });
   }
+});
+
+describe("isActiveByDefault", () => {
+  beforeEach(() => {
+    __resetSystemIntegrationsForTest();
+    initSystemIntegrations([{ id: OFFERED_SYSTEM_INTEGRATION, clients: [] }]);
+  });
+  afterEach(() => __resetSystemIntegrationsForTest());
+
+  it("is the deployment default alone, an offer not counting", () => {
+    expect(isActiveByDefault(system())).toBe(true);
+    expect(isActiveByDefault(system({ type: "integration", id: OFFERED_SYSTEM_INTEGRATION }))).toBe(
+      true,
+    );
+    expect(isActiveByDefault(system({ type: "integration" }))).toBe(false);
+    expect(isActiveByDefault(local({ offeredToOrg: true }))).toBe(false);
+  });
+
+  it("is what isActiveWithoutRow reads once the offer is set aside", () => {
+    for (const [, pkg] of CELLS) {
+      expect(isActiveWithoutRow({ ...pkg, offeredToOrg: false })).toBe(isActiveByDefault(pkg));
+    }
+  });
 });

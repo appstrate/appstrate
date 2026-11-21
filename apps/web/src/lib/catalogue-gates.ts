@@ -7,7 +7,7 @@ import type { CataloguePlacement } from "./catalogue-placement";
 import { linkedSpacePath } from "./across-spaces";
 import { packageDetailPath } from "./package-paths";
 
-export type ActivationRefusal = "notPlaced" | "activate" | "deactivate";
+export type ActivationRefusal = "notPlaced" | "activate" | "deactivate" | "runtimeBound";
 
 export interface ActivationGate {
   allowed: boolean;
@@ -20,6 +20,7 @@ export const ACTIVATION_REFUSAL_KEY: Record<ActivationRefusal, string> = {
   notPlaced: "library.cannotShareHere",
   activate: "library.cannotActivate",
   deactivate: "library.cannotDeactivate",
+  runtimeBound: "library.runtimeBound",
 };
 
 /**
@@ -37,6 +38,7 @@ export function activationGate(
   const verdict = next ? cell.activate : cell.deactivate;
   if (verdict === "allowed") return { allowed: true, refusal: null };
   if (verdict === "not_shareable") return { allowed: false, refusal: "notPlaced" };
+  if (verdict === "runtime_bound") return { allowed: false, refusal: "runtimeBound" };
   return { allowed: false, refusal: next ? "activate" : "deactivate" };
 }
 

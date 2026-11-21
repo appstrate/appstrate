@@ -37,7 +37,7 @@ function AvailabilityCard({
   const { t } = useTranslation("settings");
   const catalogue = useCatalogueEntry("integration", packageId);
   const { key, params } = availabilityLabel(detail.availability);
-  const { offered_to_org, org_offerable } = detail.availability;
+  const { offered_to_org, org_offerable, active_by_default } = detail.availability;
   return (
     <DetailSectionCard
       title={t("integration.availability.title")}
@@ -51,7 +51,7 @@ function AvailabilityCard({
           size="sm"
         />
       </dl>
-      {(offered_to_org || org_offerable || catalogue) && (
+      {(offered_to_org || org_offerable || active_by_default || catalogue) && (
         <div className="flex flex-col gap-3 border-t p-4">
           <OrgOfferRow
             item={{
@@ -59,6 +59,7 @@ function AvailabilityCard({
               name: detail.manifest.display_name ?? packageId,
               offered_to_org,
               org_offerable,
+              active_by_default,
             }}
           />
           {catalogue && (
