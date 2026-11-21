@@ -32,7 +32,7 @@ const offerSpace = alias(spaces, "offer_space");
  * (`org_package_offers`)? A correlated EXISTS, so no call site joins anything.
  * `orgId` is a value, or a subquery of the outer query.
  */
-export function offeredToOrgSql(orgId: string | SQLWrapper) {
+function offeredToOrgSql(orgId: string | SQLWrapper) {
   return exists(
     db
       .select({ one: sql`1` })

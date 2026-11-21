@@ -649,7 +649,7 @@ export async function callerPlacementAuthority(
 }
 
 /** An organization owner or admin acting through a user credential unconfined to spaces: the role half of the offer door. */
-export function callerAdministersOrg(c: Context<AppEnv>): boolean {
+function callerAdministersOrg(c: Context<AppEnv>): boolean {
   return (
     isUserPrincipal(c) &&
     !credentialConfinedToSpaces(c) &&
