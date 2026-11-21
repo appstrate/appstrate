@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@appstrate/ui/components/switch";
-import type { LibraryPackageItem } from "../hooks/use-library";
+import { cn } from "@appstrate/ui/cn";
 import { useSetOrgOffer } from "../hooks/use-library";
 import { ConfirmModal } from "./confirm-modal";
 
@@ -13,8 +13,10 @@ function OrgOfferSwitchRow({
   offered,
   pending,
   onToggle,
+  className,
 }: {
   name: string;
+  className?: string;
   offered: boolean;
   pending: boolean;
   /** `undefined`: the reader may see the offer, not change it. */
@@ -22,7 +24,12 @@ function OrgOfferSwitchRow({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div className="border-border mb-3 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
+    <div
+      className={cn(
+        "border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm",
+        className,
+      )}
+    >
       <div className="min-w-0">
         <p className="font-medium">{t("catalogue.orgOffer.label")}</p>
         <p className="text-muted-foreground mt-0.5 text-xs">{t("catalogue.orgOffer.help")}</p>
@@ -42,7 +49,13 @@ function OrgOfferSwitchRow({
  * the offer (`org_offerable`) and, read-only, to anyone else when it stands. Withdrawing asks
  * first: every space without a row of its own stops running it and loses its schedules.
  */
-export function OrgOfferRow({ item }: { item: LibraryPackageItem }) {
+export function OrgOfferRow({
+  item,
+  className = "mb-3",
+}: {
+  item: { id: string; name: string; offered_to_org: boolean; org_offerable: boolean };
+  className?: string;
+}) {
   const { t } = useTranslation("settings");
   const setOffer = useSetOrgOffer();
   const [confirming, setConfirming] = useState(false);
@@ -54,6 +67,7 @@ export function OrgOfferRow({ item }: { item: LibraryPackageItem }) {
         name={name}
         offered={item.offered_to_org}
         pending={setOffer.isPending}
+        className={className}
         onToggle={
           item.org_offerable
             ? (next) =>

@@ -71,6 +71,18 @@ describe("the organization offer switch", () => {
   });
 });
 
+describe("the offer switch of another page", () => {
+  it("takes the minimal shape, not a library entry", () => {
+    const html = render(
+      <OrgOfferRow
+        item={{ id: "@acme/gmail", name: "Gmail", offered_to_org: true, org_offerable: true }}
+      />,
+    );
+    expect(html).toContain(settingsFr["catalogue.orgOffer.label"]);
+    expect(html).toContain('aria-checked="true"');
+  });
+});
+
 describe("the withdrawal's wording", () => {
   it("states plainly that spaces stop and their schedules are disabled", () => {
     expect(settingsFr["catalogue.orgOffer.withdrawConfirm"]).toContain("planifications");

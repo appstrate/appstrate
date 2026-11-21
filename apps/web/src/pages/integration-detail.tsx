@@ -33,6 +33,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
+import { availabilityLabel } from "../lib/integration-availability";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
@@ -58,6 +59,8 @@ import { PackageOwnershipNotice } from "../components/package-detail/package-own
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
+import { OrgDefaultSection } from "../components/integration-detail/org-default-section";
+import { PinManagementSection } from "../components/integration-detail/pin-management-section";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
 import { spaceLabel } from "../lib/space-label";
@@ -182,7 +185,7 @@ export function IntegrationSettings({
             title: t("detail.settings.configurationGroup", { ns: "agents" }),
             items: [
               item("authentication", KeyRound, t("integration.presentation.authentication")),
-              item("access", ShieldCheck, t("integration.admin.accessRules.title")),
+              item("access", ShieldCheck, t("integration.admin.access.title")),
             ],
           },
         ]
@@ -278,7 +281,7 @@ export function IntegrationSettings({
                 <SettingsHeading
                   title={t(
                     active === "access"
-                      ? "integration.admin.accessRules.title"
+                      ? "integration.admin.access.title"
                       : "integration.presentation.authentication",
                   )}
                   description={t(
@@ -452,6 +455,7 @@ export function IntegrationDetailPage() {
   const source = pkg?.source;
   const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
   const isOwned = isOwnedSource(source);
+  const availability = availabilityLabel(detail.availability);
 
   const tabs: DetailTab<(typeof INTEGRATION_TABS)[number]>[] = [
     { value: "overview", label: t("integration.tabs.overview"), icon: LayoutGrid },
@@ -481,7 +485,7 @@ export function IntegrationDetailPage() {
             {/* The working space's switch: in « Tous les espaces » the spaces it is active in say it. */}
             {!overview && (
               <Badge variant={active ? "success" : "warning"}>
-                {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
+                {t(availability.key, availability.params)}
               </Badge>
             )}
           </>
@@ -562,12 +566,28 @@ export function IntegrationDetailPage() {
         ) : detail.auths.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
         ) : (
-          <ConnectionsTable
-            packageId={packageId}
-            detail={detail}
-            canConfigure={canConfigure}
-            onConfigure={openAuthentication}
-          />
+          <>
+            <ConnectionsTable
+              packageId={packageId}
+              detail={detail}
+              canConfigure={canConfigure}
+              onConfigure={openAuthentication}
+            />
+            {/* What runs use when no one picks a connection: the space's default, then the
+                per-agent exceptions. Set by those who configure the integration. */}
+            {canConfigure && (
+              <section className="mt-8 flex flex-col gap-6" data-testid="default-connection">
+                <SettingsHeading
+                  level="group"
+                  className="mb-0"
+                  title={t("integration.defaultConnection.title")}
+                  description={t("integration.defaultConnection.description")}
+                />
+                <OrgDefaultSection packageId={packageId} />
+                <PinManagementSection packageId={packageId} />
+              </section>
+            )}
+          </>
         )}
       </DetailTabPanel>
 
