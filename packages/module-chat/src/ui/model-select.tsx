@@ -50,6 +50,8 @@ export function ModelSelect({
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"models" | "configuration">("models");
   const { t, can, personalModelCredentials, modelCredentials } = useChatHost();
+  const translateSettings = (key: string, values?: Record<string, string>) =>
+    t(`settings:${key}`, values);
   const active = models.find((m) => m.id === selectedId);
   const groups = useMemo(
     () =>
@@ -141,7 +143,7 @@ export function ModelSelect({
               selectable={isModelSelectable}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
-              labels={buildModelPickerLabels((key, options) => t(`settings:${key}`, options))}
+              labels={buildModelPickerLabels(translateSettings)}
               // The module imports no router: the host's own page, a full navigation.
               fixLink={(label) => (
                 <a href="/preferences/models" className="underline underline-offset-2">
@@ -170,10 +172,7 @@ export function ModelSelect({
                     // `settings:` — the shared label family lives in the
                     // settings bundle (a boot namespace, so already loaded);
                     // the host binds `t` to `chat`.
-                    labels={buildGenerationLabels(
-                      (key, options) => t(`settings:${key}`, options),
-                      active.generation,
-                    )}
+                    labels={buildGenerationLabels(translateSettings, active.generation)}
                   />
                 )}
               </>

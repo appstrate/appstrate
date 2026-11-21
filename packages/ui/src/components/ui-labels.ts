@@ -3,6 +3,12 @@
 
 import { createContext, useContext } from "react";
 
+/** Hosts can translate a key alone or supply interpolation values. */
+export interface Translate<Values> {
+  (key: string): string;
+  (key: string, values: Values): string;
+}
+
 /**
  * The few strings the primitives of this package render themselves (the copy button, a dialog's close button, the
  * sidebar's screen-reader chrome). The package carries no

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Translate } from "@appstrate/ui/components/ui-labels";
+
 /** Companion of `?create=agent`: the integration the new agent starts with. */
 export const CREATE_INTEGRATION_PARAM = "integration";
 
@@ -13,7 +15,7 @@ export function agentCreationWithIntegrationPath(integrationId: string): string 
 }
 
 export type CreationResource = "agent" | "skill" | "integration";
-export type CreationPromptTranslate = (key: string, values?: Record<string, string>) => string;
+export type CreationPromptTranslate = Translate<Record<string, string>>;
 
 export function chatDraftNavigationState(prompt: string): { composerDraft: string } {
   return { composerDraft: prompt };

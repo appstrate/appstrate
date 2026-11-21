@@ -157,7 +157,7 @@ function renderCard(
 
 const EMPTY = <p data-testid="no-connectable-integration" />;
 
-const label = (key: string, options?: Record<string, string>) =>
+const label = (key: string, options: Record<string, string> = {}) =>
   i18n.t(`agents:detail.${key}`, options);
 const by = (key: string) => ({ by: i18n.t(`agents:noneChosenBy.${key}`) });
 
