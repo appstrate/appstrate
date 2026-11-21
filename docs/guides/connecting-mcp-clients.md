@@ -109,10 +109,11 @@ What happens under the hood:
 > writes alike: there is no default space. `search` alone may omit it: it then
 > searches every space you reach and each item's `granted_in` names the spaces
 > where it is usable, the `space_id` to act with; the result's top-level
-> `searched_spaces` lists the spaces whose agents, skills or integration tools it
-> read (absent when it read none, when `space_id` is named, and on a
+> `searched_spaces` lists the spaces that supplied at least one entry to the
+> result (absent when none did, when `space_id` is named, and on a
 > space-pinned endpoint), and a space whose read was refused, such as a skill
-> archive unavailable there, is named in its section's `unsearched`. The argument's schema lists your
+> archive unavailable there, is named in its section's `unsearched`. When the
+> request names a space, `search` takes its `space_id` too. The argument's schema lists your
 > spaces (name, `spc_…` id, your role there), since clients may truncate the
 > server instructions. Space names are not unique, so every machine field names
 > a space by its id: `granted_in` in results, and the bracketed ids in the
