@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
+import { integrationIdOfField } from "../lib/connection-choice";
 import { useSpacesOf } from "./use-spaces";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -128,6 +131,7 @@ export function useInvalidatePackageActivation() {
  * switches on; `false` switches off and keeps the row and its settings.
  */
 export function useSetPackageActive() {
+  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   const invalidate = useInvalidatePackageActivation();
   const scope = useOrgOnlyScope();
@@ -161,10 +165,21 @@ export function useSetPackageActive() {
         });
         return;
       }
-      await client.POST("/api/spaces/{id}/packages", {
+      const { data } = await client.POST("/api/spaces/{id}/packages", {
         params: { path: { id: spaceId } },
         body: { packageId },
       });
+      return data?.warnings;
+    },
+    onSuccess: (warnings, { packageId }) => {
+      for (const warning of warnings ?? []) {
+        toast.warning(
+          t(warning.required ? "catalogue.inactiveRequired" : "catalogue.inactiveOptional", {
+            agent: packageId,
+            integration: integrationIdOfField(warning.field),
+          }),
+        );
+      }
     },
     onMutate: async ({ spaceId, packageId, active }) => {
       // The space library holds the working space only.
@@ -239,13 +254,27 @@ export function usePackageActivationInSpaces(
 }
 
 /** The working space's « Activer »: whether its library row lets the reader switch it on, and the act. */
-export function usePackageActivation(packageId: string) {
+export function usePackageActivation(
+  packageId: string,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const setActive = useSetPackageActive();
   const spaceId = useCurrentSpaceId();
-  const { data: library } = useSpaceLibrary();
-  const row = libraryRow(library, packageId);
+  const { data: library, isLoading: libraryLoading } = useSpaceLibrary({ enabled });
+  const spaceRow = libraryRow(library, packageId);
+  // Homed elsewhere and not placed here, a package is absent from a personal space's library:
+  // the org-wide library's per-space `activation` verdict answers then.
+  const { data: orgLibrary, isLoading: orgLoading } = useCatalogueLibrary({
+    enabled: enabled && !!library && !spaceRow,
+  });
+  const row = spaceRow ?? libraryRow(orgLibrary, packageId);
+  const gate = spaceId && row ? activationGate(row, spaceId, true) : null;
   return {
-    mayActivate: !!spaceId && !!row && activationGate(row, spaceId, true).allowed,
+    mayActivate: !!gate?.allowed,
+    /** Why the server refuses; `null` when allowed or no verdict names a reason. */
+    refusal: gate?.refusal ?? null,
+    /** The libraries that decide `mayActivate` are still loading: a refusal is not known yet. */
+    loading: libraryLoading || orgLoading,
     activate: (options?: { onSuccess?: () => void }) => {
       if (spaceId) setActive.mutate({ spaceId, packageId, active: true }, options);
     },

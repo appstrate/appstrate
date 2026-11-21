@@ -38,7 +38,12 @@ import { isUserPrincipal } from "./principal.ts";
 import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { callerReachableSpaces, unnameableSpace, type ReachableSpace } from "./reachable-spaces.ts";
+import {
+  callerReachableSpaces,
+  credentialReachableSpaces,
+  unnameableSpace,
+  type ReachableSpace,
+} from "./reachable-spaces.ts";
 import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -138,6 +143,18 @@ export async function packageAccessSpaces(
     .from(spaces)
     .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)));
   return space ? [{ ...space, permissions: callerPermissions(c) }] : [];
+}
+
+/**
+ * The reach of a WRITE that places a package outside its home or withdraws it, judged in the home
+ * while it acts in the target: the credential's own ({@link credentialReachableSpaces}), so a
+ * credential bound to a set judges it the same whichever of its spaces the call entered. Every
+ * read keeps {@link packageAccessSpaces}; so does an end-user (its own space).
+ */
+export function placementAccessSpaces(c: Context<AppEnv>): Promise<PackageAccessSpace[]> {
+  return c.get("principalKind") === "end_user"
+    ? packageAccessSpaces(c)
+    : credentialReachableSpaces(c, c.get("orgId"));
 }
 
 /**
@@ -271,10 +288,25 @@ export async function assertCatalogPackageAccess(
   packageId: string,
   source?: ForeignOrgStanding,
 ) {
+  return assertPackageReachable(c, packageId, packageAccessSpaces, source);
+}
+
+/** {@link assertCatalogPackageAccess} over {@link placementAccessSpaces}: the activation door, which may place. */
+export async function assertPackageReachableForPlacement(c: Context<AppEnv>, packageId: string) {
+  return assertPackageReachable(c, packageId, placementAccessSpaces);
+}
+
+/** The one reachability read; the callers differ only in the spaces the credential reaches. */
+async function assertPackageReachable(
+  c: Context<AppEnv>,
+  packageId: string,
+  reach: (c: Context<AppEnv>, source?: ForeignOrgStanding) => Promise<PackageAccessSpace[]>,
+  source?: ForeignOrgStanding,
+) {
   const sourceOrgId = source?.orgId ?? c.get("orgId");
   const [pkg, accessible, placedIn] = await Promise.all([
     loadPackageRow(packageId, sourceOrgId),
-    packageAccessSpaces(c, source),
+    reach(c, source),
     loadPlacementSpaces(packageId, sourceOrgId),
   ]);
   assertPackageIsReachable(packageId, pkg, placedIn, accessible);
@@ -445,7 +477,7 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 }
 
 /**
- * {@link assertPackageShareAccess} as a question, for bundle import: place the
+ * {@link assertPackageShareAccessForPlacement} as a question, for bundle import: place the
  * root here when the caller may ({@link callerPlacementAuthority}), else `null`
  * and `root_active: false`.
  */
@@ -585,12 +617,20 @@ export async function assertPackageShareAccess(
   return assertHomeAuthority(c, packageId, "share");
 }
 
+/** {@link assertPackageShareAccess} for a placement WRITE, over {@link placementAccessSpaces}. */
+export async function assertPackageShareAccessForPlacement(
+  c: Context<AppEnv>,
+  packageId: string,
+): Promise<PackageAccessRow> {
+  return assertHomeAuthority(c, packageId, "share", placementAccessSpaces);
+}
+
 /** The caller as a placer: `shared_by` plus the share rule as a predicate `placePackage` re-asks against the locked home. */
 export async function callerPlacementAuthority(
   c: Context<AppEnv>,
   type: PackageType,
 ): Promise<PlacementAuthority> {
-  const accessible = await packageAccessSpaces(c);
+  const accessible = await placementAccessSpaces(c);
   const permission = packagePermission(type, "share");
   return {
     sharedBy: c.get("user").id,
@@ -619,7 +659,12 @@ export async function assertPlacementRemovalAccess(
   // The target is a space the credential may name, whichever side's authority acts: home
   // authority reaches the package, not every space it could be placed in.
   if (!credentialAdmitsSpace(c, targetSpaceId)) throw unnameableSpace(c, targetSpaceId);
-  const { pkg, accessible } = await loadGovernedPackage(c, packageId, "share");
+  const { pkg, accessible } = await loadGovernedPackage(
+    c,
+    packageId,
+    "share",
+    placementAccessSpaces,
+  );
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);
   const ownerId = callerPersonalOwnerId(c, c.get("orgId"));
@@ -655,13 +700,17 @@ export async function assertPlacementRemovalAccess(
   return { pkg, authorityFor };
 }
 
+/** The spaces the home rule reads: {@link packageAccessSpaces}, or {@link placementAccessSpaces} for a placement write. */
+type GovernedReach = (c: Context<AppEnv>) => Promise<PackageAccessSpace[]>;
+
 /** The home rule itself, for each of the three verbs that ask it. */
 async function assertHomeAuthority(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete" | "share",
+  reach: GovernedReach = packageAccessSpaces,
 ): Promise<PackageAccessRow> {
-  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action);
+  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action, reach);
   const permission = packagePermission(pkg.type, action);
   if (holdsHomeAuthority(pkg, accessible, permission)) return pkg;
   const verb = action === "share" ? "Sharing" : "Modifying";
@@ -680,12 +729,10 @@ async function loadGovernedPackage(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete" | "share",
+  reach: GovernedReach,
 ): Promise<{ pkg: PackageAccessRow; accessible: PackageAccessSpace[] }> {
   const orgId = c.get("orgId");
-  const [pkg, accessible] = await Promise.all([
-    loadPackageRow(packageId, orgId),
-    packageAccessSpaces(c),
-  ]);
+  const [pkg, accessible] = await Promise.all([loadPackageRow(packageId, orgId), reach(c)]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one —
   // the `source` column says the same thing, and {@link isSystemPackageRow} is

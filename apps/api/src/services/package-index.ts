@@ -21,6 +21,8 @@ import {
   type PackageAccessSpace,
 } from "../lib/package-access.ts";
 import { isPublished, listActivePackages } from "./space-packages.ts";
+import { inactiveRequiredIntegrationIds } from "./integration-connection-resolver.ts";
+import { selectorlessLaunchManifests } from "./agent-version-resolver.ts";
 import { getRunningRunCounts } from "./state/runs.ts";
 import { getUnreadRunCountsByAgent } from "./state/run-reads.ts";
 import { listOrgItems } from "./package-items/crud.ts";
@@ -32,12 +34,15 @@ import { CONFIG_BY_TYPE } from "./package-items/config.ts";
  * `grants`, each space counting the runs its grant admits, and the row is a
  * summary unless one of its spaces grants the content read. `reach` (the
  * caller's `packageAccessSpaces`) is awaited alongside the index's own reads.
+ * `singleSpaceId`: the one space a single-space index lists, whose activations
+ * name each row's `inactive_required_integrations`.
  */
 export async function listAgentIndex(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
   reach: Promise<PackageAccessSpace[]>,
+  singleSpaceId?: string,
 ) {
   const permissions = new Map(grants.map((g) => [g.spaceId, g.permissions]));
   const [rows, runningCounts, unreadCounts, accessible] = await Promise.all([
@@ -46,8 +51,15 @@ export async function listAgentIndex(
     getUnreadRunCountsByAgent(orgId, grants, actor),
     reach,
   ]);
+  // Single-space index only: an organization row spans spaces, each with its own activations.
+  const inactive = singleSpaceId
+    ? await inactiveRequiredIntegrationIds(await selectorlessLaunchManifests(rows), {
+        orgId,
+        spaceId: singleSpaceId,
+      })
+    : null;
 
-  return rows.map((row) => {
+  return rows.map((row, i) => {
     const summaryOnly = !row.spaceIds.some((spaceId) =>
       readsAgentContent(permissions.get(spaceId)!),
     );
@@ -93,6 +105,7 @@ export async function listAgentIndex(
       // `published` is whether omitting the version selector at launch resolves.
       published: isPublished(row),
       type: row.type,
+      ...(inactive ? { inactive_required_integrations: inactive[i]! } : {}),
     };
   });
 }

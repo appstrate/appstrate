@@ -242,6 +242,14 @@ const INDEX_SPACE_IDS = {
     "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
 };
 
+/** An agent's required integrations not active in the space (`AgentListItem`, `GET /api/me/context`). */
+export const INACTIVE_REQUIRED_INTEGRATIONS = {
+  type: "array",
+  items: { type: "string" },
+  description:
+    "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ.",
+};
+
 const ORG_PACKAGE_ITEM_SCHEMA = {
   type: "object",
   // Always emitted by the listOrgItems mapper. `created_by_name` stays
@@ -531,6 +539,42 @@ export const schemas = {
             description:
               "On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`.",
           },
+          active_in_spaces: {
+            $ref: "#/components/schemas/ActiveInSpaces",
+            description:
+              "On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the version it names, or its default published version) are active. Connections are judged at launch there. Absent on a schedule write and on readiness.",
+          },
+        },
+      },
+    ],
+  },
+  ActiveInSpaces: {
+    type: "array",
+    description:
+      "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+    items: {
+      type: "object",
+      required: ["id", "name"],
+      properties: {
+        id: { type: "string", description: "Space id (`spc_…`)." },
+        name: {
+          type: "string",
+          description: "Space name, as a space listing shows it (not unique).",
+        },
+      },
+    },
+  },
+  AgentNotActiveInSpaceProblem: {
+    description:
+      "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation.",
+    allOf: [
+      { $ref: "#/components/schemas/ProblemDetail" },
+      {
+        type: "object",
+        required: ["active_in_spaces"],
+        properties: {
+          code: { type: "string", enum: ["agent_not_active_in_space"] },
+          active_in_spaces: { $ref: "#/components/schemas/ActiveInSpaces" },
         },
       },
     ],
@@ -560,6 +604,37 @@ export const schemas = {
         items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
       },
     },
+  },
+  // `allOf`-merged into the success bodies of the two doors that switch a package on in a space.
+  ActivationWarnings: {
+    type: "object",
+    required: ["warnings"],
+    properties: {
+      warnings: {
+        type: "array",
+        description:
+          "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+        items: { $ref: "#/components/schemas/ActivationWarning" },
+      },
+    },
+  },
+  ActivationWarning: {
+    description:
+      "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+    allOf: [
+      { $ref: "#/components/schemas/ResolutionFieldError" },
+      {
+        type: "object",
+        required: ["required"],
+        properties: {
+          code: { type: "string", enum: ["integration_not_active"] },
+          required: {
+            type: "boolean",
+            description: "Whether the agent declares the integration `required`.",
+          },
+        },
+      },
+    ],
   },
   // The `structuredContent` of the MCP `run_and_wait` tool, and its declared `outputSchema`.
   RunAndWaitResult: {
@@ -994,6 +1069,8 @@ export const schemas = {
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
     // There is no `active`: the listing IS the active set, so the field could
     // only ever say `true` — `AgentDetail.active` is where the switch is read.
+    // `inactive_required_integrations` is emitted by the single-space index only:
+    // an organization row spans spaces, each with its own activations.
     required: [
       "id",
       "icon",
@@ -1038,6 +1115,12 @@ export const schemas = {
         type: "string",
         description: "Package type from manifest",
         enum: [...packageTypeValues],
+      },
+      inactive_required_integrations: {
+        ...INACTIVE_REQUIRED_INTEGRATIONS,
+        description:
+          INACTIVE_REQUIRED_INTEGRATIONS.description +
+          " Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces.",
       },
       running_runs: { type: "integer" },
       unread_count: {

@@ -7,7 +7,7 @@ import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
 import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
 import { forbidden, notFound, type ApiError } from "./errors.ts";
-import { dispatchSpacePin } from "./internal-dispatch.ts";
+import { dispatchPin } from "./internal-dispatch.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -70,9 +70,29 @@ export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<Reac
   return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));
 }
 
+/**
+ * The credential's own reach. A credential bound to a set reaches all of it, whichever space the
+ * call entered: only the endpoint's pin holds (its dispatches' included). Any other credential
+ * keeps every pin, as {@link callerReachableSpaces} does. Read by launch refusals
+ * (`lib/launch-spaces.ts`) and by placement outside the home (`placementAccessSpaces`).
+ */
+export function credentialReachableSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
+  const pin = c.get("credentialSpaceIds") === undefined ? requestPin(c) : endpointPin(c);
+  return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), pin);
+}
+
 /** The space the endpoint or the dispatch confines this request to. */
 function requestPin(c: Context<AppEnv>): string | undefined {
-  return c.get("endpointSpaceId") ?? dispatchSpacePin(c);
+  return c.get("endpointSpaceId") ?? dispatchPin(c)?.spaceId;
+}
+
+/** The space the endpoint confines this request to, the request itself or its dispatch. */
+function endpointPin(c: Context<AppEnv>): string | undefined {
+  const dispatch = dispatchPin(c);
+  return c.get("endpointSpaceId") ?? (dispatch?.endpoint ? dispatch.spaceId : undefined);
 }
 
 function reachPinnedTo(

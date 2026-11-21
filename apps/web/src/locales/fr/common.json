@@ -267,7 +267,7 @@
   "apiError.empty_prompt": "Le prompt de l'agent est vide.",
   "apiError.missing_skill": "Un skill dont dépend l'agent est introuvable ou n'est pas activé dans cet espace : {{message}}",
   "apiError.integration_not_found": "Une intégration dont dépend l'agent est introuvable : {{message}}",
-  "apiError.integration_not_active": "Une intégration dont dépend l'agent n'est pas activée dans cet espace : {{message}}",
+  "apiError.integration_not_active": "Une intégration dont dépend l'agent n'est pas activée dans cet espace.",
   "apiError.integration_wrong_type": "Une dépendance déclarée comme intégration n'en est pas une : {{message}}",
   "apiError.integration_invalid_manifest": "Le manifeste d'une intégration dont dépend l'agent est invalide : {{message}}",
   "apiError.not_an_mcp_server": "Cette adresse ne répond pas comme un serveur MCP (Streamable HTTP ou SSE).",

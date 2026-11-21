@@ -67,7 +67,8 @@ import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
-import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { resolveRunPreflight } from "../services/run-pipeline.ts";
+import { launchSpacesLookup } from "../lib/launch-spaces.ts";
 import {
   toLaunchOverrides,
   type LaunchOverrides,
@@ -257,9 +258,8 @@ export function createRunsRemoteRouter() {
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
       let warnings: ResolutionFieldError[];
-      // Seeded by the inline preflight only — the registry branch resolves no
-      // pins of its own, so `createRun` creates its own Map there.
-      let manifestCache: IntegrationManifestCache | undefined;
+      // Both preflights seed the versions used for this launch.
+      let manifestCache: IntegrationManifestCache;
       let launchOverrides: LaunchOverrides | null;
       // Normalize an empty map to null (mirrors the platform run route): a
       // non-null map on the row means the run carried explicit overrides.
@@ -352,14 +352,20 @@ export function createRunsRemoteRouter() {
           }
         }
 
-        // Readiness gate — same checks the inline preflight ends with.
-        warnings = await validateAgentReadiness({
+        manifestCache = new Map();
+        warnings = await resolveRunPreflight({
+          manifestCache,
+          dependencyOverrides,
           agent: agentForRun,
           versionRef: versionRefOf(overrideVersionLabel),
           orgId,
           spaceId,
           actor,
           launchOverrides,
+          launchSpaces: launchSpacesLookup(c, ["agents:run"], {
+            version: src.stage,
+            dependencyOverrides,
+          }),
         });
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
@@ -376,6 +382,9 @@ export function createRunsRemoteRouter() {
 
         const preflight = await runInlinePreflight({
           authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+          launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"], {
+            dependencyOverrides,
+          }),
           orgId,
           spaceId,
           actor,
@@ -441,7 +450,7 @@ export function createRunsRemoteRouter() {
           contextSnapshot: body.contextSnapshot,
           runnerName: runner.name,
           runnerKind: runner.kind,
-          ...(manifestCache ? { manifestCache } : {}),
+          manifestCache,
         });
       } catch (err) {
         // A refused inline run leaves no run row, so its shadow package is purged.

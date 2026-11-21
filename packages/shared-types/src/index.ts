@@ -592,6 +592,8 @@ export interface AgentListItem extends BasePackageListItem {
     skills?: Record<string, string>;
     integrations: Record<string, string>;
   };
+  /** Required integrations not active in the space (they refuse the launch); single-space index only. */
+  inactive_required_integrations?: string[];
   running_runs: number;
   /** Runs of this agent the caller has not read yet (per recipient, like a schedule's). */
   unread_count: number;

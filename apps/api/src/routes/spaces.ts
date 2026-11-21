@@ -58,6 +58,7 @@ import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   activatePackage,
+  activationWarnings,
   deactivatePackage,
   listSpacePackages,
   getSpacePackage,
@@ -67,7 +68,8 @@ import {
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
   assertCatalogPackageAccess,
-  assertPackageShareAccess,
+  assertPackageReachableForPlacement,
+  assertPackageShareAccessForPlacement,
   callerPlacementAuthority,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
@@ -315,8 +317,9 @@ async function coarseSpacePackageGate(
  *      ({@link coarseSpacePackageGate}). A caller holding none of the four
  *      strings this op can require is refused without the row being looked up,
  *      so the route is not an enumeration oracle.
- *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
- *      reachability rule the READ routes obey, for all three ops, so `POST`,
+ *   2. **Catalog lookup** — the reachability rule the READ routes obey
+ *      (`assertCatalogPackageAccess`; over the credential's reach for
+ *      `activate`, which may place: `assertPackageReachableForPlacement`), so `POST`,
  *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
@@ -347,7 +350,11 @@ async function gateSpacePackageWrite(
 ): Promise<void> {
   const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
-  const { type } = await assertCatalogPackageAccess(c, packageId);
+  // Activation may place, judged in the home; configure and deactivate act on the placement here.
+  const { type } =
+    op === "activate"
+      ? await assertPackageReachableForPlacement(c, packageId)
+      : await assertCatalogPackageAccess(c, packageId);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every
@@ -795,11 +802,11 @@ export function createSpacesRouter() {
   //
   // Idempotent upsert: 201 when this call put the package on, 200 when it
   // already was. If not placed here it can place it, but only with
-  // `<type>:share` in the home (`assertPackageShareAccess`), so activation is no
+  // `<type>:share` in the home (`assertPackageShareAccessForPlacement`), so activation is no
   // way around `share`; an API key never carries it.
   //
   // No permission guard is mounted: the gate below reads the package's own rows
-  // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
+  // (`gateSpacePackageWrite`, `assertPackageShareAccessForPlacement`).
   router.post("/:id/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("id")!;
@@ -817,7 +824,7 @@ export function createSpacesRouter() {
       : await activatePackage(scope, data.packageId, {
           placeAs: await callerPlacementAuthority(
             c,
-            (await assertPackageShareAccess(c, data.packageId)).type,
+            (await assertPackageShareAccessForPlacement(c, data.packageId)).type,
           ),
         });
     // True only if this call turned the package on (a default-on package was already active).
@@ -843,8 +850,19 @@ export function createSpacesRouter() {
     // 201 says this call turned the package on; 200 says it was already on.
     // The body is the row the TRANSACTION wrote, not a re-read: a second SELECT
     // would describe whatever state the table is in when it lands, which under
-    // concurrency is somebody else's act.
-    return c.json({ object: "space_package", ...activation.placement }, turnedOn ? 201 : 200);
+    // concurrency is somebody else's act. `warnings`: what the agent is now on without.
+    return c.json(
+      {
+        object: "space_package",
+        ...activation.placement,
+        warnings: await activationWarnings(
+          scope,
+          data.packageId,
+          activation.placement.package_type,
+        ),
+      },
+      turnedOn ? 201 : 200,
+    );
   });
 
   // GET /api/spaces/:id/packages/:packageId — one placement, in detail

@@ -10,7 +10,7 @@
  * keeps the row; only `withdrawPlacement` deletes it.
  */
 
-import { eq, and, exists, inArray, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import type { AnyPgColumn, PgSelect } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import {
@@ -20,7 +20,13 @@ import {
   packageVersions,
   spaces,
 } from "@appstrate/db/schema";
-import { conflict, forbidden, notFound, parseBody } from "../lib/errors.ts";
+import {
+  conflict,
+  forbidden,
+  notFound,
+  parseBody,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -31,6 +37,17 @@ import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import {
+  inactiveDeclaredIntegrations,
+  inactiveRequiredIntegrationIds,
+  integrationNotActiveMessage,
+  translateResolutionError,
+} from "./integration-connection-resolver.ts";
+import {
+  latestTagJoin,
+  selectorlessAgentManifest,
+  selectorlessLaunchManifests,
+} from "./agent-version-resolver.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -135,7 +152,7 @@ export async function assertHasPublishedVersion(packageId: string, executor: DbO
 /** The placement as the wire names it, built from the rows just written (a re-read could describe another call's act); same shape as {@link spacePackageSelect}. */
 function spacePackageWire(
   row: typeof spacePackages.$inferSelect,
-  pkg: { type: string; source: string | null; draftManifest: unknown },
+  pkg: { type: PackageType; source: string | null; draftManifest: unknown },
 ) {
   return {
     packageId: row.packageId,
@@ -244,6 +261,36 @@ export async function activatePackageWithin(
   }
   // A concurrent call placed it first: switch that row on, like any other.
   return switchOn(false, false);
+}
+
+/** A declared integration not active where the agent is now on (`warnings[]` of an activation). */
+export type ActivationWarning = ResolutionFieldError & { required: boolean };
+
+/**
+ * Declared integrations of an agent not active in `spaceId` (`[]` for any other
+ * `type`); activates nothing, since that opens credentials to the space.
+ */
+export async function activationWarnings(
+  scope: SpaceScope,
+  packageId: string,
+  type: PackageType,
+): Promise<ActivationWarning[]> {
+  if (type !== "agent") return [];
+  const manifest = await selectorlessAgentManifest(packageId);
+  if (!manifest) return [];
+  const [inactive] = await inactiveDeclaredIntegrations([manifest], scope);
+  return inactive!.map(({ integrationId, required }) => ({
+    ...translateResolutionError({
+      integrationId,
+      code: "integration_not_active",
+      message: `${integrationNotActiveMessage(integrationId, scope.spaceId)}; ${
+        required
+          ? "a launch of this agent here is refused until then."
+          : "the run proceeds without it."
+      }`,
+    }),
+    required,
+  }));
 }
 
 /** 404 unless the deployment default switches the package on with no row. */
@@ -377,11 +424,25 @@ export function activeInSpaces<Q extends PgSelect>(
   type: PackageType,
   groupBy: AnyPgColumn[] = [],
 ) {
-  return query
-    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+  return joinSpacePlacements(query, orgId, spaceIds)
     .where(activePackagesFilter({ orgId }, type))
     .groupBy(packages.id, ...groupBy);
+}
+
+/** `query` (a `$dynamic()` select from `packages`) per space of `spaceIds`, with its placement row if any. */
+function joinSpacePlacements<Q extends PgSelect>(
+  query: Q,
+  orgId: string,
+  spaceIds: readonly string[],
+) {
+  return query
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id));
+}
+
+/** Org-or-system, never an ephemeral shadow, placed in the joined space. */
+function readablePlacementFilter(orgId: string) {
+  return and(orgOrSystemFilter(orgId), notEphemeralFilter(), placementReadFilter(spaces.id));
 }
 
 /** Readable placements, including switched-off ones, in home-first space listing order. */
@@ -392,21 +453,29 @@ export async function packagePlacementsInSpaces(
   type: PackageType,
 ) {
   if (!spaceIds.length) return [];
-  return db
+  const query = db
     .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
     .from(packages)
-    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(
-      and(
-        eq(packages.id, packageId),
-        eq(packages.type, type),
-        orgOrSystemFilter(orgId),
-        notEphemeralFilter(),
-        placementReadFilter(spaces.id),
-      ),
-    )
+    .$dynamic();
+  return joinSpacePlacements(query, orgId, spaceIds)
+    .where(and(eq(packages.id, packageId), eq(packages.type, type), readablePlacementFilter(orgId)))
     .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
+}
+
+/** The `spaceIds` where every one of `packageIds` is placed, readable and active. */
+export async function spacesActiveForAll(
+  orgId: string,
+  packageIds: readonly string[],
+  spaceIds: readonly string[],
+): Promise<Set<string>> {
+  const wanted = [...new Set(packageIds)];
+  if (!wanted.length || !spaceIds.length) return new Set();
+  const query = db.select({ spaceId: spaces.id }).from(packages).$dynamic();
+  const rows = await joinSpacePlacements(query, orgId, spaceIds)
+    .where(and(inArray(packages.id, wanted), readablePlacementFilter(orgId), activeHereSql()))
+    .groupBy(spaces.id)
+    .having(sql`count(*) = ${wanted.length}`);
+  return new Set(rows.map((row) => row.spaceId));
 }
 
 /**
@@ -437,9 +506,10 @@ function packageListingOrder() {
 
 /**
  * List every package of one `type` any of `spaceIds` runs
- * ({@link activePackagesFilter}): what can be launched from there, one row per
- * package carrying the spaces it is active in ({@link activeSpaceIds}) — ONE
- * statement whatever the number of spaces. Placed-but-off packages belong to
+ * ({@link activePackagesFilter}): what is switched on there (launchable once
+ * its required integrations are active too), one row per package carrying the
+ * spaces it is active in ({@link activeSpaceIds}) — ONE statement whatever the
+ * number of spaces. Placed-but-off packages belong to
  * the library (`services/package-library.ts`). The projection omits
  * `draft_content`, which an index card never reads; `latestVersionId` answers
  * {@link isPublished}. Ordered by {@link packageListingOrder}.
@@ -534,27 +604,6 @@ interface PackageHint {
   home_writable: boolean;
 }
 
-/** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
-function latestTagJoin(packageIdColumn: AnyPgColumn) {
-  return and(
-    eq(packageDistTags.packageId, packageIdColumn),
-    eq(packageDistTags.tag, "latest"),
-    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(packageVersions)
-        .where(
-          and(
-            eq(packageVersions.id, packageDistTags.versionId),
-            eq(packageVersions.packageId, packageIdColumn),
-            eq(packageVersions.yanked, false),
-          ),
-        ),
-    ),
-  );
-}
-
 /** A `latest` dist-tag ({@link latestTagJoin}), or a system package — published by construction. */
 export function isPublished(row: { source: string | null; latestVersionId: number | null }) {
   return row.source === "system" || row.latestVersionId != null;
@@ -582,8 +631,8 @@ interface HintOptions {
 /**
  * List the packages of one `type` an actor in this space could use, as a
  * bounded hint for the get_me caller context. "Could use" is
- * {@link activePackagesFilter}, the run gate's own predicate: a system package,
- * or a placement row that says `enabled`. The list is capped (`limit`) so a
+ * {@link activePackagesFilter}, the activation half of the run gate: a system
+ * package, or a placement row that says `enabled`. The list is capped (`limit`) so a
  * large catalog doesn't bloat the payload — the long tail stays reachable
  * via `search`.
  *
@@ -605,7 +654,13 @@ async function listActivePackageHints<T extends PackageHint>(
   type: PackageType,
   project: (base: PackageHint, manifest: Record<string, unknown>) => T,
   opts?: HintOptions,
-): Promise<{ items: T[]; truncated: boolean; total: number }> {
+): Promise<{
+  items: T[];
+  /** Each item's row, same order: what {@link selectorlessLaunchManifests} reads. */
+  rows: { source: string | null; draftManifest: unknown; latestVersionId: number | null }[];
+  truncated: boolean;
+  total: number;
+}> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
   const rows = await db
     .select({
@@ -645,33 +700,37 @@ async function listActivePackageHints<T extends PackageHint>(
     return project(base, manifest);
   });
 
-  return { items, truncated: total > items.length, total };
+  return { items, rows, truncated: total > items.length, total };
 }
 
-/** One entry in the runnable-agent hint exposed via get_me. */
-interface RunnableAgent extends PackageHint {
+/** One entry in the active-agent hint exposed via get_me. */
+interface ActiveAgentHint extends PackageHint {
   /** Whether the agent declares an input schema with at least one property. */
   takes_input: boolean;
+  /** Required integrations not active here, in the selector-less launch's definition. */
+  inactive_required_integrations: string[];
 }
 
-interface RunnableAgentsResult {
-  agents: RunnableAgent[];
+interface ActiveAgentHintsResult {
+  agents: ActiveAgentHint[];
   /** True when the catalog was capped by `limit` (more reachable via search). */
   truncated: boolean;
-  /** Total runnable agents before the cap. */
+  /** Total active agents before the cap. */
   total: number;
 }
 
 /**
- * Runnable-agent hint for the caller context. "Runnable" is a hint only — the
- * caller gates on the `agents:run` permission and the run route re-checks RBAC
- * at invoke time. See {@link listActivePackageHints}.
+ * The agents ACTIVE in the space, as a hint for the caller context. Active is not
+ * launchable: `inactive_required_integrations` names what the run gate refuses
+ * on, and connections are judged at launch only. The caller gates on the
+ * `agents:run` permission and the run route re-checks RBAC at invoke time. See
+ * {@link listActivePackageHints}.
  */
-export async function listRunnableAgents(
+export async function listActiveAgentHints(
   scope: SpaceScope,
   opts?: HintOptions,
-): Promise<RunnableAgentsResult> {
-  const { items, truncated, total } = await listActivePackageHints(
+): Promise<ActiveAgentHintsResult> {
+  const { items, rows, truncated, total } = await listActivePackageHints(
     scope,
     "agent",
     (base, manifest) => {
@@ -680,7 +739,15 @@ export async function listRunnableAgents(
     },
     opts,
   );
-  return { agents: items, truncated, total };
+  const inactive = await inactiveRequiredIntegrationIds(
+    await selectorlessLaunchManifests(rows),
+    scope,
+  );
+  const agents = items.map((item, i) => ({
+    ...item,
+    inactive_required_integrations: inactive[i]!,
+  }));
+  return { agents, truncated, total };
 }
 
 /** One entry in the active-skill hint exposed via get_me. */

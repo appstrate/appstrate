@@ -15,7 +15,7 @@ import {
 } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
-import { loadSpaceAccess } from "../lib/space-lookup.ts";
+import { loadSpaceAccessForIds } from "../lib/space-lookup.ts";
 import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
@@ -156,29 +156,43 @@ export async function removeScheduleJobs(scheduleIds: readonly string[]): Promis
  * schedule's org and hold agents:run in its space; an end-user must still
  * exist in the schedule's space.
  */
+export async function scheduleActorRunSpaces(
+  actor: Actor,
+  orgId: string,
+  spaceIds: readonly string[],
+): Promise<Set<string>> {
+  if (spaceIds.length === 0) return new Set();
+  if (actor.type === "user") {
+    // A fire has no admission to pin the org role at (RBAC spec §4.4). The
+    // frozen actor is the caller in personal spaces too (RBAC spec §3.6).
+    const snapshots = await loadSpaceAccessForIds(spaceIds, orgId, actor.id);
+    return new Set(
+      snapshots.flatMap(({ orgRole, space, member }) => {
+        if (!orgRole) return [];
+        const role = resolveSpaceRole(orgRole, space, member, actor.id);
+        return spacePermissions(role).has("agents:run") ? [space.id] : [];
+      }),
+    );
+  }
+  const rows = await db
+    .select({ spaceId: endUsers.spaceId })
+    .from(endUsers)
+    .where(
+      and(
+        eq(endUsers.orgId, orgId),
+        eq(endUsers.id, actor.id),
+        inArray(endUsers.spaceId, [...spaceIds]),
+      ),
+    );
+  return new Set(rows.map(({ spaceId }) => spaceId));
+}
+
 async function isScheduleActorValid(
   actor: Actor,
   orgId: string,
   spaceId: string,
 ): Promise<boolean> {
-  if (actor.type === "user") {
-    // All three inputs in one statement: a fire has no admission to pin the org
-    // role at (RBAC spec §4.4).
-    const access = await loadSpaceAccess(spaceId, orgId, actor.id);
-    if (!access?.orgRole) return false;
-    // The frozen actor IS the caller here: a schedule in a personal space runs
-    // as its owner, and stops the moment they are no longer the owner
-    // (RBAC spec §3.6).
-    return spacePermissions(
-      resolveSpaceRole(access.orgRole, access.space, access.member, actor.id),
-    ).has("agents:run");
-  }
-  const [row] = await db
-    .select({ id: endUsers.id })
-    .from(endUsers)
-    .where(and(eq(endUsers.id, actor.id), eq(endUsers.spaceId, spaceId)))
-    .limit(1);
-  return row !== undefined;
+  return (await scheduleActorRunSpaces(actor, orgId, [spaceId])).has(spaceId);
 }
 
 function invalidScheduleActorReason(actor: Actor): string {

@@ -23,8 +23,10 @@ import {
   updateSchedule,
   deleteSchedule,
   assertScheduleActorValid,
+  scheduleActorRunSpaces,
 } from "../services/scheduler.ts";
 import { computeNextRun, isValidCron } from "../lib/cron.ts";
+import { activeSpacesForAgentVersion } from "../lib/launch-spaces.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
@@ -416,6 +418,27 @@ export const createScheduleSchema = z
   })
   .strict();
 
+/** Where the same schedule can be armed, with its writer's grant and its firing actor's reach. */
+async function inactiveScheduleAlternatives(c: Context<AppEnv>) {
+  const body = await readJsonBody(c, createScheduleSchema);
+  const actor = selectedActor(body.actor) ?? getActor(c);
+  // An end-user belongs to one space. A writer may consult another member's
+  // reach only when allowed to name them as the schedule's actor.
+  if (actor.type === "end_user" || !mayGovernScheduleActor(c, actor)) return [];
+  const candidates = await activeSpacesForAgentVersion(
+    c,
+    ["schedules:write"],
+    body.version_override,
+    body.dependency_overrides,
+  );
+  const runnable = await scheduleActorRunSpaces(
+    actor,
+    c.get("orgId"),
+    candidates.map(({ id }) => id),
+  );
+  return candidates.filter(({ id }) => runnable.has(id));
+}
+
 /** `.strict()` for the same reason as {@link createScheduleSchema}. */
 export const updateScheduleSchema = z
   .object({
@@ -496,7 +519,7 @@ export function createSchedulesRouter() {
     // Arming a schedule is an execution decision, so it asks the execution
     // question now rather than leaving the first tick to discover it. LISTING
     // the schedules of a switched-off agent is a read and does not.
-    requireActiveAgent(),
+    requireActiveAgent(inactiveScheduleAlternatives),
     async (c) => {
       const agent = c.get("package");
 

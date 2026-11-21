@@ -23,6 +23,7 @@ import { assertImportedType, readExpectedImportType } from "../lib/import-type.t
 import {
   activatePackage,
   activatePackageWithin,
+  activationWarnings,
   assertHasPublishedVersion,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
@@ -92,6 +93,7 @@ import {
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
+  assertPackageShareAccessForPlacement,
   assertPackageShareAccess,
   assertPlacementRemovalAccess,
   callerPlacementAuthority,
@@ -99,6 +101,7 @@ import {
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
+  placementAccessSpaces,
   packageDetailSpaces,
   holdsHomeAuthority,
   requireAgentRead,
@@ -2058,9 +2061,10 @@ export function createPackagesRouter() {
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const accessible = await packageAccessSpaces(c);
+    // Home and target are two spaces of one act: the credential's reach, not the call's.
+    const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
-    const pkg = await assertPackageShareAccess(c, packageId);
+    const pkg = await assertPackageShareAccessForPlacement(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
     let spaceId: string;
@@ -2155,7 +2159,13 @@ export function createPackagesRouter() {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
       throw internalError();
     }
-    return c.json({ object: "package_share", ...view }, 201);
+    // `warnings` only where this caller may activate AND the row is ON: a stored ON state
+    // set by the recipient must not leak their personal space's integration state (§3.6).
+    const warnings =
+      enabled && view.enabled
+        ? await activationWarnings({ orgId, spaceId }, packageId, pkg.type)
+        : [];
+    return c.json({ object: "package_share", ...view, warnings }, 201);
   });
 
   router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
@@ -2181,7 +2191,7 @@ export function createPackagesRouter() {
       assertSpaceId(target, "target");
       spaceId = target;
       // The caller's own personal space is audited as its owner, like a `user` target.
-      const own = (await packageAccessSpaces(c)).find(
+      const own = (await placementAccessSpaces(c)).find(
         (space) => space.id === target && space.ownerUserId !== null,
       );
       if (own) recipientUserId = own.ownerUserId;
@@ -2191,7 +2201,7 @@ export function createPackagesRouter() {
         throw forbidden("A credential confined to spaces cannot address a person");
       }
       // Home authority is asked before the directory read: no membership leak.
-      if (target !== ownerId) await assertPackageShareAccess(c, packageId);
+      if (target !== ownerId) await assertPackageShareAccessForPlacement(c, packageId);
       const membership = await getOrgMember(orgId, target);
       if (!membership) throw notFound(`User '${target}' not found in this organization`);
       // Read-only: a revoke must not create the personal space.
@@ -2450,11 +2460,15 @@ export function createPackagesRouter() {
     // placement rule is satisfied and the upsert cannot conflict. WARN so a
     // silent non-activation is still visible.
     const spaceId = c.get("spaceId");
-    if (spaceId) {
-      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
-      );
-    }
+    const activated =
+      !!spaceId &&
+      (await activatePackage({ orgId, spaceId }, packageId).then(
+        () => true,
+        (e: unknown) => {
+          logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) });
+          return false;
+        },
+      ));
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     await recordAuditFromContext(c, {
@@ -2475,10 +2489,15 @@ export function createPackagesRouter() {
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
+    // And, for an agent now on here, each declared integration not active in the space.
     const importWarnings = [
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
       ...collectLoginCriteriaWarnings(manifest),
+      ...(activated
+        ? await activationWarnings({ orgId, spaceId }, packageId, packageType)
+        : []
+      ).map((w) => w.message),
     ];
     return c.json(
       {

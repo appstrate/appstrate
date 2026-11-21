@@ -64,6 +64,7 @@ import {
 } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { activeSpacesForAgentVersion, launchSpacesLookup } from "../lib/launch-spaces.ts";
 import { withoutConnectOffers } from "../services/connect/preflight-connect-offer.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext, recordAuditsFromContext } from "../services/audit.ts";
@@ -311,7 +312,15 @@ export function createRunsRouter() {
     // The execution gate, and only here: an agent placed in this space but
     // switched off does not run, a rerun of one of its past runs included —
     // `rerun_from` is a body field of THIS route, so it passes the same door.
-    requireActiveAgent(),
+    requireActiveAgent(async (c) => {
+      const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
+      return activeSpacesForAgentVersion(
+        c,
+        ["agents:run"],
+        c.req.query("version"),
+        body.dependency_overrides,
+      );
+    }),
     runLaunchIdempotency(),
     async (c) => {
       const agent = c.get("package");
@@ -427,6 +436,10 @@ export function createRunsRouter() {
           actor,
           // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
+          launchSpaces: launchSpacesLookup(c, ["agents:run"], {
+            version: versionOverride,
+            dependencyOverrides,
+          }),
           launchOverrides,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
           // preflight seeds the manifests the kickoff will freeze.
@@ -717,6 +730,7 @@ export function createRunsRouter() {
         actor,
         body,
         connectOffers: connectOfferPolicyFromRequest(c),
+        launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"]),
         authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
       });
 

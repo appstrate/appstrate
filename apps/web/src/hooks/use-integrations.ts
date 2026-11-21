@@ -224,7 +224,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
-function useAgentConnectionReadinessOptions(
+export function useAgentConnectionReadinessOptions(
   agentPackageId: string | undefined,
   version?: string,
   scheduleId?: string,
