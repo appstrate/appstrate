@@ -12,7 +12,10 @@ import {
   auditEvents,
   integrationConnections,
   orgPackageOffers,
+  packages,
   schedules,
+  spacePackages,
+  spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -26,12 +29,18 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
+  seedOrgOffer,
   seedPackage,
   seedPublishedVersion,
   seedSchedule,
   seedSpace,
   seedSpacePackage,
 } from "../../helpers/seed.ts";
+import { isPackageActiveHere, updateSpacePackage } from "../../../src/services/space-packages.ts";
+import { sharePackage } from "../../../src/services/package-shares.ts";
+import { reconcilePlacementsAfterRehome } from "../../../src/services/package-placement.ts";
+import { emptyAndDeletePersonalSpace } from "../../../src/services/spaces.ts";
+import { isPackageReadableInSpace } from "../../../src/lib/package-access.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
@@ -309,5 +318,169 @@ describe("withdrawing the offer", () => {
       .from(auditEvents)
       .where(eq(auditEvents.action, "package.offer_withdrawn"));
     expect(audits).toHaveLength(0);
+  });
+});
+
+const rowIn = async (spaceId: string, packageId: string) =>
+  (
+    await db
+      .select()
+      .from(spacePackages)
+      .where(and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, packageId)))
+  )[0];
+
+const configure = (spaceId: string, packageId: string) =>
+  updateSpacePackage({ orgId: ctx.orgId, spaceId }, packageId, {
+    inputSettings: { values: {}, locked: [] },
+  });
+
+describe("a row created under the offer is a decision about the offer, not a placement", () => {
+  it("configuring in a space under the offer, then withdrawing, leaves nothing placed or active there", async () => {
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    await configure(member.personalSpaceId, AGENT);
+    expect((await rowIn(member.personalSpaceId, AGENT))?.placedByOffer).toBe(true);
+    const schedule = await seedSchedule({
+      orgId: ctx.orgId,
+      spaceId: member.personalSpaceId,
+      packageId: AGENT,
+      userId: member.userId,
+    });
+
+    expect((await withdraw(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(204);
+
+    expect(await rowIn(member.personalSpaceId, AGENT)).toBeUndefined();
+    expect(await isPackageReadableInSpace(member.personalSpaceId, AGENT)).toBe(false);
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
+    ).toBe(false);
+    const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+    expect(after!.enabled).toBe(false);
+    expect(after!.disabledReason).toBe("package_removed");
+  });
+
+  it("activating an already-offered package answers 200 and records an offer row", async () => {
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    const res = await app.request(`/api/spaces/${member.personalSpaceId}/packages`, {
+      method: "POST",
+      headers: { ...member.headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ packageId: AGENT }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const row = await rowIn(member.personalSpaceId, AGENT);
+    expect(row?.enabled).toBe(true);
+    expect(row?.placedByOffer).toBe(true);
+  });
+
+  it("keeps an opt-out when a share is revoked while the package is offered", async () => {
+    await seedSpacePackage(member.personalSpaceId, AGENT, { enabled: false });
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    const res = await app.request(`/api/packages/${AGENT}/shares/${member.personalSpaceId}`, {
+      method: "DELETE",
+      headers: member.headers(),
+    });
+    expect(res.status, await res.clone().text()).toBe(204);
+    const row = await rowIn(member.personalSpaceId, AGENT);
+    expect(row?.enabled).toBe(false);
+    expect(row?.placedByOffer).toBe(true);
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: member.personalSpaceId }, AGENT),
+    ).toBe(false);
+  });
+
+  it("keeps an opt-out through a home move that drops the old home's row", async () => {
+    const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
+    await seedSpacePackage(teamId, AGENT, { enabled: false });
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    const ids = await db.transaction((tx) =>
+      reconcilePlacementsAfterRehome(tx, {
+        packageId: AGENT,
+        newHomeSpaceId: third,
+        previousHome: { spaceId: teamId, keep: false },
+      }),
+    );
+    expect(ids).toEqual([]);
+    const row = await rowIn(teamId, AGENT);
+    expect(row?.enabled).toBe(false);
+    expect(row?.placedByOffer).toBe(true);
+  });
+
+  it("a row of the new home is no offer row: withdrawing the offer after the move keeps it", async () => {
+    const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    await configure(third, AGENT);
+    const schedule = await seedSchedule({
+      orgId: ctx.orgId,
+      spaceId: third,
+      packageId: AGENT,
+      userId: ctx.user.id,
+    });
+    await db.transaction((tx) =>
+      reconcilePlacementsAfterRehome(tx, {
+        packageId: AGENT,
+        newHomeSpaceId: third,
+        previousHome: { spaceId: teamId, keep: true },
+      }),
+    );
+    await db.update(packages).set({ homeSpaceId: third }).where(eq(packages.id, AGENT));
+    expect((await rowIn(third, AGENT))?.placedByOffer).toBe(false);
+
+    expect((await withdraw(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT)).status).toBe(204);
+
+    const row = await rowIn(third, AGENT);
+    expect(row?.inputSettings).toEqual({ values: {}, locked: [] });
+    const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+    expect(after!.enabled).toBe(true);
+  });
+
+  it("a real share over an offer row survives the withdrawal", async () => {
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    await configure(member.personalSpaceId, AGENT);
+    const shared = await sharePackage({
+      packageId: AGENT,
+      spaceId: member.personalSpaceId,
+      orgId: ctx.orgId,
+      placeAs: { sharedBy: ctx.user.id, authorizeHome: () => true },
+      enabled: true,
+    });
+    expect(shared.created).toBe(true);
+    expect((await rowIn(member.personalSpaceId, AGENT))?.placedByOffer).toBe(false);
+
+    await withdraw(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    expect(await rowIn(member.personalSpaceId, AGENT)).toBeDefined();
+    const listed = await app.request(`/api/packages/${AGENT}/shares`, {
+      headers: authHeaders(ctx, { "X-Space-Id": teamId }),
+    });
+    expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(1);
+  });
+
+  it("does not list an offer row as a share, and reports it via organization", async () => {
+    await offer(authHeaders(ctx, { "X-Space-Id": teamId }), AGENT);
+    await configure(member.personalSpaceId, AGENT);
+    const listed = await app.request(`/api/packages/${AGENT}/shares`, {
+      headers: authHeaders(ctx, { "X-Space-Id": teamId }),
+    });
+    expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(0);
+    const row = await libraryPlacement(member, AGENT, "agent", member.personalSpaceId);
+    expect(row?.placements.map((p) => p.via)).toEqual(["organization"]);
+  });
+
+  it("re-homes an offered package when its author's personal space is swept", async () => {
+    await seedPackage({
+      id: "@offers/personal",
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: member.personalSpaceId,
+      draftManifest: { name: "@offers/personal", version: "0.1.0", type: "agent" },
+    });
+    await seedOrgOffer(ctx.orgId, "@offers/personal");
+    await db
+      .update(spaces)
+      .set({ orphanedAt: new Date(Date.now() - 90 * 86_400_000) })
+      .where(eq(spaces.id, member.personalSpaceId));
+    const swept = await emptyAndDeletePersonalSpace(ctx.orgId, member.personalSpaceId);
+    expect(swept.counts).toEqual({ rehomedPackages: 1, deletedPackages: 0 });
+    const [pkg] = await db.select().from(packages).where(eq(packages.id, "@offers/personal"));
+    expect(pkg?.homeSpaceId).toBe(ctx.defaultSpaceId);
+    expect(await offerRows("@offers/personal")).toHaveLength(1);
   });
 });

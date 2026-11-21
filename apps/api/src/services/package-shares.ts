@@ -170,6 +170,8 @@ export async function listPackageShares(
     .where(
       and(
         eq(spacePackages.packageId, packageId),
+        // A row that only decides about the organization's offer is no share.
+        eq(spacePackages.placedByOffer, false),
         eq(spaces.orgId, orgId),
         // A system package is never shared, and the home is not an audience.
         eq(packages.orgId, orgId),

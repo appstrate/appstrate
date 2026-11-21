@@ -7,6 +7,7 @@ import {
   organizationMembers,
   packageTypeValues,
   type PackageType,
+  packageDistTags,
   packages,
   spacePackages,
   user,
@@ -14,11 +15,7 @@ import {
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
-import {
-  callerAdministersOrg,
-  homeWireForCaller,
-  packageAccessSpaces,
-} from "../lib/package-access.ts";
+import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -90,8 +87,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");
 
   const accessible = await packageAccessSpaces(c);
-  // The offer door's role half (`assertPackageOfferAccess`); the home half is each package's `home_shareable`.
-  const administersOrg = callerAdministersOrg(c);
   // The caller's own personal space takes no activation grant: ownership authorizes
   // (`coarseSpacePackageGate`, `routes/spaces.ts`).
   const personalOwnerId = callerPersonalOwnerId(c);
@@ -160,6 +155,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       draftManifest: packages.draftManifest,
       spaceId: spacePackages.spaceId,
       enabled: spacePackages.enabled,
+      placedByOffer: spacePackages.placedByOffer,
       sharedBy: spacePackages.sharedBy,
       sharerName: user.name,
     })
@@ -192,6 +188,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       string,
       {
         enabled: boolean;
+        placedByOffer: boolean;
         sharedBy: { user_id: string; name: string } | null;
       }
     >
@@ -202,6 +199,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     if (!bySpace) placementRows.set(row.id, (bySpace = new Map()));
     bySpace.set(row.spaceId, {
       enabled: row.enabled!,
+      placedByOffer: row.placedByOffer!,
       sharedBy: sharerView(row),
     });
   }
@@ -210,6 +208,23 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   // row, and the projection below reads the whole map at once.
   const catalogue = new Map<string, (typeof rows)[number]>();
   for (const row of rows) if (!catalogue.has(row.id)) catalogue.set(row.id, row);
+
+  // The offer door's version precondition, for every homed package at once.
+  const homedIds = [...catalogue.values()]
+    .filter((row) => row.source !== "system")
+    .map((r) => r.id);
+  const published = new Set(
+    homedIds.length === 0
+      ? []
+      : (
+          await db
+            .select({ packageId: packageDistTags.packageId })
+            .from(packageDistTags)
+            .where(
+              and(eq(packageDistTags.tag, "latest"), inArray(packageDistTags.packageId, homedIds)),
+            )
+        ).map((tag) => tag.packageId),
+  );
 
   const grouped: Record<string, LibraryPackage[]> = {
     agent: [],
@@ -233,7 +248,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           ? "system"
           : row.homeSpaceId === space
             ? "home"
-            : placementRow
+            : placementRow && !placementRow.placedByOffer
               ? "shared"
               : offered
                 ? "organization"
@@ -279,7 +294,11 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       // write, delete and share verdicts themselves.
       ...home,
       offered_to_org: offered,
-      org_offerable: administersOrg && (row.source === "system" || home.home_shareable),
+      // The offer door's verdict (`assertPackageOfferAccess`): the role and ceiling, the home's
+      // `share` (`home_shareable`) and, for a homed package, a published version.
+      org_offerable:
+        callerMayOffer(c, type) &&
+        (row.source === "system" || (home.home_shareable && published.has(row.id))),
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
       placements,

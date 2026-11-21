@@ -17,7 +17,7 @@ import { forbidden } from "../lib/errors.ts";
 import { assertHasPublishedVersion, loadPlaceablePackage } from "./space-packages.ts";
 import type { PlacementAuthority } from "./space-packages.ts";
 import { isActiveWithoutRow } from "./package-activation.ts";
-import { disableArmedSchedules } from "./package-placement.ts";
+import { disableArmedSchedules, withdrawPlacement } from "./package-placement.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 
 /** The locked package, after the home rule is re-asked against it. */
@@ -27,7 +27,7 @@ async function loadOfferablePackage(
   packageId: string,
   authorizeHome: PlacementAuthority["authorizeHome"],
 ) {
-  const pkg = await loadPlaceablePackage(tx, { orgId }, packageId);
+  const pkg = await loadPlaceablePackage(tx, { orgId }, packageId, "update");
   if (!authorizeHome(pkg.homeSpaceId)) {
     throw forbidden(
       `Offering '${packageId}' to the organization requires the share permission in its home space — the package moved home while this request was in flight.`,
@@ -64,8 +64,10 @@ export async function offerPackageToOrg(params: {
 /**
  * Withdraw the offer. Idempotent (`removed: false` when there was none). In the
  * same transaction, the armed schedules of the package are disabled
- * (`package_removed`) in every space that loses it with the offer: spaces of
- * the organization holding no row of their own, other than its home (still
+ * (`package_removed`) in every space that loses it with the offer: spaces
+ * whose row only decided about the offer (`placed_by_offer`, deleted here
+ * through `withdrawPlacement`), and spaces of the organization holding no row
+ * of their own, other than its home (still
  * placed, now merely inactive: its schedules fail visibly like any deactivated
  * package's), and none at all when the deployment's default still activates
  * it.
@@ -88,6 +90,22 @@ export async function withdrawOrgOffer(params: {
     if (isActiveWithoutRow({ ...pkg, offeredToOrg: false })) {
       return { removed: true, disabledScheduleIds: [] };
     }
+    // Rows that decided about the offer go with it, schedules off like any withdrawal.
+    const offerRows = await tx
+      .select({ spaceId: spacePackages.spaceId })
+      .from(spacePackages)
+      .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+      .where(
+        and(
+          eq(spacePackages.packageId, packageId),
+          eq(spacePackages.placedByOffer, true),
+          eq(spaces.orgId, orgId),
+        ),
+      );
+    const fromRows: string[] = [];
+    for (const { spaceId } of offerRows) {
+      fromRows.push(...(await withdrawPlacement(tx, packageId, spaceId)).disabledScheduleIds);
+    }
     const lost = await tx
       .select({ id: spaces.id })
       .from(spaces)
@@ -104,8 +122,8 @@ export async function withdrawOrgOffer(params: {
           pkg.homeSpaceId === null ? undefined : ne(spaces.id, pkg.homeSpaceId),
         ),
       );
-    if (lost.length === 0) return { removed: true, disabledScheduleIds: [] };
-    const disabledScheduleIds = await disableArmedSchedules(
+    if (lost.length === 0) return { removed: true, disabledScheduleIds: fromRows };
+    const fromNoRow = await disableArmedSchedules(
       tx,
       and(
         eq(schedules.packageId, packageId),
@@ -115,6 +133,6 @@ export async function withdrawOrgOffer(params: {
         ),
       ),
     );
-    return { removed: true, disabledScheduleIds };
+    return { removed: true, disabledScheduleIds: [...fromRows, ...fromNoRow] };
   });
 }

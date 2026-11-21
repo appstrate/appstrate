@@ -6,7 +6,19 @@
  * here, shipped with the deployment, or offered to the space's organization.
  */
 
-import { and, asc, eq, exists, inArray, isNotNull, ne, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  ne,
+  or,
+  sql,
+  type SQL,
+  type SQLWrapper,
+} from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { orgPackageOffers, packages, schedules, spacePackages, spaces } from "@appstrate/db/schema";
@@ -16,27 +28,23 @@ import { disableSchedules } from "./schedules-naming-connection.ts";
 const offerSpace = alias(spaces, "offer_space");
 
 /**
- * Drizzle filter: is the package offered to the organization of `spaceId`
- * (`org_package_offers`)? A correlated EXISTS on the outer `packages` row, so
- * no call site joins anything; `spaceId` may be a column of the outer query.
+ * Drizzle filter: is the outer `packages` row offered to the organization `orgId`
+ * (`org_package_offers`)? A correlated EXISTS, so no call site joins anything.
+ * `orgId` is a value, or a subquery of the outer query.
  */
-export function offeredToSpaceOrgSql(spaceId: string | AnyPgColumn) {
-  return exists(
-    db
-      .select({ one: sql`1` })
-      .from(orgPackageOffers)
-      .innerJoin(offerSpace, eq(offerSpace.orgId, orgPackageOffers.orgId))
-      .where(and(eq(offerSpace.id, spaceId), eq(orgPackageOffers.packageId, packages.id))),
-  );
-}
-
-/** Drizzle filter: is the outer `packages` row offered to organization `orgId`? A correlated EXISTS. */
-export function offeredToOrgSql(orgId: string) {
+export function offeredToOrgSql(orgId: string | SQLWrapper) {
   return exists(
     db
       .select({ one: sql`1` })
       .from(orgPackageOffers)
       .where(and(eq(orgPackageOffers.orgId, orgId), eq(orgPackageOffers.packageId, packages.id))),
+  );
+}
+
+/** {@link offeredToOrgSql} for the organization of `spaceId`, a value or a column of the outer query. */
+export function offeredToSpaceOrgSql(spaceId: string | AnyPgColumn) {
+  return offeredToOrgSql(
+    db.select({ orgId: offerSpace.orgId }).from(offerSpace).where(eq(offerSpace.id, spaceId)),
   );
 }
 
@@ -59,19 +67,43 @@ export async function listOrgOffers(
   return new Set(rows.map((row) => row.packageId));
 }
 
-/** The subset of `packageIds` offered to the organization of `spaceId`: the in-memory twin's input ({@link offeredToSpaceOrgSql}). */
+/** The subset of `packageIds` offered to the organization of `spaceId`: the in-memory twin's input. */
 export async function listOfferedToSpaceOrg(
   spaceId: string,
   packageIds: readonly string[],
   executor: DbOrTx = db,
 ): Promise<Set<string>> {
-  if (packageIds.length === 0) return new Set();
+  const [space] = await executor
+    .select({ orgId: spaces.orgId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  return space ? listOrgOffers(space.orgId, packageIds, executor) : new Set();
+}
+
+/**
+ * The spaces of `orgId` the package is placed in beyond its home and the
+ * deployment: every space when it is offered to the organization, else those
+ * holding a row.
+ */
+export async function placedSpaceIds(
+  orgId: string,
+  packageId: string,
+  executor: DbOrTx = db,
+): Promise<string[]> {
+  if ((await listOrgOffers(orgId, [packageId], executor)).has(packageId)) {
+    const all = await executor
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(eq(spaces.orgId, orgId));
+    return all.map((row) => row.id);
+  }
   const rows = await executor
-    .select({ packageId: orgPackageOffers.packageId })
-    .from(orgPackageOffers)
-    .innerJoin(spaces, eq(spaces.orgId, orgPackageOffers.orgId))
-    .where(and(eq(spaces.id, spaceId), inArray(orgPackageOffers.packageId, [...packageIds])));
-  return new Set(rows.map((row) => row.packageId));
+    .select({ id: spacePackages.spaceId })
+    .from(spacePackages)
+    .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+    .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId)));
+  return rows.map((row) => row.id);
 }
 
 /**
@@ -139,6 +171,11 @@ export async function reconcilePlacementsAfterRehome(
   },
 ): Promise<string[]> {
   const { packageId, newHomeSpaceId, previousHome } = params;
+  // A row in the home is never an offer row: it is the home's own, whatever it was before the move.
+  await tx
+    .update(spacePackages)
+    .set({ placedByOffer: false })
+    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, newHomeSpaceId)));
   if (previousHome.spaceId === newHomeSpaceId) return [];
   if (previousHome.keep) {
     const [row] = await tx
@@ -178,11 +215,14 @@ export async function disableArmedSchedules(tx: Tx, where: SQL | undefined): Pro
  * Withdraw `packageId` from `spaceId`: the one delete of a `space_packages` row
  * (settings included). Every schedule of the package there is disabled with
  * `package_removed` in the same transaction; re-placing does not re-arm them.
- * A package offered to the organization stays placed (and active) in the space
- * without a row, so its schedules are left armed. The org boundary is the
- * caller's.
  *
- * @returns whether a row went, and the disabled schedules, whose jobs the
+ * A package still offered to the space's organization stays placed and active
+ * there with no row, so the row is not deleted but turned into a decision about
+ * the offer (`placed_by_offer`, `enabled` and settings kept, a sticky opt-out
+ * included) and the schedules are left armed. A row that already was one is no
+ * placement to withdraw. The org boundary is the caller's.
+ *
+ * @returns whether a placement went, and the disabled schedules, whose jobs the
  *   caller removes once committed.
  */
 export async function withdrawPlacement(
@@ -190,13 +230,18 @@ export async function withdrawPlacement(
   packageId: string,
   spaceId: string,
 ): Promise<{ removed: boolean; disabledScheduleIds: string[] }> {
-  const removed = await tx
-    .delete(spacePackages)
-    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, spaceId)))
-    .returning({ packageId: spacePackages.packageId });
+  const here = and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, spaceId));
   if ((await listOfferedToSpaceOrg(spaceId, [packageId], tx)).has(packageId)) {
-    return { removed: removed.length > 0, disabledScheduleIds: [] };
+    const kept = await tx
+      .update(spacePackages)
+      .set({ placedByOffer: true, sharedBy: null })
+      .where(and(here, eq(spacePackages.placedByOffer, false)))
+      .returning({ packageId: spacePackages.packageId });
+    return { removed: kept.length > 0, disabledScheduleIds: [] };
   }
+  const removed = await tx.delete(spacePackages).where(here).returning({
+    packageId: spacePackages.packageId,
+  });
   const disabledScheduleIds = await disableArmedSchedules(
     tx,
     and(eq(schedules.packageId, packageId), eq(schedules.spaceId, spaceId)),

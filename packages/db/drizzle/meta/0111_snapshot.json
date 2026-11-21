@@ -1,5 +1,5 @@
 {
-  "id": "ae5592ee-0092-4147-be95-5bf1c931f691",
+  "id": "721be321-5053-405e-94e2-7507317df050",
   "prevId": "0e91a84c-6edc-4f06-a528-cc7e2eeb8603",
   "version": "7",
   "dialect": "postgresql",
@@ -3441,6 +3441,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "placed_by_offer": {
+          "name": "placed_by_offer",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "installed_at": {
           "name": "installed_at",

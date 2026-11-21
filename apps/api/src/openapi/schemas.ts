@@ -3168,7 +3168,7 @@ export const schemas = {
         org_offerable: {
           type: "boolean",
           description:
-            "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin session, and for a package homed in a space the type's `share` permission in that home. The route stays the authority; this is its verdict served in advance.",
+            "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home and a published version. The route stays the authority; this is its verdict served in advance.",
         },
         activation: {
           type: "array",
@@ -3209,7 +3209,7 @@ export const schemas = {
         type: "string",
         enum: ["home", "shared", "system", "organization"],
         description:
-          "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own). In that order of precedence.",
+          "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). In that order of precedence.",
       },
       state: {
         type: "string",

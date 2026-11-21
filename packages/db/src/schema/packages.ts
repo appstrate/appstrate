@@ -92,6 +92,11 @@ export const spacePackages = pgTable(
     blockUserConnections: boolean("block_user_connections").notNull().default(false),
     enabled: boolean("enabled").notNull(),
     sharedBy: text("shared_by").references(() => user.id, { onDelete: "set null" }),
+    // A row outside the package's home that exists only because the package is
+    // offered to the organization (`org_package_offers`): a DECISION about the
+    // offer (switch off, configure), not a placement. Withdrawing the offer
+    // deletes it; `placePackage` (a real share) sets it back to false.
+    placedByOffer: boolean("placed_by_offer").notNull().default(false),
     installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

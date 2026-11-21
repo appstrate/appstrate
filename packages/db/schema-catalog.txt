@@ -606,6 +606,7 @@ column space_packages.input_settings jsonb not null default '{"locked": [], "val
 column space_packages.installed_at timestamp with time zone not null default now()
 column space_packages.model_id text
 column space_packages.package_id text not null
+column space_packages.placed_by_offer boolean not null default false
 column space_packages.proxy_id text
 column space_packages.shared_by text
 column space_packages.space_id text not null

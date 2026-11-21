@@ -8,7 +8,7 @@ import { useSetOrgOffer } from "../hooks/use-library";
 import { ConfirmModal } from "./confirm-modal";
 
 /** The row's markup: the package's offer to the organization and its switch. */
-export function OrgOfferSwitchRow({
+function OrgOfferSwitchRow({
   name,
   offered,
   pending,
