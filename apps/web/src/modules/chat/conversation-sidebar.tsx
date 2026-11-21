@@ -59,6 +59,12 @@ import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
+/**
+ * The panel's own frame: it floats beside the thread, so its cards (and the
+ * previewed file) are rounder than a page's and lifted by a light shadow.
+ */
+const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
+
 /** The shell header's one control for the context panel, wherever it is drawn. */
 export function ConversationContextToggle({
   expanded,
@@ -137,7 +143,7 @@ function ShownStoredFile({
       error={error}
       fallbackName={file.name || t("context.file.untitled")}
       onClose={onClose}
-      className="h-full"
+      className={cn("h-full", FLOATING_FRAME)}
     />
   );
 }
@@ -160,7 +166,7 @@ function ShownLocalFile({
       error={null}
       fallbackName={file.local.name || t("context.file.untitled")}
       onClose={onClose}
-      className="h-full"
+      className={cn("h-full", FLOATING_FRAME)}
     />
   );
 }
@@ -199,7 +205,7 @@ export function ConversationRuns({
   }
   if (query.isLoading) {
     return (
-      <Card>
+      <Card className={FLOATING_FRAME}>
         <TextSkeleton className="p-4" />
       </Card>
     );
@@ -211,7 +217,7 @@ export function ConversationRuns({
   }
 
   return (
-    <Card className="divide-y overflow-hidden">
+    <Card className={cn("divide-y", FLOATING_FRAME)}>
       {runs.map((run) => (
         <RunRow
           key={run.id}
@@ -253,7 +259,7 @@ export function ConversationFiles({
   }
   if (query.isLoading) {
     return (
-      <Card>
+      <Card className={FLOATING_FRAME}>
         <TextSkeleton className="p-4" />
       </Card>
     );
@@ -265,7 +271,7 @@ export function ConversationFiles({
   }
 
   return (
-    <Card className="divide-y overflow-hidden">
+    <Card className={cn("divide-y", FLOATING_FRAME)}>
       {files.map((file) => (
         <button
           key={file.id}
@@ -507,7 +513,7 @@ function ConversationInfo({
       ? undefined
       : (detail.data ?? null);
   return (
-    <Card className="divide-y overflow-hidden">
+    <Card className={cn("divide-y", FLOATING_FRAME)}>
       <ConversationDetails conversationId={conversationId} active={active} />
       <div className="p-4">
         <ChatAccessSummary conversation={conversation} />
