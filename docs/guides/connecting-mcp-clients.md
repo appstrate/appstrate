@@ -113,7 +113,7 @@ What happens under the hood:
 > result (absent when none did, when `space_id` is named, and on a
 > space-pinned endpoint), and a space whose read was refused, such as a skill
 > archive unavailable there, is named in its section's `unsearched`. When the
-> request names a space, `search` takes its `space_id` too. The argument's schema lists your
+> request names a space or its context designates one, `search` takes its `space_id` too. The argument's schema lists your
 > spaces (name, `spc_…` id, your role there), since clients may truncate the
 > server instructions. Space names are not unique, so every machine field names
 > a space by its id: `granted_in` in results, and the bracketed ids in the

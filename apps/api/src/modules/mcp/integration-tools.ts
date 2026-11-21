@@ -181,7 +181,8 @@ export const INTEGRATION_TOOLS_DESCRIPTION =
   "`integration_tool` in `kinds` reads remote catalogs from their servers (the connection's " +
   "credential is sent, journaled as its call); otherwise, an `integration` included, remote " +
   "catalogs are read from the cache alone, a cold one's tools are listed by name only " +
-  "(`catalog_unreadable: true`) and the integration is named in `uncached`.";
+  "(`catalog_unreadable: true`); such an integration is named in `uncached` when it relates to the " +
+  "query, otherwise counted in `note`.";
 
 /** A listed entry, and the spaces of an org-wide call it is listed in (none when pinned). */
 type Merged<T> = T & { granted_in?: string[] };
@@ -336,6 +337,13 @@ export async function searchIntegrationTools(
       `${matches.length - shown.length} more tool(s) match than the ${limit} shown: narrow ` +
         "with `query`, or pass `integration` to search one integration" +
         (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
+    );
+  }
+  if (read.uncached.length > uncachedShown.length) {
+    notes.push(
+      `${read.uncached.length - uncachedShown.length} other integration(s) have no cached catalog, so ` +
+        "their tools may not match by description: search again with " +
+        '`kinds: ["integration_tool"]` to read them.',
     );
   }
   for (const entry of truncatedShown) {

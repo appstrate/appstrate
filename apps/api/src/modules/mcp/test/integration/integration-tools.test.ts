@@ -1215,6 +1215,13 @@ describe("mcp integration tools", () => {
       // An uncached integration is named only when it relates to the query.
       const unrelated = await callTool(caller, "search", { query: "zzzunmatched" });
       expect(section(unrelated.data).uncached).toBeUndefined();
+      // The others are only counted, without naming an integration or a space.
+      const unrelatedNote = (unrelated.data.integration_tools as { note?: string }).note ?? "";
+      expect(unrelatedNote).toContain("1 other integration(s) have no cached catalog");
+      expect(unrelatedNote).not.toContain(REMOTE_ID);
+      expect((general.data.integration_tools as { note?: string }).note ?? "").not.toContain(
+        "have no cached catalog",
+      );
 
       // Naming the kind reads it from the server, as the call it journals.
       const named = await callTool(caller, "search", {

@@ -20,12 +20,12 @@ import {
   INSUFFICIENT_SCOPES_REMEDIES,
 } from "@appstrate/core/integration";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
+import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import {
   deriveMcpSurface,
   RUN_AND_WAIT_LONG_POLL_RESUME,
 } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import { instructionsFor } from "./helpers.ts";
 
 // The appended operation index is filtered per operation against the mounted
