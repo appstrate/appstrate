@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `search_integration_tools` and `call_integration_tool`: when they are declared,
+ * Unit tests for the `integration_tool` kind of `search`/`describe` and `call_integration_tool`: when they are declared,
  * what each one reads and dispatches to the credential proxy, and what the model is handed back.
  * Dispatch is injected, so the proxy's own answers (its listing of the tools, its guard, its
  * access rule, its refusals) are stubbed here; the listing is exercised for real in
@@ -20,6 +20,8 @@ import {
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import { MAX_LISTED_SCOPES } from "../../../../src/modules/mcp/integration-tool-catalog.ts";
+import { searchIntegrationTools } from "../../../../src/modules/mcp/integration-tools.ts";
+import type { McpSpace } from "../../../../src/modules/mcp/spaces.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
 import {
@@ -150,6 +152,7 @@ const listingOf =
       not_ready: rest.not_ready ?? [],
       unlisted: rest.unlisted ?? [],
       truncated_catalogs: rest.truncated_catalogs ?? [],
+      uncached: [],
     });
 
 function makeTools(
@@ -183,6 +186,13 @@ function makeTools(
     observe: (event) => events.push(event),
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    skills: {
+      list: async () => [],
+      entry: async () => null,
+      read: async () => {
+        throw new Error("no skill reads here");
+      },
+    },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
@@ -215,7 +225,48 @@ async function apiCall(
 type Entry = Record<string, unknown> & { error?: Record<string, unknown> };
 const entries = (payload: Record<string, unknown>) => payload.results as Entry[];
 
-const BOTH = ["search_integration_tools", "call_integration_tool"];
+/** What `search` and `describe` declare for the kind: the enum value on each, beside the tool. */
+const kindEnum = (
+  made: { byName: Map<string, { descriptor: { inputSchema: { properties?: unknown } } }> },
+  tool: "search" | "describe",
+): unknown[] => {
+  const properties = made.byName.get(tool)!.descriptor.inputSchema.properties as Record<
+    string,
+    { enum?: unknown[]; items?: { enum?: unknown[] } }
+  >;
+  const argument = properties[tool === "search" ? "kinds" : "kind"]!;
+  return argument.enum ?? argument.items?.enum ?? [];
+};
+
+/** Whether the surface carries integration tools at all: the kind, on both tools, and the caller. */
+const declaresIntegrationTools = (made: Parameters<typeof kindEnum>[0]): boolean => {
+  const kinds = [kindEnum(made, "search"), kindEnum(made, "describe")].map((k) =>
+    k.includes("integration_tool"),
+  );
+  expect(kinds[0]).toBe(kinds[1]);
+  expect(made.byName.has("call_integration_tool")).toBe(kinds[0]!);
+  return kinds[0]!;
+};
+
+/** `search` over the `integration_tool` kind: its section. */
+async function searchKind(made: ReturnType<typeof makeTools>, args: Record<string, unknown>) {
+  const result = await made.byName
+    .get("search")!
+    .handler({ kinds: ["integration_tool"], ...args }, noExtra);
+  const body = parseResult(result);
+  return {
+    result,
+    body,
+    section: body.integration_tools as Record<string, unknown>,
+  };
+}
+
+/** `describe` of an integration tool by its id. */
+async function describeTool(made: ReturnType<typeof makeTools>, id: string) {
+  return parseResult(
+    await made.byName.get("describe")!.handler({ kind: "integration_tool", id }, noExtra),
+  );
+}
 
 describe("integration tools — declaration", () => {
   const names = (permissions: string[], proxyAcceptsCredential = true): string[] => [
@@ -223,26 +274,27 @@ describe("integration tools — declaration", () => {
   ];
 
   it("withholds both without `mcp:invoke`: a read-only connection calls nothing", () => {
-    const declared = names(["mcp:read", "credential-proxy:call-own"]);
-    for (const name of BOTH) expect(declared).not.toContain(name);
+    expect(declaresIntegrationTools(makeTools(["mcp:read", "credential-proxy:call-own"]))).toBe(
+      false,
+    );
   });
 
   it("declares both under either permission of a call outside a run", () => {
     // `credential-proxy:call` implies `call-own`: the closed set of either declares the tools.
     for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
-      const declared = names([...withImpliedPermissions(["mcp:read", "mcp:invoke", permission])]);
-      for (const name of BOTH) expect(declared, permission).toContain(name);
+      const made = makeTools([...withImpliedPermissions(["mcp:read", "mcp:invoke", permission])]);
+      expect(declaresIntegrationTools(made), permission).toBe(true);
     }
   });
 
   it("withholds both when the proxy would refuse the credential the request carries", () => {
-    const declared = names(CALL_OWN, false);
-    for (const name of BOTH) expect(declared).not.toContain(name);
-    expect(declared).toContain("invoke_operation");
+    expect(declaresIntegrationTools(makeTools(CALL_OWN, undefined, false))).toBe(false);
+    expect(names(CALL_OWN, false)).toContain("invoke_operation");
   });
 
   it("declares neither retired name", () => {
     const declared = names([...withImpliedPermissions([...CALL_OWN, "credential-proxy:call"])]);
+    expect(declared).not.toContain("search_integration_tools");
     expect(declared).not.toContain("list_connections");
     expect(declared).not.toContain("api_call");
   });
@@ -251,30 +303,30 @@ describe("integration tools — declaration", () => {
     const description = (permissions: string[], name: string) =>
       makeTools(permissions).byName.get(name)!.descriptor.description!;
     const runner = [...CALL_OWN, "agents:run", "runs:read"];
-    for (const name of BOTH) {
+    for (const name of ["call_integration_tool"]) {
       expect(description(runner, name)).toContain("run_and_wait");
       expect(description(CALL_OWN, name)).not.toContain("run_and_wait");
     }
   });
 });
 
-describe("search_integration_tools", () => {
+describe("search — integration_tool kind", () => {
   const search = async (args: Record<string, unknown>, fixture: Fixture = {}) => {
     const made = makeTools(CALL_OWN, undefined, true, fixture);
-    const result = await made.byName.get("search_integration_tools")!.handler(args, noExtra);
-    return { ...made, result, payload: parseResult(result) };
+    const { result, section } = await searchKind(made, args);
+    return { ...made, result, payload: section };
   };
   const toolNames = (payload: Record<string, unknown>) =>
-    (payload.tools as Array<{ tool: string }>).map((tool) => tool.tool);
+    (payload.items as Array<{ id: string }>).map((tool) => tool.id);
 
   it("with no argument, lists every tool, and each connection they reach once with every field", async () => {
     const { result, payload, listings, calls, events } = await search({});
     expect(result.isError).toBe(false);
     expect(payload).toEqual({
       total: 1,
-      tools: [
+      items: [
         {
-          tool: TOOL,
+          id: TOOL,
           integration_package_id: INTEGRATION,
           description: expect.stringMatching(/^Acme Items\. Calls the integration's API/),
           connection_ids: [CONNECTION_ID],
@@ -294,30 +346,28 @@ describe("search_integration_tools", () => {
     expect(req.headers.get(marker)).toBe(value);
     expect(events).toEqual([
       expect.objectContaining({
-        tool: "search_integration_tools",
-        outcome: "invoked",
+        tool: "search",
         shownCount: 1,
       }),
     ]);
   });
 
-  it("carries the top result's input schema when searched, by keyword or integration", async () => {
-    for (const args of [{ query: "items" }, { integration: INTEGRATION }]) {
-      const { payload } = await search(args);
-      const best = payload.best_match as Record<string, unknown> & {
-        input_schema: { properties: Record<string, unknown>; additionalProperties: boolean };
-      };
-      expect(best.tool).toBe(TOOL);
-      expect(Object.keys(best.input_schema.properties).sort()).toEqual([
-        "max_response_bytes",
-        "read_as_file",
-        "requests",
-        "session_id",
-      ]);
-      expect(best.input_schema.additionalProperties).toBe(false);
-      expect(best.usage).toContain("`{ session_id, results }`");
-    }
-    expect((await search({ query: "nothing-matches" })).payload).toEqual({ total: 0, tools: [] });
+  it("describes a tool with its input schema and usage", async () => {
+    const found = (await describeTool(makeTools(CALL_OWN), TOOL)) as Record<string, unknown> & {
+      input_schema: { properties: Record<string, unknown>; additionalProperties: boolean };
+    };
+    expect(found.kind).toBe("integration_tool");
+    expect(found.id).toBe(TOOL);
+    expect(Object.keys(found.input_schema.properties).sort()).toEqual([
+      "max_response_bytes",
+      "read_as_file",
+      "requests",
+      "session_id",
+    ]);
+    expect(found.input_schema.additionalProperties).toBe(false);
+    expect(found.usage).toContain("`{ session_id, results }`");
+    const nothing = await search({ query: "nothing-matches" });
+    expect(nothing.payload).toEqual({ total: 0, items: [] });
   });
 
   it("asks the listing for the integration it searches, and ranks by keyword in listing order", async () => {
@@ -341,23 +391,76 @@ describe("search_integration_tools", () => {
     ]);
   });
 
-  it("relays the listing route's refusal as `{ status, body }`", async () => {
+  it("relays the listing route's refusal as an error result when the call names the kind, and leaves the kind out otherwise", async () => {
     for (const code of ["forbidden", "credential_proxy_closed"]) {
-      const { result, payload, events } = await search(
-        {},
-        { listing: () => problem(403, code, "Refused") },
-      );
-      expect(result.isError).toBe(true);
-      expect(payload.status).toBe(403);
-      expect((payload.body as { code: string }).code).toBe(code);
-      expect(events).toEqual([
+      const made = makeTools(CALL_OWN, undefined, true, {
+        listing: () => problem(403, code, "Refused"),
+      });
+      const named = await made.byName
+        .get("search")!
+        .handler({ kinds: ["integration_tool"] }, noExtra);
+      expect(named.isError).toBe(true);
+      const refused = parseResult(named) as { status: number; body: { code: string } };
+      expect(refused.status).toBe(403);
+      expect(refused.body.code).toBe(code);
+      expect(made.events).toContainEqual(
         expect.objectContaining({
+          tool: "search",
           method: "GET",
           path: "/api/credential-proxy/tools",
           status: 403,
         }),
-      ]);
+      );
+
+      const defaulted = await made.byName.get("search")!.handler({}, noExtra);
+      expect(defaulted.isError).toBe(false);
+      expect(parseResult(defaulted).integration_tools).toBeUndefined();
     }
+  });
+
+  it("narrows an omitted `kinds` to integration tools under `integration`, and refuses it beside other kinds only", async () => {
+    const made = makeTools(CALL_OWN);
+    const alone = parseResult(
+      await made.byName.get("search")!.handler({ integration: INTEGRATION }, noExtra),
+    );
+    expect(Object.keys(alone)).toEqual(["integration_tools"]);
+    const refused = await made.byName
+      .get("search")!
+      .handler({ kinds: ["operation"], integration: INTEGRATION }, noExtra);
+    expect(parseResult(refused)).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["integration"],
+    });
+  });
+
+  it("refuses an empty or malformed `integration` before anything is dispatched, instead of widening to every integration", async () => {
+    for (const integration of ["", "nope", 3]) {
+      const made = makeTools(CALL_OWN);
+      for (const args of [{ integration }, { kinds: ["integration_tool"], integration }]) {
+        const result = await made.byName.get("search")!.handler(args, noExtra);
+        expect(result.isError).toBe(true);
+        expect(parseResult(result)).toMatchObject({
+          code: "invalid_argument",
+          arguments: ["integration"],
+        });
+      }
+      expect(made.listings).toHaveLength(0);
+      expect(made.calls).toHaveLength(0);
+    }
+    const made = makeTools(CALL_OWN);
+    const result = await made.byName.get("search")!.handler({ tag: "" }, noExtra);
+    expect(parseResult(result)).toMatchObject({ code: "invalid_argument", arguments: ["tag"] });
+  });
+
+  it("reads remote catalogs from their servers only when `kinds` lists integration_tool: `integration` alone stays cache-only", async () => {
+    const catalogs = async (args: Record<string, unknown>) => {
+      const made = makeTools(CALL_OWN);
+      await made.byName.get("search")!.handler(args, noExtra);
+      return new URL(made.listings[0]!.url).searchParams.get("catalogs");
+    };
+    expect(await catalogs({ integration: INTEGRATION })).toBe("cached");
+    expect(await catalogs({})).toBe("cached");
+    expect(await catalogs({ kinds: ["integration_tool"], integration: INTEGRATION })).toBeNull();
   });
 
   /** A `not_ready` entry of the listing. */
@@ -1105,24 +1208,64 @@ describe("typed tools of a remote MCP integration", () => {
   const callTool = (paths: Request[]) =>
     paths.find((req) => new URL(req.url).pathname.endsWith("/tools/call"));
 
-  it("lists a typed tool as the listing describes it, its schema in `best_match`", async () => {
+  it("lists a typed tool as the listing describes it, describe giving its schema", async () => {
     const made = makeTools(CALL_OWN, undefined, true, fixture);
-    const payload = parseResult(
-      await made.byName.get("search_integration_tools")!.handler({ integration: REMOTE }, noExtra),
-    );
-    expect(payload.tools).toEqual([
+    const { section: payload } = await searchKind(made, {
+      integration: REMOTE,
+      query: "search",
+    });
+    const best = await describeTool(made, "acme_docs__search");
+    expect(payload.items).toEqual([
       {
-        tool: "acme_docs__search",
+        id: "acme_docs__search",
         integration_package_id: REMOTE,
         description: "Acme Docs. Full-text search.",
         connection_ids: [CONNECTION_ID],
       },
     ]);
     expect(payload.connections).toEqual([{ integration_package_id: REMOTE, ...connection() }]);
-    const best = payload.best_match as { input_schema: unknown; usage: string };
-    expect(best.input_schema).toEqual(inputSchema);
-    expect(best.usage).toContain("the server's own tool result");
+
+    expect(best!.input_schema).toEqual(inputSchema);
+    expect(best!.usage).toContain("the server's own tool result");
     expect(made.calls).toHaveLength(0);
+  });
+
+  it("merges a tool listed in two spaces: both spaces, each connection's missing scopes", async () => {
+    const other = "9b1c2d3e-0000-4000-8000-000000000002";
+    const spaces = [{ id: "spc_1" }, { id: "spc_2" }] as McpSpace[];
+    const contextIn = (space: McpSpace | undefined) => {
+      const connectionId = space?.id === "spc_1" ? CONNECTION_ID : other;
+      return {
+        origin: "https://test.local",
+        authHeaders: new Headers(),
+        dispatch: (async () =>
+          listingOf([
+            remoteTool({
+              connections: [connection({ connection_id: connectionId })],
+              missing_scopes: { [connectionId]: [`scope:${connectionId.slice(-1)}`] },
+            }),
+          ])()) as Dispatch,
+        observe: () => {},
+        runs: false,
+      };
+    };
+    const found = await searchIntegrationTools(
+      spaces,
+      contextIn,
+      { tokens: [], limit: 10, cachedOnly: true },
+      undefined,
+    );
+    if ("refused" in found) throw new Error("refused");
+    const items = found.section.items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      granted_in: ["spc_1", "spc_2"],
+      connection_ids: [CONNECTION_ID, other],
+      missing_scopes: {
+        [CONNECTION_ID]: [`scope:${CONNECTION_ID.slice(-1)}`],
+        [other]: ["scope:2"],
+      },
+    });
   });
 
   it("marks a tool whose server could not be listed", async () => {
@@ -1131,11 +1274,9 @@ describe("typed tools of a remote MCP integration", () => {
         remoteTool({ catalog_unreadable: true, input_schema: { type: "object" } }),
       ]),
     });
-    const payload = parseResult(
-      await made.byName.get("search_integration_tools")!.handler({}, noExtra),
-    );
-    expect(payload.tools).toEqual([
-      expect.objectContaining({ tool: "acme_docs__search", catalog_unreadable: true }),
+    const { section: payload } = await searchKind(made, {});
+    expect(payload.items).toEqual([
+      expect.objectContaining({ id: "acme_docs__search", catalog_unreadable: true }),
     ]);
   });
 
@@ -1299,14 +1440,13 @@ describe("typed tools of a remote MCP integration", () => {
   });
 
   it("explains missing_scopes in a typed tool's usage only", async () => {
-    const remote = await makeTools(CALL_OWN, undefined, true, fixture)
-      .byName.get("search_integration_tools")!
-      .handler({ integration: REMOTE }, noExtra);
-    const apiCall = await makeTools(CALL_OWN)
-      .byName.get("search_integration_tools")!
-      .handler({ integration: INTEGRATION }, noExtra);
-    const remoteUsage = (parseResult(remote).best_match as { usage: string }).usage;
-    const apiUsage = (parseResult(apiCall).best_match as { usage: string }).usage;
+    const remote = await describeTool(
+      makeTools(CALL_OWN, undefined, true, fixture),
+      "acme_docs__search",
+    );
+    const apiCall = await describeTool(makeTools(CALL_OWN), TOOL);
+    const remoteUsage = remote.usage as string;
+    const apiUsage = apiCall.usage as string;
     expect(remoteUsage).toContain("`missing_scopes`");
     expect(apiUsage).not.toContain("missing_scopes");
     expect(apiUsage).toContain("`scopes_granted_count`");
@@ -1320,11 +1460,7 @@ describe("typed tools of a remote MCP integration", () => {
       const made = makeTools(CALL_OWN, undefined, true, {
         listing: listingOf([remoteTool({ connections: [connection({ scopes_granted: scopes })] })]),
       });
-      const payload = parseResult(
-        await made.byName
-          .get("search_integration_tools")!
-          .handler({ integration: REMOTE }, noExtra),
-      );
+      const { section: payload } = await searchKind(made, { integration: REMOTE });
       return (payload.connections as Record<string, unknown>[])[0]!;
     };
     const cut = await search(many);
@@ -1350,11 +1486,10 @@ describe("typed tools of a remote MCP integration", () => {
   });
 });
 
-describe("search_integration_tools — what a search says it leaves out", () => {
-  const search = async (args: Record<string, unknown>, fixture: Fixture) => {
-    const made = makeTools(CALL_OWN, undefined, true, fixture);
-    return parseResult(await made.byName.get("search_integration_tools")!.handler(args, noExtra));
-  };
+describe("search — what an integration_tool search says it leaves out", () => {
+  const search = async (args: Record<string, unknown>, fixture: Fixture) =>
+    (await searchKind(makeTools(CALL_OWN, undefined, true, fixture), args)).section;
+  const first = (payload: Record<string, unknown>) => (payload.items as { id: string }[])[0]!.id;
   const named = (name: string, description = "Acme Items.") => apiCallTool({ name, description });
 
   it("ranks a tool whose name is the query first, whatever the listing order", async () => {
@@ -1362,7 +1497,7 @@ describe("search_integration_tools — what a search says it leaves out", () => 
       { query: "acme_items__folder" },
       { listing: listingOf([named("acme_items__folder_list"), named("acme_items__folder")]) },
     );
-    expect((payload.best_match as { tool: string }).tool).toBe("acme_items__folder");
+    expect(first(payload)).toBe("acme_items__folder");
   });
 
   it("ranks a tool whose name holds the query's words above one whose description does", async () => {
@@ -1375,13 +1510,10 @@ describe("search_integration_tools — what a search says it leaves out", () => 
         ]),
       },
     );
-    expect((payload.tools as { tool: string }[]).map((tool) => tool.tool)).toEqual([
+    expect((payload.items as { id: string }[]).map((tool) => tool.id)).toEqual([
       "acme_items__get_workspace_hierarchy",
       "acme_items__get_custom_fields",
     ]);
-    expect((payload.best_match as { tool: string }).tool).toBe(
-      "acme_items__get_workspace_hierarchy",
-    );
   });
 
   it("ranks the shorter of two names holding the same words first", async () => {
@@ -1394,14 +1526,14 @@ describe("search_integration_tools — what a search says it leaves out", () => 
         ]),
       },
     );
-    expect((payload.best_match as { tool: string }).tool).toBe("acme_items__create_task");
+    expect(first(payload)).toBe("acme_items__create_task");
   });
 
   it("says when more tools match than are shown, naming the integration filter", async () => {
     const tools = Array.from({ length: 4 }, (_, i) => named(`acme_items__t${i}`));
     const payload = await search({ limit: 2 }, { listing: listingOf(tools) });
     expect(payload.total).toBe(4);
-    expect((payload.tools as unknown[]).length).toBe(2);
+    expect((payload.items as unknown[]).length).toBe(2);
     expect(payload.note).toContain("2 more tool(s)");
     expect(payload.note).toContain("`integration`");
     expect((await search({}, { listing: listingOf(tools) })).note).toBeUndefined();
@@ -1424,7 +1556,7 @@ describe("search_integration_tools — what a search says it leaves out", () => 
 
   it("says when the integration it filters on offers nothing", async () => {
     const payload = await search({ integration: "@acme/empty" }, { listing: listingOf([]) });
-    expect(payload).toMatchObject({ total: 0, tools: [] });
+    expect(payload).toMatchObject({ total: 0, items: [] });
     expect(payload.note).toContain("@acme/empty offers you no tool");
   });
 
@@ -1446,7 +1578,7 @@ describe("integration tools — descriptors", () => {
   it("keeps both descriptions under the 2 048 bytes the platform allows a third-party one", () => {
     for (const permissions of [CALL_OWN, [...CALL_OWN, "agents:run", "runs:read"]]) {
       const { byName } = makeTools(permissions);
-      for (const name of BOTH) {
+      for (const name of ["call_integration_tool"]) {
         const bytes = new TextEncoder().encode(byName.get(name)!.descriptor.description!).length;
         expect(bytes, name).toBeLessThan(2048);
       }
@@ -1455,7 +1587,7 @@ describe("integration tools — descriptors", () => {
 
   it("annotates both tools as reaching the open world", () => {
     const { byName } = makeTools(CALL_OWN);
-    for (const name of BOTH) {
+    for (const name of ["call_integration_tool"]) {
       expect(byName.get(name)!.descriptor.annotations?.openWorldHint, name).toBe(true);
     }
   });
@@ -1560,7 +1692,7 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(result.structuredContent).toEqual({ count: 1 });
   });
 
-  it("relays a typed tool's output schema in `best_match`", async () => {
+  it("relays a typed tool's output schema in `describe`", async () => {
     const outputSchema = { type: "object", properties: { count: { type: "number" } } };
     const withOutput: Fixture = {
       listing: listingOf([
@@ -1577,13 +1709,7 @@ describe("call_integration_tool — a result past the budget", () => {
       ]),
     };
     const made = makeTools(CALL_OWN, () => Response.json({}), true, withOutput);
-    const result = await made.byName
-      .get("search_integration_tools")!
-      .handler({ query: "acme_docs__search" }, noExtra);
-    const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as {
-      best_match: { output_schema?: unknown };
-    };
-    expect(payload.best_match.output_schema).toEqual(outputSchema);
+    expect((await describeTool(made, "acme_docs__search")).output_schema).toEqual(outputSchema);
   });
 });
 

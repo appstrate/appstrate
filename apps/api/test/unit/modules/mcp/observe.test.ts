@@ -47,6 +47,13 @@ function makeTools(permissions: string[], status = 200) {
     observe: (e) => events.push(e),
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
+    skills: {
+      list: async () => [],
+      entry: async () => null,
+      read: async () => {
+        throw new Error("no skill reads here");
+      },
+    },
     fileAccess: async () => ({ grants: [] }),
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
@@ -58,13 +65,15 @@ function makeTools(permissions: string[], status = 200) {
   return { byName, events };
 }
 
-describe("observe — search_operations", () => {
+describe("observe — search", () => {
   it("emits a search event carrying the shown count and a duration", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
-    await byName.get("search_operations")!.handler({ query: "agent", limit: 3 }, noExtra);
+    await byName
+      .get("search")!
+      .handler({ query: "agent", limit: 3, kinds: ["operation"] }, noExtra);
     expect(events.length).toBe(1);
     const e = events[0]!;
-    expect(e.tool).toBe("search_operations");
+    expect(e.tool).toBe("search");
     expect(typeof e.shownCount).toBe("number");
     expect(e.shownCount).toBeLessThanOrEqual(3);
     expect(typeof e.durationMs).toBe("number");
@@ -77,7 +86,9 @@ describe("observe — search_operations", () => {
 
   it("reports a zero shown count for a no-match query (search hit-rate signal)", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
-    await byName.get("search_operations")!.handler({ query: "zzznotarealthing_xyzzy" }, noExtra);
+    await byName
+      .get("search")!
+      .handler({ query: "zzznotarealthing_xyzzy", kinds: ["operation"] }, noExtra);
     expect(events[0]!.shownCount).toBe(0);
     // Nothing matched, so nothing was denied either — the two counters move
     // independently.
@@ -85,20 +96,20 @@ describe("observe — search_operations", () => {
   });
 });
 
-describe("observe — describe_operation", () => {
+describe("observe — describe", () => {
   it("emits a describe event for a known operation", async () => {
     const op = firstOp(() => true);
     const { byName, events } = makeTools(["mcp:read"]);
-    await byName.get("describe_operation")!.handler({ operation_id: op.operationId }, noExtra);
+    await byName.get("describe")!.handler({ kind: "operation", id: op.operationId }, noExtra);
     expect(events.length).toBe(1);
-    expect(events[0]!.tool).toBe("describe_operation");
+    expect(events[0]!.tool).toBe("describe");
     expect(events[0]!.operationId).toBe(op.operationId);
   });
 
   it("does not emit when the operationId is unknown (refused as an isError result)", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     // Telemetry still must NOT record a describe event for an unknown operationId.
-    const res = await byName.get("describe_operation")!.handler({ operation_id: "nope" }, noExtra);
+    const res = await byName.get("describe")!.handler({ kind: "operation", id: "nope" }, noExtra);
     expect(res.isError).toBe(true);
     expect(events.length).toBe(0);
   });

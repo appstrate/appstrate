@@ -81,32 +81,74 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${rest}s`;
 }
 
-/** The coarsest unit a timestamp's age rounds down to; `now` is under a minute. */
-export type RelativeAgeUnit = "now" | "minute" | "hour" | "day" | "month" | "year";
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
 
 /**
- * How long ago an ISO timestamp was, as of `now` (epoch ms), in the coarsest
- * unit that fits: minutes under an hour, hours under a day, days under 30,
- * months (30 days) under 12, then years. Each level rounds the level below, so
- * 90 s reads as 2 minutes. `null` for an unparseable timestamp. The count is
- * clamped at 0, so a clock-skewed future timestamp reads as `now`. Language is
- * the caller's: it maps the unit to its own wording.
+ * The span from `now` to `at` (epoch ms) in the coarsest unit that fits:
+ * seconds under a minute (count 0), then minutes, hours, days under 30,
+ * months of 30 days under 365 days, years. The count is signed (negative in
+ * the past) and truncated toward zero, so a run 1 h 50 away is never
+ * announced later than it is. Days are 24-hour spans, not calendar days: no
+ * reader's midnight can make « dans 1 j » wrong, where « demain » could.
  */
-export function relativeAge(
-  iso: string,
+function relativeSpan(
+  at: number,
   now: number,
-): { unit: RelativeAgeUnit; count: number } | null {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return null;
-  const seconds = Math.max(0, Math.round((now - then) / 1000));
-  if (seconds < 60) return { unit: "now", count: 0 };
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return { unit: "minute", count: minutes };
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return { unit: "hour", count: hours };
-  const days = Math.round(hours / 24);
-  if (days < 30) return { unit: "day", count: days };
-  const months = Math.round(days / 30);
-  if (months < 12) return { unit: "month", count: months };
-  return { unit: "year", count: Math.round(days / 365) };
+): [number, "second" | "minute" | "hour" | "day" | "month" | "year"] {
+  const diff = at - now;
+  const abs = Math.abs(diff);
+  const [value, unit] =
+    abs < MINUTE_MS
+      ? ([0, "second"] as const)
+      : abs < HOUR_MS
+        ? ([diff / MINUTE_MS, "minute"] as const)
+        : abs < DAY_MS
+          ? ([diff / HOUR_MS, "hour"] as const)
+          : abs < 30 * DAY_MS
+            ? ([diff / DAY_MS, "day"] as const)
+            : abs < 365 * DAY_MS
+              ? ([diff / (30 * DAY_MS), "month"] as const)
+              : ([diff / (365 * DAY_MS), "year"] as const);
+  // `+ 0` turns -0 into 0, so a past instant under a minute is « maintenant », not « -0 ».
+  return [Math.trunc(value) + 0, unit];
+}
+
+/**
+ * `at` relative to `now`, both epoch milliseconds, as a phrase: « dans 3 h »,
+ * « il y a 5 min », « maintenant » under a minute (`Intl.RelativeTimeFormat`).
+ * `locale` as for {@link formatBytes}: omitted or malformed, English. Like it,
+ * a display helper never throws: a non-finite `at` (an unparseable date)
+ * renders "".
+ */
+export function formatRelativeTime(
+  at: number,
+  now: number,
+  locale?: string,
+  style: Intl.RelativeTimeFormatStyle = "short",
+): string {
+  if (!Number.isFinite(at)) return "";
+  const [count, unit] = relativeSpan(at, now);
+  // `auto` only for zero: « maintenant », not « dans 0 seconde ».
+  return new Intl.RelativeTimeFormat(canonicalLocale(locale) ?? "en", {
+    style,
+    numeric: count === 0 ? "auto" : "always",
+  }).format(count, unit);
+}
+
+/**
+ * How old `at` is as of `now`, both epoch milliseconds, as a bare quantity for
+ * a narrow column (« 5 min », « 3 h », « 2 j »), « maintenant » under a minute.
+ * Same units, locale and "" for a non-finite `at` as {@link formatRelativeTime},
+ * without its « il y a ».
+ */
+export function formatAge(at: number, now: number, locale?: string): string {
+  if (!Number.isFinite(at)) return "";
+  const [count, unit] = relativeSpan(at, now);
+  const tag = canonicalLocale(locale) ?? "en";
+  if (count === 0) return new Intl.RelativeTimeFormat(tag, { numeric: "auto" }).format(0, unit);
+  return new Intl.NumberFormat(tag, { style: "unit", unit, unitDisplay: "short" }).format(
+    Math.abs(count),
+  );
 }

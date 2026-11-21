@@ -15,8 +15,8 @@ import {
 } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
-import { loadSpaceAccess } from "../lib/space-lookup.ts";
-import { batchLoadUserNames } from "../lib/user-helpers.ts";
+import { loadSpaceAccessForIds } from "../lib/space-lookup.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
@@ -28,7 +28,7 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getPackageDisplayName, orgOrSystemFilter } from "../lib/package-helpers.ts";
-import { getSpacePackageSettings } from "./space-packages.ts";
+import { assertScheduleAgentActive, getSpacePackageSettings } from "./space-packages.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -156,29 +156,43 @@ export async function removeScheduleJobs(scheduleIds: readonly string[]): Promis
  * schedule's org and hold agents:run in its space; an end-user must still
  * exist in the schedule's space.
  */
+export async function scheduleActorRunSpaces(
+  actor: Actor,
+  orgId: string,
+  spaceIds: readonly string[],
+): Promise<Set<string>> {
+  if (spaceIds.length === 0) return new Set();
+  if (actor.type === "user") {
+    // A fire has no admission to pin the org role at (RBAC spec §4.4). The
+    // frozen actor is the caller in personal spaces too (RBAC spec §3.6).
+    const snapshots = await loadSpaceAccessForIds(spaceIds, orgId, actor.id);
+    return new Set(
+      snapshots.flatMap(({ orgRole, space, member }) => {
+        if (!orgRole) return [];
+        const role = resolveSpaceRole(orgRole, space, member, actor.id);
+        return spacePermissions(role).has("agents:run") ? [space.id] : [];
+      }),
+    );
+  }
+  const rows = await db
+    .select({ spaceId: endUsers.spaceId })
+    .from(endUsers)
+    .where(
+      and(
+        eq(endUsers.orgId, orgId),
+        eq(endUsers.id, actor.id),
+        inArray(endUsers.spaceId, [...spaceIds]),
+      ),
+    );
+  return new Set(rows.map(({ spaceId }) => spaceId));
+}
+
 async function isScheduleActorValid(
   actor: Actor,
   orgId: string,
   spaceId: string,
 ): Promise<boolean> {
-  if (actor.type === "user") {
-    // All three inputs in one statement: a fire has no admission to pin the org
-    // role at (RBAC spec §4.4).
-    const access = await loadSpaceAccess(spaceId, orgId, actor.id);
-    if (!access?.orgRole) return false;
-    // The frozen actor IS the caller here: a schedule in a personal space runs
-    // as its owner, and stops the moment they are no longer the owner
-    // (RBAC spec §3.6).
-    return spacePermissions(
-      resolveSpaceRole(access.orgRole, access.space, access.member, actor.id),
-    ).has("agents:run");
-  }
-  const [row] = await db
-    .select({ id: endUsers.id })
-    .from(endUsers)
-    .where(and(eq(endUsers.id, actor.id), eq(endUsers.spaceId, spaceId)))
-    .limit(1);
-  return row !== undefined;
+  return (await scheduleActorRunSpaces(actor, orgId, [spaceId])).has(spaceId);
 }
 
 function invalidScheduleActorReason(actor: Actor): string {
@@ -778,7 +792,7 @@ export async function listPackageSchedules(
 }
 
 /** The bare schedule row, before any enrichment — what a write path reads to diff against. */
-async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
+export async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)
@@ -918,23 +932,12 @@ async function enrichSchedules(
   if (schedules.length === 0) return [];
 
   const userIds = [...new Set(schedules.map((s) => s.userId).filter((id): id is string => !!id))];
-  const endUserIds = [
-    ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
-  ];
 
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
 
-  const [userNameMap, endUserRows, runStats, packageRows] = await Promise.all([
+  const [userNameMap, endUserNameMap, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
-    endUserIds.length > 0
-      ? db
-          .select({
-            id: endUsers.id,
-            name: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-          })
-          .from(endUsers)
-          .where(inArray(endUsers.id, endUserIds))
-      : Promise.resolve([] as { id: string; name: string | null }[]),
+    batchLoadScheduleEndUserNames(orgId, schedules),
     loadScheduleRunStats(
       schedules.map((s) => s.id),
       orgId,
@@ -949,7 +952,6 @@ async function enrichSchedules(
       .from(packages)
       .where(and(inArray(packages.id, packageIds), orgOrSystemFilter(orgId))),
   ]);
-  const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
   const agentNameMap = new Map(packageRows.map((r) => [r.id, getPackageDisplayName(r)]));
 
   return schedules.map((schedule) => {
@@ -960,7 +962,7 @@ async function enrichSchedules(
       actorName = userNameMap.get(schedule.userId) ?? null;
     } else if (schedule.endUserId) {
       actorType = "end_user";
-      actorName = endUserNameMap.get(schedule.endUserId) ?? null;
+      actorName = endUserNameMap.get(schedule.id) ?? null;
     }
     // A schedule that never fired has no `runs` rows, hence no group — zeroes.
     const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;
@@ -1026,6 +1028,7 @@ export async function createSchedule(
       })
       .returning();
   const [row] = await db.transaction(async (tx) => {
+    await assertScheduleAgentActive(tx, scope, packageId);
     await assertScheduleGovernanceUnchanged(
       tx,
       scope.spaceId,
@@ -1148,6 +1151,7 @@ export async function updateSchedule(
   const [row] = !enabled
     ? await update(db)
     : await db.transaction(async (tx) => {
+        if (!expected.enabled) await assertScheduleAgentActive(tx, scope, expected.packageId);
         await assertScheduleGovernanceUnchanged(
           tx,
           scope.spaceId,

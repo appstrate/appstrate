@@ -124,7 +124,7 @@ describe("readPromptPdfs", () => {
     const read: string[] = [];
     const receipts = await readPromptPdfs(
       user("current", ...uris),
-      createTurnPdfInput({ api: "openai-responses", input: ["text", "image"] }),
+      createTurnPdfInput({ api: "openai-responses" }, { image: true, pdf: true }),
       async (uri) => {
         read.push(uri);
         return { mime: "application/pdf", bytes: new TextEncoder().encode("%PDF-1.7") };
@@ -132,6 +132,19 @@ describe("readPromptPdfs", () => {
       signal,
     );
     expect(read).toEqual(["0.pdf", "1.pdf", "2.pdf", "3.pdf"]);
-    expect(receipts.get("4.pdf")).toContain("at most 4 PDFs");
+    expect(receipts.get("4.pdf")).toContain("at most 4 per message");
+  });
+
+  it("reads no PDF when the turn sends none, and tells the model why", async () => {
+    const turn = createTurnPdfInput({ api: "openai-responses" }, { image: false, pdf: false });
+    const receipts = await readPromptPdfs(
+      user("current", "0.pdf"),
+      turn,
+      async () => {
+        throw new Error("must not read");
+      },
+      signal,
+    );
+    expect(receipts.get("0.pdf")).toBe(turn.unsupported!);
   });
 });

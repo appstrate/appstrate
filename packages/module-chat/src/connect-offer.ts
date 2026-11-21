@@ -249,18 +249,24 @@ const CONNECT_OPERATIONS: ReadonlySet<string> = new Set([
   "initiateIntegrationOAuth",
 ]);
 
+/** `describe`: an item (the payload carries its `kind`) is what members and servers wrote, so none is offered; any other payload is a refusal. */
+const describeScope: OfferScope = (payload) =>
+  typeof payload === "object" && payload !== null && "kind" in payload
+    ? UNOFFERED(payload)
+    : splitConnectPayload(payload);
+
 /**
  * The tools whose result the platform writes to carry its connect links, each with the subtrees
- * that are not its own. `run_and_wait`: its launch refusal (409 readiness items), never the run's
- * `result`, which the agent wrote. `search_integration_tools`: its `not_ready` and `unlisted`
- * refusals and its own refusal, never `tools` / `best_match`, a remote server's descriptions and
- * schemas. `call_integration_tool`: its refusals and an `api_call` batch's per-request `error`,
- * never the upstream's `body` and `headers` (a remote server's own result comes marked relayed,
- * see {@link offerScopeOf}).
+ * that are not its own: what a member, a server or an upstream wrote. A remote server's own
+ * result comes marked relayed (see {@link offerScopeOf}).
  */
 const OFFER_SOURCES: Readonly<Record<string, OfferScope>> = {
   run_and_wait: scopeOf({ verbatim: [], unoffered: [["result"]] }),
-  search_integration_tools: scopeOf({ verbatim: [["tools"], ["best_match"]], unoffered: [] }),
+  search: scopeOf({
+    verbatim: [["operations"], ["integration_tools", "items"]],
+    unoffered: [["agents"], ["skills"]],
+  }),
+  describe: describeScope,
   call_integration_tool: scopeOf({
     verbatim: [
       ["results", "*", "body"],

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `listActivePackageHints` (through `listRunnableAgents` /
+ * `listActivePackageHints` (through `listActiveAgentHints` /
  * `listActiveSkills`) is bounded IN SQL: the activation filter and the cap
  * sit in the query, and `total` is a window count over the filtered set. It
  * runs twice on every chat turn's TTFT path, so it must not load the whole
@@ -27,7 +27,7 @@
  */
 
 import { afterEach, describe, it, expect, beforeEach } from "bun:test";
-import { listRunnableAgents, listActiveSkills } from "../../../src/services/space-packages.ts";
+import { listActiveAgentHints, listActiveSkills } from "../../../src/services/space-packages.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -87,7 +87,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     });
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/a0-skill");
 
-    const page = await listRunnableAgents(scope, { limit: 3 });
+    const page = await listActiveAgentHints(scope, { limit: 3 });
     expect(page.agents.map((a) => a.packageId)).toEqual([
       "@zsys/system-agent",
       "@hintorg/a1",
@@ -99,7 +99,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     expect(page.total).toBe(6);
 
     // Control: a cap above the catalog returns it whole, with the same count.
-    const whole = await listRunnableAgents(scope, { limit: 10 });
+    const whole = await listActiveAgentHints(scope, { limit: 10 });
     expect(whole.agents).toHaveLength(6);
     expect(whole.truncated).toBe(false);
     expect(whole.total).toBe(6);
@@ -130,7 +130,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
   });
 
   it("reports an empty catalog as zero, not truncated", async () => {
-    const page = await listRunnableAgents(scope);
+    const page = await listActiveAgentHints(scope);
     expect(page).toEqual({ agents: [], truncated: false, total: 0 });
   });
 });
@@ -201,7 +201,9 @@ describe("the hints and the type index render one set", () => {
 
     const expected = ["@asys/system-agent", "@twoviews/local-on", "@twoviews/placed-on"];
 
-    const hinted = (await listRunnableAgents(scope, { limit: 50 })).agents.map((a) => a.packageId);
+    const hinted = (await listActiveAgentHints(scope, { limit: 50 })).agents.map(
+      (a) => a.packageId,
+    );
     const indexed = await indexIds("/api/packages/agents");
     expect(hinted.slice().sort()).toEqual(expected);
     expect(indexed.slice().sort()).toEqual(expected);

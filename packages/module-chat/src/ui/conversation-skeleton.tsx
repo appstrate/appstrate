@@ -53,7 +53,7 @@ export function ConversationSkeleton({
         </div>
       ) : (
         <div aria-hidden className="mx-auto flex w-full max-w-2xl flex-col gap-2 pb-4">
-          <ComposerSkeleton placeholder={placeholder} />
+          <ComposerSkeleton placeholder={placeholder} gauge />
           <div className={cn(DISCLAIMER_TEXT_CLASS, "self-center")}>{disclaimer}</div>
         </div>
       )}
@@ -69,10 +69,13 @@ export function ConversationSkeleton({
 export function ComposerSkeleton({
   placeholder,
   limited = false,
+  gauge = false,
 }: {
   placeholder: ReactNode;
   /** The limit chip is drawn: a new conversation started in a selected space is limited to it. */
   limited?: boolean;
+  /** The context gauge is drawn: an existing conversation carries a measure once a turn settled. */
+  gauge?: boolean;
 }) {
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
@@ -88,7 +91,10 @@ export function ComposerSkeleton({
           </div>
         </div>
         <Skeleton className="desktop-pointer:h-[30px] h-10 w-32 rounded-md [grid-area:model] max-md:hidden" />
-        <Skeleton className={cn(COMPOSER_BUTTON_CLASS, "[grid-area:send]")} />
+        <div className="flex items-center gap-2 [grid-area:send]">
+          {gauge && <Skeleton className={cn(COMPOSER_BUTTON_CLASS, "max-md:hidden")} />}
+          <Skeleton className={COMPOSER_BUTTON_CLASS} />
+        </div>
       </div>
     </div>
   );

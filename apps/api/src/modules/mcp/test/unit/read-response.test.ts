@@ -15,6 +15,7 @@
 import { describe, it, expect } from "bun:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { readResponse } from "../../tools.ts";
+import { ACTIVE_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 
 function parse(result: CallToolResult): Record<string, unknown> {
   const first = result.content[0];
@@ -101,6 +102,39 @@ describe("readResponse — text bodies", () => {
     expect(body.status).toBe(200);
     expect(body.body).toEqual({ hello: "world", n: 1 });
     expect(body.truncated).toBeUndefined();
+  });
+
+  it("marks precisely the launch alternatives the tool exposes, even when its input exceeded the cap", async () => {
+    const kept = { id: "spc_allowed", name: "Allowed" };
+    const excluded = { id: "spc_rest_only", name: "x".repeat(100_000) };
+    const response = Response.json(
+      { code: "missing_integration_connection", active_in_spaces: [excluded, kept] },
+      { status: 409 },
+    );
+    const result = await readResponse(response, undefined, () => [kept]);
+    expect(parse(result)).toEqual({
+      status: 409,
+      body: { code: "missing_integration_connection", active_in_spaces: [kept] },
+    });
+    expect(result._meta?.[ACTIVE_SPACES_META_KEY]).toEqual([kept.id]);
+  });
+
+  it("omits alternatives before truncating a large configuration refusal", async () => {
+    const kept = { id: "spc_allowed", name: "Allowed" };
+    const response = Response.json(
+      {
+        code: "agent_not_active_in_space",
+        active_in_spaces: [kept],
+        padding: "x".repeat(100_000),
+      },
+      { status: 404 },
+    );
+    const result = await readResponse(response, undefined, () => [kept]);
+    const payload = parse(result);
+    expect(payload.truncated).toBe(true);
+    expect(payload.body).not.toContain(kept.name);
+    expect(payload.body).not.toContain(kept.id);
+    expect(result._meta?.[ACTIVE_SPACES_META_KEY]).toBeUndefined();
   });
 
   it("falls back to the raw string when JSON is malformed", async () => {

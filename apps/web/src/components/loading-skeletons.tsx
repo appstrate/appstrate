@@ -590,7 +590,7 @@ function CollectionBlocks({
   /** Inside a surface that is already framed (an overlay), the table draws no card of its own. */
   frameless?: boolean;
   cards?: boolean;
-  /** The cards carry a run button (agents). */
+  /** The cards are agents': a run button and the stack of their integrations. */
   runnable?: boolean;
   /** The cards name their space (a list spanning spaces). */
   spaceName?: boolean;
@@ -611,7 +611,12 @@ function CollectionBlocks({
         ) : (
           <CardGridSkeleton
             placeholder={
-              <PackageCardSkeleton runnable={runnable} meta={cardMeta} spaceName={spaceName} />
+              <PackageCardSkeleton
+                runnable={runnable}
+                integrations={runnable}
+                meta={cardMeta}
+                spaceName={spaceName}
+              />
             }
           />
         )
@@ -663,33 +668,38 @@ export function EditorPanelSkeleton() {
 
 /**
  * A settings page that is a table (`DataTable` on the panel's integrated surface: no frame, the
- * head ruled above and below), with what leads it: an intro (a heading line over its hint, or a
- * lone hint paragraph) and the list's toolbar.
+ * head ruled above and below), with what leads it: a hint paragraph and the list's toolbar. With
+ * `groups`, the page is that many titled tables (`SettingsGroup`) under the hint.
  */
 export function SettingsTableSkeleton({
   toolbar = false,
   columns = false,
   intro,
+  groups,
 }: {
   /** The list's search bar. */
   toolbar?: boolean;
   /** The bar also holds the column menu. */
   columns?: boolean;
-  intro?: "heading" | "hint";
+  intro?: "hint";
+  groups?: number;
 }) {
   return (
     <Waiting>
-      {intro === "heading" && (
-        <div className="mb-4">
-          <SkeletonLine className="w-40 text-sm font-medium" />
-          <SkeletonLine className="mt-1 w-80 max-w-full text-xs" />
-        </div>
-      )}
       {intro === "hint" && (
         <SkeletonLine className="mb-6 w-full max-w-2xl text-sm leading-relaxed" />
       )}
       {toolbar && <ToolbarBlocks filters={false} columns={columns} />}
-      <TableBlocks framed={false} />
+      {groups ? (
+        Array.from({ length: groups }, (_, i) => (
+          <div key={i} className="mb-8">
+            <SkeletonLine className="mb-4 w-32 text-base font-semibold" />
+            <TableBlocks framed={false} />
+          </div>
+        ))
+      ) : (
+        <TableBlocks framed={false} />
+      )}
     </Waiting>
   );
 }
@@ -807,7 +817,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable spaceName={on} />
+              <PackageCardSkeleton runnable integrations spaceName={on} />
             </div>
           ))}
         </div>

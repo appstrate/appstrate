@@ -11,8 +11,37 @@ import { FormModal } from "../form-modal";
 import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
-import { writableDestinations } from "../../lib/package-home";
+import { previousHomeSchedules, writableDestinations } from "../../lib/package-home";
+import { useSchedules } from "../../hooks/use-schedules";
+import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { errorMessage } from "../../lib/mutation-error";
+
+/** What the move does to the schedules of the space being left; follows the "keep" checkbox live. */
+export function PreviousHomeSchedules({
+  state,
+  keep,
+  space,
+}: {
+  state: ReturnType<typeof previousHomeSchedules> | null;
+  keep: boolean;
+  space: string;
+}) {
+  const { t } = useTranslation("settings");
+  if (state === null) return null;
+  let text: string;
+  if (state === "unknown") {
+    text = keep
+      ? t("packages.moveHomeSchedulesKeptUnknown", { space })
+      : t("packages.moveHomeSchedulesDisabledUnknown", { space });
+  } else if (state === 0) {
+    text = t("packages.moveHomeSchedulesNone", { space });
+  } else {
+    text = keep
+      ? t("packages.moveHomeSchedulesKept", { count: state, space })
+      : t("packages.moveHomeSchedulesDisabled", { count: state, space });
+  }
+  return <p className="text-muted-foreground mt-2 text-xs tabular-nums">{text}</p>;
+}
 
 /** `PUT /api/packages/{scope}/{name}/home`; the only way out of the 409 a space deletion answers while it homes packages. */
 export function MoveHomeSpaceDialog({
@@ -37,6 +66,22 @@ export function MoveHomeSpaceDialog({
   // The space being LEFT; `home_space_id` is null only when unreachable, which the move's `<type>:write` there rules out.
   const previousHome = spaces?.find((space) => space.id === homeSpaceId);
 
+  // Only agents have schedules; counting them needs `schedules:read` in the space being left.
+  const grants = useRowSpaceGrants();
+  const readable = grants(homeSpaceId ?? undefined, "schedules:read");
+  const countable = type === "agent" && !!previousHome;
+  const schedules = useSchedules(countable && readable ? packageId : undefined, {
+    spanning: true,
+  });
+  const schedulesState =
+    countable && previousHome
+      ? previousHomeSchedules(schedules.data, previousHome.id, {
+          readable,
+          isError: schedules.isError,
+        })
+      : null;
+  const destination = writable.find((space) => space.id === target);
+
   // The dialog stays mounted between openings, so every exit clears the selection.
   const close = () => {
     setTarget("");
@@ -47,7 +92,6 @@ export function MoveHomeSpaceDialog({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const destination = writable.find((space) => space.id === target);
     if (!destination) return;
     move.mutate(
       { id: packageId, homeSpaceId: destination.id, keepInPreviousHome },
@@ -73,7 +117,13 @@ export function MoveHomeSpaceDialog({
       <FormItem
         id="move-home-space"
         label={t("packages.moveHomeLabel")}
-        hint={writable.length === 0 ? t("packages.moveHomeEmpty") : t("packages.moveHomeHint")}
+        hint={
+          writable.length === 0
+            ? t("packages.moveHomeEmpty")
+            : destination
+              ? t("packages.moveHomePublisher", { space: destination.name })
+              : t("packages.moveHomeHint")
+        }
       >
         <OptionSelect
           value={target || undefined}
@@ -84,18 +134,25 @@ export function MoveHomeSpaceDialog({
         />
       </FormItem>
       {previousHome ? (
-        <CheckboxField
-          id="move-home-keep"
-          className="mt-4"
-          label={t("packages.moveHomeKeep", { space: spaceLabel(previousHome, t) })}
-          description={
-            keepInPreviousHome
-              ? t("packages.moveHomeKeepHint", { space: spaceLabel(previousHome, t) })
-              : t("packages.moveHomeReleaseHint", { space: spaceLabel(previousHome, t) })
-          }
-          checked={keepInPreviousHome}
-          onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
-        />
+        <>
+          <CheckboxField
+            id="move-home-keep"
+            className="mt-4"
+            label={t("packages.moveHomeKeep", { space: spaceLabel(previousHome, t) })}
+            description={
+              keepInPreviousHome
+                ? t("packages.moveHomeKeepHint", { space: spaceLabel(previousHome, t) })
+                : t("packages.moveHomeReleaseHint", { space: spaceLabel(previousHome, t) })
+            }
+            checked={keepInPreviousHome}
+            onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
+          />
+          <PreviousHomeSchedules
+            state={schedulesState}
+            keep={keepInPreviousHome}
+            space={spaceLabel(previousHome, t)}
+          />
+        </>
       ) : null}
     </FormModal>
   );

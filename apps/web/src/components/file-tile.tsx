@@ -19,10 +19,10 @@ import { ExpiryBadge } from "./file-badges";
 import { SkeletonLine } from "./skeleton-line";
 import { SpaceNameOf } from "./space-name";
 
-function MimePlaceholder({ mime }: { mime: string }) {
+function MimePlaceholder({ file }: { file: FileDto }) {
   return (
     <div className="flex size-full items-center justify-center">
-      <MimeIcon mime={mime} className="text-muted-foreground size-10" />
+      <MimeIcon mime={file.mime} name={file.name} className="text-muted-foreground size-10" />
     </div>
   );
 }
@@ -31,7 +31,7 @@ function MimePlaceholder({ mime }: { mime: string }) {
 function FileTileImage({ file }: { file: FileDto }) {
   const src = useFileImageSrc(file.id, file.spaceId);
   if (src === undefined) return <Skeleton className="size-full rounded-none" />;
-  if (!src) return <MimePlaceholder mime={file.mime} />;
+  if (!src) return <MimePlaceholder file={file} />;
   return <img src={src} alt="" className="size-full object-cover" />;
 }
 
@@ -62,7 +62,7 @@ export function FileTile({
     download && isImageMime(file.mime) ? (
       <FileTileImage file={file} />
     ) : (
-      <MimePlaceholder mime={file.mime} />
+      <MimePlaceholder file={file} />
     );
 
   return (

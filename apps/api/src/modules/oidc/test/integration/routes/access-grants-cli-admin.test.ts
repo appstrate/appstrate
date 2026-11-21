@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for the Phase 3 admin oversight endpoints (issue #251):
+ * The org-admin access-grants endpoints, on their CLI half:
  *
- *   GET    /api/orgs/:orgId/cli-sessions
- *   DELETE /api/orgs/:orgId/cli-sessions/:familyId
+ *   GET    /api/orgs/:orgId/access-grants
+ *   DELETE /api/orgs/:orgId/access-grants/:grantId
  *
  * Covers:
  *   - Listing visibility scoped to current org members + cross-user info
@@ -169,7 +169,7 @@ async function setupOrg(slug: string): Promise<OrgSetup> {
   return { orgId: org.id, owner, admin, member };
 }
 
-describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
+describe("GET /api/orgs/:orgId/access-grants (CLI sessions)", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -188,33 +188,39 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
       "X-Appstrate-Device-Name": "owner-workstation",
     });
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants`, {
       method: "GET",
       headers: { Cookie: admin.cookie },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data: Array<{
-        familyId: string;
-        userId: string;
-        userEmail: string | null;
-        deviceName: string | null;
+        id: string;
+        kind: string;
+        user: { id: string; email: string | null };
+        device_name: string | null;
+        revocable: boolean;
       }>;
     };
     expect(body.data.length).toBe(2);
-    const byFamily = new Map(body.data.map((s) => [s.familyId, s]));
-    expect(byFamily.get(memberFamily.familyId)?.userId).toBe(member.userId);
-    expect(byFamily.get(memberFamily.familyId)?.userEmail).toBe("adminclisess1-member@example.com");
-    expect(byFamily.get(memberFamily.familyId)?.deviceName).toBe("member-laptop");
-    expect(byFamily.get(ownerFamily.familyId)?.userId).toBe(owner.userId);
-    expect(byFamily.get(ownerFamily.familyId)?.deviceName).toBe("owner-workstation");
+    const byFamily = new Map(body.data.map((s) => [s.id, s]));
+    expect(byFamily.get(memberFamily.familyId)?.user.id).toBe(member.userId);
+    expect(byFamily.get(memberFamily.familyId)?.user.email).toBe(
+      "adminclisess1-member@example.com",
+    );
+    expect(byFamily.get(memberFamily.familyId)?.device_name).toBe("member-laptop");
+    expect(byFamily.get(ownerFamily.familyId)?.user.id).toBe(owner.userId);
+    expect(byFamily.get(ownerFamily.familyId)?.device_name).toBe("owner-workstation");
+    expect(byFamily.get(memberFamily.familyId)?.kind).toBe("cli");
+    // Single-org members: the admin may end their sessions.
+    expect(byFamily.get(memberFamily.familyId)?.revocable).toBe(true);
   });
 
   it("rejects non-admin (member) callers with 403", async () => {
     const { orgId, member } = await setupOrg("adminclisess2");
     await loginCli(member.cookie);
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants`, {
       method: "GET",
       headers: { Cookie: member.cookie },
     });
@@ -224,7 +230,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
   it("an owner-minted API key does NOT inherit its creator's org authority", async () => {
     // `orgPathContext` derives from the membership row for session-shaped
     // callers ONLY. A key keeps the ceiling-limited set the pipeline wrote, and
-    // `cli-sessions:read` is not in it — whoever minted the key. A module that
+    // `access-grants:read` is not in it — whoever minted the key. A module that
     // derives its own org context for every caller breaks exactly this.
     const { orgId, owner } = await setupOrg("adminclisess-key");
     const space = await seedSpace({ orgId });
@@ -235,7 +241,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
       scopes: ["runs:read"],
     });
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants`, {
       method: "GET",
       headers: { Authorization: `Bearer ${key.rawKey}` },
     });
@@ -243,7 +249,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
 
     // Control: the same owner, as a session, DOES reach it — so the 403 above
     // is about the credential, not about the org or the route.
-    const asOwner = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const asOwner = await app.request(`/api/orgs/${orgId}/access-grants`, {
       method: "GET",
       headers: { Cookie: owner.cookie },
     });
@@ -261,7 +267,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
       scopes: ["runs:read"],
     });
 
-    const res = await app.request(`/api/orgs/${b.orgId}/cli-sessions`, {
+    const res = await app.request(`/api/orgs/${b.orgId}/access-grants`, {
       method: "GET",
       headers: { Authorization: `Bearer ${key.rawKey}` },
     });
@@ -270,7 +276,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
 
   it("rejects unauthenticated callers with 401", async () => {
     const { orgId } = await setupOrg("adminclisess3");
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, { method: "GET" });
+    const res = await app.request(`/api/orgs/${orgId}/access-grants`, { method: "GET" });
     expect(res.status).toBe(401);
   });
 
@@ -280,13 +286,13 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
     await loginCli(a.member.cookie);
     const bFamily = await loginCli(b.member.cookie);
 
-    const aListedFromB = await app.request(`/api/orgs/${a.orgId}/cli-sessions`, {
+    const aListedFromB = await app.request(`/api/orgs/${a.orgId}/access-grants`, {
       method: "GET",
       headers: { Cookie: a.admin.cookie },
     });
-    const aBody = (await aListedFromB.json()) as { data: Array<{ familyId: string }> };
+    const aBody = (await aListedFromB.json()) as { data: Array<{ id: string }> };
     // A's admin sees only A's member's session.
-    expect(aBody.data.map((s) => s.familyId)).not.toContain(bFamily.familyId);
+    expect(aBody.data.map((s) => s.id)).not.toContain(bFamily.familyId);
   });
 
   it("excludes sessions of users who left the org", async () => {
@@ -296,7 +302,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
     // Member leaves the org.
     await db.delete(organizationMembers).where(eq(organizationMembers.userId, member.userId));
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants`, {
       method: "GET",
       headers: { Cookie: admin.cookie },
     });
@@ -306,7 +312,7 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
   });
 });
 
-describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
+describe("DELETE /api/orgs/:orgId/access-grants/:grantId (CLI sessions)", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -319,7 +325,7 @@ describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
     const { orgId, owner, member } = await setupOrg("adminclisessrev1");
     const { familyId } = await loginCli(member.cookie);
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions/${familyId}`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants/${familyId}`, {
       method: "DELETE",
       headers: { Cookie: owner.cookie },
     });
@@ -339,7 +345,7 @@ describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
     const { orgId, admin, member } = await setupOrg("adminclisessrev2");
     const { familyId } = await loginCli(member.cookie);
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions/${familyId}`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants/${familyId}`, {
       method: "DELETE",
       headers: { Cookie: admin.cookie },
     });
@@ -350,7 +356,7 @@ describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
     const { orgId, member } = await setupOrg("adminclisessrev3");
     const { familyId } = await loginCli(member.cookie);
 
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions/${familyId}`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants/${familyId}`, {
       method: "DELETE",
       headers: { Cookie: member.cookie },
     });
@@ -362,7 +368,7 @@ describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
     const b = await setupOrg("adminclisessrev-b");
     const { familyId: bFamily } = await loginCli(b.member.cookie);
 
-    const res = await app.request(`/api/orgs/${a.orgId}/cli-sessions/${bFamily}`, {
+    const res = await app.request(`/api/orgs/${a.orgId}/access-grants/${bFamily}`, {
       method: "DELETE",
       headers: { Cookie: a.owner.cookie },
     });
@@ -381,12 +387,12 @@ describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
     const { orgId, owner, member } = await setupOrg("adminclisessrev4");
     const { familyId } = await loginCli(member.cookie);
 
-    const first = await app.request(`/api/orgs/${orgId}/cli-sessions/${familyId}`, {
+    const first = await app.request(`/api/orgs/${orgId}/access-grants/${familyId}`, {
       method: "DELETE",
       headers: { Cookie: owner.cookie },
     });
     expect(first.status).toBe(204);
-    const second = await app.request(`/api/orgs/${orgId}/cli-sessions/${familyId}`, {
+    const second = await app.request(`/api/orgs/${orgId}/access-grants/${familyId}`, {
       method: "DELETE",
       headers: { Cookie: owner.cookie },
     });
@@ -395,7 +401,7 @@ describe("DELETE /api/orgs/:orgId/cli-sessions/:familyId (#251)", () => {
 
   it("returns 404 on a completely unknown familyId", async () => {
     const { orgId, owner } = await setupOrg("adminclisessrev5");
-    const res = await app.request(`/api/orgs/${orgId}/cli-sessions/crf_does_not_exist`, {
+    const res = await app.request(`/api/orgs/${orgId}/access-grants/crf_does_not_exist`, {
       method: "DELETE",
       headers: { Cookie: owner.cookie },
     });

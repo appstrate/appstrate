@@ -24,7 +24,16 @@ export interface AuthorizationCodeFlowInput {
   clientId: string;
   redirectUri: string;
   scope: string;
-  resource: string;
+  /** The resource(s) authorized; the token request asks for the first. */
+  resource: string | string[];
+}
+
+export interface AuthorizedCode {
+  /** Whether the consent screen stood between authorize and the code. */
+  consentShown: boolean;
+  code: string;
+  /** The PKCE verifier the code's challenge was made from. */
+  verifier: string;
 }
 
 export interface AuthorizationCodeFlowResult {
@@ -37,14 +46,14 @@ export interface AuthorizationCodeFlowResult {
 }
 
 /**
- * Full authorization-code + PKCE exchange as a signed-in platform user:
- * authorize → consent (unless a stored consent short-circuits it) → token.
+ * Authorization-code + PKCE, first half, as a signed-in platform user:
+ * authorize → consent (unless a stored consent short-circuits it) → code.
  */
-export async function authorizationCodeFlow(
+export async function authorizeCode(
   app: TestAppLike,
   input: AuthorizationCodeFlowInput,
-): Promise<AuthorizationCodeFlowResult> {
-  const { cookie, clientId, redirectUri, scope, resource } = input;
+): Promise<AuthorizedCode> {
+  const { cookie, clientId, redirectUri, scope } = input;
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
   const authorizeQuery = new URLSearchParams({
     response_type: "code",
@@ -54,8 +63,8 @@ export async function authorizationCodeFlow(
     state: "authorization-code-flow",
     code_challenge: await challengeFor(verifier),
     code_challenge_method: "S256",
-    resource,
   });
+  for (const resource of [input.resource].flat()) authorizeQuery.append("resource", resource);
   const authorized = await app.request(`/api/auth/oauth2/authorize?${authorizeQuery}`, {
     headers: { cookie, accept: "text/html" },
     redirect: "manual",
@@ -103,22 +112,38 @@ export async function authorizationCodeFlow(
   expect(callback.searchParams.get("error")).toBeNull();
   const code = callback.searchParams.get("code");
   expect(code).toBeTruthy();
+  return { consentShown, code: code!, verifier };
+}
 
-  const tokenRes = await app.request("/api/auth/oauth2/token", {
+/** Second half: the `/oauth2/token` request for a code, for its first resource. */
+export function exchangeCode(
+  app: TestAppLike,
+  input: AuthorizationCodeFlowInput & Pick<AuthorizedCode, "code" | "verifier">,
+): Promise<Response> | Response {
+  return app.request("/api/auth/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code",
-      code: code!,
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-      resource,
+      code: input.code,
+      client_id: input.clientId,
+      redirect_uri: input.redirectUri,
+      code_verifier: input.verifier,
+      resource: [input.resource].flat()[0]!,
     }).toString(),
   });
+}
+
+/** Both halves: authorize, consent, and exchange the code for tokens. */
+export async function authorizationCodeFlow(
+  app: TestAppLike,
+  input: AuthorizationCodeFlowInput,
+): Promise<AuthorizationCodeFlowResult> {
+  const authorized = await authorizeCode(app, input);
+  const tokenRes = await exchangeCode(app, { ...input, ...authorized });
   const token = (await tokenRes.json()) as Record<string, unknown>;
   expect(token).not.toHaveProperty("error");
   expect(tokenRes.status).toBe(200);
   const claims = decodeJwt(String(token.access_token)) as Record<string, unknown>;
-  return { consentShown, token, claims };
+  return { consentShown: authorized.consentShown, token, claims };
 }

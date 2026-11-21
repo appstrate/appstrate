@@ -285,7 +285,7 @@ export async function listMeConnections(
                   eq(packages.type, "agent"),
                   orgOrSystemFilter(sp.orgId),
                   notEphemeralFilter(),
-                  activeHereSql(),
+                  activeHereSql(sp.id),
                 ),
               ),
           ] as const,

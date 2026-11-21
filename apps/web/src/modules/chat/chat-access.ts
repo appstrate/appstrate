@@ -74,7 +74,7 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (_ctx, turn) => reaches(turn.runLevel, "read"),
   },
   {
-    // Browsing (`list_files`), not reading: `read_file` applies the file ACL, not
+    // Browsing (`list_files`), not reading: `read` applies the file ACL, not
     // `files:read`. A tool of its own, so no `mcp:invoke`.
     id: "browseFiles",
     labelKey: "access.capability.browseFiles",

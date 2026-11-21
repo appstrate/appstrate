@@ -11,23 +11,22 @@ interface AgentConnectionsSectionProps {
   detail: AgentDetail;
 }
 
-/** Agent "Connexions" tab: the integrations the agent declares, each with its connection picker. */
+/** Agent "Connexions" tab: the integrations the agent declares that bind a connection, each with its picker. */
 export function AgentConnectionsSection({ packageId, detail }: AgentConnectionsSectionProps) {
   const { t } = useTranslation(["agents"]);
 
-  const integrations = detail.dependencies.integrations;
-  const hasIntegrations = integrations.length > 0;
-
-  if (!hasIntegrations) {
-    return (
-      <EmptyState
-        message={t("detail.emptyConnections")}
-        hint={t("detail.emptyConnectionsHint")}
-        icon={Unplug}
-        compact
-      />
-    );
-  }
-
-  return <AgentIntegrationsBlock entries={integrations} agentPackageId={packageId} />;
+  return (
+    <AgentIntegrationsBlock
+      entries={detail.dependencies.integrations}
+      agentPackageId={packageId}
+      empty={
+        <EmptyState
+          message={t("detail.emptyConnections")}
+          hint={t("detail.emptyConnectionsHint")}
+          icon={Unplug}
+          compact
+        />
+      }
+    />
+  );
 }

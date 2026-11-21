@@ -77,7 +77,7 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { db } from "@appstrate/db/client";
-import { connectionPrincipal } from "../lib/connection-principal.ts";
+import { connectionPrincipal, writesDelegated } from "../lib/connection-principal.ts";
 import {
   callerPermissionsInSpace,
   credentialAdmitsSpace,
@@ -1226,7 +1226,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: principal.binding !== null,
+          delegated: writesDelegated(principal),
           ...(body.variables ? { variables: body.variables } : {}),
         };
         const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1290,7 +1290,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: principal.binding !== null,
+          delegated: writesDelegated(principal),
           ...(body.variables ? { variables: body.variables } : {}),
         },
         {
@@ -1341,7 +1341,7 @@ export function createIntegrationsRouter() {
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-          delegated: principal.binding !== null,
+          delegated: writesDelegated(principal),
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),

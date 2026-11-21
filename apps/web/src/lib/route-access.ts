@@ -86,7 +86,7 @@ export const ROUTE_ACCESS = {
   "/preferences/general": OWN_ACCOUNT,
   "/preferences/appearance": OWN_ACCOUNT,
   "/preferences/security": OWN_ACCOUNT,
-  "/preferences/devices": OWN_ACCOUNT,
+  "/preferences/devices": { ...OWN_ACCOUNT, feature: "oidc" },
   "/preferences/connections": OWN_ACCOUNT,
   "/preferences/mcp-access": OWN_ACCOUNT,
   // Its one read is the list, guarded read|connect; a personal credential's actions need `connect`.
@@ -123,10 +123,10 @@ export const ROUTE_ACCESS = {
     anyOf: ["oauth-clients:read"],
     operations: ["listOAuthClients"],
   },
-  "/org-settings/cli-sessions": {
+  "/org-settings/access-grants": {
     feature: "oidc",
-    anyOf: ["cli-sessions:read"],
-    operations: ["listOrgCliSessions"],
+    anyOf: ["access-grants:read"],
+    operations: ["listOrgAccessGrants"],
   },
   "/org-settings/billing": {
     feature: "billing",

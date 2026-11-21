@@ -7,7 +7,8 @@
  * rows.
  *
  *   activeHere = the placement row's `enabled`, when there IS a row
- *              = the deployment's default, when there is none
+ *              = the deployment's default OR an offer to the space's
+ *                organization (`org_package_offers`), when there is none
  *
  * The ROW ALWAYS WINS. That is why a system package can be switched off per
  * space like any other: an explicit `false` is an operator decision the
@@ -34,16 +35,20 @@
  */
 
 import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { packages, spacePackages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 import { listSystemIntegrationIds } from "./integration-client-registry.ts";
 import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
+import { offeredToSpaceOrgSql } from "./package-placement.ts";
 
 /** The catalog columns the rule reads — every caller already has them. */
 export interface ActivatablePackage {
   id: string;
   type: PackageType | string;
   source: string | null;
+  /** Offered to the organization of the space asked about (`org_package_offers`). */
+  offeredToOrg: boolean;
 }
 
 /** The integration ids active without a row: the offered ones and the runtime-bound ones. */
@@ -54,10 +59,11 @@ function activeWithoutRowIntegrationIds(): ReadonlySet<string> {
 /**
  * Is the package active in a space that holds NO placement row for it?
  *
- * The deployment's default, and the only half of the rule that looks at the
- * package rather than at the space's decision.
+ * The deployment's default or the organization's offer: the half of the rule
+ * that looks at the package rather than at the space's decision.
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
+  if (pkg.offeredToOrg) return true;
   if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
   return pkg.source === "system";
 }
@@ -75,8 +81,9 @@ export function isActiveHere(
 
 /**
  * The rule, in SQL. Expects a LEFT JOIN of `spacePackages` on (package, the
- * space asked about) — `placementRowJoin` (`services/package-placement.ts`).
- * A query that omits it loses the row half silently rather than loudly: every
+ * space asked about) — `placementRowJoin` (`services/package-placement.ts`) —
+ * and takes that same space as `spaceId` (a value, or a column of the outer
+ * query), against which the organization's offer is read. A query that omits it loses the row half silently rather than loudly: every
  * package falls back to the deployment default, which is not the same question.
  *
  * The `IN (…)` list is the system-integration registry, read from memory at
@@ -84,7 +91,7 @@ export function isActiveHere(
  * inlining it costs nothing and keeps the default identical to the in-memory
  * twin instead of approximating it with `source = 'system'`.
  */
-export function activeHereSql() {
+export function activeHereSql(spaceId: string | AnyPgColumn) {
   const offered = [...activeWithoutRowIntegrationIds()];
   const systemDefault = or(
     and(ne(packages.type, "integration"), eq(packages.source, "system")),
@@ -95,6 +102,6 @@ export function activeHereSql() {
   );
   return or(
     and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true)),
-    and(isNull(spacePackages.packageId), systemDefault),
+    and(isNull(spacePackages.packageId), or(systemDefault, offeredToSpaceOrgSql(spaceId))),
   );
 }

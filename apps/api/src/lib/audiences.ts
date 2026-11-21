@@ -34,7 +34,7 @@ import { SPACE_ID_RE } from "@appstrate/db/ids";
 export const MCP_RESOURCE_PREFIX = "/api/mcp/o";
 
 /** What an MCP resource URI binds a token to. */
-interface McpResourceBinding {
+export interface McpResourceBinding {
   orgId: string;
   spaceId?: string;
 }
@@ -81,17 +81,18 @@ export function parseMcpResourceUri(uri: string): McpResourceBinding | undefined
 }
 
 /**
- * First MCP binding among the audience entries. A token is bound to at most one
- * MCP resource, so the first match is the binding; non-string and unrecognised
- * entries are skipped, and `undefined` means "not an MCP-bound token".
+ * First MCP binding among the audience entries, with the resource URI it came
+ * from. A token is bound to at most one MCP resource, so the first match is the
+ * binding; non-string and unrecognised entries are skipped, and `undefined`
+ * means "not an MCP-bound token".
  */
 export function mcpBindingFromAudiences(
   audiences: readonly unknown[],
-): McpResourceBinding | undefined {
+): (McpResourceBinding & { resource: string }) | undefined {
   for (const entry of audiences) {
     if (typeof entry !== "string") continue;
     const binding = parseMcpResourceUri(entry);
-    if (binding) return binding;
+    if (binding) return { ...binding, resource: entry };
   }
   return undefined;
 }

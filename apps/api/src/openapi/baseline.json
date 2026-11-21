@@ -805,7 +805,7 @@
         "operationId": "listAgents",
         "tags": ["Agents"],
         "summary": "List all agents",
-        "description": "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "description": "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts: a system agent, or one placed there (homed there, or holding a row there) and switched on. Active is not launchable: `inactive_required_integrations` names the required integrations not active in this space, each of which refuses the launch (`409`) until it is activated here; the agent stays listed so it can be repaired. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` and `integrations` along with the identity, labels and run counters a launcher picks an agent by.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -871,7 +871,8 @@
                       "dependencies": {
                         "skills": {},
                         "integrations": {}
-                      }
+                      },
+                      "integrations": []
                     },
                     {
                       "id": "@appstrate/code-reviewer",
@@ -898,7 +899,16 @@
                         "integrations": {
                           "@appstrate/github": "^2.0.0"
                         }
-                      }
+                      },
+                      "integrations": [
+                        {
+                          "id": "@appstrate/github",
+                          "name": "GitHub",
+                          "icon": "logos:github-icon",
+                          "required": true,
+                          "authenticated": true
+                        }
+                      ]
                     }
                   ]
                 }
@@ -982,7 +992,8 @@
                       "dependencies": {
                         "skills": {},
                         "integrations": {}
-                      }
+                      },
+                      "integrations": []
                     },
                     {
                       "id": "@appstrate/code-reviewer",
@@ -1009,7 +1020,16 @@
                         "integrations": {
                           "@appstrate/github": "^2.0.0"
                         }
-                      }
+                      },
+                      "integrations": [
+                        {
+                          "id": "@appstrate/github",
+                          "name": "GitHub",
+                          "icon": "logos:github-icon",
+                          "required": true,
+                          "authenticated": true
+                        }
+                      ]
                     }
                   ]
                 }
@@ -1269,6 +1289,14 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "scheduleId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Apply the stored dependency version overrides of this agent's schedule in the current space. Requires schedules:read. The version parameter selects the agent definition and connection visibility remains the caller's."
           },
           {
             "name": "version",
@@ -2149,8 +2177,26 @@
             "description": "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent, or the caller lacks the read scope of a dependency type the bundle carries (`skills:read`, `integrations:read`)."
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
-            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{id}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`."
+            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{id}/packages`, or export it from one of the problem's `active_in_spaces` (where it is active, whatever its integrations). `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ProblemDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AgentNotActiveInSpaceProblem"
+                    }
+                  ]
+                }
+              }
+            }
           },
           "422": {
             "description": "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version (an integration pin included, exactly as a run refuses it), or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
@@ -2411,8 +2457,26 @@
             "description": "Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it)."
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
-            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`."
+            "description": "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`, or launch it in one of the problem's `active_in_spaces`.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ProblemDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AgentNotActiveInSpaceProblem"
+                    }
+                  ]
+                }
+              }
+            }
           },
           "409": {
             "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings), or `model_credential_required` (the model has no organization credential and the caller holds no personal credential that serves it)",
@@ -4314,7 +4378,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
+            "description": "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6282,7 +6346,7 @@
           },
           "404": {
             "$ref": "#/components/responses/NoPublishedVersion",
-            "description": "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`)."
+            "description": "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`; its `active_in_spaces` names where this version and its required integrations are active, the caller holds `schedules:write` and the schedule’s actor can run agents)."
           },
           "409": {
             "description": "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write — by the server itself when the caller writes for itself (that one connection is stored in `connection_overrides`, so this refusal then means several connections or only shared ones); a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration when that governance allows no additions, which outranks it (name only connections of that set, or drop the override; an admin pin that allows additions accepts them) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here) — or `required_integration_unbound` when the schedule's own `connection_overrides` sets `[]` on an integration the agent marks `required` and no admin pin or enforced org default imposes a set (`source: schedule_override`) — or `connection_set_too_large` when the schedule's additions take the imposed set past the cap. Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_governance_changed`: the write leaves the schedule enabled, and the admin pin of the agent, the actor's own pin for it or the space's org default of an integration its connections were judged under, or of one its `connection_overrides` names, changed between that judgment and the write (a concurrent pin or default write or delete); nothing was written — reload and retry.",
@@ -15742,7 +15806,7 @@
         "operationId": "removeMember",
         "tags": ["Organizations"],
         "summary": "Remove a member",
-        "description": "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile.",
+        "description": "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here revoked, the OAuth tokens bound to this organization deleted, their MCP grants on the organization's endpoints (organization and spaces) ended, and their personal space enters the 30-day offboarding window. An MCP-bound JWT access token is refused from its next request; only a JWT of an org-level OAuth client stays valid until it expires, and the per-request membership check refuses it meanwhile. Other members' schedules naming a connection the member shared are disabled too (`connection_unshared`); `getMemberDepartureImpact` lists, before the removal, every team-space schedule it would stop.",
         "parameters": [
           {
             "name": "orgId",
@@ -15785,12 +15849,168 @@
         }
       }
     },
+    "/api/orgs/{orgId}/members/{userId}/departure-impact": {
+      "get": {
+        "operationId": "getMemberDepartureImpact",
+        "tags": ["Organizations"],
+        "summary": "Preview what removing a member stops",
+        "description": "The enabled schedules in TEAM spaces that `removeMember` would disable for this member, in one list whatever the cause: `actor_left_org` for a schedule the member is the actor of, `connection_unshared` for another actor's schedule whose `connection_overrides` name a connection the member shares into that space (the removal withdraws every share of the member's connections). Each item's `lost_integrations` lists the integrations whose named connection belongs to the departing member: reassigning the schedule to another member (`updateSchedule`) is not enough there, a replacement connection is needed too. Read with the same selectors the removal uses, without writing anything: a snapshot, which a later change can make stale before the removal runs. Schedules in personal spaces are left out — the departing member's personal space enters its 30-day offboarding window and an administrator cannot read a live one. A credential confined to spaces (a space-bound token, the chat's bearer) sees only the items in the spaces it may name. Known limit: a binding to the member's connection outside the schedule's own `connection_overrides` — an admin pin, an organization default, or a member pin of the departing member — is not listed, and is not disabled by the removal either (the schedule fails at resolution). Same guard and same per-target rule as `removeMember`: 404 when the user is not a member, 403 when the caller could not remove them (an admin previewing an owner, any token previewing an owner).",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schedules the removal would stop, ordered by space name then schedule name",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "space",
+                          "packageId",
+                          "actor",
+                          "cause",
+                          "lost_integrations"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Schedule id."
+                          },
+                          "name": {
+                            "type": ["string", "null"]
+                          },
+                          "space": {
+                            "type": "object",
+                            "required": ["id", "name"],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "packageId": {
+                            "type": "string",
+                            "description": "The scheduled agent."
+                          },
+                          "actor": {
+                            "type": "object",
+                            "required": ["type", "id", "name"],
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "end_user"]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": ["string", "null"]
+                              }
+                            }
+                          },
+                          "cause": {
+                            "type": "string",
+                            "enum": ["actor_left_org", "connection_unshared"],
+                            "description": "The `disabled_reason` the removal would set."
+                          },
+                          "lost_integrations": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Integrations whose connection named in `connection_overrides` belongs to the departing member."
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Always false: the list is not paginated. A credential confined to spaces receives only the items of the spaces it may name (see the description)."
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
+                    {
+                      "id": "sch_abc123",
+                      "name": "Daily digest",
+                      "space": {
+                        "id": "spc_team",
+                        "name": "Sales"
+                      },
+                      "packageId": "@acme/digest",
+                      "actor": {
+                        "type": "user",
+                        "id": "usr_def456",
+                        "name": "Bob"
+                      },
+                      "cause": "actor_left_org",
+                      "lost_integrations": ["@acme/gmail"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/orgs/{orgId}/leave": {
       "post": {
         "operationId": "leaveOrganization",
         "tags": ["Organizations"],
         "summary": "Leave an organization",
-        "description": "The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.",
+        "description": "The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here revoked, the OAuth tokens bound to this organization deleted, their MCP grants on the organization's endpoints (organization and spaces) ended, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and deleted tokens stay gone). An MCP-bound JWT access token is refused from its next request; only a JWT of an org-level OAuth client stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.",
         "parameters": [
           {
             "name": "orgId",
@@ -17800,10 +18020,16 @@
                     },
                     "connections": {
                       "type": "array",
-                      "description": "Integrations the caller could attach to an agent.",
+                      "description": "Integrations the caller holds a connection usable in this space for, active here or not (`active`).",
                       "items": {
                         "type": "object",
-                        "required": ["integration_package_id", "name", "source"],
+                        "required": [
+                          "integration_package_id",
+                          "name",
+                          "source",
+                          "active",
+                          "connections"
+                        ],
                         "properties": {
                           "integration_package_id": {
                             "type": "string"
@@ -17814,6 +18040,43 @@
                           "source": {
                             "type": "string",
                             "enum": ["own", "shared", "both"]
+                          },
+                          "active": {
+                            "type": "boolean",
+                            "description": "Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent."
+                          },
+                          "connections": {
+                            "type": "array",
+                            "description": "The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`.",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "label",
+                                "account_id",
+                                "owned_by_actor",
+                                "needs_reconnection"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "account_id": {
+                                  "type": "string"
+                                },
+                                "owned_by_actor": {
+                                  "type": "boolean",
+                                  "description": "False: a colleague's connection shared into the space. Use it only when the user named it."
+                                },
+                                "needs_reconnection": {
+                                  "type": "boolean",
+                                  "description": "True: the credentials died; a run naming it fails until its owner reconnects it."
+                                }
+                              }
+                            }
                           },
                           "version": {
                             "type": "string",
@@ -17844,7 +18107,7 @@
                     },
                     "agents": {
                       "type": "array",
-                      "description": "Agents the caller can run in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation.",
+                      "description": "Agents ACTIVE in the current space (capped), each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation.",
                       "items": {
                         "type": "object",
                         "required": [
@@ -17852,6 +18115,7 @@
                           "display_name",
                           "description",
                           "takes_input",
+                          "inactive_required_integrations",
                           "published",
                           "home_writable",
                           "source"
@@ -17870,6 +18134,13 @@
                           "takes_input": {
                             "type": "boolean",
                             "description": "Whether the agent declares an input schema with properties."
+                          },
+                          "inactive_required_integrations": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ."
                           },
                           "published": {
                             "type": "boolean",
@@ -17892,7 +18163,7 @@
                     },
                     "agents_total": {
                       "type": "integer",
-                      "description": "Total runnable agents before the cap."
+                      "description": "Total active agents before the cap."
                     },
                     "skills": {
                       "type": "array",
@@ -17969,12 +18240,32 @@
                     {
                       "integration_package_id": "@appstrate/gmail",
                       "name": "Gmail",
-                      "source": "own"
+                      "source": "own",
+                      "active": true,
+                      "connections": [
+                        {
+                          "id": "conn_1",
+                          "label": "ada@acme.com",
+                          "account_id": "ada@acme.com",
+                          "owned_by_actor": true,
+                          "needs_reconnection": false
+                        }
+                      ]
                     },
                     {
                       "integration_package_id": "@appstrate/clickup",
                       "name": "ClickUp",
-                      "source": "shared"
+                      "source": "shared",
+                      "active": true,
+                      "connections": [
+                        {
+                          "id": "conn_2",
+                          "label": "Acme workspace",
+                          "account_id": "acme",
+                          "owned_by_actor": false,
+                          "needs_reconnection": false
+                        }
+                      ]
                     }
                   ],
                   "recent_runs": [
@@ -17992,6 +18283,7 @@
                       "display_name": "Inbox Triage",
                       "description": "Sorts and labels incoming email.",
                       "takes_input": false,
+                      "inactive_required_integrations": [],
                       "published": true,
                       "home_writable": false,
                       "source": "system"
@@ -21021,7 +21313,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded."
+                      "description": "Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling — and, when `root_active` and the root is an agent, one per integration it declares that is not active in this space, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Empty when nothing is degraded."
                     }
                   }
                 }
@@ -21145,7 +21437,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted."
+                      "description": "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling — and, for an agent switched on in this space, one per integration it declares that is not active there, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Present only when warnings were emitted."
                     }
                   }
                 },
@@ -21286,7 +21578,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted."
+                      "description": "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling — and, for an agent switched on in this space, one per integration it declares that is not active there, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Present only when warnings were emitted."
                     }
                   }
                 }
@@ -23807,7 +24099,7 @@
         "operationId": "sharePackage",
         "tags": ["Packages"],
         "summary": "Share a package with a person or a space",
-        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
+        "description": "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23853,7 +24145,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PackageShare"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PackageShare"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivationWarnings"
+                    }
+                  ]
                 }
               }
             }
@@ -23915,6 +24214,101 @@
         "responses": {
           "204": {
             "description": "Placement removed, with its settings; the package's schedules in that space are disabled (`package_removed`)."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}/org-offer": {
+      "put": {
+        "operationId": "offerPackageToOrg",
+        "tags": ["Packages"],
+        "summary": "Offer a package to the organization",
+        "description": "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The package is offered to the organization (new or already offered).",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageOrgOffer"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The package has no published version to offer (`package_has_no_version` — publish one, then offer). RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "withdrawPackageOrgOffer",
+        "tags": ["Packages"],
+        "summary": "Withdraw a package's offer to the organization",
+        "description": "Remove the offer. A space holding a row of its own that is a real placement (a share) is unaffected. A row that only decided about the offer (the space switched the package off or configured it while it was offered; `placed_by_offer`) goes with the offer, schedules disabled like any withdrawal. Every other space of the organization stops placing and activating the package through the offer, and in the same transaction every enabled schedule of the package there is disabled (`disabled_reason: package_removed`, jobs removed) — except in the package's home, which stays placed (its schedules, like any deactivated package's, fail visibly), and everywhere when the deployment's default still activates the package. Same authority as `PUT`. Idempotent: answers 204 when there was no offer. Audited as `package.offer_withdrawn`, with the `disabledScheduleIds` when any.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Offer withdrawn (or there was none)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -25179,7 +25573,7 @@
                   },
                   "credential_proxy_open": {
                     "type": "boolean",
-                    "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
+                    "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools' integration tools (`search` and `describe` of the `integration_tool` kind, `call_integration_tool`). `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
                   }
                 },
                 "additionalProperties": false
@@ -25476,7 +25870,7 @@
         "operationId": "activatePackage",
         "tags": ["Space Packages"],
         "summary": "Activate a package in this space",
-        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
+        "description": "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -25520,7 +25914,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpacePackage"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SpacePackage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivationWarnings"
+                    }
+                  ]
                 }
               }
             }
@@ -25535,7 +25936,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpacePackage"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SpacePackage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivationWarnings"
+                    }
+                  ]
                 }
               }
             }
@@ -28886,6 +29294,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "catalogs",
+            "in": "query",
+            "required": false,
+            "description": "`live` (the default) reads a remote catalog the cache does not hold from its server, as described above. `cached` reads the cache alone: a catalog not in it is not listed, so no server is contacted, no credential sent and no call journaled; its declared tools are listed `catalog_unreadable`, and the integration in `uncached`.",
+            "schema": {
+              "type": "string",
+              "enum": ["live", "cached"]
+            }
           }
         ],
         "responses": {
@@ -28908,7 +29326,8 @@
                     "connections",
                     "not_ready",
                     "unlisted",
-                    "truncated_catalogs"
+                    "truncated_catalogs",
+                    "uncached"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -29192,6 +29611,13 @@
                             "description": "The tools read: the first ones the server lists."
                           }
                         }
+                      }
+                    },
+                    "uncached": {
+                      "type": "array",
+                      "description": "With `catalogs=cached`: the remote integrations whose catalog the cache did not hold, listed by their declared tools. Empty otherwise.",
+                      "items": {
+                        "type": "string"
                       }
                     }
                   }
@@ -34000,7 +34426,7 @@
         "operationId": "getLibrary",
         "tags": ["Library"],
         "summary": "Organization library — the placement map, graded by caller",
-        "description": "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{id}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{id}/packages/{scope}/{name}` deactivates it there.",
+        "description": "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: system, home, shared, organization) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{id}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{id}/packages/{scope}/{name}` deactivates it there.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -34091,6 +34517,8 @@
                         "home_writable": true,
                         "home_deletable": true,
                         "home_shareable": true,
+                        "offered_to_org": false,
+                        "org_offerable": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34134,6 +34562,8 @@
                         "home_writable": false,
                         "home_deletable": false,
                         "home_shareable": false,
+                        "offered_to_org": false,
+                        "org_offerable": false,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34280,6 +34710,8 @@
                         "home_writable": true,
                         "home_deletable": true,
                         "home_shareable": true,
+                        "offered_to_org": false,
+                        "org_offerable": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34323,6 +34755,8 @@
                         "home_writable": false,
                         "home_deletable": false,
                         "home_shareable": false,
+                        "offered_to_org": false,
+                        "org_offerable": false,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
@@ -34953,6 +35387,49 @@
               "version_ref": {
                 "type": "string",
                 "description": "On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`."
+              },
+              "active_in_spaces": {
+                "$ref": "#/components/schemas/ActiveInSpaces",
+                "description": "On an agent-run, inline-run or remote-run launch whose `errors[]` holds an `integration_not_active` item: the caller's other spaces where the agent (an inline run has no placement) and every integration required by the definition this launch runs (the version it names, or its default published version) are active. Connections are judged at launch there. Absent on a schedule write and on readiness."
+              }
+            }
+          }
+        ]
+      },
+      "ActiveInSpaces": {
+        "type": "array",
+        "description": "Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement.",
+        "items": {
+          "type": "object",
+          "required": ["id", "name"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Space id (`spc_…`)."
+            },
+            "name": {
+              "type": "string",
+              "description": "Space name, as a space listing shows it (not unique)."
+            }
+          }
+        }
+      },
+      "AgentNotActiveInSpaceProblem": {
+        "description": "`agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ProblemDetail"
+          },
+          {
+            "type": "object",
+            "required": ["active_in_spaces"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["agent_not_active_in_space"]
+              },
+              "active_in_spaces": {
+                "$ref": "#/components/schemas/ActiveInSpaces"
               }
             }
           }
@@ -34993,6 +35470,41 @@
             }
           }
         }
+      },
+      "ActivationWarnings": {
+        "type": "object",
+        "required": ["warnings"],
+        "properties": {
+          "warnings": {
+            "type": "array",
+            "description": "Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it.",
+            "items": {
+              "$ref": "#/components/schemas/ActivationWarning"
+            }
+          }
+        }
+      },
+      "ActivationWarning": {
+        "description": "A declared integration of the agent that is not active in the space, in the launch `warnings[]` vocabulary (`field: integrations.<id>`, `code: integration_not_active`). `required: true` — a launch of the agent in this space is refused (`409`, `errors[].code: integration_not_active`) until the integration is activated there; `false` — runs start without it (the launch `warnings[]` item).",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ResolutionFieldError"
+          },
+          {
+            "type": "object",
+            "required": ["required"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["integration_not_active"]
+              },
+              "required": {
+                "type": "boolean",
+                "description": "Whether the agent declares the integration `required`."
+              }
+            }
+          }
+        ]
       },
       "RunAndWaitResult": {
         "type": "object",
@@ -35713,6 +36225,7 @@
           "running_runs",
           "unread_count",
           "dependencies",
+          "integrations",
           "scope",
           "keywords",
           "version",
@@ -35783,6 +36296,43 @@
             "type": "string",
             "description": "Package type from manifest",
             "enum": ["agent", "skill", "integration"]
+          },
+          "inactive_required_integrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the integrations the agent declares `required` that are not active in this space; `[]` when none. Non-empty: a launch here is refused (`409`, `errors[].code: integration_not_active`) until each is activated in this space (`POST /api/spaces/{id}/packages`). Empty does not mean the launch will succeed: connections are judged at launch and by `GET /api/agents/{scope}/{name}/connection-readiness`. Judged on the definition a launch with `version` omitted runs: the latest published version (the rest of the entry describes the draft), or, for an agent with no published version, the draft (`version=draft` is then its only launch), or a system agent's own definition. A launch naming another version may differ. Emitted by `GET /api/agents` only: absent from `GET /api/orgs/{orgId}/agents`, whose rows span spaces."
+          },
+          "integrations": {
+            "type": "array",
+            "description": "The integrations a launch with `version` omitted uses, the required ones first, then by `name`: the latest published version's declarations (a draft-only or system agent: its own), each at the version it pins (its draft when no published version satisfies the pin, as run readiness reads it) and whose manifest loads. Left out, as the run leaves them out: an inert one (declared optional, selecting no tool or scope) and, on `GET /api/agents`, an optional one not active in the space — a run there starts without it; a required one not active stays, and is named in `inactive_required_integrations`. The name and the icon are read off the integration manifest that version resolves to, so a list can draw them without reading the integration. `dependencies.integrations` is the draft's declaration map.",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "icon", "required", "authenticated"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Integration package id (`@scope/name`)."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "The manifest's `display_name`, the id when it declares none."
+                },
+                "icon": {
+                  "type": ["string", "null"],
+                  "description": "The manifest's `icon`: an Iconify id (`<prefix>:<name>`) or an image URL, `null` when it declares none."
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without it — the integration not active in the space, or no connection bound."
+                },
+                "authenticated": {
+                  "type": "boolean",
+                  "description": "Whether the integration declares `auths`, as on the integration index. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection."
+                }
+              }
+            }
           },
           "running_runs": {
             "type": "integer"
@@ -38067,7 +38617,7 @@
                 },
                 "required": {
                   "type": "boolean",
-                  "description": "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here."
+                  "description": "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without it — the integration not active in the space, or no connection bound."
                 },
                 "run_blocking": {
                   "type": "boolean",
@@ -38350,7 +38900,7 @@
           },
           "credential_proxy_open": {
             "type": "boolean",
-            "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
+            "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools' integration tools (`search` and `describe` of the `integration_tool` kind, `call_integration_tool`). `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
           },
           "personal": {
             "type": "boolean",
@@ -38700,6 +39250,8 @@
             "home_writable",
             "home_deletable",
             "home_shareable",
+            "offered_to_org",
+            "org_offerable",
             "placements",
             "activation"
           ],
@@ -38739,6 +39291,14 @@
             "home_shareable": {
               "type": "boolean",
               "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            },
+            "offered_to_org": {
+              "type": "boolean",
+              "description": "Offered to the organization: placed and active in every space of it that holds no `space_packages` row of its own (a row always wins; `enabled = false` keeps it off)."
+            },
+            "org_offerable": {
+              "type": "boolean",
+              "description": "Whether THIS caller may offer it, or withdraw the offer, through `PUT|DELETE /api/packages/{scope}/{name}/org-offer`: an owner or admin user credential unconfined to spaces whose scope ceiling leaves the type's `share`, and for a package homed in a space the type's `share` permission in that home. Creating an offer also requires a published version for a homed package. The route stays the authority; this is its verdict served in advance."
             },
             "activation": {
               "type": "array",
@@ -38782,13 +39342,13 @@
           },
           "via": {
             "type": "string",
-            "enum": ["home", "shared", "system"],
-            "description": "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space)."
+            "enum": ["home", "shared", "system", "organization"],
+            "description": "WHY the package is placed here: `system` (a built-in package, readable in every space), `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `organization` (offered to the organization, and this space holds no row of its own or only one that decides about the offer — switched off or configured there). A built-in integration activated solely by the organization offer also reports `organization`."
           },
           "state": {
             "type": "string",
             "enum": ["active", "inactive", "none"],
-            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`."
+            "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here, the deployment's default is off and the package is not offered to the organization. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none` — unless the package is offered to the organization, which activates it."
           },
           "shared_by": {
             "type": ["object", "null"],
@@ -38898,6 +39458,25 @@
             "type": "string",
             "format": "date-time",
             "description": "When the placement row was created (`space_packages.installed_at`)."
+          }
+        }
+      },
+      "PackageOrgOffer": {
+        "type": "object",
+        "description": "The offer of a package to its organization, as it stands after `PUT …/org-offer`.",
+        "required": ["object", "packageId", "offered_to_org"],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["package_org_offer"]
+          },
+          "packageId": {
+            "type": "string",
+            "description": "Package id (`@scope/name`)."
+          },
+          "offered_to_org": {
+            "type": "boolean",
+            "enum": [true]
           }
         }
       },

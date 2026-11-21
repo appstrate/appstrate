@@ -449,7 +449,9 @@ export async function handleChatStream(
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
     // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
-    // or the space of a file `read_resource` reads, before the call, refused outside the set.
+    // or the space of a file `read_resource` reads, before the call, refused outside the set;
+    // search records the spaces it read (`searched_spaces`), and a launch refusal records
+    // the spaces whose activation state it discloses, before any result or card is shown.
     // Skills are procedures, not data: injecting one touches no space.
     const organization: TurnSpaces = {
       spaces,
@@ -539,6 +541,7 @@ export async function handleChatStream(
                   permissions: [...callerPermissions],
                   viewAs: persona,
                   spaceIds: spaces.map((space) => space.id),
+                  restricted,
                 })}`,
                 "x-org-id": orgId,
               },
@@ -835,6 +838,7 @@ export async function handleChatStream(
       injectedSkills,
       // The spaces the bearer reaches: the turn's (a limited conversation's origin alone).
       spaceIds: spaces.map((space) => space.id),
+      restricted: scope.restricted,
       // The conversation issuing its requests: a run it launches may take its own files.
       chatSessionId,
     },

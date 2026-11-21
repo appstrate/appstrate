@@ -9,7 +9,7 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
  * an error carries the text only.
  */
 export function jsonResult(payload: Record<string, unknown>, isError = false): CallToolResult {
-  const content = [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }];
+  const content = [{ type: "text" as const, text: JSON.stringify(payload) }];
   return isError ? { content, isError } : { content, structuredContent: payload, isError };
 }
 
@@ -82,7 +82,14 @@ export interface Refusal {
   hint?: string;
 }
 
-export function refusalResult(refusal: Refusal): CallToolResult {
+/** A route's refusal, as `invoke_operation` relays one: its status and problem body. */
+export interface RouteRefusal {
+  status: number;
+  body: unknown;
+}
+
+/** A refusal result: a tool's own {@link Refusal}, or a route's relayed as is. */
+export function refusalResult(refusal: Refusal | RouteRefusal): CallToolResult {
   return jsonResult({ ...refusal }, true);
 }
 

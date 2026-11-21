@@ -10,7 +10,7 @@
  * keeps the row; only `withdrawPlacement` deletes it.
  */
 
-import { eq, and, exists, inArray, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import type { AnyPgColumn, PgSelect } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import {
@@ -20,7 +20,13 @@ import {
   packageVersions,
   spaces,
 } from "@appstrate/db/schema";
-import { conflict, forbidden, notFound, parseBody } from "../lib/errors.ts";
+import {
+  conflict,
+  forbidden,
+  notFound,
+  parseBody,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -29,8 +35,19 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
-import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import { listOrgOffers, placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import {
+  inactiveDeclaredIntegrations,
+  inactiveRequiredIntegrationIds,
+  integrationNotActiveMessage,
+  translateResolutionError,
+} from "./integration-connection-resolver.ts";
+import {
+  latestTagJoin,
+  selectorlessAgentManifest,
+  selectorlessLaunchManifests,
+} from "./agent-version-resolver.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -56,9 +73,17 @@ async function currentPlacement(tx: Tx, packageId: string, spaceId: string) {
 /**
  * The catalog row every door starts from, or an opaque 404. `FOR SHARE` because
  * `home_space_id` decides whether a row may be created and a home move rewrites
- * it. Lock order: `packages`, then the `space_packages` row.
+ * it. `lock: "update"` is for the one writer of the organization's offer, which
+ * serializes against every row writer (they all hold `FOR SHARE`). The offer is
+ * read AFTER the lock, in a statement of its own, so it is current. Lock order:
+ * `packages`, then the `space_packages` row.
  */
-export async function loadPlaceablePackage(tx: Tx, scope: SpaceScope, packageId: string) {
+export async function loadPlaceablePackage(
+  tx: Tx,
+  scope: OrgScope,
+  packageId: string,
+  lock: "share" | "update" = "share",
+) {
   const [pkg] = await tx
     .select({
       id: packages.id,
@@ -70,17 +95,39 @@ export async function loadPlaceablePackage(tx: Tx, scope: SpaceScope, packageId:
     .from(packages)
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
     .limit(1)
-    .for("share");
+    .for(lock);
   if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
-  return pkg;
+  const offeredToOrg = (await listOrgOffers(scope.orgId, [packageId], tx)).has(packageId);
+  return { ...pkg, offeredToOrg };
 }
 
-/** Placed here without a row — shipped with the deployment, or homed here. */
+/** Placed here without a row — shipped with the deployment, homed here, or offered to the organization. */
 function placedWithoutRow(
-  pkg: { source: string | null; homeSpaceId: string | null },
+  pkg: { source: string | null; homeSpaceId: string | null; offeredToOrg: boolean },
   spaceId: string,
 ): boolean {
-  return pkg.source === "system" || pkg.homeSpaceId === spaceId;
+  return pkg.source === "system" || pkg.homeSpaceId === spaceId || pkg.offeredToOrg;
+}
+
+/** The agent and its local decision stay locked until the schedule insert or re-arm commits. */
+export async function assertScheduleAgentActive(tx: Tx, scope: SpaceScope, packageId: string) {
+  const pkg = await loadPlaceablePackage(tx, scope, packageId);
+  const placement = await currentPlacement(tx, packageId, scope.spaceId);
+  if (!isActiveHere(pkg, placement)) {
+    throw notFound(
+      `Agent '${packageId}' is unavailable for scheduling in this space. Activate it before enabling a schedule.`,
+    );
+  }
+}
+
+/**
+ * Does a row this door creates in `spaceId` exist only because of the offer? A
+ * row outside the home of an organization package is placed by nothing else
+ * here (a real placement is `placePackage`'s), so it decides about the offer
+ * and goes when the offer does (`placed_by_offer`).
+ */
+function offerOnlyRow(pkg: { source: string | null; homeSpaceId: string | null }, spaceId: string) {
+  return pkg.source !== "system" && pkg.homeSpaceId !== spaceId;
 }
 
 /** Who places a package outside its home: recorded as `shared_by`, plus the route's `<type>:share` rule as a predicate, judged against the locked home. */
@@ -117,7 +164,13 @@ export async function placePackage(
   const [row] = await tx
     .insert(spacePackages)
     .values({ spaceId, packageId: pkg.id, enabled: params.enabled, sharedBy: params.sharedBy })
-    .onConflictDoNothing()
+    // A row left by the offer becomes a real placement (keeping its `enabled`
+    // and settings); any other existing row is left untouched.
+    .onConflictDoUpdate({
+      target: [spacePackages.spaceId, spacePackages.packageId],
+      set: { placedByOffer: false, sharedBy: params.sharedBy },
+      setWhere: eq(spacePackages.placedByOffer, true),
+    })
     .returning();
   return row ?? null;
 }
@@ -135,7 +188,7 @@ export async function assertHasPublishedVersion(packageId: string, executor: DbO
 /** The placement as the wire names it, built from the rows just written (a re-read could describe another call's act); same shape as {@link spacePackageSelect}. */
 function spacePackageWire(
   row: typeof spacePackages.$inferSelect,
-  pkg: { type: string; source: string | null; draftManifest: unknown },
+  pkg: { type: PackageType; source: string | null; draftManifest: unknown },
 ) {
   return {
     packageId: row.packageId,
@@ -192,7 +245,10 @@ export async function activatePackageWithin(
   tx: Tx,
   scope: SpaceScope,
   packageId: string,
-  opts?: { placeAs?: PlacementAuthority; keepExistingDecision?: boolean },
+  opts?: {
+    placeAs?: PlacementAuthority;
+    keepExistingDecision?: boolean;
+  },
 ): Promise<PackageActivation> {
   const pkg = await loadPlaceablePackage(tx, scope, packageId);
   const existing = await currentPlacement(tx, packageId, scope.spaceId);
@@ -225,7 +281,12 @@ export async function activatePackageWithin(
     // must not 500. `created` may then be true on both sides (one duplicate audit).
     const [row] = await tx
       .insert(spacePackages)
-      .values({ spaceId: scope.spaceId, packageId, enabled: true })
+      .values({
+        spaceId: scope.spaceId,
+        packageId,
+        enabled: true,
+        placedByOffer: offerOnlyRow(pkg, scope.spaceId),
+      })
       .onConflictDoUpdate({
         target: [spacePackages.spaceId, spacePackages.packageId],
         set: opts?.keepExistingDecision
@@ -244,6 +305,36 @@ export async function activatePackageWithin(
   }
   // A concurrent call placed it first: switch that row on, like any other.
   return switchOn(false, false);
+}
+
+/** A declared integration not active where the agent is now on (`warnings[]` of an activation). */
+export type ActivationWarning = ResolutionFieldError & { required: boolean };
+
+/**
+ * Declared integrations of an agent not active in `spaceId` (`[]` for any other
+ * `type`); activates nothing, since that opens credentials to the space.
+ */
+export async function activationWarnings(
+  scope: SpaceScope,
+  packageId: string,
+  type: PackageType,
+): Promise<ActivationWarning[]> {
+  if (type !== "agent") return [];
+  const manifest = await selectorlessAgentManifest(packageId);
+  if (!manifest) return [];
+  const [inactive] = await inactiveDeclaredIntegrations([manifest], scope);
+  return inactive!.map(({ integrationId, required }) => ({
+    ...translateResolutionError({
+      integrationId,
+      code: "integration_not_active",
+      message: `${integrationNotActiveMessage(integrationId, scope.spaceId)}; ${
+        required
+          ? "a launch of this agent here is refused until then."
+          : "the run proceeds without it."
+      }`,
+    }),
+    required,
+  }));
 }
 
 /** 404 unless the deployment default switches the package on with no row. */
@@ -285,7 +376,12 @@ export async function deactivatePackage(
 
     await tx
       .insert(spacePackages)
-      .values({ spaceId: scope.spaceId, packageId, enabled: false })
+      .values({
+        spaceId: scope.spaceId,
+        packageId,
+        enabled: false,
+        placedByOffer: offerOnlyRow(pkg, scope.spaceId),
+      })
       .onConflictDoUpdate({
         target: [spacePackages.spaceId, spacePackages.packageId],
         set: { enabled: false, updatedAt: new Date() },
@@ -355,12 +451,16 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * an ephemeral shadow. Expects the `spacePackages` join of {@link activeHereSql},
  * which index pages, hints and the run gate all share.
  */
-export function activePackagesFilter(scope: OrgScope, type: PackageType) {
+export function activePackagesFilter(
+  scope: OrgScope,
+  type: PackageType,
+  spaceId: string | AnyPgColumn,
+) {
   return and(
     eq(packages.type, type),
     orgOrSystemFilter(scope.orgId),
     notEphemeralFilter(),
-    activeHereSql(),
+    activeHereSql(spaceId),
   );
 }
 
@@ -377,11 +477,25 @@ export function activeInSpaces<Q extends PgSelect>(
   type: PackageType,
   groupBy: AnyPgColumn[] = [],
 ) {
+  return joinSpacePlacements(query, orgId, spaceIds)
+    .where(activePackagesFilter({ orgId }, type, spaces.id))
+    .groupBy(packages.id, ...groupBy);
+}
+
+/** `query` (a `$dynamic()` select from `packages`) per space of `spaceIds`, with its placement row if any. */
+function joinSpacePlacements<Q extends PgSelect>(
+  query: Q,
+  orgId: string,
+  spaceIds: readonly string[],
+) {
   return query
     .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(activePackagesFilter({ orgId }, type))
-    .groupBy(packages.id, ...groupBy);
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id));
+}
+
+/** Org-or-system, never an ephemeral shadow, placed in the joined space. */
+function readablePlacementFilter(orgId: string) {
+  return and(orgOrSystemFilter(orgId), notEphemeralFilter(), placementReadFilter(spaces.id));
 }
 
 /** Readable placements, including switched-off ones, in home-first space listing order. */
@@ -392,21 +506,31 @@ export async function packagePlacementsInSpaces(
   type: PackageType,
 ) {
   if (!spaceIds.length) return [];
-  return db
-    .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
+  const query = db
+    .select({ id: spaces.id, active: sql<boolean>`${activeHereSql(spaces.id)}` })
     .from(packages)
-    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(
-      and(
-        eq(packages.id, packageId),
-        eq(packages.type, type),
-        orgOrSystemFilter(orgId),
-        notEphemeralFilter(),
-        placementReadFilter(spaces.id),
-      ),
-    )
+    .$dynamic();
+  return joinSpacePlacements(query, orgId, spaceIds)
+    .where(and(eq(packages.id, packageId), eq(packages.type, type), readablePlacementFilter(orgId)))
     .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
+}
+
+/** The `spaceIds` where every one of `packageIds` is placed, readable and active. */
+export async function spacesActiveForAll(
+  orgId: string,
+  packageIds: readonly string[],
+  spaceIds: readonly string[],
+): Promise<Set<string>> {
+  const wanted = [...new Set(packageIds)];
+  if (!wanted.length || !spaceIds.length) return new Set();
+  const query = db.select({ spaceId: spaces.id }).from(packages).$dynamic();
+  const rows = await joinSpacePlacements(query, orgId, spaceIds)
+    .where(
+      and(inArray(packages.id, wanted), readablePlacementFilter(orgId), activeHereSql(spaces.id)),
+    )
+    .groupBy(spaces.id)
+    .having(sql`count(*) = ${wanted.length}`);
+  return new Set(rows.map((row) => row.spaceId));
 }
 
 /**
@@ -437,9 +561,10 @@ function packageListingOrder() {
 
 /**
  * List every package of one `type` any of `spaceIds` runs
- * ({@link activePackagesFilter}): what can be launched from there, one row per
- * package carrying the spaces it is active in ({@link activeSpaceIds}) — ONE
- * statement whatever the number of spaces. Placed-but-off packages belong to
+ * ({@link activePackagesFilter}): what is switched on there (launchable once
+ * its required integrations are active too), one row per package carrying the
+ * spaces it is active in ({@link activeSpaceIds}) — ONE statement whatever the
+ * number of spaces. Placed-but-off packages belong to
  * the library (`services/package-library.ts`). The projection omits
  * `draft_content`, which an index card never reads; `latestVersionId` answers
  * {@link isPublished}. Ordered by {@link packageListingOrder}.
@@ -534,27 +659,6 @@ interface PackageHint {
   home_writable: boolean;
 }
 
-/** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
-function latestTagJoin(packageIdColumn: AnyPgColumn) {
-  return and(
-    eq(packageDistTags.packageId, packageIdColumn),
-    eq(packageDistTags.tag, "latest"),
-    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(packageVersions)
-        .where(
-          and(
-            eq(packageVersions.id, packageDistTags.versionId),
-            eq(packageVersions.packageId, packageIdColumn),
-            eq(packageVersions.yanked, false),
-          ),
-        ),
-    ),
-  );
-}
-
 /** A `latest` dist-tag ({@link latestTagJoin}), or a system package — published by construction. */
 export function isPublished(row: { source: string | null; latestVersionId: number | null }) {
   return row.source === "system" || row.latestVersionId != null;
@@ -582,10 +686,10 @@ interface HintOptions {
 /**
  * List the packages of one `type` an actor in this space could use, as a
  * bounded hint for the get_me caller context. "Could use" is
- * {@link activePackagesFilter}, the run gate's own predicate: a system package,
- * or a placement row that says `enabled`. The list is capped (`limit`) so a
+ * {@link activePackagesFilter}, the activation half of the run gate: a system
+ * package, or a placement row that says `enabled`. The list is capped (`limit`) so a
  * large catalog doesn't bloat the payload — the long tail stays reachable
- * via `search_operations`.
+ * via `search`.
  *
  * Bounded IN SQL. One get_me call runs it twice (agents, then skills): the
  * activation filter and the LIMIT sit in the query, so only the
@@ -605,7 +709,13 @@ async function listActivePackageHints<T extends PackageHint>(
   type: PackageType,
   project: (base: PackageHint, manifest: Record<string, unknown>) => T,
   opts?: HintOptions,
-): Promise<{ items: T[]; truncated: boolean; total: number }> {
+): Promise<{
+  items: T[];
+  /** Each item's row, same order: what {@link selectorlessLaunchManifests} reads. */
+  rows: { source: string | null; draftManifest: unknown; latestVersionId: number | null }[];
+  truncated: boolean;
+  total: number;
+}> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
   const rows = await db
     .select({
@@ -623,7 +733,7 @@ async function listActivePackageHints<T extends PackageHint>(
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
-    .where(activePackagesFilter(scope, type))
+    .where(activePackagesFilter(scope, type, scope.spaceId))
     .orderBy(...packageListingOrder())
     .limit(limit);
 
@@ -645,33 +755,37 @@ async function listActivePackageHints<T extends PackageHint>(
     return project(base, manifest);
   });
 
-  return { items, truncated: total > items.length, total };
+  return { items, rows, truncated: total > items.length, total };
 }
 
-/** One entry in the runnable-agent hint exposed via get_me. */
-interface RunnableAgent extends PackageHint {
+/** One entry in the active-agent hint exposed via get_me. */
+interface ActiveAgentHint extends PackageHint {
   /** Whether the agent declares an input schema with at least one property. */
   takes_input: boolean;
+  /** Required integrations not active here, in the selector-less launch's definition. */
+  inactive_required_integrations: string[];
 }
 
-interface RunnableAgentsResult {
-  agents: RunnableAgent[];
+interface ActiveAgentHintsResult {
+  agents: ActiveAgentHint[];
   /** True when the catalog was capped by `limit` (more reachable via search). */
   truncated: boolean;
-  /** Total runnable agents before the cap. */
+  /** Total active agents before the cap. */
   total: number;
 }
 
 /**
- * Runnable-agent hint for the caller context. "Runnable" is a hint only — the
- * caller gates on the `agents:run` permission and the run route re-checks RBAC
- * at invoke time. See {@link listActivePackageHints}.
+ * The agents ACTIVE in the space, as a hint for the caller context. Active is not
+ * launchable: `inactive_required_integrations` names what the run gate refuses
+ * on, and connections are judged at launch only. The caller gates on the
+ * `agents:run` permission and the run route re-checks RBAC at invoke time. See
+ * {@link listActivePackageHints}.
  */
-export async function listRunnableAgents(
+export async function listActiveAgentHints(
   scope: SpaceScope,
   opts?: HintOptions,
-): Promise<RunnableAgentsResult> {
-  const { items, truncated, total } = await listActivePackageHints(
+): Promise<ActiveAgentHintsResult> {
+  const { items, rows, truncated, total } = await listActivePackageHints(
     scope,
     "agent",
     (base, manifest) => {
@@ -680,7 +794,15 @@ export async function listRunnableAgents(
     },
     opts,
   );
-  return { agents: items, truncated, total };
+  const inactive = await inactiveRequiredIntegrationIds(
+    await selectorlessLaunchManifests(rows),
+    scope,
+  );
+  const agents = items.map((item, i) => ({
+    ...item,
+    inactive_required_integrations: inactive[i]!,
+  }));
+  return { agents, truncated, total };
 }
 
 /** One entry in the active-skill hint exposed via get_me. */
@@ -731,7 +853,7 @@ export async function isPackageActiveHere(scope: SpaceScope, packageId: string):
         eq(packages.id, packageId),
         orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
-        activeHereSql(),
+        activeHereSql(scope.spaceId),
       ),
     )
     .limit(1);
@@ -873,10 +995,9 @@ export async function getResolvedRunConfig(
  * values. Never `enabled` (activation doors own it). The org check shares the
  * write's transaction.
  *
- *   - `requirePlacement: true`: the row must already exist, else 404.
+ *   - `requirePlacement: true`: a local row or an organization offer must already exist.
  *   - default: update the row; with none, create it only where the package is
- *     placed without one (home, system), with the default's `enabled`;
- *     elsewhere 404 (outside the home only {@link placePackage} creates).
+ *     placed without one (home, system or organization offer), preserving the default activation.
  */
 export async function updateSpacePackage(
   scope: SpaceScope,
@@ -911,20 +1032,6 @@ export async function updateSpacePackage(
     // `FOR SHARE`: the home read below decides whether a row may be created.
     const pkg = await loadPlaceablePackage(tx, scope, packageId);
 
-    if (opts?.requirePlacement) {
-      const updated = await tx
-        .update(spacePackages)
-        .set(set)
-        .where(
-          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
-        )
-        .returning({ packageId: spacePackages.packageId });
-      if (updated.length === 0) {
-        throw notFound(`Package '${packageId}' is not placed in this space`);
-      }
-      return;
-    }
-
     const existing = await currentPlacement(tx, packageId, scope.spaceId);
     if (existing) {
       await tx
@@ -935,8 +1042,8 @@ export async function updateSpacePackage(
         );
       return;
     }
-    // Configuring never activates: `enabled` keeps the default's verdict.
-    if (!placedWithoutRow(pkg, scope.spaceId)) {
+    // The public settings door accepts a local row or a current organization offer.
+    if (opts?.requirePlacement ? !pkg.offeredToOrg : !placedWithoutRow(pkg, scope.spaceId)) {
       throw notFound(`Package '${packageId}' is not placed in this space`);
     }
     await tx
@@ -945,6 +1052,7 @@ export async function updateSpacePackage(
         spaceId: scope.spaceId,
         packageId,
         enabled: isActiveWithoutRow(pkg),
+        placedByOffer: offerOnlyRow(pkg, scope.spaceId),
         ...(inputSettings !== undefined ? { inputSettings } : {}),
         ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
         ...(updates.generationConfig !== undefined

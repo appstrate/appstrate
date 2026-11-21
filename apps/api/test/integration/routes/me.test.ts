@@ -24,6 +24,7 @@ import {
 import {
   seedApiKey,
   seedPackage,
+  seedPublishedVersion,
   seedSpacePackage,
   seedSpace,
   seedSpaceMember,
@@ -74,7 +75,7 @@ async function seedConnectionFor(opts: {
     orgId: opts.orgId,
     type: "integration",
     source: "local",
-  });
+  }).catch(() => undefined); // already seeded by an earlier connection of the integration
   const [row] = await db
     .insert(integrationConnections)
     .values({
@@ -314,18 +315,101 @@ describe("Me API (/api/me)", () => {
       expect("needs_reconnection" in byId.get("@ctx/healthy")!).toBe(false);
     });
 
-    describe("connections lists only integrations active in the space", () => {
+    describe("each integration lists the connections the caller may bind", () => {
+      type Listed = {
+        id: string;
+        label: string;
+        account_id: string;
+        owned_by_actor: boolean;
+        needs_reconnection: boolean;
+      };
+      const read = async () => {
+        const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+        const body = (await res.json()) as {
+          connections: { integration_package_id: string; connections: Listed[] }[];
+        };
+        return body.connections;
+      };
+
+      it("lists two connections of one integration by label, oldest first, a colleague's unshared one excluded", async () => {
+        const first = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: ctx.user.id,
+          label: "Prod server",
+        });
+        const second = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: ctx.user.id,
+          label: "Staging server",
+        });
+        const colleague = await createTestUser();
+        await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: colleague.id,
+          label: "Colleague private",
+        });
+        const sharedByColleague = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/ssh",
+          userId: colleague.id,
+          label: "Colleague shared",
+          sharedWithSpace: true,
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/ssh");
+
+        const entry = (await read()).find((c) => c.integration_package_id === "@ctx/ssh")!;
+        expect(entry.connections.map((c) => c.label)).toEqual([
+          "Prod server",
+          "Staging server",
+          "Colleague shared",
+        ]);
+        expect(entry.connections.map((c) => c.id)).toEqual([first, second, sharedByColleague]);
+        expect(entry.connections.map((c) => c.owned_by_actor)).toEqual([true, true, false]);
+        expect(entry.connections[0]).toEqual({
+          id: first,
+          label: "Prod server",
+          account_id: expect.any(String),
+          owned_by_actor: true,
+          needs_reconnection: false,
+        });
+        // Identical calls, identical payload.
+        expect(await read()).toEqual(await read());
+      });
+    });
+
+    describe("connections flags whether each integration is active in the space", () => {
       afterEach(() => {
         __resetSystemIntegrationsForTest();
       });
 
-      async function listedIntegrations(spaceId = ctx.defaultSpaceId) {
+      type Listed = {
+        integration_package_id: string;
+        active: boolean;
+        version?: string;
+        default_tools?: unknown;
+        connections: { id: string }[];
+      };
+
+      async function listedEntries(spaceId = ctx.defaultSpaceId): Promise<Listed[]> {
         const res = await app.request("/api/me/context", {
           headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
         });
         expect(res.status).toBe(200);
-        const body = (await res.json()) as { connections: { integration_package_id: string }[] };
-        return body.connections.map((c) => c.integration_package_id);
+        return ((await res.json()) as { connections: Listed[] }).connections;
+      }
+
+      /** The ids of the integrations ACTIVE in the space. */
+      async function listedIntegrations(spaceId = ctx.defaultSpaceId) {
+        return (await listedEntries(spaceId))
+          .filter((c) => c.active)
+          .map((c) => c.integration_package_id);
       }
 
       /** An org-scope connection (serving every space of the org) of the caller. */
@@ -338,16 +422,25 @@ describe("Me API (/api/me)", () => {
           userId: ctx.user.id,
         });
 
-      it("omits an org-scope connection where its integration is not activated", async () => {
-        await seedOrgConnection("@ctx/twilio");
+      it("lists an org-scope connection where its integration is not activated, as inactive", async () => {
+        const connectionId = await seedOrgConnection("@ctx/twilio");
         const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
         await seedSpacePackage(team.id, "@ctx/twilio");
 
-        expect(await listedIntegrations()).toEqual([]);
-        expect(await listedIntegrations(team.id)).toEqual(["@ctx/twilio"]);
+        const here = await listedEntries();
+        expect(here.map((c) => [c.integration_package_id, c.active])).toEqual([
+          ["@ctx/twilio", false],
+        ]);
+        // Nothing a run could bind, but the connection stays nameable.
+        expect(here[0]!.version).toBeUndefined();
+        expect(here[0]!.default_tools).toBeUndefined();
+        expect(here[0]!.connections.map((c) => c.id)).toEqual([connectionId]);
+        expect(
+          (await listedEntries(team.id)).map((c) => [c.integration_package_id, c.active]),
+        ).toEqual([["@ctx/twilio", true]]);
       });
 
-      it("follows a system integration's activation: listed without a row, omitted when switched off", async () => {
+      it("follows a system integration's activation: active without a row, inactive when switched off", async () => {
         initSystemIntegrations([{ id: "@ctx/system-mail" }]);
         await seedOrgConnection("@ctx/system-mail");
 
@@ -355,6 +448,19 @@ describe("Me API (/api/me)", () => {
 
         await seedSpacePackage(ctx.defaultSpaceId, "@ctx/system-mail", { enabled: false });
         expect(await listedIntegrations()).toEqual([]);
+        expect((await listedEntries()).map((c) => [c.integration_package_id, c.active])).toEqual([
+          ["@ctx/system-mail", false],
+        ]);
+      });
+
+      it("sorts active and inactive entries together by integration id", async () => {
+        await seedOrgConnection("@ctx/zeta");
+        await seedOrgConnection("@ctx/alpha");
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/zeta");
+        expect((await listedEntries()).map((c) => [c.integration_package_id, c.active])).toEqual([
+          ["@ctx/alpha", false],
+          ["@ctx/zeta", true],
+        ]);
       });
 
       it("lists the integrations GET /api/credential-proxy/connections lists", async () => {
@@ -470,6 +576,83 @@ describe("Me API (/api/me)", () => {
       // No `latest` dist-tag was seeded → draft-only agent → must run with version=draft.
       expect(triage?.published).toBe(false);
       expect(body.agents_truncated).toBe(false);
+    });
+
+    it("names each listed agent's required integrations not active in the space", async () => {
+      const integration = (name: string) =>
+        localIntegrationManifest({
+          name,
+          auths: {
+            api: {
+              type: "api_key",
+              authorizedUris: ["https://api.example.com/**"],
+              delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+            },
+          },
+          tools_policy: { search: {} },
+        });
+      // Homed here with no row: placed, not active. `@ctx/svc-on` is switched on.
+      for (const id of ["@ctx/svc-off", "@ctx/svc-optional", "@ctx/svc-on"]) {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          homeSpaceId: ctx.defaultSpaceId,
+          draftManifest: integration(id),
+        });
+      }
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/svc-on");
+      const agent = async (id: string, integrations: Record<string, boolean>) => {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          homeSpaceId: ctx.defaultSpaceId,
+          draftManifest: {
+            name: id,
+            version: "0.1.0",
+            type: "agent",
+            schema_version: "0.2",
+            dependencies: {
+              integrations: Object.fromEntries(Object.keys(integrations).map((i) => [i, "^1.0.0"])),
+            },
+            integrations_configuration: Object.fromEntries(
+              Object.entries(integrations).map(([i, required]) => [
+                i,
+                { tools: ["search"], required },
+              ]),
+            ),
+          },
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      await agent("@ctx/blocked", {
+        "@ctx/svc-off": true,
+        "@ctx/svc-optional": false,
+        "@ctx/svc-on": true,
+      });
+      await agent("@ctx/ready", { "@ctx/svc-on": true });
+      // Its draft is ready, but its published version — what a selector-less launch runs — is not.
+      await agent("@ctx/published-blocked", { "@ctx/svc-on": true });
+      await seedPublishedVersion("@ctx/published-blocked", "1.0.0", {
+        manifest: {
+          name: "@ctx/published-blocked",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          dependencies: { integrations: { "@ctx/svc-off": "^1.0.0" } },
+          integrations_configuration: { "@ctx/svc-off": { tools: ["search"], required: true } },
+        },
+      });
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        agents: { packageId: string; inactive_required_integrations: string[] }[];
+      };
+      const byId = new Map(body.agents.map((a) => [a.packageId, a.inactive_required_integrations]));
+      expect(byId.get("@ctx/blocked")).toEqual(["@ctx/svc-off"]);
+      expect(byId.get("@ctx/ready")).toEqual([]);
+      expect(byId.get("@ctx/published-blocked")).toEqual(["@ctx/svc-off"]);
     });
 
     it("lists installed skills (enabled only) with attachable id and version", async () => {

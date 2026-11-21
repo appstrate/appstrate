@@ -7,6 +7,7 @@ import {
   organizationMembers,
   packageTypeValues,
   type PackageType,
+  packageDistTags,
   packages,
   spacePackages,
   user,
@@ -14,14 +15,19 @@ import {
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
-import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
-import { isActiveHere } from "./package-activation.ts";
+import { callerMayOffer, homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
+import { isActiveHere, isActiveWithoutRow } from "./package-activation.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
+import { listOrgOffers } from "./package-placement.ts";
 
-/** How a package reaches a space: its home, a row outside it (`shared`), or `system` (RBAC spec §6.9). */
-type PlacementVia = "home" | "shared" | "system";
+/**
+ * How a package reaches a space: `system`, its home, a row outside it
+ * (`shared`), or an offer to the organization with no row of the space's own
+ * (`organization`). A system integration activated solely by the offer also reports `organization` (§6.8).
+ */
+type PlacementVia = "home" | "shared" | "system" | "organization";
 
 /** Whether the space RUNS what it was placed. */
 type PlacementState = "active" | "inactive" | "none";
@@ -60,6 +66,10 @@ interface LibraryPackage {
   home_writable: boolean;
   home_deletable: boolean;
   home_shareable: boolean;
+  /** Offered to the organization: placed and active in every space holding no row of its own. */
+  offered_to_org: boolean;
+  /** Whether THIS caller may offer it or withdraw the offer (`PUT|DELETE …/org-offer`). */
+  org_offerable: boolean;
   placements: Placement[];
   activation: ActivationCell[];
 }
@@ -145,6 +155,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       draftManifest: packages.draftManifest,
       spaceId: spacePackages.spaceId,
       enabled: spacePackages.enabled,
+      placedByOffer: spacePackages.placedByOffer,
       sharedBy: spacePackages.sharedBy,
       sharerName: user.name,
     })
@@ -168,6 +179,8 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
     .orderBy(packages.id);
 
+  const offeredIds = await listOrgOffers(orgId);
+
   /** packageId → spaceId → the row's switches, for the rows the caller's spaces hold. */
   const placementRows = new Map<
     string,
@@ -175,6 +188,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       string,
       {
         enabled: boolean;
+        placedByOffer: boolean;
         sharedBy: { user_id: string; name: string } | null;
       }
     >
@@ -185,6 +199,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     if (!bySpace) placementRows.set(row.id, (bySpace = new Map()));
     bySpace.set(row.spaceId, {
       enabled: row.enabled!,
+      placedByOffer: row.placedByOffer!,
       sharedBy: sharerView(row),
     });
   }
@@ -193,6 +208,23 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   // row, and the projection below reads the whole map at once.
   const catalogue = new Map<string, (typeof rows)[number]>();
   for (const row of rows) if (!catalogue.has(row.id)) catalogue.set(row.id, row);
+
+  // The offer door's version precondition, for every homed package at once.
+  const homedIds = [...catalogue.values()]
+    .filter((row) => row.source !== "system")
+    .map((r) => r.id);
+  const published = new Set(
+    homedIds.length === 0
+      ? []
+      : (
+          await db
+            .select({ packageId: packageDistTags.packageId })
+            .from(packageDistTags)
+            .where(
+              and(eq(packageDistTags.tag, "latest"), inArray(packageDistTags.packageId, homedIds)),
+            )
+        ).map((tag) => tag.packageId),
+  );
 
   const grouped: Record<string, LibraryPackage[]> = {
     agent: [],
@@ -207,22 +239,29 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const home = homeWireForCaller(row, accessible);
     const rowsBySpace = placementRows.get(row.id);
 
+    const offered = offeredIds.has(row.id);
+    const activatedByOffer = offered && !isActiveWithoutRow({ ...row, offeredToOrg: false });
     const placements: Placement[] = [];
     for (const space of readable) {
       const placementRow = rowsBySpace?.get(space);
       const via: PlacementVia | null =
-        row.source === "system"
+        row.source === "system" && (placementRow || !activatedByOffer)
           ? "system"
           : row.homeSpaceId === space
             ? "home"
-            : placementRow
+            : placementRow && !placementRow.placedByOffer
               ? "shared"
-              : null;
+              : offered
+                ? "organization"
+                : null;
       if (via === null) continue;
       placements.push({
         space_id: space,
         via,
-        state: placementState({ id: row.id, type, source: row.source }, placementRow?.enabled),
+        state: placementState(
+          { id: row.id, type, source: row.source, offeredToOrg: offered },
+          placementRow?.enabled,
+        ),
         shared_by: via === "shared" ? (placementRow?.sharedBy ?? null) : null,
       });
     }
@@ -255,6 +294,12 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       // §6.10): the home's id only when this caller reaches that space, and the
       // write, delete and share verdicts themselves.
       ...home,
+      offered_to_org: offered,
+      // The offer door's verdict (`assertPackageOfferAccess`): the role and ceiling, the home's
+      // `share` (`home_shareable`) and, when creating an offer for a homed package, a published version.
+      org_offerable:
+        callerMayOffer(c, type) &&
+        (row.source === "system" || (home.home_shareable && (offered || published.has(row.id)))),
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
       placements,
@@ -278,7 +323,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
  * at all.
  */
 function placementState(
-  pkg: { id: string; type: PackageType; source: string },
+  pkg: { id: string; type: PackageType; source: string; offeredToOrg: boolean },
   enabled: boolean | undefined,
 ): PlacementState {
   const row = enabled === undefined ? undefined : { enabled };

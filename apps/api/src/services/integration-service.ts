@@ -13,6 +13,7 @@ import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags, spacePackages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { canonicalUrl } from "@appstrate/afps-shared/authorized-uris";
@@ -21,7 +22,7 @@ import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
-import { pickVersion } from "./run-launcher/db-package-catalog.ts";
+import { getVersionManifests } from "./package-versions.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
@@ -115,11 +116,40 @@ async function fetchIntegrationManifestUncached(
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
-  if (!pkgRow) return { ok: false, failure: { kind: "not_found" } };
-  if (pkgRow.type !== "integration") {
-    return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
+  return manifestLoadResult(pkgRow);
+}
+
+/** A `packages` row (or its absence) answered as an integration manifest load. */
+function manifestLoadResult(
+  row: { manifest: unknown; type: string } | undefined,
+): IntegrationManifestLoadResult {
+  if (!row) return { ok: false, failure: { kind: "not_found" } };
+  if (row.type !== "integration") {
+    return { ok: false, failure: { kind: "not_integration", actualType: row.type } };
   }
-  return parseIntegrationManifest(pkgRow.manifest);
+  return parseIntegrationManifest(row.manifest);
+}
+
+/**
+ * Seed `cache` with each of `ids` it lacks, from ONE read, answered as
+ * {@link fetchIntegrationManifest} answers a single id.
+ */
+export function seedIntegrationManifests(
+  ids: readonly string[],
+  cache: IntegrationManifestCache,
+): void {
+  const missing = [...new Set(ids)].filter((id) => !cache.has(id));
+  if (missing.length === 0) return;
+  const rows = db
+    .select({ id: packages.id, manifest: packages.draftManifest, type: packages.type })
+    .from(packages)
+    .where(inArray(packages.id, missing))
+    .then((found) => new Map(found.map((row) => [row.id, row])));
+  for (const id of missing)
+    cache.set(
+      id,
+      rows.then((byId) => manifestLoadResult(byId.get(id))),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -192,61 +222,103 @@ async function resolvePublishedManifest(
     return { ok: false, reason: "wrong_type", actualType: pkgRow.type };
   }
 
-  // Projection is deliberately metadata-only: `pickVersion` reads nothing but
-  // (version, integrity, yanked), and this list is UNBOUNDED — a package with
-  // N published versions would otherwise pull N manifest jsonb blobs to keep
-  // exactly one. The winner's manifest is fetched by itself below.
-  const [versionRows, tagRows] = await Promise.all([
+  const selectVersion = await integrationVersionCatalog([packageId], orgId, executor);
+  const selected = selectVersion(packageId, pin);
+  if (!selected.ok) return selected;
+  const [row] = await executor
+    .select({ manifest: packageVersions.manifest, version: packageVersions.version })
+    .from(packageVersions)
+    .innerJoin(packages, and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)))
+    .where(eq(packageVersions.id, selected.id))
+    .limit(1);
+  return row
+    ? { ok: true, rawManifest: row.manifest, version: row.version, source: "version" }
+    : { ok: false, reason: "not_found" };
+}
+
+/** Load version metadata once for all requested packages. Only selected manifests need loading. */
+async function integrationVersionCatalog(ids: string[], orgId: string, executor: DbOrTx = db) {
+  const [versions, tags] = await Promise.all([
     executor
       .select({
+        packageId: packages.id,
+        id: packageVersions.id,
         version: packageVersions.version,
-        integrity: packageVersions.integrity,
         yanked: packageVersions.yanked,
       })
       .from(packageVersions)
-      // Same tenant boundary on the version lookup itself (not just the
-      // package row above) so the two reads can never skew across a
-      // concurrent delete/recreate of the package id.
-      .innerJoin(
-        packages,
-        and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)),
+      .innerJoin(packages, eq(packages.id, packageVersions.packageId))
+      .where(
+        and(inArray(packages.id, ids), orgOrSystemFilter(orgId), eq(packages.type, "integration")),
       )
-      .where(eq(packageVersions.packageId, packageId))
       .orderBy(desc(packageVersions.createdAt)),
     executor
-      .select({ tag: packageDistTags.tag, version: packageVersions.version })
+      .select({
+        packageId: packages.id,
+        tag: packageDistTags.tag,
+        versionId: packageDistTags.versionId,
+      })
       .from(packageDistTags)
-      .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
-      .where(eq(packageDistTags.packageId, packageId)),
+      .innerJoin(packages, eq(packages.id, packageDistTags.packageId))
+      .where(and(inArray(packages.id, ids), orgOrSystemFilter(orgId))),
   ]);
-
-  if (versionRows.length === 0) return { ok: false, reason: "no_published_version" };
-
-  // Missing/empty pin → "latest". `pickVersion` applies the canonical
-  // exact → dist-tag → range resolution and the yanked-visibility rule shared
-  // with `DbPackageCatalog`.
-  const spec = pin && pin.trim().length > 0 ? pin.trim() : "latest";
-  const picked = pickVersion(spec, versionRows, tagRows);
-  if (!picked) return { ok: false, reason: "unsatisfiable_pin" };
-
-  // Manifest of the WINNING version only — same tenant boundary as the list
-  // read above, so the two reads cannot skew across a concurrent
-  // delete/recreate of the package id.
-  const [manifestRow] = await executor
-    .select({ manifest: packageVersions.manifest })
-    .from(packageVersions)
-    .innerJoin(packages, and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)))
-    .where(
-      and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, picked.version)),
-    )
-    .limit(1);
-
-  return {
-    ok: true,
-    rawManifest: manifestRow?.manifest,
-    version: picked.version,
-    source: "version",
+  const versionsByPackage = Map.groupBy(versions, (row) => row.packageId);
+  const tagsByPackage = Map.groupBy(tags, (row) => row.packageId);
+  return (packageId: string, pin?: string | null) => {
+    const available = versionsByPackage.get(packageId);
+    if (!available) return { ok: false, reason: "no_published_version" } as const;
+    const id = resolveVersionFromCatalog(
+      pin?.trim() || "latest",
+      available,
+      tagsByPackage.get(packageId) ?? [],
+    );
+    return id === null
+      ? ({ ok: false, reason: "unsatisfiable_pin" } as const)
+      : ({ ok: true, id } as const);
   };
+}
+
+/** Each agent gets the versions it pins. Matching pins share their load and validation. */
+export async function activationManifestCaches(
+  manifests: readonly Record<string, unknown>[],
+  orgId: string,
+) {
+  const declarations = manifests.map(parseManifestIntegrations);
+  const ids = [...new Set(declarations.flat().map((entry) => entry.id))];
+  const system = getSystemPackages();
+  const local = ids.filter((id) => !system.has(id));
+  const selectVersion = local.length ? await integrationVersionCatalog(local, orgId) : null;
+  // A numeric key is an immutable version. A package id is its system definition or the
+  // draft fallback used by run readiness when the published pin cannot be resolved.
+  const selections = declarations.map((entries) =>
+    entries.map(({ id, version }) => {
+      const selected = !system.has(id) && selectVersion?.(id, version);
+      return { id, key: selected && selected.ok ? selected.id : id };
+    }),
+  );
+  const keys = [...new Set(selections.flat().map(({ key }) => key))];
+  const fallbackIds = keys.filter(
+    (key): key is string => typeof key === "string" && !system.has(key),
+  );
+  const [published, fallback] = await Promise.all([
+    getVersionManifests(keys.filter((key): key is number => typeof key === "number")),
+    fallbackIds.length
+      ? db
+          .select({ id: packages.id, type: packages.type, manifest: packages.draftManifest })
+          .from(packages)
+          .where(and(inArray(packages.id, fallbackIds), orgOrSystemFilter(orgId)))
+      : [],
+  ]);
+  const drafts = new Map(fallback.map((row) => [row.id, row]));
+  const loaded = new Map<string | number, Promise<IntegrationManifestLoadResult>>();
+  for (const key of keys) {
+    const result =
+      typeof key === "number"
+        ? parseIntegrationManifest(published.get(key))
+        : manifestLoadResult(system.get(key) ?? drafts.get(key));
+    loaded.set(key, Promise.resolve(result));
+  }
+  return selections.map((entries) => new Map(entries.map(({ id, key }) => [id, loaded.get(key)!])));
 }
 
 // ---------------------------------------------------------------------------
