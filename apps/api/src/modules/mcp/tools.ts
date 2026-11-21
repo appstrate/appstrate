@@ -2489,7 +2489,8 @@ function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<strin
     description: optional
       ? `The one space to search, by id: ${reached}. Omitted, every space you reach is searched ` +
         "and each item names the spaces where you reach it (`granted_in`): act on it with one of " +
-        "them, where your role there still decides."
+        "them, where your role there still decides. Pass it whenever the request or its context " +
+        "designates a space; omit it only when the space is unknown."
       : `The space this call acts in, by id: ${reached}. ` +
         "Take it from the user's request, or, when it names none, from the space your context " +
         "designates for such a request; with neither, a new package goes to the space marked " +
