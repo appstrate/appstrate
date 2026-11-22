@@ -11,14 +11,12 @@ import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
-import type { RunKindFilter } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
 import { showsTeamEmpty } from "../lib/space-filter";
-import { useHiddenRuns } from "../hooks/use-hidden-runs";
-import { HiddenRunsNotice } from "../components/hidden-runs-notice";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -44,7 +42,15 @@ export function RunsPage() {
   const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
   // The team preset narrows by kind, so the URL never grows with the number of spaces; a pick is ids.
   const { spaceKind, spaceIds: pickedSpaceIds } = spaceFilter.runs;
-  const hidden = useHiddenRuns(narrowing);
+  // Runs of personal spaces, which the team default hides. A disabled query keeps serving its
+  // cached `data`: gate the figure on `narrowing`, not just the fetch.
+  const hiddenPage = useFirstRunsPage({
+    spanning: true,
+    spaceKind: "personal",
+    limit: 1,
+    enabled: narrowing,
+  });
+  const hiddenCount = narrowing ? (hiddenPage.data?.total ?? 0) : 0;
   const unreadCount = useUnreadRunCount({ spanning, spaceKind, spaceIds: pickedSpaceIds });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
@@ -94,7 +100,7 @@ export function RunsPage() {
   const teamEmpty = showsTeamEmpty({
     readerFiltered: filtered,
     narrowing,
-    hiddenCount: hidden.total,
+    hiddenCount,
   });
   const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
@@ -127,27 +133,17 @@ export function RunsPage() {
         spaceKind={spaceKind}
         spaceIds={pickedSpaceIds}
         search={search}
-        toolbar={({ columns, empty }) => (
-          <>
-            <ListToolbar
-              search={{
-                value: search,
-                onChange: list.setSearch,
-                placeholder: searchPlaceholder,
-              }}
-              filters={filters}
-              onReset={list.reset}
-              columns={columns}
-            />
-            {/* The team-empty state says the same and offers the same button. */}
-            {!(empty && teamEmpty) && (
-              <HiddenRunsNotice
-                inFlight={hidden.inFlight}
-                unread={hidden.unread}
-                showAll={spaceFilter.showAll}
-              />
-            )}
-          </>
+        toolbar={({ columns }) => (
+          <ListToolbar
+            search={{
+              value: search,
+              onChange: list.setSearch,
+              placeholder: searchPlaceholder,
+            }}
+            filters={filters}
+            onReset={list.reset}
+            columns={columns}
+          />
         )}
         // A filtered list that finds nothing ran out of matches: the way out is the filter. When
         // only the space filter narrows, the way out is every space.
