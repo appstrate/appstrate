@@ -11,6 +11,7 @@ import { BookOpenIcon, LockIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import {
+  NO_CITED_SKILLS,
   canResetSkills,
   effectiveSkills,
   loadsSkill,
@@ -18,11 +19,9 @@ import {
   type ConversationSkills,
 } from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport, type ChatTranslate } from "./runtime-context.ts";
 import { SkillsChip } from "./skills-picker.tsx";
 import { useChatCommands } from "./use-chat-commands.ts";
-
-const NO_CITED: readonly string[] = [];
 
 interface LoadedSkill {
   packageId: string;
@@ -54,18 +53,23 @@ function useSkillsByLoad(
   };
 }
 
-type Translate = ReturnType<typeof useChatHost>["t"];
-
 /** The pill's text: the count of several skills, the name of a single one, or how many are not loaded when none is. */
-function pillText(skills: readonly LoadedSkill[], refused: number, t: Translate): string {
+function pillText(skills: readonly LoadedSkill[], refused: number, t: ChatTranslate): string {
   if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
-  return skills.length === 1 ? skills[0]!.name : t("skills.pinnedCount", { n: skills.length });
+  return skills.length === 1 ? skills[0]!.name : t("skills.pinnedCount", { count: skills.length });
 }
 
 /** What the accessible name says of the skills: the single name, or how many. The tooltip lists them. */
-function skillsSummary(skills: readonly LoadedSkill[], refused: number, t: Translate): string {
+function skillsSummary(skills: readonly LoadedSkill[], refused: number, t: ChatTranslate): string {
   if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
-  return skills.length === 1 ? skills[0]!.name : t("skills.count", { n: skills.length });
+  return skills.length === 1 ? skills[0]!.name : t("skills.count", { count: skills.length });
+}
+
+/** What the live region reads out: the loaded skills, then how many pins are not loaded. */
+function liveSummary(skills: readonly LoadedSkill[], refused: number, t: ChatTranslate): string {
+  if (skills.length === 0) return refused === 0 ? "" : skillsSummary(skills, refused, t);
+  const loaded = skillsSummary(skills, 0, t);
+  return refused === 0 ? loaded : `${loaded}, ${t("skills.notLoadedCount", { count: refused })}`;
 }
 
 function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
@@ -109,6 +113,7 @@ function PinnedPill({
   onReset?: () => void;
 }) {
   const { t } = useChatHost();
+  const summary = skillsSummary(skills, refused.length, t);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -117,7 +122,7 @@ function PinnedPill({
           open={{
             onClick: onOpen,
             label: t(discovery ? "skills.pinnedPillLabel" : "skills.pinnedLockedPillLabel", {
-              skills: skillsSummary(skills, refused.length, t),
+              skills: summary,
             }),
             testId: "skill-pill-pinned",
           }}
@@ -154,23 +159,29 @@ interface SkillChipsProps {
 export function SkillChips({
   transport,
   skills,
-  cited = NO_CITED,
+  cited = NO_CITED_SKILLS,
   onOpenPicker,
   onReset,
 }: SkillChipsProps) {
+  const { t } = useChatHost();
   const { loaded, refused } = useSkillsByLoad(transport, skills, cited);
-  if (loaded.length === 0 && refused.length === 0) {
-    return (
-      <SkillsChip discovery={skills.skillDiscovery} onClick={onOpenPicker} onReset={onReset} />
-    );
-  }
   return (
-    <PinnedPill
-      skills={loaded}
-      refused={refused}
-      discovery={skills.skillDiscovery}
-      onOpen={onOpenPicker}
-      onReset={canResetSkills(skills, cited) ? onReset : undefined}
-    />
+    <>
+      {loaded.length === 0 && refused.length === 0 ? (
+        <SkillsChip discovery={skills.skillDiscovery} onClick={onOpenPicker} onReset={onReset} />
+      ) : (
+        <PinnedPill
+          skills={loaded}
+          refused={refused}
+          discovery={skills.skillDiscovery}
+          onOpen={onOpenPicker}
+          onReset={canResetSkills(skills, cited) ? onReset : undefined}
+        />
+      )}
+      {/* Always mounted, so a verdict landing after a turn is read out. */}
+      <span aria-live="polite" data-testid="skill-pill-live" className="sr-only">
+        {liveSummary(loaded, refused.length, t)}
+      </span>
+    </>
   );
 }

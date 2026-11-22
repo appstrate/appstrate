@@ -2,8 +2,9 @@
 
 /**
  * The skill picker's pure rules. The server holds the conversation's skills (`StoredSkills`); the
- * client holds only what the user changed since it last read them (`ChatSkillChanges`), and sends
- * those changes, never a full set: a stale client cannot drop a pin the server added.
+ * client holds only what the user changed (`ChatSkillChanges`): the changes the turn being sent
+ * carries, and those made since. It sends changes, never a full set: a stale client cannot drop a
+ * pin the server added.
  */
 
 import { parseScopedName } from "@appstrate/core/naming";
@@ -29,7 +30,7 @@ export interface StoredSkills {
 /** A conversation the server does not hold yet: discovery on, no pin. */
 export const DEFAULT_STORED_SKILLS: StoredSkills = {
   skillDiscovery: DEFAULT_SKILL_SELECTION.skillDiscovery,
-  pins: DEFAULT_SKILL_SELECTION.pinnedSkills.map((id) => ({ id, source: "user", status: null })),
+  pins: [],
 };
 
 export const NO_SKILL_CHANGES: ChatSkillChanges = { pin: [], unpin: [] };
@@ -39,76 +40,90 @@ export function hasSkillChanges(changes: ChatSkillChanges): boolean {
   return changes.skillDiscovery !== undefined || changes.pin.length > 0 || changes.unpin.length > 0;
 }
 
+/**
+ * The user's changes in two layers over the server's skills: `inFlight`, carried by the turn being
+ * sent and not answered yet, and `local`, made since (against the server's skills with `inFlight`
+ * applied, so undoing an in-flight change is an ordinary change).
+ */
+export interface SkillLayers {
+  inFlight: ChatSkillChanges;
+  local: ChatSkillChanges;
+}
+
+export const NO_SKILL_LAYERS: SkillLayers = { inFlight: NO_SKILL_CHANGES, local: NO_SKILL_CHANGES };
+
+/** `older` then `newer`: for a skill or the discovery switch both change, `newer` wins. */
+export function mergeSkillChanges(
+  older: ChatSkillChanges,
+  newer: ChatSkillChanges,
+): ChatSkillChanges {
+  const decided = new Set([...newer.pin, ...newer.unpin]);
+  const kept = (ids: readonly string[]) => ids.filter((id) => !decided.has(id));
+  const skillDiscovery = newer.skillDiscovery ?? older.skillDiscovery;
+  return {
+    ...(skillDiscovery !== undefined && { skillDiscovery }),
+    pin: [...kept(older.pin), ...newer.pin],
+    unpin: [...kept(older.unpin), ...newer.unpin],
+  };
+}
+
 /** The conversation's skills as the composer shows them: the server's, the user's changes applied. */
 export interface ConversationSkills {
   skillDiscovery: boolean;
   /** Pinned once the changes apply, sorted: with the draft's citations, what the cap counts. */
   pinned: readonly string[];
-  /** The server's pins, by id: their source and the verdict of the last turn. */
+  /** The server's pins with the in-flight changes applied, by id: source and last verdict. */
   stored: ReadonlyMap<string, PinnedSkill>;
   /** Pinned by a change the server has not applied yet: the next turn loads them. */
   pending: ReadonlySet<string>;
 }
 
-export function conversationSkills(
-  stored: StoredSkills,
-  changes: ChatSkillChanges,
-): ConversationSkills {
-  const byId = new Map(stored.pins.map((pin) => [pin.id, pin]));
+export function conversationSkills(stored: StoredSkills, layers: SkillLayers): ConversationSkills {
+  const base = withAppliedChanges(stored, layers.inFlight);
+  const byId = new Map(base.pins.map((pin) => [pin.id, pin]));
   return {
-    skillDiscovery: changes.skillDiscovery ?? stored.skillDiscovery,
-    pinned: applySkillChanges([...byId.keys()], changes),
+    skillDiscovery: layers.local.skillDiscovery ?? base.skillDiscovery,
+    pinned: applySkillChanges([...byId.keys()], layers.local),
     stored: byId,
-    pending: new Set(changes.pin),
+    pending: new Set([...layers.inFlight.pin, ...layers.local.pin]),
   };
-}
-
-/**
- * What a change is made against: the server's skills as last read, and the changes the turn in
- * flight carries. A change the server state already shows is not recorded, unless it undoes one
- * in flight: the server is about to apply that one, and the undo must reach it.
- */
-export interface SkillChangeBase {
-  stored: StoredSkills;
-  inFlight: ChatSkillChanges | null;
 }
 
 const without = (ids: readonly string[], id: string) => ids.filter((other) => other !== id);
 const withId = (ids: readonly string[], id: string) => (ids.includes(id) ? ids : [...ids, id]);
 
-/** `changes` with `id` pinned (`on`) or unpinned, from the panel. */
+/**
+ * `changes` with `id` pinned (`on`) or unpinned, from the panel. `base` is what the changes apply
+ * to: a change it already shows is not recorded.
+ */
 export function changePin(
   changes: ChatSkillChanges,
   id: string,
   on: boolean,
-  { stored, inFlight }: SkillChangeBase,
+  base: StoredSkills,
 ): ChatSkillChanges {
-  const held = stored.pins.some((pin) => pin.id === id);
-  if (on) {
-    const record = !held || !!inFlight?.unpin.includes(id);
+  const held = base.pins.some((pin) => pin.id === id);
+  if (on)
     return {
       ...changes,
-      pin: record ? withId(changes.pin, id) : changes.pin,
+      pin: held ? changes.pin : withId(changes.pin, id),
       unpin: without(changes.unpin, id),
     };
-  }
-  const record = held || !!inFlight?.pin.includes(id);
   return {
     ...changes,
     pin: without(changes.pin, id),
-    unpin: record ? withId(changes.unpin, id) : changes.unpin,
+    unpin: held ? withId(changes.unpin, id) : changes.unpin,
   };
 }
 
-/** `changes` with discovery `on` or off. */
+/** `changes` with discovery `on` or off, over `base`. */
 export function changeDiscovery(
   changes: ChatSkillChanges,
   on: boolean,
-  { stored, inFlight }: SkillChangeBase,
+  base: StoredSkills,
 ): ChatSkillChanges {
   const { skillDiscovery: _previous, ...rest } = changes;
-  const undoesInFlight = inFlight?.skillDiscovery !== undefined && inFlight.skillDiscovery !== on;
-  return on === stored.skillDiscovery && !undoesInFlight ? rest : { ...rest, skillDiscovery: on };
+  return on === base.skillDiscovery ? rest : { ...rest, skillDiscovery: on };
 }
 
 /**
@@ -139,13 +154,16 @@ export function withAppliedChanges(stored: StoredSkills, changes: ChatSkillChang
 export function resetSkillChanges(
   changes: ChatSkillChanges,
   pinned: readonly string[],
-  base: SkillChangeBase,
+  base: StoredSkills,
 ): ChatSkillChanges {
   return pinned.reduce(
     (next, id) => changePin(next, id, false, base),
     changeDiscovery(changes, true, base),
   );
 }
+
+/** No skill cited: the default of the components that take the draft's citations. */
+export const NO_CITED_SKILLS: readonly string[] = [];
 
 /** The package ids of the skills a draft cites with a skill directive, each once. */
 export function citedSkillIds(draft: string): string[] {

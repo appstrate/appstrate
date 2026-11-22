@@ -6,11 +6,13 @@ import { describe, expect, it } from "bun:test";
 import type { ChatSkillChanges, PinnedSkill } from "../src/skills.ts";
 import {
   NO_SKILL_CHANGES,
+  NO_SKILL_LAYERS,
   changeDiscovery,
   changePin,
   conversationSkills,
   hasSkillChanges,
   loadsSkill,
+  mergeSkillChanges,
   resetSkillChanges,
   withAppliedChanges,
   citeSkill,
@@ -33,11 +35,13 @@ const changes = (c: Partial<ChatSkillChanges> = {}): ChatSkillChanges => ({
   ...c,
 });
 
+const local = (c: Partial<ChatSkillChanges>) => ({ ...NO_SKILL_LAYERS, local: changes(c) });
+
 describe("conversationSkills", () => {
   it("applies the changes to the server's pins and discovery", () => {
     const skills = conversationSkills(
       stored([pin("@a/held"), pin("@a/dropped")], true),
-      changes({ pin: ["@a/new"], unpin: ["@a/dropped"], skillDiscovery: false }),
+      local({ pin: ["@a/new"], unpin: ["@a/dropped"], skillDiscovery: false }),
     );
     expect(skills.pinned).toEqual(["@a/held", "@a/new"]);
     expect(skills.skillDiscovery).toBe(false);
@@ -45,14 +49,38 @@ describe("conversationSkills", () => {
   });
 
   it("is the server's state when nothing changed", () => {
-    const skills = conversationSkills(stored([pin("@a/x")], false), NO_SKILL_CHANGES);
+    const skills = conversationSkills(stored([pin("@a/x")], false), NO_SKILL_LAYERS);
     expect(skills.pinned).toEqual(["@a/x"]);
     expect(skills.skillDiscovery).toBe(false);
+  });
+
+  it("layers the local changes over the in-flight ones, both pending until applied", () => {
+    const skills = conversationSkills(stored([pin("@a/held")], true), {
+      inFlight: changes({ pin: ["@a/sent"], skillDiscovery: false }),
+      local: changes({ pin: ["@a/later"], unpin: ["@a/sent"] }),
+    });
+    expect(skills.pinned).toEqual(["@a/held", "@a/later"]);
+    expect(skills.skillDiscovery).toBe(false);
+    expect([...skills.pending].sort()).toEqual(["@a/later", "@a/sent"]);
+  });
+});
+
+describe("mergeSkillChanges", () => {
+  it("keeps both sides' changes, the newer winning where both decide", () => {
+    expect(
+      mergeSkillChanges(
+        changes({ pin: ["@a/x", "@a/y"], unpin: ["@a/z"], skillDiscovery: false }),
+        changes({ unpin: ["@a/x"], pin: ["@a/z"] }),
+      ),
+    ).toEqual(changes({ pin: ["@a/y", "@a/z"], unpin: ["@a/x"], skillDiscovery: false }));
+    expect(
+      mergeSkillChanges(changes({ skillDiscovery: false }), changes({ skillDiscovery: true })),
+    ).toEqual(changes({ skillDiscovery: true }));
   });
 });
 
 describe("changePin", () => {
-  const base = { stored: stored([pin("@a/held", "injected", "assistant")]), inFlight: null };
+  const base = stored([pin("@a/held", "injected", "assistant")]);
 
   it("records a pin the server lacks and an unpin of one it holds", () => {
     expect(changePin(NO_SKILL_CHANGES, "@a/new", true, base)).toEqual(changes({ pin: ["@a/new"] }));
@@ -69,25 +97,25 @@ describe("changePin", () => {
     expect(changePin(unpinned, "@a/held", true, base)).toEqual(NO_SKILL_CHANGES);
   });
 
-  it("records the undo of a change the turn in flight carries: the server is about to apply it", () => {
-    const sentPin = { ...base, inFlight: changes({ pin: ["@a/new"] }) };
-    expect(changePin(changes({ pin: ["@a/new"] }), "@a/new", false, sentPin)).toEqual(
+  it("records the undo of an in-flight change: made over the server's state with it applied", () => {
+    const sentPin = withAppliedChanges(base, changes({ pin: ["@a/new"] }));
+    expect(changePin(NO_SKILL_CHANGES, "@a/new", false, sentPin)).toEqual(
       changes({ unpin: ["@a/new"] }),
     );
-    const sentUnpin = { ...base, inFlight: changes({ unpin: ["@a/held"] }) };
-    expect(changePin(changes({ unpin: ["@a/held"] }), "@a/held", true, sentUnpin)).toEqual(
+    const sentUnpin = withAppliedChanges(base, changes({ unpin: ["@a/held"] }));
+    expect(changePin(NO_SKILL_CHANGES, "@a/held", true, sentUnpin)).toEqual(
       changes({ pin: ["@a/held"] }),
     );
   });
 
   it("never sends a full set: the server's other pins are not named", () => {
-    const many = { stored: stored([pin("@a/1"), pin("@a/2"), pin("@a/3")]), inFlight: null };
+    const many = stored([pin("@a/1"), pin("@a/2"), pin("@a/3")]);
     expect(changePin(NO_SKILL_CHANGES, "@a/2", false, many)).toEqual(changes({ unpin: ["@a/2"] }));
   });
 });
 
 describe("changeDiscovery", () => {
-  const base = { stored: stored([], true), inFlight: null };
+  const base = stored([], true);
 
   it("records a departure from the server and drops a return to it", () => {
     const off = changeDiscovery(NO_SKILL_CHANGES, false, base);
@@ -95,9 +123,9 @@ describe("changeDiscovery", () => {
     expect(changeDiscovery(off, true, base)).toEqual(NO_SKILL_CHANGES);
   });
 
-  it("keeps a return to the server's value that undoes the turn in flight", () => {
-    const inFlight = { ...base, inFlight: changes({ skillDiscovery: false }) };
-    expect(changeDiscovery(changes({ skillDiscovery: false }), true, inFlight)).toEqual(
+  it("records a return to the server's value that undoes the turn in flight", () => {
+    const sent = withAppliedChanges(base, changes({ skillDiscovery: false }));
+    expect(changeDiscovery(NO_SKILL_CHANGES, true, sent)).toEqual(
       changes({ skillDiscovery: true }),
     );
   });
@@ -105,7 +133,7 @@ describe("changeDiscovery", () => {
 
 describe("resetSkillChanges", () => {
   it("unpins every pin and turns discovery back on", () => {
-    const base = { stored: stored([pin("@a/held")], false), inFlight: null };
+    const base = stored([pin("@a/held")], false);
     expect(resetSkillChanges(changes({ pin: ["@a/new"] }), ["@a/held", "@a/new"], base)).toEqual(
       changes({ skillDiscovery: true, unpin: ["@a/held"] }),
     );
@@ -163,7 +191,7 @@ describe("skillRowState", () => {
       pin("@a/broken", "unreadable"),
       pin("@a/dropped"),
     ]),
-    changes({ pin: ["@a/pending"], unpin: ["@a/dropped"] }),
+    local({ pin: ["@a/pending"], unpin: ["@a/dropped"] }),
   );
   const state = (id: string, cited: string[] = []) => skillRowState(skills, id, new Set(cited));
 
@@ -177,10 +205,10 @@ describe("skillRowState", () => {
   });
 
   it("is next for a pending pin even over a stored verdict: the re-check postdates it", () => {
-    const repinned = conversationSkills(stored([pin("@a/x", "injected", "assistant")]), {
-      pin: ["@a/x"],
-      unpin: [],
-    });
+    const repinned = conversationSkills(
+      stored([pin("@a/x", "injected", "assistant")]),
+      local({ pin: ["@a/x"] }),
+    );
     expect(skillRowState(repinned, "@a/x", new Set())).toEqual({ kind: "next" });
   });
 

@@ -9,7 +9,7 @@ import {
   citedSkillIds,
   conversationSkills,
   effectiveSkills,
-  NO_SKILL_CHANGES,
+  NO_SKILL_LAYERS,
 } from "../src/ui/chat-skills.ts";
 import { draftIssue } from "../src/ui/directive-send.ts";
 import { commandList } from "../src/ui/composer-commands.ts";
@@ -59,7 +59,7 @@ describe("canResetSkills", () => {
   const skills = (skillDiscovery: boolean, pinned: string[]) =>
     conversationSkills(
       { skillDiscovery, pins: pinned.map((id) => ({ id, source: "user", status: "injected" })) },
-      NO_SKILL_CHANGES,
+      NO_SKILL_LAYERS,
     );
   const on = skills(true, ["@acme/a"]);
 

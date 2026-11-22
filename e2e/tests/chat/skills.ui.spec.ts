@@ -78,5 +78,4 @@ test("carries the skill changes and discovery with the first message, and writes
   expect(body.skill_discovery).toBe(false);
   expect(body.pin_skills).toEqual([packageId]);
   expect(body.unpin_skills).toBeUndefined();
-  expect(body.pinned_skills).toBeUndefined();
 });

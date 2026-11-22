@@ -9,9 +9,13 @@
  */
 
 import type { Page } from "@playwright/test";
+import type { components, operations } from "../../../apps/web/src/api/schema.d.ts";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 
-const commands = {
+// Typed from the generated API types: a contract change breaks the typecheck, not the mock.
+type SessionDetail = operations["getChatSession"]["responses"][200]["content"]["application/json"];
+
+const commands: components["schemas"]["ChatCommands"] = {
   skills: [
     { id: "@acme/tone", name: "tone", description: "Adjusts the tone", version: "1.0.0" },
     { id: "@acme/auto", name: "auto", description: "Loaded by the assistant", version: "1.0.0" },
@@ -20,7 +24,7 @@ const commands = {
   agents: [],
 };
 
-const skills = [
+const skills: SessionDetail["skills"] = [
   { id: "@acme/auto", source: "assistant", status: "injected" },
   { id: "@acme/big", source: "user", status: "over_budget" },
   { id: "@acme/tone", source: "user", status: "injected" },
@@ -49,50 +53,48 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
   );
   await page.route(`**${chat}/sessions/${id}`, async (route) => {
     const response = await route.fetch();
-    await route.fulfill({
-      response,
-      json: {
-        ...(await response.json()),
-        skill_discovery: true,
-        skills,
-        messages: [
-          {
-            id: "load",
-            content: {
-              role: "assistant",
-              parts: [
-                {
-                  type: "tool-read_resource",
-                  toolCallId: "call_auto",
-                  state: "output-available",
-                  input: { uri: skillMd("auto") },
-                  // What a reload serves: the receipt, never the skill's body.
-                  output: {
-                    content: [
-                      {
-                        type: "text",
-                        text: JSON.stringify({
-                          uri: skillMd("auto"),
-                          skill: "@acme/auto",
-                          pinned: true,
-                        }),
-                      },
-                    ],
-                  },
+    const json: SessionDetail = {
+      ...((await response.json()) as SessionDetail),
+      skill_discovery: true,
+      skills,
+      messages: [
+        {
+          id: "load",
+          content: {
+            role: "assistant",
+            parts: [
+              {
+                type: "tool-read_resource",
+                toolCallId: "call_auto",
+                state: "output-available",
+                input: { uri: skillMd("auto") },
+                // What a reload serves: the receipt, never the skill's body.
+                output: {
+                  content: [
+                    {
+                      type: "text",
+                      text: JSON.stringify({
+                        uri: skillMd("auto"),
+                        skill: "@acme/auto",
+                        pinned: true,
+                      }),
+                    },
+                  ],
                 },
-                {
-                  type: "tool-read_resource",
-                  toolCallId: "call_refused",
-                  state: "output-error",
-                  input: { uri: skillMd("pdf") },
-                  errorText: "This conversation already pins 5 skills.",
-                },
-              ],
-            },
+              },
+              {
+                type: "tool-read_resource",
+                toolCallId: "call_refused",
+                state: "output-error",
+                input: { uri: skillMd("pdf") },
+                errorText: "This conversation already pins 5 skills.",
+              },
+            ],
           },
-        ],
-      },
-    });
+        },
+      ],
+    };
+    await route.fulfill({ response, json });
   });
 
   await page.goto(`/chat/${id}`);
@@ -107,7 +109,8 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
   await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText("Non chargée");
   await expect(loads.nth(1)).not.toContainText("already pins");
 
-  // The pill counts only what is loaded: the refused pin is left out.
+  // The pill counts only what is loaded: `big`, pinned but over budget, is left out (`pdf` is a
+  // refused load, never a pin).
   await expect(page.getByTestId("skill-pill-pinned")).toHaveText(/^\s*2 ajoutées\s*$/);
 
   await openSkillsPicker(page);
@@ -140,5 +143,4 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
   expect(body.unpin_skills).toEqual(["@acme/auto"]);
   expect(body.pin_skills).toBeUndefined();
   expect(body.skill_discovery).toBeUndefined();
-  expect(body.pinned_skills).toBeUndefined();
 });

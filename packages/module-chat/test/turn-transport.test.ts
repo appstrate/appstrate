@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { createTurnTransport } from "../src/ui/chat-route.ts";
+import { createTurnTransport, type TurnAnswer } from "../src/ui/chat-route.ts";
 import type { ChatTransport } from "../src/ui/runtime-context.ts";
 import { transportOver } from "./fake-request.ts";
 
@@ -15,11 +15,13 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-function capture(status = 200): string[] {
+/** `status` answers every request; `null` fails it before any response. */
+function capture(status: number | null = 200): string[] {
   const urls: string[] = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       urls.push(String(input));
+      if (status === null) throw new TypeError("Failed to fetch");
       return new Response("", { status });
     },
     { preconnect: realFetch.preconnect },
@@ -52,12 +54,14 @@ describe("the turn transport", () => {
     expect(urls).toEqual(["/api/orgs/org_1/chat", "/api/orgs/org_1/chat/sessions/chs_1/stream"]);
   });
 
-  it("reports whether the server accepted the turn, and nothing for the resume", async () => {
-    for (const [status, accepted] of [
-      [200, true],
-      [503, false],
+  it("reports how the server answered the turn, and nothing for the resume", async () => {
+    for (const [status, answer] of [
+      [200, "accepted"],
+      [409, "refused"],
+      [503, "refused"],
+      [null, "unanswered"],
     ] as const) {
-      const answers: boolean[] = [];
+      const answers: TurnAnswer[] = [];
       const turns = createTurnTransport({
         getTransport: () => transportOver(async () => new Response()),
         headers: () => ({}),
@@ -75,7 +79,7 @@ describe("the turn transport", () => {
         })
         .catch(() => {});
       await turns.reconnectToStream({ chatId: "chs_1" }).catch(() => {});
-      expect(answers).toEqual([accepted]);
+      expect(answers).toEqual([answer]);
     }
   });
 });

@@ -13,6 +13,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 import {
+  NO_CITED_SKILLS,
   effectiveSkills,
   skillPickerRows,
   skillRowState,
@@ -22,9 +23,7 @@ import {
 import type { SkillActions } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { RemovableChip } from "./removable-chip.tsx";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
-
-const NO_CITED: readonly string[] = [];
+import { useChatHost, type ChatTransport, type ChatTranslate } from "./runtime-context.ts";
 
 interface SkillsPickerProps {
   transport: ChatTransport | undefined;
@@ -68,8 +67,6 @@ export function SkillsChip({
   );
 }
 
-type Translate = ReturnType<typeof useChatHost>["t"];
-
 const REFUSAL_KEY: Record<Extract<SkillRowState, { kind: "refused" }>["reason"], string> = {
   over_budget: "skills.state.refused.over_budget",
   unavailable: "skills.state.refused.unavailable",
@@ -77,7 +74,7 @@ const REFUSAL_KEY: Record<Extract<SkillRowState, { kind: "refused" }>["reason"],
 };
 
 /** A row's caption: what the server reported of its skill; none for a skill the user's pin loaded. */
-function rowCaption(state: SkillRowState, t: Translate): string | null {
+function rowCaption(state: SkillRowState, t: ChatTranslate): string | null {
   switch (state.kind) {
     case "cited":
       return t("skills.cited");
@@ -97,7 +94,7 @@ export function SkillsPickerPanel({
   transport,
   skills: conversation,
   actions,
-  cited = NO_CITED,
+  cited = NO_CITED_SKILLS,
 }: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "cited">) {
   const { t } = useChatHost();
   const catalogue = useChatCommands(transport, true);
@@ -110,9 +107,9 @@ export function SkillsPickerPanel({
   const atPinCap = effective.atCap;
   const rows = skillPickerRows(skills, effective.ids);
 
-  const togglePin = (packageId: string) => {
-    // A cited skill is the message's: only removing its chip drops it.
-    if (effective.cited.has(packageId)) return;
+  const togglePin = (packageId: string, checked: boolean) => {
+    // A cited skill is the message's: only removing its chip drops it. Past the cap, nothing pins.
+    if (effective.cited.has(packageId) || (!checked && atPinCap)) return;
     actions.togglePin(packageId);
   };
 
@@ -162,12 +159,16 @@ export function SkillsPickerPanel({
             // By row: a package id's `@` and `/` break selectors, and a slug
             // of it can collide (`@a-b/c`, `@a/b-c`).
             const id = `skills-pin-${index}`;
+            const nameId = `${id}-name`;
+            const detailsId = `${id}-details`;
             const state = skillRowState(conversation, skill.id, effective.cited);
             const checked = state.kind !== "off";
             const isCited = state.kind === "cited";
+            // Not `disabled`: a locked row stays focusable, so its reason is still read out.
             const inert = (!checked && atPinCap) || isCited;
             const caption = rowCaption(state, t);
             const refused = state.kind === "refused";
+            const hasDetails = !!caption || (available ? !!skill.description : !refused);
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
@@ -175,46 +176,52 @@ export function SkillsPickerPanel({
                   data-testid={`skill-pin-${skill.id}`}
                   data-state-kind={state.kind}
                   checked={checked}
-                  disabled={inert}
+                  aria-disabled={inert || undefined}
+                  aria-labelledby={nameId}
+                  aria-describedby={hasDetails ? detailsId : undefined}
                   data-cited={isCited || undefined}
-                  onCheckedChange={() => togglePin(skill.id)}
-                  className="mt-0.5 shrink-0"
+                  onCheckedChange={() => togglePin(skill.id, checked)}
+                  className={cn("mt-0.5 shrink-0", inert && "cursor-not-allowed opacity-50")}
                 />
                 <label
                   htmlFor={id}
                   className={cn("min-w-0 flex-1 cursor-pointer", inert && "opacity-50")}
                 >
                   <span className="flex items-baseline gap-1.5">
-                    <span className="truncate text-xs font-medium">{skill.name}</span>
+                    <span id={nameId} className="truncate text-xs font-medium">
+                      {skill.name}
+                    </span>
                     {skill.version && (
                       <span className="text-muted-foreground shrink-0 text-[0.65rem]">
                         v{skill.version}
                       </span>
                     )}
                   </span>
-                  {/* Inside the label, so the checkbox's name says why it is locked or not loaded. */}
-                  {caption && (
-                    <span
-                      data-testid={`skill-pin-state-${skill.id}`}
-                      className={cn(
-                        "block text-[0.7rem] leading-snug",
-                        refused ? "text-warning" : "text-muted-foreground",
-                      )}
-                    >
-                      {caption}
-                    </span>
-                  )}
-                  {available && skill.description && (
-                    <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
-                      {skill.description}
-                    </span>
-                  )}
-                  {/* A pin the catalogue no longer lists; a refusal already says why it is out. */}
-                  {!available && !refused && (
-                    <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
-                      {t("skills.unavailable")}
-                    </span>
-                  )}
+                  {/* The checkbox's description: why it is locked or not loaded, then what it does. */}
+                  <span id={detailsId} className="block">
+                    {caption && (
+                      <span
+                        data-testid={`skill-pin-state-${skill.id}`}
+                        className={cn(
+                          "block text-[0.7rem] leading-snug",
+                          refused ? "text-warning" : "text-muted-foreground",
+                        )}
+                      >
+                        {caption}
+                      </span>
+                    )}
+                    {available && skill.description && (
+                      <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
+                        {skill.description}
+                      </span>
+                    )}
+                    {/* A pin the catalogue no longer lists; a refusal already says why it is out. */}
+                    {!available && !refused && (
+                      <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
+                        {t("skills.unavailable")}
+                      </span>
+                    )}
+                  </span>
                 </label>
               </div>
             );

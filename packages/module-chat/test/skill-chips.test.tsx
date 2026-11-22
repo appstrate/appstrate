@@ -18,7 +18,7 @@ import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { PinnedSkill } from "../src/skills.ts";
 import {
-  NO_SKILL_CHANGES,
+  NO_SKILL_LAYERS,
   conversationSkills,
   type ConversationSkills,
 } from "../src/ui/chat-skills.ts";
@@ -36,7 +36,7 @@ const pinned = (
 ): ConversationSkills =>
   conversationSkills(
     { skillDiscovery, pins: ids.map((id) => ({ id, source: "user", status })) },
-    NO_SKILL_CHANGES,
+    NO_SKILL_LAYERS,
   );
 
 function render(skills: ConversationSkills = pinned([], false)): string {
@@ -73,14 +73,36 @@ describe("SkillChips", () => {
   it("counts several pinned skills in the one pill, with no per-skill chip nor « +N »", () => {
     const html = render(pinned(["@a/one", "@a/two", "@a/three", "@a/four"]));
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
-    expect(html).toContain("skills.pinnedCount {&quot;n&quot;:4}");
+    expect(html).toContain("skills.pinnedCount {&quot;count&quot;:4}");
     expect(html).toContain(
-      "skills.pinnedPillLabel {&quot;skills&quot;:&quot;skills.count {\\&quot;n\\&quot;:4}&quot;}",
+      "skills.pinnedPillLabel {&quot;skills&quot;:&quot;skills.count {\\&quot;count\\&quot;:4}&quot;}",
     );
   });
 
-  it("draws nothing on the default selection: no pin, discovery on", () => {
-    expect(render(pinned([]))).toBe("");
+  it("draws nothing on the default selection but the empty live region: no pin, discovery on", () => {
+    expect(render(pinned([]))).toBe(
+      '<span aria-live="polite" data-testid="skill-pill-live" class="sr-only"></span>',
+    );
+  });
+
+  it("announces the loaded skills and the pins left out in one polite live region", () => {
+    const live = (html: string) => html.match(/data-testid="skill-pill-live"[^>]*>([^<]*)</)![1];
+    const skills = conversationSkills(
+      {
+        skillDiscovery: true,
+        pins: [
+          { id: "@acme/a", source: "user", status: "injected" },
+          { id: "@acme/b", source: "user", status: "injected" },
+          { id: "@acme/big", source: "user", status: "over_budget" },
+        ],
+      },
+      NO_SKILL_LAYERS,
+    );
+    const html = render(skills);
+    expect(html.match(/aria-live=/g)).toHaveLength(1);
+    expect(live(html)).toBe(
+      "skills.count {&quot;count&quot;:2}, skills.notLoadedCount {&quot;count&quot;:1}",
+    );
   });
 
   it("draws the pill for pins with discovery on, with a book and the locked label off", () => {
@@ -105,7 +127,7 @@ describe("SkillChips", () => {
           { id: "@a/big", source: "user", status: "over_budget" },
         ],
       },
-      NO_SKILL_CHANGES,
+      NO_SKILL_LAYERS,
     );
     const html = render(skills);
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
@@ -122,9 +144,9 @@ describe("SkillChips", () => {
   it("counts a pin the server has not evaluated yet and a pending one: the next turn loads them", () => {
     const skills = conversationSkills(
       { skillDiscovery: true, pins: [{ id: "@a/one", source: "assistant", status: null }] },
-      { pin: ["@a/two"], unpin: [] },
+      { ...NO_SKILL_LAYERS, local: { pin: ["@a/two"], unpin: [] } },
     );
-    expect(render(skills)).toContain("skills.pinnedCount {&quot;n&quot;:2}");
+    expect(render(skills)).toContain("skills.pinnedCount {&quot;count&quot;:2}");
   });
 
   it("puts an X restoring the default on the pinned pill", () => {

@@ -645,20 +645,15 @@ function ConversationInner({
 > & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
-  /** The skill changes a turn carries, and their settling once it ends. */
-  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeChanges" | "answered" | "settle">;
+  /** The skill changes a turn carries, and how the server answered it. */
+  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeChanges" | "answered">;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
   const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
-  const {
-    pinCited,
-    takeChanges: takeSkillChanges,
-    answered: skillsAnswered,
-    settle: settleSkills,
-  } = turnSkills;
+  const { pinCited, takeChanges: takeSkillChanges, answered: skillsAnswered } = turnSkills;
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
@@ -844,10 +839,9 @@ function ConversationInner({
         ),
       );
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
-      settleSkills();
     }
     wasGenerating.current = generating;
-  }, [generating, id, isPersisted, filterSpaceId, getScope, queryClient, settleSkills]);
+  }, [generating, id, isPersisted, filterSpaceId, getScope, queryClient]);
 
   // On the first message of a brand-new conversation, lazily adopt its id into
   // the URL (the server creates the session on that same POST). `id` is stable

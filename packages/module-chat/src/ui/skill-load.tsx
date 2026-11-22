@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A skill the assistant loaded, drawn with the chip a user message draws for a cited skill. Loading
- * a skill is a read of its `SKILL.md`, by the chat's `read_resource` or the platform's forwarded
- * `read`; the server pins the skill to the conversation when the read succeeds and refuses it
- * (pins full, budget spent) with an error. Pi's `details` never reach the UI, so everything is
- * read from the call's input and state. A failed read says only that the skill is not loaded:
- * its error, written for the model, may come from anything (a refusal, a stopped turn, a fault). Any other read keeps the generic tool row.
+ * A skill the assistant loaded (a read of its `SKILL.md`), drawn with the chip a user message
+ * draws for a cited skill. A failed read only says the skill is not loaded: its error is written
+ * for the model. Any other read keeps the generic tool row.
  */
 
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";

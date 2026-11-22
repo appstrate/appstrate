@@ -44,11 +44,11 @@ import { transportOf, transportOver } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import {
   DEFAULT_STORED_SKILLS,
-  NO_SKILL_CHANGES,
+  NO_SKILL_LAYERS,
   conversationSkills,
 } from "../src/ui/chat-skills.ts";
 
-const NO_SKILLS = conversationSkills(DEFAULT_STORED_SKILLS, NO_SKILL_CHANGES);
+const NO_SKILLS = conversationSkills(DEFAULT_STORED_SKILLS, NO_SKILL_LAYERS);
 const NO_SKILL_ACTIONS = { togglePin() {}, setDiscovery() {}, reset() {} };
 
 /** The assistant-ui runtime the attach button reads. */

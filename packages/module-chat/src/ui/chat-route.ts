@@ -76,17 +76,23 @@ export function turnBody(args: {
 }
 
 /**
+ * How the server answered a turn's POST: a 2xx, another status, or no answer at all (the request
+ * failed before any response: whether the server acted on it is unknown).
+ */
+export type TurnAnswer = "accepted" | "refused" | "unanswered";
+
+/**
  * The transport of a conversation's turns. `useChat` keeps the first transport it sees for an id,
  * so everything it sends is read at request time: the route (a conversation can mount before the
  * host's transport is ready), the headers and the body. Resume targets the per-session stream
- * endpoint (the chat id is the conversation id). `answered` learns whether the server accepted a
- * turn: a 2xx, or refused (any other status, or a request that failed without an answer).
+ * endpoint (the chat id is the conversation id). `answered` learns how the server answered each
+ * turn's POST.
  */
 export function createTurnTransport(read: {
   getTransport: () => ChatTransport | undefined;
   headers: () => Record<string, string>;
   body: (request: { id: string; messages: UIMessage[]; body: object | undefined }) => object;
-  answered: (accepted: boolean) => void;
+  answered: (answer: TurnAnswer) => void;
 }): DefaultChatTransport<UIMessage> {
   // A turn needs the organization's route: without the host's transport there is nowhere to send it.
   const transport = (): ChatTransport => {
@@ -105,10 +111,10 @@ export function createTurnTransport(read: {
       try {
         response = await globalThis.fetch(input, init);
       } catch (error) {
-        if (turn) read.answered(false);
+        if (turn) read.answered("unanswered");
         throw error;
       }
-      if (turn) read.answered(response.ok);
+      if (turn) read.answered(response.ok ? "accepted" : "refused");
       return response;
     }) as typeof fetch,
     prepareSendMessagesRequest: (request) => ({
