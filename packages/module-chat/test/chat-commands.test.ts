@@ -121,8 +121,28 @@ const get = (app: Hono<ChatEnv>, query = "") =>
 
 describe("GET /api/orgs/:orgId/chat/commands", () => {
   const PROMPTS = [
-    { name: "run-summarizer", title: "Summarizer", description: "Summarize the inbox" },
-    { name: "run-bare" },
+    {
+      name: "run-summarizer",
+      title: "Summarizer",
+      description: "Summarize the inbox",
+      _meta: {
+        "dev.appstrate/agent": {
+          packageId: "@acme/summarizer",
+          icon: "lucide:bot",
+          color: "teal",
+        },
+      },
+    },
+    {
+      name: "run-bare",
+      _meta: { "dev.appstrate/agent": { packageId: "@acme/bare", icon: null, color: null } },
+    },
+    // No meta, or a malformed one: no id to seed the colour from, so left out.
+    { name: "run-nometa", title: "No meta" },
+    {
+      name: "run-bad",
+      _meta: { "dev.appstrate/agent": { packageId: 3, icon: null, color: null } },
+    },
   ];
 
   it("returns the skills and the agents of every acting space", async () => {
@@ -140,8 +160,22 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
         { id: "@acme/tone", name: "tone", description: "tone skill", version: "1.0.0" },
       ],
       agents: [
-        { name: "run-summarizer", title: "Summarizer", description: "Summarize the inbox" },
-        { name: "run-bare", title: "run-bare", description: "" },
+        {
+          name: "run-summarizer",
+          title: "Summarizer",
+          description: "Summarize the inbox",
+          packageId: "@acme/summarizer",
+          icon: "lucide:bot",
+          color: "teal",
+        },
+        {
+          name: "run-bare",
+          title: "run-bare",
+          description: "",
+          packageId: "@acme/bare",
+          icon: null,
+          color: null,
+        },
       ],
     });
     // One connection, over the acting spaces alone, with the caller's own grants.
@@ -181,7 +215,7 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
     );
     const body = chatCommandsSchema.parse(await (await get(app)).json());
     expect(body.skills).toEqual([]);
-    expect(body.agents).toHaveLength(2);
+    expect(body.agents.map((a) => a.name)).toEqual(["run-summarizer", "run-bare"]);
     expect(seen.methods).not.toContain("skills/list");
   });
 

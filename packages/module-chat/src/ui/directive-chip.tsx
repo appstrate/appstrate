@@ -5,25 +5,84 @@
  * atomic chip) and in the sent bubble (`DirectiveText`, the text part of a user message).
  */
 
-import { BookOpenIcon, BotIcon } from "lucide-react";
+import { useRef, type MouseEvent } from "react";
+import { BookOpenIcon, XIcon } from "lucide-react";
+import type { DirectiveChipProps } from "@assistant-ui/react-lexical";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { $getNearestNodeFromDOMNode } from "lexical";
+import { cn } from "@appstrate/ui/cn";
 import { AGENT_DIRECTIVE, directiveSegments } from "../directives.ts";
+import { $removeDirectiveChip } from "./directive-chip-remove.ts";
+import { DirectiveAgentGlyph } from "./agent-glyph.tsx";
+import { useChatHost } from "./runtime-context.ts";
 
-interface DirectiveChipProps {
+/** 1em tall, on the text's baseline (a descender's depth below it): centred with the letters. */
+const CHIP_GLYPH = "mr-1 inline-flex size-[1em] shrink-0 align-[-0.125em]";
+
+interface ChipProps {
   directiveType: string;
+  /** An agent's prompt name: what resolves its tile. */
+  directiveId: string;
   label: string;
+  /** In the composer only: deletes the chip. */
+  remove?: { label: string; onRemove: (chip: HTMLElement) => void };
 }
 
-export function DirectiveChip({ directiveType, label }: DirectiveChipProps) {
-  const Icon = directiveType === AGENT_DIRECTIVE ? BotIcon : BookOpenIcon;
+export function DirectiveChip({ directiveType, directiveId, label, remove }: ChipProps) {
+  const ref = useRef<HTMLSpanElement>(null);
   return (
     <span
+      ref={ref}
       data-testid="directive-chip"
       data-directive-type={directiveType}
-      className="bg-muted text-foreground mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 align-baseline text-sm leading-snug md:text-xs"
+      // An inline box, not a flex one: it takes the text's own font and line-height, so its baseline is
+      // the line's and its box (the font's content area, borders paint outside the line box) is
+      // centred on the line. A flex chip aligned on its first child's baseline (icon, tile) and
+      // grew taller than the line. `box-decoration-clone` keeps the border on each wrapped piece.
+      className="group/chip bg-muted text-foreground mx-0.5 rounded-md border box-decoration-clone px-1.5"
     >
-      <Icon className="text-muted-foreground size-3.5 shrink-0" aria-hidden="true" />
-      <span className="truncate">{label}</span>
+      {directiveType === AGENT_DIRECTIVE ? (
+        <DirectiveAgentGlyph promptName={directiveId} label={label} className={CHIP_GLYPH} />
+      ) : (
+        <BookOpenIcon className={cn("text-muted-foreground", CHIP_GLYPH)} aria-hidden="true" />
+      )}
+      <span>{label}</span>
+      {remove && (
+        // Not a tab stop: the chip sits in a textbox, where Tab must reach the next control and the
+        // keyboard already deletes a chip (Backspace on the atomic node). Pointer and touch only.
+        <button
+          type="button"
+          tabIndex={-1}
+          data-testid="directive-chip-remove"
+          aria-label={remove.label}
+          // The editor keeps the focus and the caret: the press must not take them.
+          onMouseDown={(event: MouseEvent) => event.preventDefault()}
+          onClick={() => ref.current && remove.onRemove(ref.current)}
+          className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground desktop-pointer:opacity-0 desktop-pointer:group-hover/chip:opacity-100 desktop-pointer:focus-within:opacity-100 relative -mr-0.5 ml-1 inline-flex size-[1em] items-center justify-center rounded-full align-[-0.125em] before:absolute before:-inset-2 before:content-['']"
+        >
+          <XIcon className="size-3" aria-hidden="true" />
+        </button>
+      )}
     </span>
+  );
+}
+
+/** The chip as the composer's editor draws it: the X removes this chip's node. */
+export function ComposerDirectiveChip({ directiveType, directiveId, label }: DirectiveChipProps) {
+  const [editor] = useLexicalComposerContext();
+  const { t } = useChatHost();
+  return (
+    <DirectiveChip
+      directiveType={directiveType}
+      directiveId={directiveId}
+      label={label}
+      remove={{
+        label: t("composer.removeDirective", { label }),
+        // The decorator gives no node key: the chip's DOM leads to its node.
+        onRemove: (chip) =>
+          editor.update(() => void $removeDirectiveChip($getNearestNodeFromDOMNode(chip))),
+      }}
+    />
   );
 }
 
@@ -36,7 +95,12 @@ export function DirectiveText({ text }: { text: string }) {
           // Segments only ever append: the position is the identity.
           <span key={index}>{segment.text}</span>
         ) : (
-          <DirectiveChip key={index} directiveType={segment.type} label={segment.label} />
+          <DirectiveChip
+            key={index}
+            directiveType={segment.type}
+            directiveId={segment.id}
+            label={segment.label}
+          />
         ),
       )}
     </>

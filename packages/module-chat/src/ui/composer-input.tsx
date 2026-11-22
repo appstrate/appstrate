@@ -13,7 +13,7 @@ import { LexicalComposerInput } from "@assistant-ui/react-lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { mergeRegister } from "@lexical/utils";
 import { COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND } from "lexical";
-import { DirectiveChip } from "./directive-chip.tsx";
+import { ComposerDirectiveChip } from "./directive-chip.tsx";
 import { COMPOSER_INPUT_CLASS } from "./phone-text.ts";
 import { shouldBlurAfterRunStart } from "./run-start-focus.ts";
 import { useLatest } from "./use-latest.ts";
@@ -105,7 +105,7 @@ export function ComposerEditor({
       autoFocus={autofocus}
       // Enter is the plugin's: it queues while a turn runs and honours the conversation's limit.
       submitMode="none"
-      directiveChip={DirectiveChip}
+      directiveChip={ComposerDirectiveChip}
       onPaste={addPastedFiles}
       onFocus={onFocus}
       className={COMPOSER_INPUT_CLASS}

@@ -89,6 +89,9 @@ export interface AgentHit {
   display_name: string;
   description: string;
   published: boolean;
+  /** The agent's chosen icon (`@appstrate/core/appearance` grammar), `null` when none. */
+  icon: string | null;
+  color: string | null;
 }
 
 /** A GET dispatched in-process, in the space `ctx` enters. */
@@ -127,6 +130,8 @@ export async function listAgents(
         display_name: name || id,
         description: typeof row?.description === "string" ? row.description : "",
         published: row?.published === true,
+        icon: typeof row?.icon === "string" ? row.icon : null,
+        color: typeof row?.color === "string" ? row.color : null,
       },
     ];
   });

@@ -10,6 +10,7 @@ import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
@@ -48,9 +49,11 @@ function Thread({ chat }: { chat: ChatHelpers }) {
 
 function render(parts: UIMessage["parts"]): string {
   return renderToString(
-    <ChatHostProvider value={testHost()}>
-      <Thread chat={chatOf([{ id: "m1", role: "user", parts }])} />
-    </ChatHostProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <ChatHostProvider value={testHost()}>
+        <Thread chat={chatOf([{ id: "m1", role: "user", parts }])} />
+      </ChatHostProvider>
+    </QueryClientProvider>,
   );
 }
 

@@ -14,9 +14,11 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import type { TriggerAdapter, TriggerItem } from "@assistant-ui/core";
-import { BookOpenIcon, BotIcon, CheckIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { AGENT_DIRECTIVE } from "../directives.ts";
+import { AgentGlyph } from "./agent-glyph.tsx";
+import type { AgentAppearance } from "./agent-appearance.ts";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 import { commandList, searchCommands, slashMatch } from "./composer-commands.ts";
 import { useChatHost, useChatTransport } from "./runtime-context.ts";
@@ -168,7 +170,11 @@ function Row({ item, index, homonym }: { item: TriggerItem; index: number; homon
     >
       {agent ? (
         <>
-          <BotIcon className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+          <AgentGlyph
+            agent={item.metadata?.appearance as AgentAppearance | undefined}
+            label={item.label}
+            className="mt-0.5"
+          />
           <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
             <span className="truncate text-sm font-medium">{item.label}</span>
             <span className="text-muted-foreground shrink-0 text-xs">/{item.id}</span>

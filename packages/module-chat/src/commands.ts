@@ -23,6 +23,11 @@ const chatAgentCommandSchema = z.object({
   name: z.string(),
   title: z.string(),
   description: z.string(),
+  /** `@scope/name`: the seed of the agent's derived colour. */
+  packageId: z.string(),
+  /** The agent's chosen icon and colour (`@appstrate/core/appearance` grammar), `null` when none. */
+  icon: z.string().nullable(),
+  color: z.string().nullable(),
 });
 
 export const chatCommandsSchema = z.object({

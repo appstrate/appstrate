@@ -7,7 +7,7 @@
  * fails to read is left empty, as the turn tolerates it.
  */
 
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { readAgentPromptMeta, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { badGateway } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 import { CALLER_READ_TIMEOUT_MS, readSkillsOver } from "./prompt.ts";
@@ -50,11 +50,27 @@ export async function readChatCommands(
         : [],
       client.listPrompts({ signal }).then(
         ({ prompts }) =>
-          prompts.map((prompt): ChatAgentCommand => ({
-            name: prompt.name,
-            title: prompt.title ?? prompt.name,
-            description: prompt.description ?? "",
-          })),
+          prompts.flatMap((prompt): ChatAgentCommand[] => {
+            // The platform server always sets the meta; without it the agent has no id to seed
+            // its colour from, so it is left out rather than drawn under a made-up identity.
+            const meta = readAgentPromptMeta(prompt._meta);
+            if (!meta) {
+              logger.warn("agent prompt without a valid agent meta — left out", {
+                prompt: prompt.name,
+              });
+              return [];
+            }
+            return [
+              {
+                name: prompt.name,
+                title: prompt.title ?? prompt.name,
+                description: prompt.description ?? "",
+                packageId: meta.packageId,
+                icon: meta.icon,
+                color: meta.color,
+              },
+            ];
+          }),
         (err: unknown) => {
           logger.warn("prompts/list failed — the composer's agents left empty", {
             err: String(err),

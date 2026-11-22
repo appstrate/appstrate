@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { AGENT_PROMPT_META_KEY, readAgentPromptMeta } from "../src/agent-prompt-meta.ts";
 import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
@@ -123,5 +124,21 @@ describe("readToolIntegration", () => {
       }),
     ).toEqual({ id: "@acme/gh", tool: "x" });
     expect(readToolIntegration({ _meta: { [TOOL_INTEGRATION_META_KEY]: "x" } })).toBeUndefined();
+  });
+});
+
+describe("readAgentPromptMeta", () => {
+  const key = AGENT_PROMPT_META_KEY;
+  it("reads a well-formed payload", () => {
+    expect(
+      readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: "lucide:bot", color: null } }),
+    ).toEqual({ packageId: "@a/b", icon: "lucide:bot", color: null });
+  });
+  it("is null when missing or malformed", () => {
+    expect(readAgentPromptMeta(undefined)).toBeNull();
+    expect(readAgentPromptMeta({})).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { packageId: "", icon: null, color: null } })).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: 1, color: null } })).toBeNull();
+    expect(readAgentPromptMeta({ [key]: { packageId: "@a/b", icon: null } })).toBeNull();
   });
 });

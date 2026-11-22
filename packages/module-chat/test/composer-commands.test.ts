@@ -14,7 +14,16 @@ const commands: ChatCommands = {
     { id: "@acme/pdf-tools", name: "pdf-tools", description: "More PDF", version: null },
     { id: "@other/tone", name: "tone", description: "Another tone", version: null },
   ],
-  agents: [{ name: "run-report", title: "Weekly report", description: "Builds the report" }],
+  agents: [
+    {
+      name: "run-report",
+      title: "Weekly report",
+      description: "Builds the report",
+      packageId: "@acme/report",
+      icon: "lucide:chart-bar",
+      color: "blue",
+    },
+  ],
 };
 const ctx = { pinned: [] as string[], running: false, draft: "" };
 
@@ -28,6 +37,16 @@ describe("commandList", () => {
       "skill:tone:@other/tone",
       "agent:Weekly report:run-report",
     ]);
+  });
+
+  it("carries the agent's appearance for its row's tile, and none for a skill", () => {
+    const { items } = commandList(commands, ctx);
+    expect(items.find((i) => i.type === "agent")?.metadata?.appearance).toEqual({
+      packageId: "@acme/report",
+      icon: "lucide:chart-bar",
+      color: "blue",
+    });
+    expect(items.find((i) => i.type === "skill")?.metadata?.appearance).toBeUndefined();
   });
 
   it("lists no skill where the selection cannot be changed", () => {

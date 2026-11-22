@@ -119,7 +119,7 @@ export const chatComponentSchemas = {
           "The agents the caller can launch, as launch prompts. Empty when the caller cannot run agents.",
         items: {
           type: "object",
-          required: ["name", "title", "description"],
+          required: ["name", "title", "description", "packageId", "icon", "color"],
           properties: {
             name: {
               type: "string",
@@ -128,6 +128,19 @@ export const chatComponentSchemas = {
             },
             title: { type: "string" },
             description: { type: "string" },
+            packageId: {
+              type: "string",
+              description: "`@scope/name`: the seed of the agent's derived colour.",
+            },
+            icon: {
+              type: ["string", "null"],
+              description:
+                "The agent's chosen icon (`@appstrate/core/appearance` grammar, e.g. `lucide:bot`); null when none.",
+            },
+            color: {
+              type: ["string", "null"],
+              description: "The agent's chosen colour (a palette key); null when none.",
+            },
           },
         },
       },

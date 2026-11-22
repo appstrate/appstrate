@@ -17,7 +17,16 @@ import { conversationScope, testHost } from "./test-host.ts";
 
 const commands = {
   skills: [{ id: "@acme/tone", name: "tone", description: "Adjusts tone", version: "1.2.0" }],
-  agents: [{ name: "run-report", title: "Report", description: "Weekly report" }],
+  agents: [
+    {
+      name: "run-report",
+      title: "Report",
+      description: "Weekly report",
+      packageId: "@acme/report",
+      icon: null,
+      color: null,
+    },
+  ],
 };
 
 describe("fetchChatCommands", () => {

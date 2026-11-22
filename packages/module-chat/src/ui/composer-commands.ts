@@ -59,6 +59,9 @@ export function commandList(
         type: AGENT_DIRECTIVE,
         label: agent.title,
         description: agent.description,
+        metadata: {
+          appearance: { packageId: agent.packageId, icon: agent.icon, color: agent.color },
+        },
       });
     }
   }
